@@ -1,0 +1,57 @@
+# ============================================================================
+# TEST FACTORS — SỐ BỊA, DÙNG RIÊNG CHO UNIT TEST
+#
+# ⛔ KHÔNG PHẢI HỆ SỐ PHÁT THẢI THẬT.
+# ⛔ KHÔNG copy sang backend/config/emission_factors.yaml.
+# ⛔ KHÔNG dùng bất kỳ con số nào sinh ra từ file này để pitch hay báo cáo.
+#
+# Mục đích duy nhất: kiểm chứng IMPLEMENTATION của engine (phép nhân, phép cộng,
+# phân rã, chia cho sản lượng) bằng những con số tròn dễ tính tay.
+# Giá trị khoa học thật nằm ở open issue OI-02, chưa có.
+# ============================================================================
+
+version: "TEST-FACTORS-DO-NOT-USE"
+review_date: "2026-09-07"
+
+factors:
+  methane:
+    continuous_flooding:
+      value: 10.0
+      unit: kg_CO2e_per_ha_per_day
+      source: "TEST ONLY — số bịa"
+      status: "TEST"
+    awd:
+      value: 4.0
+      unit: kg_CO2e_per_ha_per_day
+      source: "TEST ONLY — số bịa"
+      status: "TEST"
+
+  fertilizer_n2o:
+    value: 2.0
+    unit: kg_CO2e_per_kg_N
+    source: "TEST ONLY — số bịa"
+    status: "TEST"
+
+  fuel:
+    diesel:
+      value: 3.0
+      unit: kg_CO2e_per_litre
+      source: "TEST ONLY — số bịa"
+      status: "TEST"
+
+  straw:
+    burned:
+      value: 1.0
+      unit: kg_CO2e_per_kg_straw
+      source: "TEST ONLY — số bịa"
+      status: "TEST"
+    incorporated:
+      value: 0.5
+      unit: kg_CO2e_per_kg_straw
+      source: "TEST ONLY — số bịa"
+      status: "TEST"
+    removed:
+      value: 0.2
+      unit: kg_CO2e_per_kg_straw
+      source: "TEST ONLY — số bịa"
+      status: "TEST"

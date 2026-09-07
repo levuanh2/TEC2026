@@ -1,0 +1,29 @@
+{
+  "_comment": "DEMO FIXTURE — dữ liệu bịa để chạy thử engine. KHÔNG phải số liệu thực địa.",
+  "crop_id": "demo-001",
+  "area_ha": 1.0,
+  "cultivation_days": 100,
+  "yield_kg": 5200,
+  "seed": {
+    "variety": "OM5451",
+    "seed_rate_kg_per_ha": 80,
+    "sowing_method": "sa_hang"
+  },
+  "water": {
+    "regime": "awd",
+    "drainage_events": 3,
+    "pump_fuel_litre": 25
+  },
+  "fertilizer": [
+    {
+      "fertilizer_type": "Urea",
+      "amount_kg": 120,
+      "n_content_pct": 46,
+      "application_no": 1
+    }
+  ],
+  "straw": {
+    "method": "removed",
+    "amount_kg": 5000
+  }
+}

@@ -1,4 +1,10 @@
+# Carbon Engine (backend/carbon) chi can pyyaml.
+pyyaml>=6.0
+
+# API layer - chua trien khai (main.py moi la TODO).
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.7
-pyyaml>=6.0
+
+# Test
+pytest>=8.0

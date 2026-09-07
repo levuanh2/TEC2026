@@ -51,7 +51,9 @@ Chi tiết: [`docs/architecture.md`](docs/architecture.md)
 │       └── 07-mrv-export.md           # 1c — xuất báo cáo MRV (Người B + A)
 ├── app/                               # Mobile app Flutter, offline-first — Người A
 ├── backend/                           # FastAPI + Carbon Engine — Người B
-│   └── config/emission_factors.yaml   # hệ số phát thải, có nguồn trích dẫn
+│   ├── carbon/                        # Carbon Engine (hàm thuần, không phụ thuộc UI/DB)
+│   ├── config/emission_factors.yaml   # hệ số phát thải, có nguồn trích dẫn
+│   └── tests/                         # unit test + demo fixture
 ├── ml/                                # model CV bệnh lá lúa — Người B
 │   └── datasets/README.md             # nguồn dataset + license
 ├── web-dashboard/                     # dashboard 1c (có thể là mock) — Người A
@@ -146,5 +148,6 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
 |---|---|
 | [`docs/PRD.md`](docs/PRD.md) | Bối cảnh, người dùng, định vị, mục tiêu từng lớp MVP, ngoài phạm vi, success metrics, rủi ro |
 | [`docs/SRS.md`](docs/SRS.md) | Functional/non-functional requirements, data model, API contract, ràng buộc |
+| [`docs/CARBON_METHOD.md`](docs/CARBON_METHOD.md) | Công thức từng nguồn phát thải + trạng thái xác minh (VERIFIED / PENDING / NOT IMPLEMENTED) |
 | [`docs/architecture.md`](docs/architecture.md) | Kiến trúc thành phần, luồng dữ liệu, nguyên tắc thiết kế |
 | [`docs/mrv-mapping.md`](docs/mrv-mapping.md) | 6 bước MRV ↔ module nào xử lý, mức độ phủ, khoảng trống |
