@@ -1,0 +1,110 @@
+# AgriCarbon — Emission Factor & hằng số tham chiếu
+#
+# QUY TẮC: mọi con số dùng trong Carbon Engine phải nằm ở file này, kèm `source` và
+# `review_by`. KHÔNG hardcode magic number trong code tính toán (SRS — Ràng buộc RB-01).
+#
+# Trạng thái file: NHÁP. Chưa đối chiếu với hướng dẫn MRV chính thức
+# (Quyết định 4801/QĐ-BNNMT, 14/11/2025). Xem `open_issues` cuối file.
+
+version: 0.1.0-draft
+updated: 2026-09-07
+
+# ---------------------------------------------------------------------------
+# 1. Baseline tham chiếu cấp sản phẩm (kg CO2e / kg lúa)
+# ---------------------------------------------------------------------------
+product_baseline:
+  average:
+    value: 1.04
+    unit: kg_CO2_per_kg_rice
+    source: "AgriCarbon_v2_Rice_Decision_and_Roadmap.md §1a.2 — hệ số tham chiếu Việt Nam"
+    review_by: 2026-09-15
+    note: >
+      Tài liệu gốc ghi ~1,04 kg CO2/kg lúa là mức trung bình, đồng thời ghi dải
+      2,29–3,72 kg CO2e/kg tùy phương pháp canh tác. Hai con số này chưa nhất quán
+      về phạm vi (khí nhà kính nào, ranh giới hệ thống nào). PHẢI làm rõ trước khi
+      dùng làm baseline trong báo cáo — xem open_issues.OI-01.
+  range_by_practice:
+    min: 2.29
+    max: 3.72
+    unit: kg_CO2e_per_kg_rice
+    source: "AgriCarbon_v2_Rice_Decision_and_Roadmap.md §1a.2"
+    review_by: 2026-09-15
+
+# ---------------------------------------------------------------------------
+# 2. Hệ số theo chế độ tưới — biến số carbon lớn nhất của lúa nước
+# ---------------------------------------------------------------------------
+# CH4 từ ruộng ngập là nguồn phát thải chi phối. AWD (tưới ngập-khô xen kẽ) giảm
+# đáng kể so với tưới ngập liên tục (continuous flooding).
+water_regime:
+  continuous_flooding:
+    ch4_scaling_factor: null      # TODO: lấy từ hướng dẫn MRV chính thức
+    source: "CHƯA CHỐT — cần đối chiếu QĐ 4801/QĐ-BNNMT + IPCC 2019 Refinement Ch.5.5"
+    review_by: 2026-09-15
+  awd:
+    ch4_scaling_factor: null      # TODO: lấy từ hướng dẫn MRV chính thức
+    source: "CHƯA CHỐT — cần đối chiếu QĐ 4801/QĐ-BNNMT + IPCC 2019 Refinement Ch.5.5"
+    review_by: 2026-09-15
+
+# ---------------------------------------------------------------------------
+# 3. Hệ số theo nhóm hoạt động canh tác ("1 phải 5 giảm")
+# ---------------------------------------------------------------------------
+activity_factors:
+  fertilizer_n:
+    value: null
+    unit: kg_CO2e_per_kg_N
+    source: "CHƯA CHỐT — dự kiến IPCC direct+indirect N2O"
+    review_by: 2026-09-15
+  straw_management:
+    burned: { value: null, source: "CHƯA CHỐT", review_by: 2026-09-15 }
+    incorporated: { value: null, source: "CHƯA CHỐT", review_by: 2026-09-15 }
+    removed: { value: null, source: "CHƯA CHỐT", review_by: 2026-09-15 }
+  diesel_pumping:
+    value: null
+    unit: kg_CO2e_per_litre
+    source: "CHƯA CHỐT"
+    review_by: 2026-09-15
+
+# ---------------------------------------------------------------------------
+# 4. Giá tín chỉ carbon — CHƯA CHỐT CHÍNH THỨC
+# ---------------------------------------------------------------------------
+carbon_credit_price:
+  value: null
+  currency: USD
+  unit: per_tCO2e
+  status: NOT_CONFIRMED
+  source: >
+    Cơ chế TCAF (World Bank) cho Đề án 1 triệu ha, tổng ~33,3–40 triệu USD, giá
+    tín chỉ ĐANG TRONG QUÁ TRÌNH ĐỊNH GIÁ. Con số ~20 USD từng được nhắc nhưng
+    tài liệu gốc yêu cầu KHÔNG trình bày như số liệu đã xác nhận.
+  review_by: 2026-12-31
+  ui_rule: >
+    Khi giá chưa chốt, UI/report PHẢI hiển thị dạng ước tính có nhãn "chưa chốt
+    chính thức", hoặc ẩn hoàn toàn phần quy đổi tiền. Không in ra số tiền trần trụi.
+
+# ---------------------------------------------------------------------------
+# 5. Tích hợp ngoài — CHƯA CÓ API MỞ
+# ---------------------------------------------------------------------------
+external_systems:
+  ricemore:
+    api: NOT_AVAILABLE
+    note: "Phủ ~75% diện tích lúa quốc gia nhưng chưa có API mở; cần partnership thể chế."
+    review_by: 2026-12-31
+  farmore:
+    api: NOT_AVAILABLE
+    note: "App IRRI miễn phí, tính tCO2e/ha cấp ruộng. Dùng để đối chiếu thủ công, chưa tích hợp."
+    review_by: 2026-12-31
+
+# ---------------------------------------------------------------------------
+open_issues:
+  - id: OI-01
+    text: "Làm rõ mâu thuẫn 1,04 vs 2,29–3,72 kg CO2e/kg (phạm vi khí / ranh giới hệ thống khác nhau?)."
+    owner: Người B
+    due: 2026-09-15
+  - id: OI-02
+    text: "Lấy bộ hệ số chính thức từ hướng dẫn MRV (QĐ 4801/QĐ-BNNMT) thay cho các giá trị null."
+    owner: Người B
+    due: 2026-09-15
+  - id: OI-03
+    text: "Đối chiếu kết quả Carbon Engine với FarMoRe trên cùng 1 lô để kiểm chứng độ tin cậy."
+    owner: Người B
+    due: 2026-09-18

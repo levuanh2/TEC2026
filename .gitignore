@@ -1,0 +1,39 @@
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Python (backend/, ml/)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node (web-dashboard/)
+node_modules/
+dist/
+
+# Flutter (app/)
+.dart_tool/
+build/
+.flutter-plugins*
+
+# Secrets & data
+.env
+.env.*
+!.env.example
+*.sqlite
+*.db
+ml/datasets/raw/
+ml/runs/
+*.pt
+*.onnx
+
+# Tai lieu nguon chua thong tin ca nhan thanh vien (MSSV/SDT/email)
+TEC2026 - Phieu dang ky du thi.docx.md
+TEC2026*.docx.md
