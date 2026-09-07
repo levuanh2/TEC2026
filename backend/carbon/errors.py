@@ -1,7 +1,7 @@
 """Lỗi của Carbon Engine.
 
 Nguyên tắc: thà báo lỗi rõ ràng còn hơn trả một con số trông hợp lý nhưng sai
-(SRS NFR-03). Không có fallback, không có giá trị mặc định ngầm.
+(SRS NFR-03). Không fallback, không giá trị mặc định ngầm.
 """
 
 
@@ -29,9 +29,22 @@ class MissingActivityDataError(ValidationError):
 
 
 class MissingEmissionFactorError(CarbonEngineError):
-    """Hệ số phát thải cần dùng đang null hoặc không có trong config.
+    """Hệ số/tham số cần dùng đang null hoặc không có trong config.
 
-    Đây là trạng thái BÌNH THƯỜNG ở phiên bản hiện tại: toàn bộ hệ số trong
-    backend/config/emission_factors.yaml đang là null vì chưa đối chiếu hướng dẫn
-    MRV chính thức (open issue OI-02).
+    Ví dụ hiện tại: `gwp.ch4` đang PENDING_VERIFICATION nên không quy đổi được
+    CH4 sang CO2e (open issue OI-05).
     """
+
+
+class MethodologyGapError(CarbonEngineError):
+    """Phương pháp luận đòi một tham số mà dữ liệu/config chưa biểu diễn được.
+
+    Khác MissingEmissionFactorError ở chỗ: đây là khoảng trống PHƯƠNG PHÁP LUẬN,
+    không phải thiếu một con số. Ví dụ: rơm vùi vào đất nhưng không biết vùi trước
+    canh tác bao nhiêu ngày — CFOA chênh 5 lần giữa <30 ngày (1,00) và >30 ngày (0,19),
+    engine không được đoán.
+    """
+
+
+class DoubleCountingError(CarbonEngineError):
+    """Một khối lượng vật chất bị tính vào hai nguồn phát thải cùng lúc."""

@@ -48,38 +48,43 @@ kịch bản **AWD (tưới ngập-khô xen kẽ)** so với **tưới ngập li
 
 ## 3. Logic nghiệp vụ cốt lõi
 
-### 3.1. Công thức nền
+### 3.1. Công thức — xem tài liệu chuyên biệt
 
-```text
-CO2e_nguồn_i  =  Activity Data_i  ×  Emission Factor_i
-
-CO2e_tổng     =  Σ CO2e_nguồn_i
-
-CO2e/kg       =  CO2e_tổng  /  yield_kg
-```
+> ⚠️ `Activity Data × Emission Factor` là **abstraction ở tầng cao, không phải công thức
+> tính**. Mỗi nguồn có phương pháp luận riêng và cấu trúc khác hẳn nhau.
+>
+> **Nguồn sự thật duy nhất về công thức:** [`../CARBON_METHOD.md`](../CARBON_METHOD.md).
+> Nguồn trích dẫn từng hệ số: [`../CARBON_METHOD_SOURCES.md`](../CARBON_METHOD_SOURCES.md).
+> Đừng nhân bản công thức vào file này — sẽ lệch nhau.
 
 ### 3.2. Các nguồn phát thải tính riêng
 
-| Nguồn (`source`) | Activity Data | Ghi chú |
+| Nguồn (`source`) | Cấu trúc thật | Phương pháp luận |
 |---|---|---|
-| `ch4_flooding` | diện tích (ha) × số ngày ngập, điều chỉnh theo `regime` | **Chi phối tổng phát thải của lúa nước.** CH4 từ ruộng ngập là nguồn lớn nhất |
-| `n2o_fertilizer` | tổng lượng N quy đổi từ các lần bón | Gồm cả trực tiếp và gián tiếp |
-| `straw_management` | phương pháp xử lý (đốt / vùi / lấy khỏi ruộng) × khối lượng | Đốt rơm cho hệ số khác hẳn vùi |
-| `fuel_pumping` | lít nhiên liệu bơm tưới | Tùy chọn, nhiều hộ không ghi |
+| `ch4_rice_cultivation` | `(EFc × SFw × SFp × SFo) × t × A` — bốn hệ số nhân nhau, SFo là hàm luỹ thừa | IPCC 2019 Refinement Eq 5.1/5.2/5.3 |
+| `n2o_fertilizer_direct` | `kg_N × EF1FR × 44/28` — áp lên **kg N**, không phải kg phân | IPCC 2019 Refinement Eq 11.1 |
+| `straw_burning` | `M_khô × Cf × Gef × 10⁻³`, tách CH4 và N2O | IPCC 2006 GL Eq 2.27 |
+| `fuel_*` | `lít × EF` — nguồn duy nhất đúng là một phép nhân đơn | PENDING (OI-06) |
+
+**Rơm VÙI không phải một nguồn phát thải riêng** — nó là đầu vào của SFo (điều chỉnh CH4).
+Chỉ rơm ĐỐT mới là nguồn riêng. Cộng cả hai là double counting — xem CARBON_METHOD.md §5.
 
 ### 3.3. Tách AWD vs tưới ngập liên tục — điểm mấu chốt
 
 Chế độ nước là **biến số ảnh hưởng carbon lớn nhất** và cũng đúng là thứ MRV 6 bước đang đo.
 
-- `continuous_flooding` — ruộng ngập suốt vụ → CH4 cao nhất. Dùng làm **đường cơ sở**
+- `continuous_flooding` → `irrigated_continuous_flooding`. Dùng làm **đường cơ sở**
   (bước 3 MRV: Thiết lập đường cơ sở).
-- `awd` — rút nước xen kẽ, đất được thoáng khí theo chu kỳ → CH4 giảm đáng kể. Số lần rút
-  nước (`drainage_events`) là đầu vào điều chỉnh.
+- `awd` → `irrigated_multiple_drainage` (IPCC Table 5.12 xếp AWD vào nhóm này).
 - `as_recorded` — dùng đúng chế độ nông dân đã ghi.
 
-Cùng một bộ Activity Data, đổi `water_regime_scenario` phải ra hai con số khác nhau và
-**giải thích được thành phần nào thay đổi** (FR-1a-09). Đây chính là con số dùng cho
-Success Metric M5 và cho câu chuyện Before/After khi pitch.
+**AWD tác động NGƯỢC CHIỀU lên hai khí:** SFw giảm 1,00 → 0,55 (CH4 giảm 45%) nhưng
+EF1FR tăng 0,003 → 0,005 (N2O **tăng** 67%). Kịch bản phải đi vào **cả CH4 lẫn N2O**.
+
+**Tuyệt đối không** lấy tổng CO2e rồi nhân một tỷ lệ giảm phẳng — phải đổi hệ số rồi chạy
+lại công thức. Có test riêng chốt điều này.
+
+Đây là con số dùng cho Success Metric M5 và câu chuyện Before/After khi pitch (FR-1a-09).
 
 ### 3.4. Ràng buộc "không hardcode" (RB-01)
 

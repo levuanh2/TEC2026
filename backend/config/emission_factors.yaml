@@ -1,98 +1,322 @@
-# AgriCarbon — Emission Factor & hằng số tham chiếu
+# AgriCarbon — Bộ tham số phương pháp luận phát thải
 #
-# QUY TẮC (SRS RB-01): mọi con số Carbon Engine dùng phải nằm ở file này, kèm
-# `unit`, `source`, `status`. KHÔNG hardcode magic number trong code tính toán.
-#
-# TRẠNG THÁI FILE: **CHƯA CÓ HỆ SỐ NÀO ĐƯỢC XÁC MINH.**
-# Mọi `value` đang là null có chủ đích. Engine sẽ báo lỗi rõ ràng
-# (MissingEmissionFactorError) thay vì tự dùng giá trị mặc định.
+# QUY TẮC (SRS RB-01): mọi con số Carbon Engine dùng phải nằm ở file này, kèm `unit`,
+# `source`, `status`. KHÔNG hardcode magic number trong code tính toán.
 #
 # Ý nghĩa `status`:
-#   VERIFIED — đã đối chiếu nguồn chính thức, dùng được cho báo cáo
-#   PENDING  — có trong tài liệu tham khảo nhưng nhóm CHƯA xác minh chính thức
-#   VERIFY   — chưa có nguồn, phải đi tìm
+#   VERIFIED             — đã trích dẫn chính xác từ tài liệu gốc, ghi rõ số hiệu bảng/phương trình
+#   PENDING_VERIFICATION — chưa lấy được nguồn; `value: null`; engine sẽ báo lỗi khi cần dùng
+#   NOT_IMPLEMENTED      — cố ý chưa làm; xem docs/CARBON_METHOD.md
 #
-# Xem docs/CARBON_METHOD.md để biết công thức tương ứng từng hệ số.
+# Nguồn từng dòng: docs/CARBON_METHOD_SOURCES.md
+# Công thức: docs/CARBON_METHOD.md
+#
+# ⚠️ CHƯA LẤY ĐƯỢC TOÀN VĂN QĐ 4801/QĐ-BNNMT (Tier 1). Bộ số dưới đây là **IPCC Tier 1
+#    default**, KHÔNG phải hệ số đặc trưng quốc gia mà quy trình MRV yêu cầu.
+#    → KHÔNG được gắn nhãn "MRV-compliant" cho bất kỳ kết quả nào.
 
-version: "0.1.0-draft"
-review_date: "2026-09-07"
+version: "0.2.0-ipcc-tier1"
+review_date: "2026-09-08"
 
+methodology:
+  name: "IPCC 2019 Refinement to the 2006 IPCC Guidelines for National GHG Inventories, Vol.4 AFOLU"
+  version: "2019"
+  tier: 1
+  region_default: "Southeast Asia"
+  status: "VERIFIED"
+  superseded_when: >
+    Lấy được phụ lục hệ số của QĐ 4801/QĐ-BNNMT (14/11/2025). Quy trình MRV dùng hệ số
+    đặc trưng quốc gia đo trực tiếp trên đồng ruộng (IPCC Tier 2), không phải default này.
+
+# ---------------------------------------------------------------------------
+# GWP — CHẶN TOÀN BỘ VIỆC RA SỐ CO2e
+# ---------------------------------------------------------------------------
+# Không tự chọn khung. Chênh lệch AR4 vs AR6 cho CH4 tới ~19% và đi thẳng vào con số cuối.
+gwp:
+  framework:
+    value: null
+    status: "PENDING_VERIFICATION"
+    source: "VERIFY — khung GWP mà QĐ 4801/QĐ-BNNMT hoặc QĐ 2626/QĐ-BTNMT quy định"
+    candidates: "AR4 (CH4 25 / N2O 298) · AR5 (28 / 265) · AR6 (27,9 phi hoá thạch / 273)"
+  ch4:
+    value: null
+    unit: "kgCO2e_per_kgCH4"
+    status: "PENDING_VERIFICATION"
+    source: "VERIFY — phụ thuộc gwp.framework"
+  n2o:
+    value: null
+    unit: "kgCO2e_per_kgN2O"
+    status: "PENDING_VERIFICATION"
+    source: "VERIFY — phụ thuộc gwp.framework"
+
+# ---------------------------------------------------------------------------
 factors:
 
-  # CH4 từ ruộng ngập — nguồn phát thải chi phối của lúa nước.
-  # Công thức dự kiến: area_ha × cultivation_days × EF   (xem CARBON_METHOD.md §CH4)
-  methane:
-    continuous_flooding:
-      value: null
-      unit: null            # dự kiến kg_CO2e_per_ha_per_day
-      source: "VERIFY — QĐ 4801/QĐ-BNNMT; đối chiếu IPCC 2019 Refinement Ch.5.5"
-      status: "VERIFY"
-      note: "Kịch bản đường cơ sở (bước 3 MRV). Chưa có hệ số chính thức."
+  # =========================================================================
+  # CH4 canh tác lúa
+  #   Eq 5.1 : CH4[kg] = EFi × t[ngày] × A[ha]
+  #   Eq 5.2 : EFi = EFc × SFw × SFp × SFo
+  # =========================================================================
+  ch4_rice:
 
-    awd:
-      value: null
-      unit: null            # dự kiến kg_CO2e_per_ha_per_day
-      source: "VERIFY — QĐ 4801/QĐ-BNNMT; đối chiếu IPCC 2019 Refinement Ch.5.5"
-      status: "VERIFY"
+    efc:
+      value: 1.22
+      unit: "kgCH4_per_ha_per_day"
+      status: "VERIFIED"
+      source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.11 (UPDATED) — Southeast Asia"
+      uncertainty_range: "0.83 – 1.81"
       note: >
-        Tưới ngập-khô xen kẽ. Hệ số điều chỉnh theo số lần rút nước
-        (drainage_events) CHƯA được mô hình hóa — xem CARBON_METHOD.md,
-        mục NOT IMPLEMENTED.
+        Baseline: không ngập trong <180 ngày trước canh tác, ngập liên tục trong vụ,
+        KHÔNG có chất hữu cơ bổ sung. World default 1,19 (0,80–1,76).
 
-  # N2O từ phân đạm (trực tiếp + gián tiếp).
-  # Công thức dự kiến: tổng kg N × EF   (xem CARBON_METHOD.md §N2O)
-  fertilizer_n2o:
-    value: null
-    unit: null              # dự kiến kg_CO2e_per_kg_N
-    source: "VERIFY — QĐ 4801/QĐ-BNNMT; đối chiếu IPCC direct + indirect N2O"
-    status: "VERIFY"
+    # SFw — chế độ nước TRONG vụ. Table 5.12 (UPDATED), cột disaggregated.
+    sfw:
+      irrigated_continuous_flooding:
+        value: 1.00
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED), disaggregated"
+        uncertainty_range: "0.73 – 1.27"
+      irrigated_single_drainage:
+        value: 0.71
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED), disaggregated"
+        uncertainty_range: "0.53 – 0.94"
+      irrigated_multiple_drainage:
+        value: 0.55
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED), disaggregated"
+        uncertainty_range: "0.41 – 0.72"
+        note: >
+          AWD (tưới ngập-khô xen kẽ) thuộc nhóm này. Nguyên văn chú thích b Table 5.12:
+          "Multiple drainage periods: ... including alternate wetting and drying (AWD)."
+      rainfed_regular:
+        value: 0.54
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED), disaggregated"
+        uncertainty_range: "0.39 – 0.74"
+      rainfed_drought_prone:
+        value: 0.16
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED), disaggregated"
+        uncertainty_range: "0.11 – 0.24"
+      deep_water:
+        value: 0.06
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED), disaggregated"
+        uncertainty_range: "0.03 – 0.12"
+      upland:
+        value: 0.0
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.12 (UPDATED)"
+        note: "Ruộng không ngập trong thời gian đáng kể."
 
-  # Nhiên liệu bơm tưới.
-  # Công thức dự kiến: số lít × EF
+    # SFp — chế độ nước TRƯỚC vụ. Table 5.13 (UPDATED), cột disaggregated.
+    # Cột aggregated KHÔNG dùng: bố cục bảng lệch khi trích từ PDF, không xác định chắc
+    # giá trị 1,22 thuộc dòng nào. Xem CARBON_METHOD_SOURCES.md.
+    sfp:
+      non_flooded_pre_season_lt_180d:
+        value: 1.00
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.13 (UPDATED), disaggregated"
+        uncertainty_range: "0.88 – 1.12"
+        note: "Thường gặp khi canh tác 2 vụ lúa/năm."
+      non_flooded_pre_season_gt_180d:
+        value: 0.89
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.13 (UPDATED), disaggregated"
+        uncertainty_range: "0.80 – 0.99"
+      flooded_pre_season_gt_30d:
+        value: 2.41
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.13 (UPDATED), disaggregated"
+        uncertainty_range: "2.13 – 2.73"
+        note: "Ngập trước vụ ≥30 ngày. Làm TĂNG phát thải hơn gấp đôi — không được bỏ qua."
+      non_flooded_pre_season_gt_365d:
+        value: 0.59
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.13 (UPDATED), disaggregated"
+        uncertainty_range: "0.41 – 0.84"
+        note: "Luân canh cây trồng cạn – lúa."
+
+    # SFo — Eq 5.3: SFo = (1 + Σ ROAi × CFOAi)^exponent, ROA tấn/ha (rơm tính khối lượng KHÔ)
+    sfo_exponent:
+      value: 0.59
+      unit: "dimensionless"
+      status: "VERIFIED"
+      source: "IPCC 2019 Refinement, Vol.4, Ch.5, Equation 5.3"
+      uncertainty_range: "0.54 – 0.64"
+
+    # CFOA — Table 5.14 (UPDATED)
+    cfoa:
+      straw_incorporated_lt_30d:
+        value: 1.00
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.14 (UPDATED)"
+        uncertainty_range: "0.85 – 1.17"
+        note: "Rơm vùi vào đất <30 ngày trước canh tác."
+      straw_incorporated_gt_30d:
+        value: 0.19
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.14 (UPDATED)"
+        uncertainty_range: "0.11 – 0.28"
+        note: "Rơm vùi >30 ngày trước canh tác — chỉ bằng ~1/5 so với vùi sát vụ."
+      compost:
+        value: 0.17
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.14 (UPDATED)"
+        uncertainty_range: "0.09 – 0.29"
+      farmyard_manure:
+        value: 0.21
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.14 (UPDATED)"
+        uncertainty_range: "0.15 – 0.28"
+      green_manure:
+        value: 0.45
+        unit: "dimensionless"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.14 (UPDATED)"
+        uncertainty_range: "0.36 – 0.57"
+
+    # Chỉ dùng khi thiếu ngày gieo sạ / ngày thu hoạch thực tế.
+    default_cultivation_days:
+      value: 102
+      unit: "day"
+      status: "VERIFIED"
+      source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.11A (NEW) — Southeast Asia"
+      uncertainty_range: "78 – 150"
+
+  # =========================================================================
+  # N2O từ đầu vào đạm trên ruộng lúa ngập
+  #   Eq 11.1 : N2O-N = F_FR × EF1FR ;  N2O = N2O-N × 44/28
+  # =========================================================================
+  n2o_fertilizer:
+
+    # EF1FR tách theo chế độ nước — AWD làm TĂNG N2O (ngược chiều với CH4).
+    ef1fr:
+      continuous_flooding:
+        value: 0.003
+        unit: "kgN2O-N_per_kgN"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.11, Table 11.1 (UPDATED), disaggregated"
+        uncertainty_range: "0.000 – 0.010"
+      single_and_multiple_drainage:
+        value: 0.005
+        unit: "kgN2O-N_per_kgN"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.11, Table 11.1 (UPDATED), disaggregated"
+        uncertainty_range: "0.000 – 0.016"
+        note: >
+          Nguyên văn chú thích 7 Table 11.1: "Single and multiple drainage also include
+          alternate wetting and drying." → AWD dùng hệ số này.
+      aggregate:
+        value: 0.004
+        unit: "kgN2O-N_per_kgN"
+        status: "VERIFIED"
+        source: "IPCC 2019 Refinement, Vol.4, Ch.11, Table 11.1 (UPDATED), aggregated"
+        uncertainty_range: "0.000 – 0.029"
+        note: "Chỉ dùng khi không phân loại được chế độ nước."
+
+    n2o_n_to_n2o:
+      value: 1.5714285714285714
+      unit: "kgN2O_per_kgN2O-N"
+      status: "VERIFIED"
+      source: "Tỷ lệ khối lượng phân tử 44/28 — hằng số hoá học, không phải hệ số phát thải"
+
+  # =========================================================================
+  # Đốt rơm rạ ngoài đồng
+  #   Eq 2.27 : L = M_dm × Cf × Gef × 10⁻³ [kg khí]
+  # =========================================================================
+  straw_burning:
+
+    combustion_factor_rice:
+      value: 0.80
+      unit: "dimensionless"
+      status: "VERIFIED"
+      source: "IPCC 2006 Guidelines, Vol.4, Ch.2, Table 2.6 — Rice residues, post-harvest field burning"
+
+    gef_ch4:
+      value: 2.7
+      unit: "g_CH4_per_kg_dry_matter"
+      status: "VERIFIED"
+      source: "IPCC 2006 Guidelines, Vol.4, Ch.2, Table 2.5 — Agricultural residues"
+      uncertainty_range: "± 1.0"
+
+    gef_n2o:
+      value: 0.07
+      unit: "g_N2O_per_kg_dry_matter"
+      status: "VERIFIED"
+      source: "IPCC 2006 Guidelines, Vol.4, Ch.2, Table 2.5 — Agricultural residues"
+
+    co2_counted:
+      value: 0
+      unit: "boolean_flag"
+      status: "PENDING_VERIFICATION"
+      source: >
+        VERIFY — theo thông lệ IPCC, CO2 từ đốt sinh khối nông nghiệp thuộc chu trình carbon
+        sinh học và không tính là phát thải ròng trong AFOLU. Cần xác nhận QĐ 4801 có theo
+        thông lệ này không. Hiện engine KHÔNG tính CO2 từ đốt rơm.
+
+  # =========================================================================
+  # Nhiên liệu bơm tưới / máy móc
+  # =========================================================================
   fuel:
     diesel:
       value: null
-      unit: null            # dự kiến kg_CO2e_per_litre
-      source: "VERIFY"
-      status: "VERIFY"
-
-  # Xử lý rơm rạ. Ba phương pháp cho ba hệ số khác nhau.
-  # Công thức dự kiến: khối lượng rơm (kg) × EF
-  straw:
-    burned:
-      value: null
-      unit: null            # dự kiến kg_CO2e_per_kg_straw
-      source: "VERIFY"
-      status: "VERIFY"
-    incorporated:
+      unit: null
+      status: "PENDING_VERIFICATION"
+      source: "VERIFY — QĐ 2626/QĐ-BTNMT Phụ lục Năng lượng; hoặc IPCC 2006 Vol.2 Ch.3 + NCV + khối lượng riêng"
+    gasoline:
       value: null
       unit: null
-      source: "VERIFY"
-      status: "VERIFY"
-    removed:
+      status: "PENDING_VERIFICATION"
+      source: "VERIFY — như diesel"
+    lpg:
       value: null
       unit: null
-      source: "VERIFY"
-      status: "VERIFY"
+      status: "PENDING_VERIFICATION"
+      source: "VERIFY — như diesel"
+    electricity_grid:
+      value: null
+      unit: null
+      status: "PENDING_VERIFICATION"
+      source: "VERIFY — hệ số lưới điện Việt Nam (bơm điện, irrigation_events.pump_energy_kwh)"
 
 # ---------------------------------------------------------------------------
-# Giá trị tham chiếu — KHÔNG dùng trong tính toán
+# Giá trị tham chiếu — KHÔNG phải emission factor, engine KHÔNG đọc mục này
 # ---------------------------------------------------------------------------
-# Đặt riêng ngoài `factors` có chủ đích: đây là số liệu tham chiếu ở cấp sản phẩm,
-# KHÔNG phải emission factor, và Carbon Engine không được đọc mục này.
+# Đây là **emission intensity / benchmark** ở cấp sản phẩm (kg CO2e trên mỗi kg lúa),
+# hoàn toàn khác loại với emission factor (kg khí trên mỗi đơn vị hoạt động).
+# Dùng để đối chiếu kết quả đầu ra, TUYỆT ĐỐI không dùng làm hệ số đầu vào.
 reference_values:
+  kind: "emission_intensity_benchmark"
   status: "CONTESTED"
   note: >
-    Tài liệu gốc ghi hai con số chưa nhất quán về phạm vi khí nhà kính và ranh giới
-    hệ thống. KHÔNG dùng làm baseline cho tới khi giải quyết xong OI-01.
+    Hai con số dưới đây trong tài liệu gốc không nhất quán về phạm vi khí nhà kính và ranh
+    giới hệ thống (1,04 ghi là kg CO2; dải kia ghi là kg CO2e; chênh nhau hơn 2 lần).
+    Chưa giải quyết xong OI-01 thì không dùng làm baseline trong bất kỳ báo cáo nào.
   product_average:
     value: 1.04
-    unit: kg_CO2_per_kg_rice
+    unit: "kgCO2_per_kg_rice"
     source: "AgriCarbon_v2_Rice_Decision_and_Roadmap.md §1a.2"
   range_by_practice:
     min: 2.29
     max: 3.72
-    unit: kg_CO2e_per_kg_rice
+    unit: "kgCO2e_per_kg_rice"
     source: "AgriCarbon_v2_Rice_Decision_and_Roadmap.md §1a.2"
 
 # ---------------------------------------------------------------------------
@@ -100,49 +324,55 @@ reference_values:
 # ---------------------------------------------------------------------------
 carbon_credit_price:
   value: null
-  currency: USD
-  unit: per_tCO2e
+  currency: "USD"
+  unit: "per_tCO2e"
   status: "NOT_CONFIRMED"
   source: >
-    Cơ chế TCAF (World Bank) cho Đề án 1 triệu ha, tổng ~33,3–40 triệu USD. Giá tín chỉ
-    ĐANG TRONG QUÁ TRÌNH ĐỊNH GIÁ. Con số ~20 USD từng được nhắc nhưng tài liệu gốc yêu
-    cầu KHÔNG trình bày như số liệu đã xác nhận.
+    Cơ chế TCAF (World Bank) cho Đề án 1 triệu ha, tổng ~33,3–40 triệu USD. Giá tín chỉ ĐANG
+    TRONG QUÁ TRÌNH ĐỊNH GIÁ. Con số ~20 USD từng được nhắc nhưng không được trình bày như
+    số liệu đã xác nhận.
   review_by: "2026-12-31"
   ui_rule: >
-    Khi giá chưa chốt, UI/report PHẢI hiển thị nhãn "chưa chốt chính thức" hoặc ẩn hoàn
-    toàn phần quy đổi tiền. Không in ra số tiền trần trụi.
+    Khi giá chưa chốt, UI/report PHẢI hiển thị nhãn "chưa chốt chính thức" hoặc ẩn hoàn toàn
+    phần quy đổi tiền.
 
-# ---------------------------------------------------------------------------
-# Tích hợp ngoài — CHƯA CÓ API MỞ (SRS RB-02)
 # ---------------------------------------------------------------------------
 external_systems:
   ricemore:
     api: "NOT_AVAILABLE"
     note: "Phủ ~75% diện tích lúa quốc gia nhưng chưa có API mở; cần partnership thể chế."
-    review_by: "2026-12-31"
   farmore:
     api: "NOT_AVAILABLE"
     note: "App IRRI miễn phí, tính tCO2e/ha cấp ruộng. Dùng đối chiếu thủ công, chưa tích hợp."
-    review_by: "2026-12-31"
 
 # ---------------------------------------------------------------------------
 open_issues:
   - id: "OI-01"
-    text: "Làm rõ mâu thuẫn 1,04 vs 2,29–3,72 kg CO2e/kg (phạm vi khí / ranh giới hệ thống khác nhau?)."
+    text: "Làm rõ mâu thuẫn 1,04 vs 2,29–3,72 kg CO2e/kg — khác phạm vi khí / ranh giới hệ thống."
     owner: "Người B"
     due: "2026-09-15"
     blocks: "reference_values"
   - id: "OI-02"
-    text: "Lấy bộ hệ số chính thức từ hướng dẫn MRV (QĐ 4801/QĐ-BNNMT) thay cho các giá trị null."
+    text: "Lấy toàn văn + phụ lục QĐ 4801/QĐ-BNNMT để thay IPCC Tier 1 default bằng hệ số đặc trưng quốc gia."
     owner: "Người B"
     due: "2026-09-15"
-    blocks: "factors.* (toàn bộ — engine không tính được cho tới khi xong)"
+    blocks: "nhãn MRV-compliant"
   - id: "OI-03"
-    text: "Đối chiếu kết quả Carbon Engine với FarMoRe trên cùng 1 lô để kiểm chứng độ tin cậy."
+    text: "Đối chiếu kết quả Carbon Engine với FarMoRe trên cùng 1 lô."
     owner: "Người B"
     due: "2026-09-18"
-  - id: "OI-04"
-    text: "Xác minh đơn vị và cơ sở tính CH4 (per ha per day?) và cách đưa drainage_events vào công thức AWD."
+  - id: "OI-05"
+    text: "Xác minh khung GWP (AR4/AR5/AR6) mà QĐ 4801 hoặc QĐ 2626 quy định."
     owner: "Người B"
     due: "2026-09-15"
-    blocks: "factors.methane.*"
+    blocks: "gwp.ch4, gwp.n2o — CHẶN TOÀN BỘ việc ra số CO2e"
+  - id: "OI-06"
+    text: "Lấy hệ số nhiên liệu diesel/xăng/LPG và hệ số lưới điện VN."
+    owner: "Người B"
+    due: "2026-09-18"
+    blocks: "factors.fuel.*"
+  - id: "OI-07"
+    text: "Đối chiếu tên 6 bước MRV: báo chí ghi 'giám sát/xác minh', docs dự án ghi 'Đo đạc/Thẩm định'."
+    owner: "Người B"
+    due: "2026-09-15"
+    blocks: "docs/mrv-mapping.md, module 07"

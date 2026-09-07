@@ -1,49 +1,85 @@
 """Carbon Engine — lõi tính CO2e của AgriCarbon (lớp 1a, đường găng).
 
-Không phụ thuộc FastAPI, Supabase, Flutter hay bất kỳ UI nào.
+Không phụ thuộc FastAPI, Supabase, Flutter hay bất kỳ UI nào — chỉ stdlib + pyyaml.
+Phương pháp luận: docs/CARBON_METHOD.md · Nguồn: docs/CARBON_METHOD_SOURCES.md
 """
 
-from .engine import BreakdownEntry, CarbonResult, calculate_carbon
+from .engine import (
+    ENGINE_VERSION,
+    CarbonResult,
+    assert_consistent_water_records,
+    calculate_carbon,
+    compute_input_hash,
+)
 from .errors import (
     CarbonEngineError,
     ConflictingWaterRegimeError,
+    DoubleCountingError,
     InvalidWaterRegimeError,
+    MethodologyGapError,
     MissingActivityDataError,
     MissingEmissionFactorError,
     ValidationError,
 )
-from .factors import EmissionFactor, EmissionFactorSet
+from .factors import Methodology, Parameter, ParameterSet
+from .methodology import (
+    BreakdownEntry,
+    FertilizerN2OCalculator,
+    FuelEmissionCalculator,
+    RiceMethaneCalculator,
+    StrawBurningCalculator,
+    classify_straw,
+)
 from .models import (
-    WATER_REGIME_SCENARIOS,
+    PRE_SEASON_REGIMES,
+    SCENARIOS,
+    STRAW_METHODS,
     WATER_REGIMES,
     CropActivityData,
     FertilizerApplication,
+    FuelUsage,
     Harvest,
+    IrrigationEvent,
+    OrganicAmendment,
     PesticideApplication,
     Seed,
-    StrawManagement,
-    WaterRecord,
+    StrawEvent,
 )
 
 __all__ = [
+    "ENGINE_VERSION",
+    "PRE_SEASON_REGIMES",
+    "SCENARIOS",
+    "STRAW_METHODS",
+    "WATER_REGIMES",
     "BreakdownEntry",
     "CarbonEngineError",
     "CarbonResult",
     "ConflictingWaterRegimeError",
     "CropActivityData",
-    "EmissionFactor",
-    "EmissionFactorSet",
+    "DoubleCountingError",
     "FertilizerApplication",
+    "FertilizerN2OCalculator",
+    "FuelEmissionCalculator",
+    "FuelUsage",
     "Harvest",
     "InvalidWaterRegimeError",
+    "IrrigationEvent",
+    "Methodology",
+    "MethodologyGapError",
     "MissingActivityDataError",
     "MissingEmissionFactorError",
+    "OrganicAmendment",
+    "Parameter",
+    "ParameterSet",
     "PesticideApplication",
+    "RiceMethaneCalculator",
     "Seed",
-    "StrawManagement",
+    "StrawBurningCalculator",
+    "StrawEvent",
     "ValidationError",
-    "WATER_REGIMES",
-    "WATER_REGIME_SCENARIOS",
-    "WaterRecord",
+    "assert_consistent_water_records",
     "calculate_carbon",
+    "classify_straw",
+    "compute_input_hash",
 ]

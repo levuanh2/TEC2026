@@ -1,57 +1,190 @@
 # ============================================================================
 # TEST FACTORS — SỐ BỊA, DÙNG RIÊNG CHO UNIT TEST
 #
-# ⛔ KHÔNG PHẢI HỆ SỐ PHÁT THẢI THẬT.
-# ⛔ KHÔNG copy sang backend/config/emission_factors.yaml.
+# ⛔ TEST ONLY — NOT SCIENTIFIC VALUES.
+# ⛔ KHÔNG PHẢI HỆ SỐ PHÁT THẢI THẬT. KHÔNG copy sang backend/config/emission_factors.yaml.
 # ⛔ KHÔNG dùng bất kỳ con số nào sinh ra từ file này để pitch hay báo cáo.
 #
-# Mục đích duy nhất: kiểm chứng IMPLEMENTATION của engine (phép nhân, phép cộng,
-# phân rã, chia cho sản lượng) bằng những con số tròn dễ tính tay.
-# Giá trị khoa học thật nằm ở open issue OI-02, chưa có.
+# Mục đích duy nhất: kiểm chứng IMPLEMENTATION (phép nhân, luỹ thừa, tổng hợp, phân luồng
+# rơm rạ, quy đổi CO2e) bằng những con số tròn dễ tính tay.
+# sfo_exponent để 1.0 (không phải 0.59) để SFo = 1 + Σ ROA×CFOA, tính tay được.
 # ============================================================================
 
 version: "TEST-FACTORS-DO-NOT-USE"
-review_date: "2026-09-07"
+review_date: "2026-09-08"
+
+methodology:
+  name: "TEST ONLY — NOT A REAL METHODOLOGY"
+  version: "test"
+  tier: 0
+  status: "TEST"
+
+gwp:
+  framework:
+    value: null
+    status: "TEST"
+    source: "TEST ONLY"
+  ch4:
+    value: 10.0
+    unit: "kgCO2e_per_kgCH4"
+    status: "TEST"
+    source: "TEST ONLY — số bịa"
+  n2o:
+    value: 100.0
+    unit: "kgCO2e_per_kgN2O"
+    status: "TEST"
+    source: "TEST ONLY — số bịa"
 
 factors:
-  methane:
-    continuous_flooding:
-      value: 10.0
-      unit: kg_CO2e_per_ha_per_day
-      source: "TEST ONLY — số bịa"
+  ch4_rice:
+    efc:
+      value: 1.0
+      unit: "kgCH4_per_ha_per_day"
       status: "TEST"
-    awd:
-      value: 4.0
-      unit: kg_CO2e_per_ha_per_day
       source: "TEST ONLY — số bịa"
+    sfw:
+      irrigated_continuous_flooding:
+        value: 1.0
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      irrigated_single_drainage:
+        value: 0.8
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      irrigated_multiple_drainage:
+        value: 0.5
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      rainfed_regular:
+        value: 0.4
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      rainfed_drought_prone:
+        value: 0.2
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      deep_water:
+        value: 0.1
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      upland:
+        value: 0.0
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+    sfp:
+      non_flooded_pre_season_lt_180d:
+        value: 1.0
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      non_flooded_pre_season_gt_180d:
+        value: 0.9
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      flooded_pre_season_gt_30d:
+        value: 2.0
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      non_flooded_pre_season_gt_365d:
+        value: 0.5
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+    sfo_exponent:
+      value: 1.0
+      unit: "dimensionless"
       status: "TEST"
+      source: "TEST ONLY — để 1.0 cho dễ tính tay, giá trị thật là 0.59"
+    cfoa:
+      straw_incorporated_lt_30d:
+        value: 1.0
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      straw_incorporated_gt_30d:
+        value: 0.2
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      compost:
+        value: 0.1
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      farmyard_manure:
+        value: 0.2
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+      green_manure:
+        value: 0.5
+        unit: "dimensionless"
+        status: "TEST"
+        source: "TEST ONLY"
+    default_cultivation_days:
+      value: 100
+      unit: "day"
+      status: "TEST"
+      source: "TEST ONLY"
+      uncertainty_range: "TEST"
 
-  fertilizer_n2o:
-    value: 2.0
-    unit: kg_CO2e_per_kg_N
-    source: "TEST ONLY — số bịa"
-    status: "TEST"
+  n2o_fertilizer:
+    ef1fr:
+      continuous_flooding:
+        value: 0.01
+        unit: "kgN2O-N_per_kgN"
+        status: "TEST"
+        source: "TEST ONLY"
+      single_and_multiple_drainage:
+        value: 0.02
+        unit: "kgN2O-N_per_kgN"
+        status: "TEST"
+        source: "TEST ONLY"
+      aggregate:
+        value: 0.015
+        unit: "kgN2O-N_per_kgN"
+        status: "TEST"
+        source: "TEST ONLY"
+    n2o_n_to_n2o:
+      value: 2.0
+      unit: "kgN2O_per_kgN2O-N"
+      status: "TEST"
+      source: "TEST ONLY — giá trị thật là 44/28"
+
+  straw_burning:
+    combustion_factor_rice:
+      value: 0.5
+      unit: "dimensionless"
+      status: "TEST"
+      source: "TEST ONLY"
+    gef_ch4:
+      value: 2.0
+      unit: "g_CH4_per_kg_dry_matter"
+      status: "TEST"
+      source: "TEST ONLY"
+    gef_n2o:
+      value: 0.1
+      unit: "g_N2O_per_kg_dry_matter"
+      status: "TEST"
+      source: "TEST ONLY"
 
   fuel:
     diesel:
       value: 3.0
-      unit: kg_CO2e_per_litre
-      source: "TEST ONLY — số bịa"
+      unit: "kgCO2e_per_litre"
       status: "TEST"
-
-  straw:
-    burned:
-      value: 1.0
-      unit: kg_CO2e_per_kg_straw
-      source: "TEST ONLY — số bịa"
+      source: "TEST ONLY"
+    gasoline:
+      value: null
+      unit: null
       status: "TEST"
-    incorporated:
-      value: 0.5
-      unit: kg_CO2e_per_kg_straw
-      source: "TEST ONLY — số bịa"
-      status: "TEST"
-    removed:
-      value: 0.2
-      unit: kg_CO2e_per_kg_straw
-      source: "TEST ONLY — số bịa"
-      status: "TEST"
+      source: "TEST ONLY — cố ý để null để test lỗi thiếu hệ số"

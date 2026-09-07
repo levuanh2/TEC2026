@@ -4,26 +4,40 @@
   "area_ha": 1.0,
   "cultivation_days": 100,
   "yield_kg": 5200,
+
+  "water_regime": "irrigated_multiple_drainage",
+  "pre_season_water_regime": "non_flooded_pre_season_lt_180d",
+
   "seed": {
     "variety": "OM5451",
     "seed_rate_kg_per_ha": 80,
     "sowing_method": "sa_hang"
   },
-  "water": {
-    "regime": "awd",
-    "drainage_events": 3,
-    "pump_fuel_litre": 25
-  },
+
   "fertilizer": [
     {
       "fertilizer_type": "Urea",
       "amount_kg": 120,
       "n_content_pct": 46,
-      "application_no": 1
+      "application_no": 1,
+      "is_organic": false
     }
   ],
-  "straw": {
-    "method": "removed",
-    "amount_kg": 5000
-  }
+
+  "straw": [
+    {
+      "method": "incorporated",
+      "mass_kg": 5000,
+      "dry_matter_fraction": 0.85,
+      "days_before_cultivation": 10
+    }
+  ],
+
+  "fuel": [
+    { "fuel_type": "diesel", "amount_litre": 25 }
+  ],
+
+  "irrigation": [
+    { "water_volume_m3": 7400 }
+  ]
 }

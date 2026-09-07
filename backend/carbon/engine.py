@@ -1,275 +1,309 @@
-"""Carbon Engine — Activity Data × Emission Factor → CO2e.
+"""Carbon Engine — điều phối các bộ tính theo nguồn và tổng hợp kết quả.
 
 Hàm thuần, không phụ thuộc FastAPI / Supabase / Flutter / UI (docs/architecture.md §4.2).
-Nhờ vậy: test được bằng ca tính tay, và What-if Simulation ở giai đoạn 2 chỉ cần gọi lại
-hàm này với input giả định thay vì viết lại lớp 1a.
+Nhờ vậy What-if Simulation ở giai đoạn 2 chỉ cần gọi lại hàm này với input giả định.
 
-Công thức và trạng thái xác minh từng nguồn: xem docs/CARBON_METHOD.md.
+Phương pháp luận và trích dẫn: docs/CARBON_METHOD.md, docs/CARBON_METHOD_SOURCES.md.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from .errors import (
     ConflictingWaterRegimeError,
+    DoubleCountingError,
     InvalidWaterRegimeError,
+    MethodologyGapError,
     MissingActivityDataError,
 )
-from .factors import EmissionFactorSet
+from .factors import STATUS_VERIFIED, ParameterSet
+from .methodology import (
+    BreakdownEntry,
+    FertilizerN2OCalculator,
+    FuelEmissionCalculator,
+    RiceMethaneCalculator,
+    StrawBurningCalculator,
+    classify_straw,
+)
 from .models import (
-    STRAW_METHODS,
-    WATER_REGIME_SCENARIOS,
+    SCENARIO_TO_REGIME,
+    SCENARIOS,
     WATER_REGIMES,
     CropActivityData,
 )
 
-
-@dataclass
-class BreakdownEntry:
-    """Một dòng phân rã theo nguồn phát thải."""
-
-    source: str
-    co2e_kg: float
-    activity_value: float
-    activity_unit: str
-    ef_path: str
-    ef_value: float
-    ef_status: str
+ENGINE_VERSION = "0.2.0"
 
 
 @dataclass
 class CarbonResult:
-    """Kết quả tính — cấu trúc bám SRS §4.2."""
+    """Kết quả tính. Cấu trúc đủ để truy ngược tới nguồn trích dẫn."""
 
     crop_id: str
-    water_regime_scenario: str
+    scenario: str
     water_regime_applied: str
-    co2e_total_kg: float
+    total_co2e_kg: float
     yield_kg: float | None
     co2e_per_kg: float | None
     breakdown: list[BreakdownEntry] = field(default_factory=list)
+    methodology: dict[str, Any] = field(default_factory=dict)
     ef_config_version: str = "unknown"
+    engine_version: str = ENGINE_VERSION
+    input_hash: str = ""
     calculated_at: str = ""
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "crop_id": self.crop_id,
+            "scenario": self.scenario,
+            "water_regime_applied": self.water_regime_applied,
+            "total_co2e_kg": self.total_co2e_kg,
+            "yield_kg": self.yield_kg,
+            "co2e_per_kg": self.co2e_per_kg,
+            "breakdown": [entry.to_dict() for entry in self.breakdown],
+            "methodology": self.methodology,
+            "ef_config_version": self.ef_config_version,
+            "engine_version": self.engine_version,
+            "input_hash": self.input_hash,
+            "calculated_at": self.calculated_at,
+            "warnings": self.warnings,
+        }
 
 
 def calculate_carbon(
     activity_data: CropActivityData,
-    water_regime_scenario: str = "as_recorded",
-    emission_factors: EmissionFactorSet | None = None,
+    scenario: str = "as_recorded",
+    methodology_config: ParameterSet | None = None,
 ) -> CarbonResult:
     """Tính CO2e tổng, CO2e/kg và phân rã theo nguồn cho một vụ canh tác.
 
     Args:
         activity_data: Activity Data của vụ.
-        water_regime_scenario: "awd" | "continuous_flooding" | "as_recorded".
-        emission_factors: bộ hệ số. Mặc định nạp backend/config/emission_factors.yaml.
+        scenario: "awd" | "continuous_flooding" | "as_recorded".
+        methodology_config: bộ tham số. Mặc định nạp backend/config/emission_factors.yaml.
 
     Raises:
-        InvalidWaterRegimeError: kịch bản nước không hợp lệ.
-        ConflictingWaterRegimeError: các bản ghi nước ghi chế độ mâu thuẫn.
-        MissingActivityDataError: thiếu dữ liệu hoạt động bắt buộc.
-        MissingEmissionFactorError: hệ số cần dùng đang null/chưa cấu hình.
+        InvalidWaterRegimeError, ConflictingWaterRegimeError, MissingActivityDataError,
+        MethodologyGapError, MissingEmissionFactorError, DoubleCountingError.
     """
-    factors = emission_factors or EmissionFactorSet.load()
+    params = methodology_config or ParameterSet.load()
     warnings: list[str] = []
 
-    regime = _resolve_water_regime(activity_data, water_regime_scenario)
-    breakdown = [
-        entry
-        for entry in (
-            _methane(activity_data, regime, factors),
-            _fertilizer_n2o(activity_data, factors),
-            _fuel(activity_data, factors),
-            _straw(activity_data, factors),
+    regime = _resolve_water_regime(activity_data, scenario)
+    cultivation_days = _resolve_cultivation_days(activity_data, params, warnings)
+
+    amendments, burned = classify_straw(
+        activity_data.straw, activity_data.crop_id, activity_data.area_ha
+    )
+    _assert_no_double_counting(amendments, burned, activity_data.crop_id)
+
+    breakdown: list[BreakdownEntry] = [
+        RiceMethaneCalculator().calculate(
+            activity_data, regime, amendments, params, cultivation_days
         )
-        if entry is not None
     ]
+
+    n2o_entry, n2o_warnings = FertilizerN2OCalculator().calculate(activity_data, regime, params)
+    warnings.extend(n2o_warnings)
+    if n2o_entry is not None:
+        breakdown.append(n2o_entry)
+
+    breakdown.extend(StrawBurningCalculator().calculate(burned, activity_data, params))
+
+    fuel_entries, fuel_warnings = FuelEmissionCalculator().calculate(activity_data, params)
+    breakdown.extend(fuel_entries)
+    warnings.extend(fuel_warnings)
 
     total = sum(entry.co2e_kg for entry in breakdown)
     per_kg, yield_warning = _per_kg(total, activity_data.yield_kg)
     if yield_warning:
         warnings.append(yield_warning)
 
-    unverified = sorted({e.ef_path for e in breakdown if e.ef_status != "VERIFIED"})
-    if unverified:
-        warnings.append(
-            "Hệ số chưa được xác minh chính thức: "
-            + ", ".join(unverified)
-            + ". Kết quả CHƯA dùng được cho báo cáo MRV (xem open issue OI-02)."
-        )
-    if activity_data.pesticide:
-        warnings.append(
-            "Thuốc BVTV đã ghi nhận nhưng chưa được đưa vào công thức phát thải "
-            "(docs/CARBON_METHOD.md — NOT IMPLEMENTED)."
-        )
-    if regime == "awd" and any(w.drainage_events for w in activity_data.water):
-        warnings.append(
-            "Số lần rút nước (drainage_events) chưa được đưa vào công thức AWD "
-            "(docs/CARBON_METHOD.md — NOT IMPLEMENTED, open issue OI-04)."
-        )
+    warnings.extend(_scope_warnings(activity_data, amendments))
+    warnings.extend(_provenance_warnings(breakdown, params))
 
     return CarbonResult(
         crop_id=activity_data.crop_id,
-        water_regime_scenario=water_regime_scenario,
+        scenario=scenario,
         water_regime_applied=regime,
-        co2e_total_kg=total,
+        total_co2e_kg=total,
         yield_kg=activity_data.yield_kg,
         co2e_per_kg=per_kg,
         breakdown=breakdown,
-        ef_config_version=factors.version,
+        methodology=params.methodology.to_dict(),
+        ef_config_version=params.version,
+        input_hash=compute_input_hash(activity_data, scenario, params),
         calculated_at=datetime.now(timezone.utc).isoformat(),
         warnings=warnings,
     )
+
+
+def compute_input_hash(
+    activity_data: CropActivityData, scenario: str, params: ParameterSet
+) -> str:
+    """SHA-256 của (Activity Data, kịch bản, phiên bản bộ tham số).
+
+    Khớp ràng buộc `carbon_input_hash_chk` của bảng carbon_calculations trong Supabase.
+    Cùng input + cùng bộ tham số -> cùng hash, kể cả giữa các lần chạy khác nhau.
+    """
+    payload = "|".join(
+        [activity_data.canonical_json(), scenario, params.version, ENGINE_VERSION]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # -- validation -------------------------------------------------------------
 
 
 def _resolve_water_regime(data: CropActivityData, scenario: str) -> str:
-    """Chốt chế độ nước dùng để tính, sau khi kiểm tra tính nhất quán của dữ liệu.
+    """Chốt chế độ nước, sau khi kiểm tra tính hợp lệ và nhất quán của dữ liệu.
 
-    Kiểm tra mâu thuẫn chạy kể cả khi kịch bản ghi đè chế độ đã ghi: dữ liệu mâu thuẫn
-    là lỗi nhập liệu, phải sửa ở nguồn chứ không phải né bằng cách chọn kịch bản khác.
+    Kiểm tra chạy kể cả khi kịch bản ghi đè: dữ liệu mâu thuẫn là lỗi nhập liệu, phải sửa
+    ở nguồn chứ không né bằng cách chọn kịch bản khác.
     """
-    if scenario not in WATER_REGIME_SCENARIOS:
+    if scenario not in SCENARIOS:
         raise InvalidWaterRegimeError(
-            f"water_regime_scenario '{scenario}' không hợp lệ. "
-            f"Chỉ nhận: {', '.join(WATER_REGIME_SCENARIOS)}."
+            f"scenario '{scenario}' không hợp lệ. Chỉ nhận: {', '.join(SCENARIOS)}."
         )
 
-    recorded = {w.regime for w in data.water}
-    invalid = recorded - set(WATER_REGIMES)
-    if invalid:
+    recorded = data.water_regime
+    if recorded is not None and recorded not in WATER_REGIMES:
         raise InvalidWaterRegimeError(
-            f"Bản ghi nước có chế độ không hợp lệ: {', '.join(sorted(invalid))}. "
+            f"'water_regime' = '{recorded}' không hợp lệ. "
             f"Chỉ nhận: {', '.join(WATER_REGIMES)}."
-        )
-    if len(recorded) > 1:
-        raise ConflictingWaterRegimeError(
-            f"Vụ '{data.crop_id}' có các bản ghi nước ghi chế độ mâu thuẫn: "
-            f"{', '.join(sorted(recorded))}. Engine không tự chọn — hãy sửa dữ liệu nguồn."
         )
 
     if scenario != "as_recorded":
-        return scenario
-    if not recorded:
+        return SCENARIO_TO_REGIME[scenario]
+    if recorded is None:
         raise MissingActivityDataError(
-            f"Vụ '{data.crop_id}' chưa có bản ghi chế độ nước nên không dùng được "
-            f"kịch bản 'as_recorded'. Hãy truyền 'awd' hoặc 'continuous_flooding'."
+            f"Vụ '{data.crop_id}' chưa có 'water_regime' nên không dùng được kịch bản "
+            f"'as_recorded'. Hãy truyền 'awd' hoặc 'continuous_flooding'."
         )
-    return recorded.pop()
+    return recorded
+
+
+def assert_consistent_water_records(crop_id: str, regimes: list[str]) -> str:
+    """Dùng ở lớp adapter khi gộp nhiều bản ghi tưới thành một chế độ nước cấp vụ.
+
+    Nhiều bản ghi ghi chế độ khác nhau -> lỗi, engine không tự chọn.
+    """
+    distinct = {r for r in regimes if r}
+    if len(distinct) > 1:
+        raise ConflictingWaterRegimeError(
+            f"Vụ '{crop_id}' có các bản ghi tưới ghi chế độ nước mâu thuẫn: "
+            f"{', '.join(sorted(distinct))}. Engine không tự chọn — hãy sửa dữ liệu nguồn."
+        )
+    if not distinct:
+        raise MissingActivityDataError(f"Vụ '{crop_id}' không có bản ghi chế độ nước nào.")
+    return distinct.pop()
+
+
+def _resolve_cultivation_days(
+    data: CropActivityData, params: ParameterSet, warnings: list[str]
+) -> int:
+    recorded = data.recorded_cultivation_days
+    if recorded is not None:
+        if recorded <= 0:
+            raise MissingActivityDataError(
+                f"Vụ '{data.crop_id}': số ngày canh tác = {recorded}, không hợp lệ."
+            )
+        return recorded
+
+    default = params.factor("ch4_rice", "default_cultivation_days")
+    warnings.append(
+        f"Vụ '{data.crop_id}': thiếu ngày gieo sạ/thu hoạch nên dùng số ngày canh tác mặc định "
+        f"{default.value:g} ngày ({default.source}). Độ không chắc chắn cao — "
+        f"khoảng {default.uncertainty_range}."
+    )
+    return int(default.value)
 
 
 def _per_kg(total: float, yield_kg: float | None) -> tuple[float | None, str | None]:
-    """CO2e/kg. Thiếu hoặc sai sản lượng → None kèm cảnh báo, KHÔNG trả 0 (NFR-03)."""
+    """CO2e/kg. Thiếu sản lượng -> None kèm cảnh báo, KHÔNG trả 0 (NFR-03)."""
     if yield_kg is None:
         return None, "Chưa có sản lượng nên chưa tính được CO2e/kg."
     if yield_kg <= 0:
-        return None, f"Sản lượng không hợp lệ ({yield_kg} kg) nên chưa tính được CO2e/kg."
+        raise MissingActivityDataError(
+            f"Sản lượng phải > 0 (đang là {yield_kg}). Khớp ràng buộc "
+            f"carbon_yield_chk của bảng carbon_calculations."
+        )
     return total / yield_kg, None
 
 
-# -- các nguồn phát thải ----------------------------------------------------
-# Mỗi hàm trả None khi vụ không có dữ liệu hoạt động của nguồn đó.
-# Có dữ liệu nhưng thiếu hệ số → MissingEmissionFactorError nổ ra từ factors.get().
+def _assert_no_double_counting(amendments, burned, crop_id: str) -> None:
+    """Một khối rơm chỉ đi một đường: SFo hoặc đốt đồng, không bao giờ cả hai.
 
-
-def _methane(data: CropActivityData, regime: str, factors) -> BreakdownEntry | None:
-    """CH4 ruộng ngập: area_ha × số ngày canh tác × EF theo chế độ nước.
-
-    Luôn bắt buộc — lúa nước lúc nào cũng có chế độ nước.
+    IPCC Table 5.14 chú thích a loại rơm bị đốt ra khỏi SFo. Kiểm tra này chốt lại
+    bất biến đó ở tầng engine.
     """
-    days = data.flooded_days
-    if days is None:
-        raise MissingActivityDataError(
-            f"Vụ '{data.crop_id}' thiếu 'cultivation_days' (hoặc cặp sowing_date/harvest_date) "
-            f"nên không tính được CH4 ruộng ngập."
-        )
-    ef = factors.get("methane", regime)
-    return BreakdownEntry(
-        source="ch4_flooding",
-        co2e_kg=data.area_ha * days * ef.value,
-        activity_value=data.area_ha * days,
-        activity_unit="ha_day",
-        ef_path=ef.path,
-        ef_value=ef.value,
-        ef_status=ef.status,
-    )
-
-
-def _fertilizer_n2o(data: CropActivityData, factors) -> BreakdownEntry | None:
-    """N2O từ phân đạm: tổng kg N × EF."""
-    if not data.fertilizer:
-        return None
-
-    total_n = 0.0
-    for application in data.fertilizer:
-        nitrogen = application.nitrogen_kg
-        if nitrogen is None:
-            raise MissingActivityDataError(
-                f"Lần bón '{application.fertilizer_type}' của vụ '{data.crop_id}' thiếu "
-                f"'n_content_pct' nên không quy đổi được lượng N. Engine không đoán hàm lượng N."
-            )
-        total_n += nitrogen
-
-    ef = factors.get("fertilizer_n2o")
-    return BreakdownEntry(
-        source="n2o_fertilizer",
-        co2e_kg=total_n * ef.value,
-        activity_value=total_n,
-        activity_unit="kg_N",
-        ef_path=ef.path,
-        ef_value=ef.value,
-        ef_status=ef.status,
-    )
-
-
-def _fuel(data: CropActivityData, factors) -> BreakdownEntry | None:
-    """Nhiên liệu bơm tưới: số lít × EF."""
-    litres = data.pump_fuel_litre
-    if litres <= 0:
-        return None
-    ef = factors.get("fuel", "diesel")
-    return BreakdownEntry(
-        source="fuel_pumping",
-        co2e_kg=litres * ef.value,
-        activity_value=litres,
-        activity_unit="litre",
-        ef_path=ef.path,
-        ef_value=ef.value,
-        ef_status=ef.status,
-    )
-
-
-def _straw(data: CropActivityData, factors) -> BreakdownEntry | None:
-    """Xử lý rơm rạ: khối lượng rơm × EF theo phương pháp."""
-    straw = data.straw
-    if straw is None:
-        return None
-    if straw.method not in STRAW_METHODS:
-        raise MissingActivityDataError(
-            f"Phương pháp xử lý rơm rạ '{straw.method}' không hợp lệ. "
-            f"Chỉ nhận: {', '.join(STRAW_METHODS)}."
-        )
-    if straw.amount_kg is None:
-        raise MissingActivityDataError(
-            f"Vụ '{data.crop_id}' ghi phương pháp xử lý rơm rạ nhưng thiếu 'amount_kg'."
+    from_straw = [a for a in amendments if a.origin.startswith("straw:")]
+    burned_methods = {e.method for e in burned}
+    amendment_methods = {a.origin.split(":", 1)[1] for a in from_straw}
+    overlap = burned_methods & amendment_methods
+    if overlap:
+        raise DoubleCountingError(
+            f"Vụ '{crop_id}': rơm với phương pháp {', '.join(sorted(overlap))} bị tính vào cả "
+            f"SFo (điều chỉnh CH4) lẫn nguồn đốt đồng. IPCC Table 5.14 chú thích a loại rơm đốt "
+            f"ra khỏi SFo."
         )
 
-    ef = factors.get("straw", straw.method)
-    return BreakdownEntry(
-        source="straw_management",
-        co2e_kg=straw.amount_kg * ef.value,
-        activity_value=straw.amount_kg,
-        activity_unit="kg_straw",
-        ef_path=ef.path,
-        ef_value=ef.value,
-        ef_status=ef.status,
+
+# -- cảnh báo ---------------------------------------------------------------
+
+
+def _scope_warnings(data: CropActivityData, amendments) -> list[str]:
+    """Nêu rõ những gì CỐ Ý không nằm trong ranh giới hệ thống."""
+    notes: list[str] = []
+    if data.pesticide:
+        notes.append(
+            f"Vụ '{data.crop_id}': có ghi nhận thuốc BVTV nhưng phát thải upstream của thuốc "
+            f"không nằm trong ranh giới hệ thống MVP (docs/CARBON_METHOD.md — NOT_IMPLEMENTED)."
+        )
+    if data.seed:
+        notes.append(
+            f"Vụ '{data.crop_id}': phát thải upstream của giống không nằm trong ranh giới "
+            f"hệ thống MVP."
+        )
+    notes.append(
+        "CH4 ngoài vụ (trước gieo sạ và sau thu hoạch) không được tính: IPCC ghi rõ SFp chỉ dùng "
+        "để ước tính CH4 TRONG vụ, không dùng để lượng hoá phát thải ngoài vụ."
     )
+    return notes
+
+
+def _provenance_warnings(breakdown: list[BreakdownEntry], params: ParameterSet) -> list[str]:
+    notes: list[str] = []
+    unverified = sorted(
+        {
+            path
+            for entry in breakdown
+            for path in entry.provenance
+            if not str(entry.provenance[path]).strip()
+        }
+    )
+    if unverified:
+        notes.append("Tham số thiếu nguồn trích dẫn: " + ", ".join(unverified) + ".")
+
+    if params.methodology.tier == 1:
+        notes.append(
+            f"Đang dùng IPCC Tier 1 default ({params.methodology.name}), KHÔNG phải hệ số đặc "
+            f"trưng quốc gia mà quy trình MRV yêu cầu. Chưa lấy được toàn văn QĐ 4801/QĐ-BNNMT "
+            f"(OI-02) — KHÔNG được gắn nhãn 'MRV-compliant' cho kết quả này."
+        )
+    return notes
+
+
+__all__ = [
+    "ENGINE_VERSION",
+    "BreakdownEntry",
+    "CarbonResult",
+    "assert_consistent_water_records",
+    "calculate_carbon",
+    "compute_input_hash",
+]

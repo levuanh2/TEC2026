@@ -1,40 +1,45 @@
 # backend/ — API + Carbon Engine
 
-- **Lớp MVP:** 1a (Carbon Engine — đường găng) + 1b (benchmark, recommendation) + 1c (export MRV).
+- **Lớp MVP:** 1a (Carbon Engine — đường găng) + 1b + 1c.
 - **Phụ trách:** Người B.
 - **Đặc tả:** [`../docs/modules/02-carbon-engine.md`](../docs/modules/02-carbon-engine.md)
-- **Công thức & trạng thái xác minh:** [`../docs/CARBON_METHOD.md`](../docs/CARBON_METHOD.md)
+- **Phương pháp luận:** [`../docs/CARBON_METHOD.md`](../docs/CARBON_METHOD.md)
+- **Nguồn từng hệ số:** [`../docs/CARBON_METHOD_SOURCES.md`](../docs/CARBON_METHOD_SOURCES.md)
 
-## Trạng thái hiện tại
+## Trạng thái
 
 | Phần | Trạng thái |
 |---|---|
-| `carbon/` — Carbon Engine | ✅ chạy được, 21 unit test pass |
-| `config/emission_factors.yaml` | ⚠️ **toàn bộ hệ số đang `null`** — chờ open issue OI-02 |
+| `carbon/` — Carbon Engine | ✅ chạy được, 52 unit test pass |
+| Phương pháp luận CH4 / N2O / đốt rơm | ✅ VERIFIED theo IPCC, trích dẫn số hiệu bảng |
+| **GWP** | ⛔ **PENDING_VERIFICATION — đang chặn toàn bộ việc ra số CO2e** |
+| Hệ số nhiên liệu | ⏳ PENDING_VERIFICATION |
+| QĐ 4801/QĐ-BNNMT (Tier 1) | ❌ chưa lấy được toàn văn → **không được nói "MRV-compliant"** |
 | `main.py` — API FastAPI | ❌ mới là entrypoint TODO |
-| Supabase / database | ❌ ngoài phạm vi — thành viên khác đang thiết kế |
+| Supabase | migration ở `../supabase/migrations/`, chưa chạy lên DB |
 
-**Engine chưa tính được số thật.** Chạy với config thật sẽ ném `MissingEmissionFactorError` —
-đó là hành vi đúng, không phải bug. Xem [`../docs/CARBON_METHOD.md`](../docs/CARBON_METHOD.md).
+**Chạy với config thật sẽ dừng ở `MissingEmissionFactorError: gwp.ch4`.** Đó là hành vi
+đúng, không phải bug.
 
 ## Cấu trúc
 
 ```text
 backend/
-├── carbon/                     # Carbon Engine — KHÔNG phụ thuộc FastAPI/Supabase/UI
-│   ├── models.py               # dataclass Activity Data (stdlib, không pydantic)
-│   ├── factors.py              # nạp hệ số từ YAML, đường duy nhất engine lấy hệ số
-│   ├── engine.py               # calculate_carbon() — hàm thuần
-│   ├── errors.py               # lỗi rõ ràng, không fallback
-│   └── demo.py                 # chạy thử end-to-end
+├── carbon/                      # Carbon Engine — chỉ stdlib + pyyaml
+│   ├── models.py                # dataclass Activity Data
+│   ├── factors.py               # nạp tham số từ YAML — đường DUY NHẤT lấy hệ số
+│   ├── methodology.py           # 1 class cho mỗi nguồn phát thải + phân luồng rơm rạ
+│   ├── engine.py                # điều phối, tổng hợp, validation, input hash
+│   ├── errors.py                # lỗi rõ ràng, không fallback
+│   └── demo.py                  # chạy thử end-to-end
 ├── config/
-│   └── emission_factors.yaml   # hệ số + nguồn + status (RB-01)
+│   └── emission_factors.yaml    # hệ số + nguồn + status (RB-01)
 ├── tests/
-│   ├── test_carbon_engine.py
+│   ├── test_carbon_engine.py    # 52 test
 │   └── fixtures/
-│       ├── demo_crop.json      # DEMO — dữ liệu bịa
-│       └── test_factors.yaml   # TEST FACTORS — số bịa, chỉ để test implementation
-└── main.py                     # API — chưa làm
+│       ├── demo_crop.json       # DEMO — dữ liệu bịa
+│       └── test_factors.yaml    # TEST ONLY — NOT SCIENTIFIC VALUES
+└── main.py                      # API — chưa làm
 ```
 
 ## Cài đặt
@@ -56,42 +61,62 @@ python -m pytest tests -q
 ```bash
 cd backend
 
-# Dùng TEST FACTORS (số bịa) — chạy thông, in ra cả 2 kịch bản awd và continuous_flooding
+# TEST FACTORS (số bịa) — chạy thông, in cả 2 kịch bản kèm phân rã và provenance
 python -m carbon.demo
 
-# Dùng config thật — SẼ BÁO LỖI vì hệ số còn null. Đây là hành vi đúng.
+# Config thật — dừng ở GWP. Đây là hành vi đúng.
 python -m carbon.demo --real
 ```
 
 ## Dùng engine trong code
 
 ```python
-from carbon import CropActivityData, EmissionFactorSet, calculate_carbon
+from carbon import CropActivityData, ParameterSet, calculate_carbon
 
 crop = CropActivityData.from_dict({
-    "crop_id": "plot-a-vu-he-thu",
+    "crop_id": "plot-a-he-thu-2026",
     "area_ha": 1.0,
     "cultivation_days": 100,
     "yield_kg": 5200,
-    "water": {"regime": "awd", "drainage_events": 3, "pump_fuel_litre": 25},
+
+    # Hai trường này phương pháp luận IPCC BẮT BUỘC có
+    "water_regime": "irrigated_multiple_drainage",          # AWD (Table 5.12)
+    "pre_season_water_regime": "non_flooded_pre_season_lt_180d",  # SFp (Table 5.13)
+
     "fertilizer": [{"fertilizer_type": "Urea", "amount_kg": 120, "n_content_pct": 46}],
-    "straw": {"method": "removed", "amount_kg": 5000},
+    "straw": [{
+        "method": "incorporated",
+        "mass_kg": 5000,
+        "dry_matter_fraction": 0.85,      # Eq 5.3 tính theo khối lượng KHÔ
+        "days_before_cultivation": 10,    # <30 ngày -> CFOA 1,00; >=30 -> 0,19
+    }],
+    "fuel": [{"fuel_type": "diesel", "amount_litre": 25}],
 })
 
-result = calculate_carbon(crop, water_regime_scenario="awd")
+result = calculate_carbon(crop, scenario="awd")   # awd | continuous_flooding | as_recorded
 print(result.to_dict())
 ```
 
-`water_regime_scenario` nhận `awd`, `continuous_flooding`, hoặc `as_recorded`.
+## Ranh giới kiến trúc
+
+`carbon/` **chỉ** import stdlib + `pyyaml`. Không FastAPI, không pydantic, không Supabase.
+Khi nối database, viết lớp adapter riêng ánh xạ bảng Supabase → `CropActivityData`;
+**đừng import Supabase vào `carbon/`**.
+
+Hàm `assert_consistent_water_records()` dành cho lớp adapter đó: gộp nhiều bản ghi
+`irrigation_events` thành một chế độ nước cấp vụ, và **báo lỗi** nếu chúng mâu thuẫn.
 
 ## Quy tắc bắt buộc
 
-1. **Không hardcode hệ số phát thải** (RB-01). Mọi hệ số nằm ở `config/emission_factors.yaml`
-   kèm `unit`, `source`, `status`. `carbon/factors.py` là đường duy nhất engine lấy hệ số.
-2. **Không tự điền số chưa xác minh.** Hệ số chỉ chuyển sang `status: VERIFIED` khi đã đối
-   chiếu nguồn chính thức và ghi nguồn đó vào config.
-3. **Không fallback.** Thiếu hệ số → `MissingEmissionFactorError`. Thiếu sản lượng →
-   `co2e_per_kg = None` kèm cảnh báo, **không trả 0**.
-4. **Engine không phụ thuộc UI/database.** `carbon/` chỉ import stdlib + `pyyaml`.
-   Khi nối Supabase, viết lớp mapping riêng — đừng import Supabase vào `carbon/`.
-5. **Số sinh từ TEST FACTORS không được đem đi pitch.** Đó là số bịa để kiểm chứng phép tính.
+1. **Không hardcode hệ số.** Mọi tham số ở `config/emission_factors.yaml` kèm `unit`,
+   `source`, `status`. Có test tự động quét mã nguồn tìm hằng số phát thải
+   (`test_no_magic_numbers_in_engine_source`).
+2. **Không tự điền số chưa xác minh.** `status: VERIFIED` chỉ khi đã trích dẫn được số hiệu
+   bảng/phương trình trong tài liệu gốc, và ghi số hiệu đó vào `source`.
+3. **Không fallback.** Thiếu tham số → `MissingEmissionFactorError`. Thiếu biến phương pháp
+   luận → `MethodologyGapError`. Thiếu sản lượng → `co2e_per_kg = None`, **không trả 0**.
+4. **Không double count rơm rạ.** Rơm vùi vào SFo; rơm đốt là nguồn riêng; không bao giờ cả hai.
+5. **Không áp tỷ lệ giảm phẳng cho kịch bản AWD.** Đổi SFw và EF1FR rồi chạy lại công thức —
+   AWD giảm CH4 nhưng **tăng** N2O.
+6. **Số sinh từ TEST FACTORS không được đem đi pitch.**
+7. **Không gắn nhãn "MRV-compliant"** khi chưa lấy được QĐ 4801/QĐ-BNNMT.

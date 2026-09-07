@@ -41,6 +41,8 @@ Chi tiết: [`docs/architecture.md`](docs/architecture.md)
 │   ├── SRS.md                         # Software Requirements Specification
 │   ├── architecture.md                # kiến trúc + luồng MEASURE→UNDERSTAND→OPTIMIZE→ACT
 │   ├── mrv-mapping.md                 # map tính năng ↔ 6 bước MRV
+│   ├── CARBON_METHOD.md               # công thức từng nguồn + trạng thái xác minh
+│   ├── CARBON_METHOD_SOURCES.md       # nguồn từng hệ số (số hiệu bảng/phương trình)
 │   └── modules/
 │       ├── 01-mobile-app.md           # 1a — app ghi nhật ký (Người A)
 │       ├── 02-carbon-engine.md        # 1a — Carbon Engine (Người B)
@@ -54,6 +56,7 @@ Chi tiết: [`docs/architecture.md`](docs/architecture.md)
 │   ├── carbon/                        # Carbon Engine (hàm thuần, không phụ thuộc UI/DB)
 │   ├── config/emission_factors.yaml   # hệ số phát thải, có nguồn trích dẫn
 │   └── tests/                         # unit test + demo fixture
+├── supabase/migrations/               # migration schema (chưa chạy lên DB)
 ├── ml/                                # model CV bệnh lá lúa — Người B
 │   └── datasets/README.md             # nguồn dataset + license
 ├── web-dashboard/                     # dashboard 1c (có thể là mock) — Người A
@@ -131,9 +134,18 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
 
 ## Việc cần làm ngay (chặn tiến độ)
 
-- [ ] **OI-01 / OI-02 — chốt bộ hệ số phát thải** (hạn 15/09/2026): làm rõ mâu thuẫn giữa
-      ~1,04 kg CO2/kg và dải 2,29–3,72 kg CO2e/kg; lấy hệ số chính thức từ hướng dẫn MRV
-      (QĐ 4801/QĐ-BNNMT). **Đây là rủi ro số 1 — chặn cả lớp 1a.**
+- [ ] **OI-05 — xác minh khung GWP** (AR4/AR5/AR6) mà QĐ 4801 hoặc QĐ 2626 quy định.
+      **Đang chặn toàn bộ việc ra số CO2e.** Chênh AR4 vs AR6 tới ~19% cho CH4.
+- [ ] **OI-02 — lấy toàn văn + phụ lục QĐ 4801/QĐ-BNNMT.** Hiện engine dùng IPCC Tier 1
+      default; quy trình MRV yêu cầu hệ số đặc trưng quốc gia. **Chưa lấy được thì không
+      được nói "MRV-compliant".**
+- [ ] **OI-01 — làm rõ mâu thuẫn** ~1,04 kg CO2/kg vs dải 2,29–3,72 kg CO2e/kg (khác phạm vi
+      khí / ranh giới hệ thống). Đây là *emission intensity benchmark*, không phải emission
+      factor — đã tách khỏi khối `factors` trong config.
+- [ ] **OI-06 — hệ số nhiên liệu** diesel/xăng/LPG và hệ số lưới điện VN.
+- [ ] Chạy `supabase/migrations/20260908_carbon_methodology_alignment.sql` lên DB, rồi backfill
+      `pre_season_water_regime`, `dry_matter_fraction`, `days_before_cultivation` — ba trường
+      này **không suy được từ dữ liệu cũ, phải đi hỏi**.
 - [ ] Chốt hợp đồng API 1a giữa Người A và Người B trước khi code song song
 - [ ] Đối chiếu Definition of Done trong `docs/modules/` với file `AgriCarbon Sprint Tracker`
       và sửa các ID `T1-xx` / `T2-xx` cho khớp (hiện đang là ID tạm)
@@ -148,6 +160,7 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
 |---|---|
 | [`docs/PRD.md`](docs/PRD.md) | Bối cảnh, người dùng, định vị, mục tiêu từng lớp MVP, ngoài phạm vi, success metrics, rủi ro |
 | [`docs/SRS.md`](docs/SRS.md) | Functional/non-functional requirements, data model, API contract, ràng buộc |
-| [`docs/CARBON_METHOD.md`](docs/CARBON_METHOD.md) | Công thức từng nguồn phát thải + trạng thái xác minh (VERIFIED / PENDING / NOT IMPLEMENTED) |
+| [`docs/CARBON_METHOD.md`](docs/CARBON_METHOD.md) | Công thức từng nguồn phát thải + trạng thái xác minh (VERIFIED / PENDING_VERIFICATION / NOT_IMPLEMENTED) |
+| [`docs/CARBON_METHOD_SOURCES.md`](docs/CARBON_METHOD_SOURCES.md) | Nguồn của từng hệ số: tài liệu, số hiệu bảng/phương trình, trạng thái |
 | [`docs/architecture.md`](docs/architecture.md) | Kiến trúc thành phần, luồng dữ liệu, nguyên tắc thiết kế |
 | [`docs/mrv-mapping.md`](docs/mrv-mapping.md) | 6 bước MRV ↔ module nào xử lý, mức độ phủ, khoảng trống |
