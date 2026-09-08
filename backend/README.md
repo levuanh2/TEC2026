@@ -5,22 +5,24 @@
 - **Đặc tả:** [`../docs/modules/02-carbon-engine.md`](../docs/modules/02-carbon-engine.md)
 - **Phương pháp luận:** [`../docs/CARBON_METHOD.md`](../docs/CARBON_METHOD.md)
 - **Nguồn từng hệ số:** [`../docs/CARBON_METHOD_SOURCES.md`](../docs/CARBON_METHOD_SOURCES.md)
+- **Kiến trúc backend đầy đủ, auth/RLS, hosted smoke test:** [`../docs/BACKEND_1A.md`](../docs/BACKEND_1A.md)
 
 ## Trạng thái
 
 | Phần | Trạng thái |
 |---|---|
-| `carbon/` — Carbon Engine | ✅ chạy được, 90 test pass (57 engine + 33 integration/API) |
+| `carbon/` — Carbon Engine | ✅ chạy được, **101 test pass** (57 engine + 44 integration/API/auth) |
 | Phương pháp luận CH4 / N2O / đốt rơm | ✅ VERIFIED theo IPCC, trích dẫn số hiệu bảng |
 | **GWP** | ⛔ **PENDING_VERIFICATION — đang chặn toàn bộ việc ra số CO2e** |
 | Hệ số nhiên liệu | ⏳ PENDING_VERIFICATION |
 | QĐ 4801/QĐ-BNNMT (Tier 1) | ❌ chưa lấy được toàn văn → **không được nói "MRV-compliant"** |
-| API `/v1/carbon/*` | ✅ POST calculate + GET result, chạy trên repository in-memory |
-| Supabase repository | ⚠️ code xong, **CHƯA kết nối DB thật lần nào** |
-| Migration | baseline + 3 migration ở `../supabase/migrations/`; đã verified trên Supabase local, **chưa chạy lên hosted DB** |
+| API `/v1/carbon/*` | ✅ POST calculate + GET result, **bắt buộc `Authorization: Bearer <jwt>`** |
+| Auth/RLS | ✅ `CropAccessChecker` replay JWT người gọi qua publishable key — service role không tự quyết định ai thấy gì. **Đã verify thật** với Supabase Auth user thật trên hosted (không phải JWT giả) |
+| Supabase repository | ✅ **đã kết nối và verify thật trên hosted** (`awazhdqzkktekbwaqiic`) — ghi/đọc/dọn sạch, xem §12 `BACKEND_1A.md` |
+| Migration | 6 file ở `../supabase/migrations/`, **5/5 đã đẩy lên hosted** (`npx supabase migration list` khớp local=remote) |
 
 **Chạy với config thật sẽ dừng ở `MissingEmissionFactorError: gwp.ch4`.** Đó là hành vi
-đúng, không phải bug.
+đúng, không phải bug — đã xác nhận cả qua CLI và qua HTTP thật (`POST` trả 422).
 
 ## Cấu trúc
 
@@ -37,15 +39,16 @@ backend/
 │   ├── config.py                # đọc .env
 │   ├── mapping.py               # THUẦN: hàng DB <-> CropActivityData <-> hàng kết quả
 │   ├── repository.py            # Protocol + InMemoryCarbonRepository
-│   └── supabase_repo.py         # repository thật (service role)
+│   ├── supabase_repo.py         # repository thật (service role — chỉ SAU khi qua auth.py)
+│   └── auth.py                  # CropAccessChecker — RLS thật qua JWT người gọi, publishable key
 ├── service.py                   # Repository -> Engine -> Repository
-├── api.py                       # routes /v1/carbon/*
+├── api.py                       # routes /v1/carbon/* + auth + logging
 ├── main.py                      # FastAPI app + /health
 ├── config/
 │   └── emission_factors.yaml    # hệ số + nguồn + status (RB-01)
 └── tests/
     ├── test_carbon_engine.py        # 57 test engine
-    ├── test_integration_supabase.py # 33 test adapter + persistence + API
+    ├── test_integration_supabase.py # 44 test adapter + persistence + API + auth
     └── fixtures/
         ├── demo_crop.json           # DEMO — dữ liệu bịa
         ├── supabase_rows.py         # DEMO — hàng mô phỏng đúng schema
@@ -78,12 +81,15 @@ route `/v1/carbon/*` trả **503** kèm hướng dẫn — cố ý, để không
 
 | Route | Việc |
 |---|---|
-| `GET /health` | trạng thái thật: `ef_config_version`, `carbon_production_ready`, `mrv_compliant` |
-| `POST /v1/carbon/calculate` | `{crop_season_id, water_regime_scenario}` → tính + lưu cho toàn vụ |
-| `GET /v1/crop-seasons/{crop_season_id}/carbon?scenario=` | bản tính **thành công** gần nhất của vụ |
+| `GET /health` | trạng thái thật: `ef_config_version`, `carbon_production_ready`, `mrv_compliant`, `auth_configured` |
+| `POST /v1/carbon/calculate` | header `Authorization: Bearer <jwt>` bắt buộc. `{crop_season_id, water_regime_scenario}` → tính + lưu cho toàn vụ |
+| `GET /v1/crop-seasons/{crop_season_id}/carbon?scenario=` | header `Authorization: Bearer <jwt>` bắt buộc. Bản tính **thành công** gần nhất của vụ |
 
-Mã lỗi: 404 không có vụ · 409 dữ liệu mâu thuẫn / phạm vi không rõ · 422 thiếu dữ liệu
-hoặc thiếu hệ số (gồm GWP) · 503 chưa import bộ hệ số vào Supabase.
+Mã lỗi: 401 thiếu JWT · 404 không có vụ **hoặc RLS từ chối** (cố ý gộp chung, không lộ
+việc vụ đó tồn tại) · 409 dữ liệu mâu thuẫn / phạm vi không rõ · 422 thiếu dữ liệu hoặc
+thiếu hệ số (gồm GWP) · 503 chưa import bộ hệ số vào Supabase · 500 lỗi không xác định
+(không lộ chi tiết, chỉ trả `request_id`, chi tiết nằm trong log server). Xem đầy đủ ở
+[`../docs/BACKEND_1A.md`](../docs/BACKEND_1A.md) §9.
 
 ## Kiểm tra schema Supabase thật
 
@@ -165,3 +171,6 @@ Hàm `assert_consistent_water_records()` dành cho lớp adapter đó: gộp nhi
 9. **YAML là nguồn sự thật cho GIÁ TRỊ hệ số.** Bảng `emission_factor_sets`/`emission_factors`
    là bản sao có kiểm soát để bản tính liên kết được `factor_set_id`. Không có bộ hệ số
    published trùng `version_code` → backend từ chối ghi, **không tự tạo bộ rỗng**.
+10. **Service role không tự quyết định ai thấy gì.** Mọi request qua `/v1/carbon/*` phải
+    qua `CropAccessChecker` (JWT người gọi + publishable key, RLS thật quyết định) trước
+    khi service role được chạm vào dữ liệu. Không dùng UI hiding làm authorization.

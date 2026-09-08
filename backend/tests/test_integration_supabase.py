@@ -19,13 +19,14 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from carbon import ParameterSet  # noqa: E402
+from carbon import ParameterSet, calculate_carbon  # noqa: E402
 from carbon.errors import (  # noqa: E402
     ConflictingWaterRegimeError,
     MethodologyGapError,
     MissingActivityDataError,
     MissingEmissionFactorError,
 )
+from infrastructure.auth import CropAccessError  # noqa: E402
 from infrastructure.mapping import RawCropBundle, map_crop_activity_data  # noqa: E402
 from infrastructure.repository import (  # noqa: E402
     FactorSetNotFoundError,
@@ -81,8 +82,30 @@ def service(repo, params) -> CarbonService:
     return CarbonService(repo, params)
 
 
+class FakeCropAccessChecker:
+    """Test double cho CropAccessChecker — không gọi Supabase thật.
+
+    Mặc định cho qua mọi crop_season_id (đủ cho các test không nhắm vào auth).
+    `deny_ids` mô phỏng RLS chặn — dùng để test cách ly phạm vi (farmer scope isolation).
+    """
+
+    def __init__(self, deny_ids: set[str] | None = None) -> None:
+        self.deny_ids = deny_ids or set()
+        self.calls: list[tuple[str, str]] = []
+
+    def assert_can_access(self, token: str, crop_season_id: str) -> None:
+        self.calls.append((token, crop_season_id))
+        if crop_season_id in self.deny_ids:
+            raise CropAccessError(f"test double denied: {crop_season_id}")
+
+
 @pytest.fixture
-def client(service) -> TestClient:
+def access_checker() -> FakeCropAccessChecker:
+    return FakeCropAccessChecker()
+
+
+@pytest.fixture
+def client(service, access_checker) -> TestClient:
     import api
 
     from fastapi import FastAPI
@@ -90,7 +113,9 @@ def client(service) -> TestClient:
     app = FastAPI()
     app.include_router(api.router)
     app.dependency_overrides[api._service] = lambda: service
-    return TestClient(app)
+    app.dependency_overrides[api._access_checker] = lambda: access_checker
+    # Mọi request mặc định mang JWT giả — test nào cần test thiếu header thì tự xoá.
+    return TestClient(app, headers={"Authorization": "Bearer test-fake-jwt"})
 
 
 # ===========================================================================
@@ -438,8 +463,9 @@ def test_api_missing_gwp_returns_422(bundle, repo):
     app = FastAPI()
     app.include_router(api.router)
     app.dependency_overrides[api._service] = lambda: CarbonService(repo, production)
+    app.dependency_overrides[api._access_checker] = lambda: FakeCropAccessChecker()
 
-    response = TestClient(app).post(
+    response = TestClient(app, headers={"Authorization": "Bearer test-fake-jwt"}).post(
         "/v1/carbon/calculate",
         json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
     )
@@ -565,3 +591,158 @@ def test_missing_plot_area_fails(bundle):
     bundle.plot["area_ha"] = None
     with pytest.raises(MissingActivityDataError):
         map_crop_activity_data(bundle)
+
+
+# ===========================================================================
+# Không nhân chéo khi gộp nhiều nguồn cùng lúc (SQL JOIN 1-n giả định)
+# ===========================================================================
+# Kiến trúc hiện tại (đọc từng bảng theo activity_type rồi ghép trong Python — không
+# join SQL) về cấu trúc không thể mắc lỗi này. Test dưới đây vẫn giữ như một guard
+# hồi quy: nếu sau này ai đổi sang một câu JOIN lớn, test phải đỏ ngay.
+
+
+def _new_activity(activity_id: str, activity_type: str, detail: dict) -> dict:
+    return {
+        "id": activity_id,
+        "production_batch_id": rows.BATCH_ID,
+        "activity_type": activity_type,
+        "occurred_at": "2026-02-01T00:00:00+07:00",
+        "recorded_at": "2026-02-01T00:00:00+07:00",
+        "source": "mobile_offline",
+        "deleted_at": None,
+        "detail": detail,
+    }
+
+
+def _add_fertilizer(bundle, activity_id: str, amount_kg: float, n_pct: float):
+    bundle.activities.append(_new_activity(activity_id, "fertilizer", {
+        "activity_id": activity_id, "fertilizer_name": "Urea",
+        "amount_kg": amount_kg, "nitrogen_percent": n_pct,
+    }))
+
+
+def _add_irrigation(bundle, activity_id: str, water_volume_m3: float):
+    bundle.activities.append(_new_activity(activity_id, "irrigation", {
+        "activity_id": activity_id, "method": "awd", "water_volume_m3": water_volume_m3,
+    }))
+
+
+def _add_harvest(bundle, activity_id: str, yield_kg: float):
+    bundle.activities.append(_new_activity(activity_id, "harvest", {
+        "activity_id": activity_id, "yield_kg": yield_kg,
+    }))
+
+
+def test_three_fertilizer_events_sum_not_multiply(bundle):
+    """3 lần bón: 120 + 80 + 40 kg, cùng 46% N -> tổng N = (120+80+40)*0.46, không phải tích."""
+    bundle.activities = [a for a in bundle.activities if a["activity_type"] != "fertilizer"]
+    _add_fertilizer(bundle, "f1", 120, 46)
+    _add_fertilizer(bundle, "f2", 80, 46)
+    _add_fertilizer(bundle, "f3", 40, 46)
+
+    data = map_crop_activity_data(bundle)
+    assert len(data.fertilizer) == 3
+    assert data.total_nitrogen_kg == pytest.approx((120 + 80 + 40) * 0.46)
+
+
+def test_no_cross_multiplication_across_three_sources(bundle, params):
+    """3 fertilizer + 2 irrigation + 2 harvest cùng lúc -> mỗi nguồn gộp ĐỘC LẬP.
+
+    Nếu code lỡ join 3 nguồn này thành một bảng phẳng rồi mới tính tổng, 3 dòng phân
+    bón sẽ nhân với 2 dòng thu hoạch thành 6 — sai lệch tổng N và sai lệch yield.
+    """
+    bundle.activities = [a for a in bundle.activities if a["activity_type"] not in ("fertilizer", "harvest")]
+    _add_fertilizer(bundle, "f1", 100, 46)
+    _add_fertilizer(bundle, "f2", 100, 46)
+    _add_fertilizer(bundle, "f3", 100, 46)
+    _add_irrigation(bundle, "i2", 1000)  # bản ghi tưới thứ 2, cùng chế độ nước
+    _add_harvest(bundle, "h1", 2000)
+    _add_harvest(bundle, "h2", 3000)
+
+    data = map_crop_activity_data(bundle)
+    assert data.total_nitrogen_kg == pytest.approx(300 * 0.46)  # KHÔNG phải x2 (harvest) hay x3 (irrigation)
+    assert data.yield_kg == pytest.approx(5000)  # KHÔNG phải x3 (fertilizer)
+    assert len(data.irrigation) == 2
+
+    result = calculate_carbon(data, "awd", params)
+    assert result.co2e_per_kg == pytest.approx(result.total_co2e_kg / 5000)
+
+
+# ===========================================================================
+# Quyền truy cập theo JWT — không dùng service role để tự quyết định (Phase 18)
+# ===========================================================================
+
+
+def test_missing_authorization_header_returns_401(service, access_checker):
+    import api
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[api._service] = lambda: service
+    app.dependency_overrides[api._access_checker] = lambda: access_checker
+    bare_client = TestClient(app)  # KHÔNG có header Authorization mặc định
+
+    response = bare_client.post(
+        "/v1/carbon/calculate",
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "missing_authorization"
+    assert access_checker.calls == []  # chặn trước khi chạm tới RLS check, không nói gì thêm
+
+
+def test_missing_authorization_header_on_get_returns_401(service, access_checker):
+    import api
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[api._service] = lambda: service
+    app.dependency_overrides[api._access_checker] = lambda: access_checker
+    bare_client = TestClient(app)
+
+    response = bare_client.get(f"/v1/crop-seasons/{rows.CROP_ID}/carbon")
+    assert response.status_code == 401
+
+
+def test_farmer_scope_isolation_denied_by_rls_returns_404(client, access_checker):
+    """Mô phỏng RLS chặn: nông dân A gọi API xin carbon của vụ thuộc nông dân B.
+
+    CropAccessChecker (đại diện cho RLS thật) từ chối -> API phải trả 404, KHÔNG phải
+    403 — tránh lộ ra rằng crop_season_id đó tồn tại nhưng không phải của người gọi.
+    """
+    access_checker.deny_ids.add(rows.CROP_ID)
+
+    response = client.post(
+        "/v1/carbon/calculate",
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "crop_not_found"
+
+
+def test_farmer_scope_isolation_applies_to_get_too(client, access_checker):
+    access_checker.deny_ids.add(rows.CROP_ID)
+
+    response = client.get(f"/v1/crop-seasons/{rows.CROP_ID}/carbon")
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "crop_not_found"
+
+
+def test_access_checker_called_with_the_actual_crop_season_id(client, access_checker):
+    client.post(
+        "/v1/carbon/calculate",
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
+    )
+    assert access_checker.calls == [("test-fake-jwt", rows.CROP_ID)]
+
+
+def test_access_check_runs_before_touching_service_role_repository(client, access_checker, repo):
+    """Quyền bị RLS từ chối -> service role KHÔNG được chạm vào (không đọc, không ghi)."""
+    access_checker.deny_ids.add(rows.CROP_ID)
+    client.post(
+        "/v1/carbon/calculate",
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
+    )
+    assert repo.calculations == []

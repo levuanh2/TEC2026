@@ -34,6 +34,9 @@ def _load_dotenv(path: Path) -> None:
 class Settings:
     supabase_url: str | None
     supabase_service_role_key: str | None
+    # Publishable (anon-equivalent) key. KHÔNG bỏ qua RLS — dùng để replay JWT của người
+    # gọi khi kiểm tra quyền đọc/ghi, để PostgREST áp đúng RLS như phía Flutter/web sẽ thấy.
+    supabase_publishable_key: str | None
     ef_config_path: Path
     # Bộ hệ số phải đã được import vào Supabase với version_code trùng YAML.
     require_factor_set_in_db: bool
@@ -41,6 +44,10 @@ class Settings:
     @property
     def supabase_configured(self) -> bool:
         return bool(self.supabase_url and self.supabase_service_role_key)
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self.supabase_url and self.supabase_publishable_key)
 
     def require_supabase(self) -> tuple[str, str]:
         if not self.supabase_configured:
@@ -50,12 +57,21 @@ class Settings:
             )
         return self.supabase_url, self.supabase_service_role_key  # type: ignore[return-value]
 
+    def require_publishable(self) -> tuple[str, str]:
+        if not self.auth_configured:
+            raise ConfigError(
+                "Thiếu SUPABASE_URL và/hoặc SUPABASE_PUBLISHABLE_KEY — cần để kiểm tra "
+                "quyền đọc/ghi theo JWT người gọi (RLS)."
+            )
+        return self.supabase_url, self.supabase_publishable_key  # type: ignore[return-value]
+
 
 def load_settings(dotenv_path: Path | None = None) -> Settings:
     _load_dotenv(dotenv_path or (BACKEND_DIR / ".env"))
     return Settings(
         supabase_url=os.environ.get("SUPABASE_URL") or None,
         supabase_service_role_key=os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or None,
+        supabase_publishable_key=os.environ.get("SUPABASE_PUBLISHABLE_KEY") or None,
         ef_config_path=Path(os.environ.get("AGRICARBON_EF_CONFIG") or DEFAULT_EF_CONFIG),
         require_factor_set_in_db=os.environ.get("AGRICARBON_REQUIRE_FACTOR_SET_IN_DB", "1")
         != "0",

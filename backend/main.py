@@ -4,20 +4,27 @@ Lớp 1a (Walking Skeleton). Người B phụ trách.
 Đặc tả: docs/modules/02-carbon-engine.md · docs/SRS.md §4
 
 Luồng:
-    App -> API -> SupabaseCarbonRepository -> CropActivityData -> Carbon Engine
+    App -> API -> [kiểm quyền qua RLS bằng JWT người gọi] -> SupabaseCarbonRepository
+                                                                  -> CropActivityData
+                                                                  -> Carbon Engine
                                                                        |
     App <- API <----------- carbon_calculations / carbon_breakdowns <---+
 """
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 
 import api
 from carbon import ENGINE_VERSION, ParameterSet
+from infrastructure.auth import SupabaseCropAccessChecker
 from infrastructure.config import load_settings
 from infrastructure.supabase_repo import SupabaseCarbonRepository
 from service import CarbonService
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 settings = load_settings()
 
@@ -34,12 +41,19 @@ if settings.supabase_configured:
     _service_singleton = _build_service()
     app.dependency_overrides[api._service] = lambda: _service_singleton
 
+if settings.auth_configured:
+    _access_checker_singleton = SupabaseCropAccessChecker(settings)
+    app.dependency_overrides[api._access_checker] = lambda: _access_checker_singleton
+
 app.include_router(api.router)
 
 
 @app.get("/health")
 def health() -> dict:
-    """Nói thật trạng thái. `carbon_production_ready` chỉ true khi GWP đã xác minh."""
+    """Nói thật trạng thái. Lightweight — chỉ đọc file YAML, KHÔNG query Supabase.
+
+    `carbon_production_ready` chỉ true khi GWP đã xác minh.
+    """
     parameters = ParameterSet.load(settings.ef_config_path)
     try:
         parameters.gwp("ch4")
@@ -54,6 +68,7 @@ def health() -> dict:
         "ef_config_version": parameters.version,
         "methodology": parameters.methodology.to_dict(),
         "supabase_configured": settings.supabase_configured,
+        "auth_configured": settings.auth_configured,
         "carbon_production_ready": gwp_ready,
         "mrv_compliant": False,
         "note": (
