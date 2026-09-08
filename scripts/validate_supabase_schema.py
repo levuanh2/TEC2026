@@ -18,6 +18,12 @@ import os
 import sys
 from pathlib import Path
 
+# PowerShell on Windows can default stdout to cp1252, while this validator
+# deliberately reports Vietnamese labels. Keep the read-only validation usable
+# in local CI and developer shells.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
@@ -41,7 +47,7 @@ REQUIRED_TABLES = [
     "carbon_breakdowns",
 ]
 
-# Cột do migration 20260908 + 20260908b thêm — thiếu là backend không chạy đúng.
+# Cột do migration 20260908000000 đến 20260908000002 thêm — thiếu là backend không chạy đúng.
 REQUIRED_COLUMNS = {
     "crop_seasons": [
         "plot_id",
@@ -164,16 +170,29 @@ RLS_REQUIRED_TABLES = [
 ]
 
 REQUIRED_POLICIES = {
-    "carbon_calculations": ["carbon_calculations_select"],
-    "carbon_breakdowns": ["carbon_breakdowns_select"],
+    # Chính sách batch-scoped cũ VẪN giữ (đọc được dữ liệu cũ); crop-season-scoped mới
+    # (migration 20260908000002) là đường đọc chính cho bản tính không gắn batch.
+    "carbon_calculations": ["carbon_calculations_select", "carbon_calculations_select_crop_season"],
+    "carbon_breakdowns": ["carbon_breakdowns_select", "carbon_breakdowns_select_crop_season"],
     "emission_factor_sets": ["ef_sets_select"],
     "emission_factors": ["ef_factors_select"],
 }
 
-REQUIRED_INDEXES = ["carbon_calculations_crop_season_idx"]
+REQUIRED_INDEXES = [
+    "carbon_calculations_crop_season_idx",
+    # Partial unique index cho bản tính whole-season (production_batch_id IS NULL).
+    "carbon_calculations_season_input_uniq",
+]
+
+# Trigger giữ bất biến "batch link (nếu có) phải cùng crop_season với bản tính".
+REQUIRED_TRIGGERS = {"carbon_calculations": ["carbon_calculations_batch_scope_guard"]}
 
 # Hàm phân quyền mà policy carbon phụ thuộc — mất là RLS gãy âm thầm.
-REQUIRED_FUNCTIONS = [("private", "user_can_read_batch"), ("private", "user_can_write_batch")]
+REQUIRED_FUNCTIONS = [
+    ("private", "user_can_read_batch"),
+    ("private", "user_can_write_batch"),
+    ("private", "user_can_read_crop"),
+]
 
 
 class Report:
@@ -284,6 +303,18 @@ def main() -> int:
         for schema, name in REQUIRED_FUNCTIONS:
             report.check((schema, name) in functions, f"hàm {schema}.{name}()")
 
+        print("\n== TRIGGER ==")
+        cur.execute(
+            "select event_object_table, trigger_name from information_schema.triggers "
+            "where trigger_schema='public'"
+        )
+        triggers: dict[str, set[str]] = {}
+        for table, name in cur.fetchall():
+            triggers.setdefault(table, set()).add(name)
+        for table, required in REQUIRED_TRIGGERS.items():
+            missing = [t for t in required if t not in triggers.get(table, set())]
+            report.check(not missing, f"trigger của {table}", f"thiếu: {', '.join(missing)}")
+
         print("\n== VIEW ==")
         cur.execute(
             "select c.relname, coalesce(array_to_string(c.reloptions, ','), '') "
@@ -313,16 +344,17 @@ def main() -> int:
 
         print("\n== PHẠM VI TÍNH TOÁN ==")
         cur.execute(
-            "select count(*) from (select crop_season_id from public.production_batches "
-            "where deleted_at is null group by crop_season_id having count(*) > 1) x"
+            "select count(*) from information_schema.columns "
+            "where table_schema='public' and table_name='carbon_calculations' "
+            "and column_name='crop_season_id' and is_nullable='NO'"
         )
-        multi = cur.fetchone()[0]
-        if multi:
-            report.warn(
-                f"{multi} crop_season có nhiều production_batch. Backend sẽ từ chối tính "
-                f"(CalculationScopeError) vì CH4 tính trên diện tích thửa × ngày canh tác của "
-                f"cả vụ — xem migration 20260908b."
-            )
+        report.check(cur.fetchone()[0] == 1, "carbon_calculations.crop_season_id NOT NULL")
+        cur.execute(
+            "select count(*) from information_schema.columns "
+            "where table_schema='public' and table_name='carbon_calculations' "
+            "and column_name='production_batch_id' and is_nullable='YES'"
+        )
+        report.check(cur.fetchone()[0] == 1, "carbon_calculations.production_batch_id nullable")
 
     print("\n" + "=" * 70)
     if report.failures:

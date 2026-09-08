@@ -24,11 +24,7 @@ from carbon import (
     StrawEvent,
     assert_consistent_water_records,
 )
-from carbon.errors import CarbonEngineError, MethodologyGapError, MissingActivityDataError
-
-
-class CalculationScopeError(CarbonEngineError):
-    """Phạm vi tính toán không xác định được — xem migration 20260908b."""
+from carbon.errors import MethodologyGapError, MissingActivityDataError
 
 
 # --- Chế độ nước ------------------------------------------------------------
@@ -81,34 +77,6 @@ class RawCropBundle:
             for a in self.activities
             if a.get("activity_type") == activity_type and a.get("deleted_at") is None
         ]
-
-
-# --- Phạm vi tính toán ------------------------------------------------------
-
-
-def resolve_calculation_batch(bundle: RawCropBundle) -> dict[str, Any]:
-    """Chọn production_batch làm khoá phạm vi cho carbon_calculations.
-
-    CH4 tính trên diện tích thửa × số ngày canh tác của cả VỤ. Nếu một vụ có nhiều lô
-    thu hoạch, tính riêng từng lô sẽ đếm trọn diện tích nhiều lần -> double counting.
-    Engine không tự chia diện tích. Xem supabase/migrations/20260908b_carbon_calculation_scope.sql.
-    """
-    active = [b for b in bundle.production_batches if b.get("deleted_at") is None]
-    crop_id = bundle.crop_season.get("id")
-
-    if not active:
-        raise CalculationScopeError(
-            f"Vụ '{crop_id}' chưa có production_batch nào. carbon_calculations.production_batch_id "
-            f"là NOT NULL nên chưa ghi được kết quả."
-        )
-    if len(active) > 1:
-        codes = ", ".join(sorted(str(b.get("batch_code")) for b in active))
-        raise CalculationScopeError(
-            f"Vụ '{crop_id}' có {len(active)} production_batch ({codes}). CH4 tính trên diện "
-            f"tích thửa × số ngày canh tác của CẢ VỤ; tính riêng từng lô sẽ đếm trọn diện tích "
-            f"nhiều lần. Backend không tự chia diện tích — xem migration 20260908b."
-        )
-    return active[0]
 
 
 # --- Chế độ nước ------------------------------------------------------------
@@ -176,7 +144,7 @@ def map_crop_activity_data(bundle: RawCropBundle) -> CropActivityData:
         )
 
     return CropActivityData(
-        crop_id=crop_id,
+        crop_season_id=crop_id,
         area_ha=float(area_ha),
         water_regime=resolve_water_regime(bundle),
         # KHÔNG default: thiếu thì engine raise MethodologyGapError về SFp.
@@ -326,7 +294,6 @@ def _map_pesticide(bundle: RawCropBundle) -> list[PesticideApplication]:
 def calculation_row(
     result,
     *,
-    production_batch_id: str,
     crop_season_id: str,
     factor_set_id: str,
     area_ha: float,
@@ -339,7 +306,6 @@ def calculation_row(
     `mrv_compliant` luôn false cho tới khi có hệ số từ QĐ 4801/QĐ-BNNMT.
     """
     return {
-        "production_batch_id": production_batch_id,
         "crop_season_id": crop_season_id,
         "scenario": SCENARIO_TO_DB[result.scenario],
         "factor_set_id": factor_set_id,

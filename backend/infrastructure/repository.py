@@ -34,7 +34,7 @@ class CropNotFoundError(CarbonEngineError):
 class CarbonRepository(Protocol):
     """Hợp đồng tối thiểu cho lớp 1a."""
 
-    def get_crop_bundle(self, crop_id: str) -> RawCropBundle: ...
+    def get_crop_bundle(self, crop_season_id: str) -> RawCropBundle: ...
 
     def resolve_factor_set_id(self, version_code: str) -> str: ...
 
@@ -45,7 +45,7 @@ class CarbonRepository(Protocol):
     ) -> str: ...
 
     def latest_calculation(
-        self, crop_id: str, scenario: str | None = None
+        self, crop_season_id: str, scenario: str | None = None
     ) -> dict[str, Any] | None: ...
 
 
@@ -64,10 +64,10 @@ class InMemoryCarbonRepository:
     breakdowns: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     _seq: int = 0
 
-    def get_crop_bundle(self, crop_id: str) -> RawCropBundle:
-        bundle = self.bundles.get(crop_id)
+    def get_crop_bundle(self, crop_season_id: str) -> RawCropBundle:
+        bundle = self.bundles.get(crop_season_id)
         if bundle is None:
-            raise CropNotFoundError(f"Không tìm thấy vụ canh tác '{crop_id}'.")
+            raise CropNotFoundError(f"Không tìm thấy vụ canh tác '{crop_season_id}'.")
         return bundle
 
     def resolve_factor_set_id(self, version_code: str) -> str:
@@ -96,13 +96,13 @@ class InMemoryCarbonRepository:
         return calc_id
 
     def latest_calculation(
-        self, crop_id: str, scenario: str | None = None
+        self, crop_season_id: str, scenario: str | None = None
     ) -> dict[str, Any] | None:
         db_scenario = SCENARIO_TO_DB.get(scenario, scenario) if scenario else None
         rows = [
             r
             for r in self.calculations
-            if r.get("crop_season_id") == crop_id
+            if r.get("crop_season_id") == crop_season_id
             and r.get("status") == "succeeded"  # không trả bản tính thất bại
             and (db_scenario is None or r.get("scenario") == db_scenario)
         ]

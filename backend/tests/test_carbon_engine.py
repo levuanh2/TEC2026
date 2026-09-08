@@ -322,7 +322,7 @@ def test_straw_burned_is_separate_source_not_in_sfo(demo, params):
 def test_no_double_counting_burned_straw(demo, params):
     """Cùng một khối rơm không bao giờ vừa vào SFo vừa vào nguồn đốt."""
     demo.straw = [StrawEvent(method="burned", mass_kg=5000, dry_matter_fraction=0.85)]
-    amendments, burned = classify_straw(demo.straw, demo.crop_id, demo.area_ha)
+    amendments, burned = classify_straw(demo.straw, demo.crop_season_id, demo.area_ha)
 
     assert amendments == []
     assert len(burned) == 1

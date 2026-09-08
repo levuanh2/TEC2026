@@ -53,7 +53,7 @@ Module liên quan: [`06-web-dashboard`](modules/06-web-dashboard.md), [`07-mrv-e
 
 | ID | Yêu cầu | Tiêu chí chấp nhận |
 |---|---|---|
-| **FR-1c-01** | Hệ thống PHẢI cho duyệt dữ liệu theo cấp bậc **Farm → Plot → Crop → Batch → Activity → Carbon**. | Từ 1 Farm bấm xuống được tới 1 bản ghi Activity và số Carbon tương ứng. |
+| **FR-1c-01** | Hệ thống PHẢI cho duyệt dữ liệu theo cấp bậc **Farm → Plot → Crop Season → {Activity, Harvest Event, Batch, Carbon Calculation}**. Carbon Calculation thuộc Crop Season, không thuộc Batch (§3 — Batch chỉ là traceability tuỳ chọn). | Từ 1 Farm bấm xuống được tới 1 bản ghi Activity và số Carbon của Crop Season chứa nó. |
 | **FR-1c-02** | Hệ thống PHẢI tổng hợp dữ liệu nhiều hộ trong 1 HTX vào một màn hình. | Hiện được tổng CO2e và CO2e/kg trung bình cấp HTX từ ≥ 3 hộ. |
 | **FR-1c-03** | Hệ thống PHẢI phân quyền 3 vai trò: **Nông dân** (chỉ nhập liệu, chỉ thấy dữ liệu của mình), **Quản lý HTX** (xem tổng hợp cấp HTX), **Doanh nghiệp / Cơ quan quản lý** (xem toàn vùng). | Đăng nhập vai Nông dân → không truy cập được dữ liệu hộ khác, kể cả khi gọi thẳng API bằng id của hộ đó. |
 | **FR-1c-04** | Hệ thống PHẢI ghi nhận ai tạo/sửa bản ghi và thời điểm. | Mỗi bản ghi có `created_by`, `created_at`, `updated_at`. |
@@ -85,10 +85,11 @@ Khung phân cấp theo đúng mục 8 tài liệu gốc:
 ```text
 Farm  (nông trại / hộ)
  └── Plot  (thửa ruộng)
-      └── Crop  (vụ canh tác trên thửa đó)
-           └── Batch  (lô thu hoạch)
-                └── Activity  (hoạt động canh tác)
-                     └── Carbon  (kết quả tính phát thải)
+      └── Crop Season  (vụ canh tác trên thửa đó)
+           ├── Activities  (dữ liệu canh tác của vụ; có thể được ghi qua batch)
+           ├── Harvest Events  (tổng yield của vụ)
+           ├── Production Batches  (traceability/thu hoạch)
+           └── Carbon Calculations  (tổng phát thải canh tác của vụ)
 ```
 
 ### 3.1. Thực thể
@@ -97,10 +98,13 @@ Farm  (nông trại / hộ)
 |---|---|---|
 | **Farm** | Nông hộ hoặc trang trại, thuộc 1 HTX | `id`, `name`, `owner_user_id`, `cooperative_id`, `commune`, `district`, `province` |
 | **Plot** | Thửa ruộng cụ thể | `id`, `farm_id`, `code`, `area_ha`, `soil_type` (tùy chọn), `geo` (tùy chọn, để dành Farm Map giai đoạn 2) |
-| **Crop** | Một vụ canh tác trên một thửa | `id`, `plot_id`, `season` (Đông Xuân / Hè Thu / Thu Đông), `variety` (giống), `sowing_date`, `harvest_date`, `yield_kg` |
-| **Batch** | Lô thu hoạch (mẫu số cho chỉ số per-kg và nền cho traceability giai đoạn 4) | `id`, `crop_id`, `batch_code`, `quantity_kg`, `harvest_date` |
+| **Crop Season** | Một vụ canh tác trên một thửa; **scope tự nhiên của phát thải canh tác** | `id`, `plot_id`, `season`, `variety`, `sowing_date`, `harvest_date`, `cultivation_days`, `water_regime` |
+| **Batch** | Lô thu hoạch, chỉ để truy xuất nguồn gốc | `id`, `crop_season_id`, `batch_code`, `quantity_kg`, `harvest_date` |
 | **Activity** | Một hoạt động canh tác đã thực hiện | xem §3.2 |
-| **Carbon** | Kết quả tính cho 1 Crop/Batch | `id`, `crop_id`, `batch_id`, `co2e_total_kg`, `co2e_per_kg`, `breakdown` (theo nguồn phát thải), `water_regime_scenario`, `ef_config_version`, `calculated_at` |
+| **Carbon Calculation** | Kết quả tính cho **1 Crop Season**, không phải mỗi batch | `id`, `crop_season_id` (bắt buộc), `production_batch_id` (nullable traceability), `co2e_total_kg`, `season_yield_kg`, `co2e_per_kg`, `breakdown`, `water_regime_scenario`, `ef_config_version`, `calculated_at` |
+
+`CO2e/kg = total cultivation CO2e / tổng yield của các harvest event hợp lệ trong Crop Season`.
+Repository đọc event theo từng bảng rồi cộng đúng một lần, không cộng qua SQL JOIN nhiều-n. Batch-specific carbon là capability tương lai: chỉ được thêm khi có methodology allocation được phê duyệt; MVP không chia total/yield theo `quantity_kg` của batch.
 
 ### 3.2. Activity — chi tiết theo khung "1 phải 5 giảm"
 
@@ -177,7 +181,7 @@ Request:
 
 ```json
 {
-  "crop_id": "crop-001",
+  "crop_season_id": "crop-001",
   "water_regime_scenario": "awd"
 }
 ```
@@ -189,7 +193,7 @@ Response:
 
 ```json
 {
-  "crop_id": "crop-001",
+  "crop_season_id": "crop-001",
   "water_regime_scenario": "awd",
   "co2e_total_kg": 4820.5,
   "yield_kg": 3100.0,
@@ -214,7 +218,7 @@ Response:
 | Hệ số cần dùng đang `null` trong config | HTTP 422, thông báo rõ hệ số nào thiếu. **Không tự đặt mặc định.** |
 | Nhiều bản ghi `water` mâu thuẫn `regime` | HTTP 422, liệt kê các bản ghi mâu thuẫn. |
 
-### 4.3. `GET /v1/crops/{crop_id}/carbon` — lấy kết quả đã tính
+### 4.3. `GET /v1/crop-seasons/{crop_season_id}/carbon` — lấy kết quả đã tính
 
 Trả về bản ghi `Carbon` gần nhất, cấu trúc giống response §4.2. Dùng để app hiển thị lại
 khi offline mà không phải tính lại.

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- AgriCarbon — Carbon calculation scope (patch bổ sung)
 -- Ngày: 2026-09-08
--- Đứng sau: 20260908_carbon_methodology_alignment.sql
+-- Đứng sau: 20260908000000_carbon_methodology_alignment.sql
 --
 -- ADDITIVE-ONLY. Không sửa migration đã commit. Không đụng RLS. Không drop gì.
 --

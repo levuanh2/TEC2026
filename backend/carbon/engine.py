@@ -43,7 +43,7 @@ ENGINE_VERSION = "0.2.0"
 class CarbonResult:
     """Kết quả tính. Cấu trúc đủ để truy ngược tới nguồn trích dẫn."""
 
-    crop_id: str
+    crop_season_id: str
     scenario: str
     water_regime_applied: str
     total_co2e_kg: float
@@ -59,7 +59,7 @@ class CarbonResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "crop_id": self.crop_id,
+            "crop_season_id": self.crop_season_id,
             "scenario": self.scenario,
             "water_regime_applied": self.water_regime_applied,
             "total_co2e_kg": self.total_co2e_kg,
@@ -98,9 +98,9 @@ def calculate_carbon(
     cultivation_days = _resolve_cultivation_days(activity_data)
 
     amendments, burned = classify_straw(
-        activity_data.straw, activity_data.crop_id, activity_data.area_ha
+        activity_data.straw, activity_data.crop_season_id, activity_data.area_ha
     )
-    _assert_no_double_counting(amendments, burned, activity_data.crop_id)
+    _assert_no_double_counting(amendments, burned, activity_data.crop_season_id)
 
     breakdown: list[BreakdownEntry] = [
         RiceMethaneCalculator().calculate(
@@ -129,7 +129,7 @@ def calculate_carbon(
     warnings.extend(_provenance_warnings(breakdown, params))
 
     return CarbonResult(
-        crop_id=activity_data.crop_id,
+        crop_season_id=activity_data.crop_season_id,
         scenario=scenario,
         water_regime_applied=regime,
         total_co2e_kg=total,
@@ -183,7 +183,7 @@ def _resolve_water_regime(data: CropActivityData, scenario: str) -> str:
         return SCENARIO_TO_REGIME[scenario]
     if recorded is None:
         raise MissingActivityDataError(
-            f"Vụ '{data.crop_id}' chưa có 'water_regime' nên không dùng được kịch bản "
+            f"Vụ '{data.crop_season_id}' chưa có 'water_regime' nên không dùng được kịch bản "
             f"'as_recorded'. Hãy truyền 'awd' hoặc 'continuous_flooding'."
         )
     return recorded
@@ -215,13 +215,13 @@ def _resolve_cultivation_days(data: CropActivityData) -> int:
     recorded = data.recorded_cultivation_days
     if recorded is None:
         raise MissingActivityDataError(
-            f"Vụ '{data.crop_id}' thiếu số ngày canh tác: cần 'cultivation_days', hoặc cả "
+            f"Vụ '{data.crop_season_id}' thiếu số ngày canh tác: cần 'cultivation_days', hoặc cả "
             f"'sowing_date' và 'harvest_date'. Engine KHÔNG dùng giá trị mặc định vùng "
             f"(IPCC Table 5.11A) cho tính toán cấp thửa ruộng."
         )
     if recorded <= 0:
         raise MissingActivityDataError(
-            f"Vụ '{data.crop_id}': số ngày canh tác = {recorded}, không hợp lệ."
+            f"Vụ '{data.crop_season_id}': số ngày canh tác = {recorded}, không hợp lệ."
         )
     return recorded
 
@@ -269,12 +269,12 @@ def _missing_record_warnings(data: CropActivityData) -> list[str]:
     notes: list[str] = []
     if not data.straw:
         notes.append(
-            f"Vụ '{data.crop_id}': KHÔNG có bản ghi xử lý rơm rạ nào nên SFo = 1,0 (coi như không "
+            f"Vụ '{data.crop_season_id}': KHÔNG có bản ghi xử lý rơm rạ nào nên SFo = 1,0 (coi như không "
             f"bổ sung chất hữu cơ). Nếu thực tế có vùi rơm mà chưa nhập, CH4 đang bị tính thiếu."
         )
     if not data.fertilizer:
         notes.append(
-            f"Vụ '{data.crop_id}': KHÔNG có bản ghi bón phân nào nên N2O = 0. Nếu thực tế có bón "
+            f"Vụ '{data.crop_season_id}': KHÔNG có bản ghi bón phân nào nên N2O = 0. Nếu thực tế có bón "
             f"mà chưa nhập, phát thải đang bị tính thiếu."
         )
     return notes
@@ -285,12 +285,12 @@ def _scope_warnings(data: CropActivityData, amendments) -> list[str]:
     notes: list[str] = []
     if data.pesticide:
         notes.append(
-            f"Vụ '{data.crop_id}': có ghi nhận thuốc BVTV nhưng phát thải upstream của thuốc "
+            f"Vụ '{data.crop_season_id}': có ghi nhận thuốc BVTV nhưng phát thải upstream của thuốc "
             f"không nằm trong ranh giới hệ thống MVP (docs/CARBON_METHOD.md — NOT_IMPLEMENTED)."
         )
     if data.seed:
         notes.append(
-            f"Vụ '{data.crop_id}': phát thải upstream của giống không nằm trong ranh giới "
+            f"Vụ '{data.crop_season_id}': phát thải upstream của giống không nằm trong ranh giới "
             f"hệ thống MVP."
         )
     notes.append(

@@ -2,7 +2,7 @@
 
 ⛔ DỮ LIỆU BỊA. Không phải số liệu thực địa.
 
-Tên cột lấy đúng từ docs/Data/AgriCarbon_FULL.sql + migration 20260908*, để test bắt
+Tên cột lấy đúng từ supabase/migrations/20260907000000_baseline.sql + migration 20260908*, để test bắt
 được lỗi ánh xạ cột (ví dụ `amount_liter` của DB vs `amount_litre` của engine).
 """
 

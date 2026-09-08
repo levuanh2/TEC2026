@@ -17,7 +17,7 @@
 | QĐ 4801/QĐ-BNNMT (Tier 1) | ❌ chưa lấy được toàn văn → **không được nói "MRV-compliant"** |
 | API `/v1/carbon/*` | ✅ POST calculate + GET result, chạy trên repository in-memory |
 | Supabase repository | ⚠️ code xong, **CHƯA kết nối DB thật lần nào** |
-| Migration | 2 file ở `../supabase/migrations/`, **chưa chạy lên DB** |
+| Migration | baseline + 3 migration ở `../supabase/migrations/`; đã verified trên Supabase local, **chưa chạy lên hosted DB** |
 
 **Chạy với config thật sẽ dừng ở `MissingEmissionFactorError: gwp.ch4`.** Đó là hành vi
 đúng, không phải bug.
@@ -79,8 +79,8 @@ route `/v1/carbon/*` trả **503** kèm hướng dẫn — cố ý, để không
 | Route | Việc |
 |---|---|
 | `GET /health` | trạng thái thật: `ef_config_version`, `carbon_production_ready`, `mrv_compliant` |
-| `POST /v1/carbon/calculate` | `{crop_id, water_regime_scenario}` → tính + lưu |
-| `GET /v1/crops/{crop_id}/carbon?scenario=` | bản tính **thành công** gần nhất |
+| `POST /v1/carbon/calculate` | `{crop_season_id, water_regime_scenario}` → tính + lưu cho toàn vụ |
+| `GET /v1/crop-seasons/{crop_season_id}/carbon?scenario=` | bản tính **thành công** gần nhất của vụ |
 
 Mã lỗi: 404 không có vụ · 409 dữ liệu mâu thuẫn / phạm vi không rõ · 422 thiếu dữ liệu
 hoặc thiếu hệ số (gồm GWP) · 503 chưa import bộ hệ số vào Supabase.
@@ -112,7 +112,7 @@ python -m carbon.demo --real
 from carbon import CropActivityData, ParameterSet, calculate_carbon
 
 crop = CropActivityData.from_dict({
-    "crop_id": "plot-a-he-thu-2026",
+    "crop_season_id": "plot-a-he-thu-2026",
     "area_ha": 1.0,
     "cultivation_days": 100,
     "yield_kg": 5200,

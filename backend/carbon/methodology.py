@@ -205,7 +205,7 @@ class RiceMethaneCalculator:
     ) -> BreakdownEntry:
         if data.pre_season_water_regime is None:
             raise MethodologyGapError(
-                f"Vụ '{data.crop_id}' thiếu 'pre_season_water_regime'. IPCC Eq 5.2 bắt buộc có "
+                f"Vụ '{data.crop_season_id}' thiếu 'pre_season_water_regime'. IPCC Eq 5.2 bắt buộc có "
                 f"SFp; ngập trước vụ ≥30 ngày làm SFp = 2,41 (tăng hơn gấp đôi so với 1,00). "
                 f"Bỏ qua SFp là sai phương pháp luận, engine không mặc định."
             )
@@ -287,7 +287,7 @@ class FertilizerN2OCalculator:
 
         if any(f.is_organic for f in data.fertilizer):
             warnings.append(
-                f"Vụ '{data.crop_id}': có phân hữu cơ trong dữ liệu. N từ phân hữu cơ (F_ON) "
+                f"Vụ '{data.crop_season_id}': có phân hữu cơ trong dữ liệu. N từ phân hữu cơ (F_ON) "
                 f"chưa nằm trong ranh giới hệ thống MVP — xem docs/CARBON_METHOD.md, "
                 f"NOT_IMPLEMENTED."
             )
@@ -296,7 +296,7 @@ class FertilizerN2OCalculator:
         if nitrogen_kg <= 0:
             return None, warnings
 
-        ef_key, regime_warning = self.resolve_ef_key(regime, data.crop_id)
+        ef_key, regime_warning = self.resolve_ef_key(regime, data.crop_season_id)
         if regime_warning:
             warnings.append(regime_warning)
 
@@ -313,7 +313,7 @@ class FertilizerN2OCalculator:
         used["_derived.n2o_n_kg"] = n2o_n_kg
 
         warnings.append(
-            f"Vụ '{data.crop_id}': mới tính N2O TRỰC TIẾP. N2O gián tiếp (bay hơi NH3/NOx và "
+            f"Vụ '{data.crop_season_id}': mới tính N2O TRỰC TIẾP. N2O gián tiếp (bay hơi NH3/NOx và "
             f"rửa trôi, IPCC Eq 11.9/11.10) chưa nằm trong ranh giới hệ thống MVP."
         )
 
@@ -361,11 +361,11 @@ class StrawBurningCalculator:
         for event in burned:
             if event.mass_kg is None:
                 raise MissingActivityDataError(
-                    f"Vụ '{data.crop_id}': bản ghi đốt rơm thiếu 'mass_kg'."
+                    f"Vụ '{data.crop_season_id}': bản ghi đốt rơm thiếu 'mass_kg'."
                 )
             if event.dry_matter_fraction is None:
                 raise MethodologyGapError(
-                    f"Vụ '{data.crop_id}': bản ghi đốt rơm thiếu 'dry_matter_fraction'. "
+                    f"Vụ '{data.crop_season_id}': bản ghi đốt rơm thiếu 'dry_matter_fraction'. "
                     f"IPCC Eq 2.27 tính trên khối lượng khô. Engine không đoán độ ẩm."
                 )
             dry_matter_kg += event.mass_kg * event.dry_matter_fraction
@@ -454,7 +454,7 @@ class FuelEmissionCalculator:
         pump_kwh = sum(e.pump_energy_kwh or 0.0 for e in data.irrigation)
         if pump_kwh > 0:
             warnings.append(
-                f"Vụ '{data.crop_id}': có {pump_kwh:g} kWh bơm điện nhưng hệ số lưới điện Việt Nam "
+                f"Vụ '{data.crop_season_id}': có {pump_kwh:g} kWh bơm điện nhưng hệ số lưới điện Việt Nam "
                 f"chưa được cấu hình (OI-06) — phần này CHƯA được tính vào tổng."
             )
 

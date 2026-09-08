@@ -14,7 +14,6 @@ from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
     map_crop_activity_data,
-    resolve_calculation_batch,
 )
 from infrastructure.repository import CarbonRepository
 
@@ -42,10 +41,9 @@ class CarbonService:
         return self._params
 
     def calculate(
-        self, crop_id: str, scenario: str = "as_recorded", *, persist: bool = True
+        self, crop_season_id: str, scenario: str = "as_recorded", *, persist: bool = True
     ) -> CalculationOutcome:
-        bundle = self._repo.get_crop_bundle(crop_id)
-        batch = resolve_calculation_batch(bundle)
+        bundle = self._repo.get_crop_bundle(crop_season_id)
         activity_data = map_crop_activity_data(bundle)
 
         # Mọi lỗi phương pháp luận/thiếu hệ số nổ ra từ đây — fail closed, không nuốt.
@@ -60,8 +58,7 @@ class CarbonService:
         calculation_id = self._repo.save_calculation(
             calculation_row(
                 result,
-                production_batch_id=batch["id"],
-                crop_season_id=crop_id,
+                crop_season_id=crop_season_id,
                 factor_set_id=factor_set_id,
                 area_ha=activity_data.area_ha,
                 cultivation_days=activity_data.recorded_cultivation_days,
@@ -73,5 +70,5 @@ class CarbonService:
             result=result, calculation_id=calculation_id, persisted=True
         )
 
-    def latest(self, crop_id: str, scenario: str | None = None) -> dict[str, Any] | None:
-        return self._repo.latest_calculation(crop_id, scenario)
+    def latest(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
+        return self._repo.latest_calculation(crop_season_id, scenario)

@@ -26,12 +26,7 @@ from carbon.errors import (  # noqa: E402
     MissingActivityDataError,
     MissingEmissionFactorError,
 )
-from infrastructure.mapping import (  # noqa: E402
-    CalculationScopeError,
-    RawCropBundle,
-    map_crop_activity_data,
-    resolve_calculation_batch,
-)
+from infrastructure.mapping import RawCropBundle, map_crop_activity_data  # noqa: E402
 from infrastructure.repository import (  # noqa: E402
     FactorSetNotFoundError,
     InMemoryCarbonRepository,
@@ -106,7 +101,7 @@ def client(service) -> TestClient:
 def test_bundle_maps_to_activity_data(bundle):
     data = map_crop_activity_data(bundle)
 
-    assert data.crop_id == rows.CROP_ID
+    assert data.crop_season_id == rows.CROP_ID
     assert data.area_ha == pytest.approx(1.0)
     assert data.cultivation_days == 100
     assert data.water_regime == "irrigated_multiple_drainage"
@@ -332,7 +327,7 @@ def test_persist_calculation_and_breakdown(repo, service):
     assert len(repo.calculations) == 1
     row = repo.calculations[0]
 
-    assert row["production_batch_id"] == rows.BATCH_ID
+    assert row.get("production_batch_id") is None
     assert row["crop_season_id"] == rows.CROP_ID
     assert row["scenario"] == "awd"
     assert row["factor_set_id"] == rows.FACTOR_SET_ID
@@ -387,7 +382,7 @@ def test_factor_set_not_imported_blocks_persistence(bundle, params):
 def test_post_then_get_roundtrip(client):
     post = client.post(
         "/v1/carbon/calculate",
-        json={"crop_id": rows.CROP_ID, "water_regime_scenario": "awd"},
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
     )
     assert post.status_code == 200, post.text
     body = post.json()
@@ -398,7 +393,7 @@ def test_post_then_get_roundtrip(client):
     assert len(body["input_hash"]) == 64
     assert body["breakdown"]
 
-    get = client.get(f"/v1/crops/{rows.CROP_ID}/carbon?scenario=awd")
+    get = client.get(f"/v1/crop-seasons/{rows.CROP_ID}/carbon?scenario=awd")
     assert get.status_code == 200, get.text
     stored = get.json()
     assert stored["total_co2e_kg"] == pytest.approx(AWD_TOTAL)
@@ -406,7 +401,7 @@ def test_post_then_get_roundtrip(client):
 
 
 def test_get_without_calculation_returns_404(client):
-    response = client.get(f"/v1/crops/{rows.CROP_ID}/carbon")
+    response = client.get(f"/v1/crop-seasons/{rows.CROP_ID}/carbon")
     assert response.status_code == 404
     assert response.json()["detail"]["error"] == "no_calculation"
 
@@ -430,7 +425,7 @@ def test_get_never_returns_failed_calculation(repo, client):
 def test_api_invalid_scenario_rejected(client):
     response = client.post(
         "/v1/carbon/calculate",
-        json={"crop_id": rows.CROP_ID, "water_regime_scenario": "random"},
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "random"},
     )
     assert response.status_code == 422  # pydantic chặn trước khi vào engine
 
@@ -446,7 +441,7 @@ def test_api_missing_gwp_returns_422(bundle, repo):
 
     response = TestClient(app).post(
         "/v1/carbon/calculate",
-        json={"crop_id": rows.CROP_ID, "water_regime_scenario": "awd"},
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
     )
     assert response.status_code == 422
     detail = response.json()["detail"]
@@ -457,7 +452,7 @@ def test_api_missing_gwp_returns_422(bundle, repo):
 def test_api_crop_not_found(client):
     response = client.post(
         "/v1/carbon/calculate",
-        json={"crop_id": "00000000-0000-0000-0000-000000000000"},
+        json={"crop_season_id": "00000000-0000-0000-0000-000000000000"},
     )
     assert response.status_code == 404
     assert response.json()["detail"]["error"] == "crop_not_found"
@@ -473,7 +468,7 @@ def test_api_conflicting_water_returns_409(bundle, client):
 
     response = client.post(
         "/v1/carbon/calculate",
-        json={"crop_id": rows.CROP_ID, "water_regime_scenario": "as_recorded"},
+        json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "as_recorded"},
     )
     assert response.status_code == 409
     assert response.json()["detail"]["error"] == "conflicting_water_records"
@@ -516,22 +511,54 @@ def test_input_hash_changes_with_scenario(service):
 # ===========================================================================
 
 
-def test_multiple_batches_rejected(bundle):
-    """CH4 tính trên diện tích thửa × ngày canh tác của cả vụ.
-
-    Nhiều lô thu hoạch -> tính riêng từng lô sẽ đếm trọn diện tích nhiều lần.
-    Backend từ chối thay vì tự chia. Xem migration 20260908b.
-    """
-    bundle.production_batches = rows.production_batches(2)
-    with pytest.raises(CalculationScopeError) as exc:
-        resolve_calculation_batch(bundle)
-    assert "diện tích" in str(exc.value)
+def test_one_batch_is_optional_traceability_not_calculation_scope(bundle, service, repo):
+    service.calculate(rows.CROP_ID, "awd")
+    assert repo.calculations[0]["crop_season_id"] == rows.CROP_ID
+    assert repo.calculations[0].get("production_batch_id") is None
 
 
-def test_no_batch_rejected(bundle):
-    bundle.production_batches = []
-    with pytest.raises(CalculationScopeError):
-        resolve_calculation_batch(bundle)
+def _calculation_for_batches(bundle, params, count: int, *, persist: bool = False):
+    bundle.production_batches = rows.production_batches(count)
+    repository = InMemoryCarbonRepository(
+        bundles={rows.CROP_ID: bundle},
+        factor_sets={"TEST-FACTORS-DO-NOT-USE": rows.FACTOR_SET_ID},
+    )
+    return CarbonService(repository, params).calculate(rows.CROP_ID, "awd", persist=persist), repository
+
+
+def test_b_two_batches_create_one_season_calculation_and_one_ch4_breakdown(bundle, params):
+    outcome, repository = _calculation_for_batches(bundle, params, 2, persist=True)
+    assert len(repository.calculations) == 1
+    assert len([x for x in outcome.result.breakdown if x.source == "ch4_rice_cultivation"]) == 1
+
+
+def test_c_adding_a_batch_does_not_double_cultivation_ch4(bundle, params):
+    one = CarbonService(
+        InMemoryCarbonRepository(bundles={rows.CROP_ID: copy.deepcopy(bundle)}), params
+    ).calculate(rows.CROP_ID, "awd", persist=False)
+    two, _ = _calculation_for_batches(bundle, params, 2)
+    methane = lambda result: next(x.co2e_kg for x in result.breakdown if x.source == "ch4_rice_cultivation")
+    assert methane(two.result) == pytest.approx(methane(one.result))
+
+
+def test_d_season_yield_is_sum_of_harvest_events_not_one_batch(bundle, params):
+    harvest = next(x for x in bundle.activities if x["activity_type"] == "harvest")
+    harvest["detail"]["yield_kg"] = 2000
+    second_harvest = copy.deepcopy(harvest)
+    second_harvest["id"] = "a7"
+    second_harvest["production_batch_id"] = f"{rows.BATCH_ID[:-1]}1"
+    second_harvest["detail"]["activity_id"] = "a7"
+    second_harvest["detail"]["yield_kg"] = 3000
+    bundle.activities.append(second_harvest)
+    outcome, _ = _calculation_for_batches(bundle, params, 2)
+    assert outcome.result.yield_kg == pytest.approx(5000)
+    assert outcome.result.co2e_per_kg == pytest.approx(outcome.result.total_co2e_kg / 5000)
+
+
+def test_e_batch_specific_allocation_is_not_implemented(bundle, params):
+    outcome, repository = _calculation_for_batches(bundle, params, 2, persist=True)
+    assert outcome.result.yield_kg == pytest.approx(YIELD)
+    assert repository.calculations[0].get("production_batch_id") is None
 
 
 def test_missing_plot_area_fails(bundle):

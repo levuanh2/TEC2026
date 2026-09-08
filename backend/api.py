@@ -20,7 +20,6 @@ from carbon.errors import (
     MissingActivityDataError,
     MissingEmissionFactorError,
 )
-from infrastructure.mapping import CalculationScopeError
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
 from service import CarbonService
 
@@ -30,7 +29,7 @@ Scenario = Literal["awd", "continuous_flooding", "as_recorded"]
 
 
 class CalculateRequest(BaseModel):
-    crop_id: str = Field(..., description="crop_seasons.id")
+    crop_season_id: str = Field(..., description="Scope of the cultivation calculation: crop_seasons.id")
     water_regime_scenario: Scenario = "as_recorded"
 
 
@@ -60,7 +59,6 @@ _ERROR_STATUS: list[tuple[type[Exception], int, str]] = [
     (CropNotFoundError, 404, "crop_not_found"),
     (InvalidWaterRegimeError, 400, "invalid_water_regime"),
     (ConflictingWaterRegimeError, 409, "conflicting_water_records"),
-    (CalculationScopeError, 409, "ambiguous_calculation_scope"),
     (DoubleCountingError, 409, "double_counting"),
     (MissingEmissionFactorError, 422, "missing_emission_factor"),
     (MethodologyGapError, 422, "methodology_gap"),
@@ -88,22 +86,22 @@ def calculate_carbon_endpoint(
     kèm cảnh báo. Thiếu hệ số bắt buộc (ví dụ GWP) -> 422, KHÔNG trả 0.
     """
     try:
-        outcome = service.calculate(payload.crop_id, payload.water_regime_scenario)
+        outcome = service.calculate(payload.crop_season_id, payload.water_regime_scenario)
     except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
         _raise_http(exc)
         raise
     return _payload(outcome.result, outcome.calculation_id)
 
 
-@router.get("/crops/{crop_id}/carbon")
+@router.get("/crop-seasons/{crop_season_id}/carbon")
 def get_crop_carbon(
-    crop_id: str,
+    crop_season_id: str,
     scenario: Scenario | None = None,
     service: CarbonService = Depends(_service),
 ) -> dict[str, Any]:
     """Bản tính THÀNH CÔNG gần nhất của vụ. Không trả bản tính thất bại."""
     try:
-        row = service.latest(crop_id, scenario)
+        row = service.latest(crop_season_id, scenario)
     except Exception as exc:  # noqa: BLE001
         _raise_http(exc)
         raise
@@ -114,7 +112,7 @@ def get_crop_carbon(
             detail={
                 "error": "no_calculation",
                 "message": (
-                    f"Vụ '{crop_id}' chưa có bản tính thành công nào"
+                    f"Vụ '{crop_season_id}' chưa có bản tính thành công nào"
                     + (f" cho kịch bản '{scenario}'" if scenario else "")
                     + ". Gọi POST /v1/carbon/calculate trước."
                 ),

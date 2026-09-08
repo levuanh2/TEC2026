@@ -117,7 +117,7 @@ Gồm: `01-mobile-app` (ghi nhật ký tối giản, offline-first) + `02-carbon
 
 - [ ] Nhập được 1 vụ canh tác đầy đủ trên app khi **tắt hoàn toàn mạng**, dữ liệu không mất.
 - [ ] Bật mạng → dữ liệu tự đồng bộ lên backend, không trùng lặp, không mất bản ghi.
-- [ ] Backend trả về **CO2e tổng và CO2e/kg** cho lô đó, app hiển thị được.
+- [ ] Backend trả về **CO2e tổng và CO2e/kg** cho vụ canh tác đó; batch chỉ dùng để truy xuất nguồn gốc, app hiển thị được.
 - [ ] Tính được **hai kịch bản riêng biệt: AWD và tưới ngập liên tục**, ra hai con số khác nhau.
 - [ ] Mọi hệ số phát thải nằm trong `backend/config/emission_factors.yaml` kèm nguồn trích
       dẫn — **không có magic number nào trong code tính toán**.
@@ -152,7 +152,7 @@ Gồm: `06-web-dashboard` + `07-mrv-export`.
 
 **Definition of Done — lớp 1c**
 
-- [ ] Xem được dữ liệu theo cấp bậc **Farm → Plot → Crop → Batch → Activity → Carbon**.
+- [ ] Xem được dữ liệu theo cấp bậc **Farm → Plot → Crop Season → {Activity, Harvest Event, Batch, Carbon Calculation}**; Carbon Calculation thuộc Crop Season.
 - [ ] Phân quyền 3 vai trò: Nông dân (chỉ nhập liệu) / Quản lý HTX (tổng hợp cấp HTX) /
       Doanh nghiệp – Cơ quan quản lý (toàn vùng).
 - [ ] Xuất được báo cáo PDF hoặc Excel bố cục theo đúng **6 bước MRV**.

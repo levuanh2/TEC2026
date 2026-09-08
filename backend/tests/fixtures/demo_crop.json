@@ -1,6 +1,6 @@
 {
   "_comment": "DEMO FIXTURE — dữ liệu bịa để chạy thử engine. KHÔNG phải số liệu thực địa.",
-  "crop_id": "demo-001",
+  "crop_season_id": "demo-001",
   "area_ha": 1.0,
   "cultivation_days": 100,
   "yield_kg": 5200,

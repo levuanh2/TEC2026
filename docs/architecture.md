@@ -40,9 +40,9 @@ vụ HTX / doanh nghiệp / cơ quan quản lý ở phía sau.
  ┌────────────────────────┐        ┌──────────────────────┐        ┌────────────────────┐
  │  app/  (Flutter)       │        │  backend/ (FastAPI)  │        │ web-dashboard/     │
  │                        │        │                      │        │                    │
- │  Form "1 phải 5 giảm"  │        │  API đồng bộ         │        │ Farm → Plot → Crop │
- │  SQLite cục bộ         │◄──────►│  Carbon Engine ◄──┐  │◄──────►│ → Batch → Activity │
- │  Hàng đợi đồng bộ      │  HTTP  │  Benchmark        │  │  HTTP  │ → Carbon           │
+ │  Form "1 phải 5 giảm"  │        │  API đồng bộ         │        │ Farm → Plot →      │
+ │  SQLite cục bộ         │◄──────►│  Carbon Engine ◄──┐  │◄──────►│ Crop Season →      │
+ │  Hàng đợi đồng bộ      │  HTTP  │  Benchmark        │  │  HTTP  │ Activity + Carbon  │
  │  Màn hình CO2e/kg      │        │  Recommendation   │  │        │ Phân quyền 3 vai   │
  │  Chụp ảnh lá lúa       │        │  Export MRV       │  │        │ Nút Export MRV     │
  └────────────────────────┘        └───────────────────┼──┘        └────────────────────┘
@@ -143,7 +143,7 @@ Không dựng code cho giai đoạn 2/3/4, nhưng data model đã chừa chỗ �
 | `app/` | Flutter + SQLite (`drift`/`sqflite`) | Một codebase, hỗ trợ offline tốt, quen thuộc trong đồ án sinh viên |
 | `backend/` | Python 3.11 + FastAPI + SQLite | Cùng ngôn ngữ với `ml/` → Người B chỉ nuôi 1 môi trường. Đổi sang Postgres khi có nhiều HTX |
 | `ml/` | PyTorch, fine-tune model phân loại ảnh | Đủ cho 1 bài toán 4 lớp |
-| `web-dashboard/` | HTML tĩnh + dữ liệu mock trước | 1c là lớp có thể cắt — chưa đáng dựng build toolchain. Nâng lên Vite + React chỉ khi cần gọi API động |
+| `web-dashboard/` | Vite + React + Supabase browser client | Publishable key only; RLS is the access boundary and the service-role key stays in `backend/` |
 | `infra/` | Chạy local hoặc 1 VPS nhỏ | Chưa cần Docker/CI/K8s khi chưa có gì để deploy |
 
 Đổi stack được, miễn giữ nguyên hợp đồng API ở [`SRS.md` §4](SRS.md#4-api-contract-nháp--luồng-1a).

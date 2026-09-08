@@ -17,6 +17,7 @@ venv/
 # Node (web-dashboard/)
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Flutter (app/)
 .dart_tool/
@@ -27,6 +28,7 @@ build/
 .env
 .env.*
 !.env.example
+.supabase.env
 *.sqlite
 *.db
 ml/datasets/raw/

@@ -25,8 +25,9 @@ và phân quyền theo vai trò.
 
 ## 2. Input / Output
 
-**Input:** dữ liệu từ backend — `Farm`, `Plot`, `Crop`, `Batch`, `Activity`, `Carbon`, chỉ số
-hiệu suất (module 04), khuyến nghị (module 05).
+**Input:** dữ liệu từ backend — `Farm`, `Plot`, `Crop Season`, `Activity`, `Carbon Calculation`
+(thuộc Crop Season, không thuộc Batch — xem `docs/CARBON_CALCULATION_SCOPE_RESOLUTION.md`),
+`Batch` (chỉ để truy xuất nguồn gốc), chỉ số hiệu suất (module 04), khuyến nghị (module 05).
 
 **Output:** giao diện web; nút kích hoạt xuất báo cáo MRV (module 07).
 
@@ -81,11 +82,12 @@ Mỗi bản ghi hiển thị `created_by`, `created_at`, `updated_at` (FR-1c-04)
 tối thiểu phục vụ **bước 6 MRV – Thẩm định**. Bộ Evidence/Anti-fraud đầy đủ (camera bắt buộc +
 GPS + timestamp + audit trail + phát hiện anomaly) thuộc **giai đoạn 2**, ngoài phạm vi MVP.
 
-### 4.3. Stack — cố tình giữ nhẹ
+### 4.3. Stack
 
-Bắt đầu bằng **một file HTML tĩnh với dữ liệu mock**. Chỉ nâng lên Vite + React khi dashboard
-thật sự cần gọi API động. 1c là lớp có thể bị cắt — dựng build toolchain trước khi 1a và 1b
-xong là đầu tư vào phần có thể không dùng đến.
+Dashboard dùng Vite + React và Supabase browser client với publishable key. Client chỉ quản lý
+session; service-role key vẫn chỉ ở backend. Mọi dữ liệu HTX phải đi qua RLS, không được lọc
+phạm vi truy cập chỉ ở frontend. Nếu cần cắt scope, UI vẫn có thể chạy ở chế độ mock nhưng không
+được thay đổi authorization boundary.
 
 ---
 
@@ -104,7 +106,7 @@ xong là đầu tư vào phần có thể không dùng đến.
 
 ## 6. Definition of Done
 
-- [ ] **T1-09** Duyệt được cây Farm → Plot → Crop → Batch → Activity → Carbon (FR-1c-01)
+- [ ] **T1-09** Duyệt được cây Farm → Plot → Crop Season → {Activity, Batch, Carbon Calculation} (FR-1c-01)
 - [ ] **T1-10** Màn hình tổng hợp cấp HTX với **≥ 3 hộ** (FR-1c-02)
 - [ ] **T1-11** Ba vai trò đăng nhập được, thấy đúng phạm vi dữ liệu (FR-1c-03)
 - [ ] **T1-12** Gọi API bằng token vai Nông dân với id lô hộ khác → trả **403** (NFR-07)

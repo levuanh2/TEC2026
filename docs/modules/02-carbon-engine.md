@@ -18,7 +18,7 @@
 
 ## 1. Mục tiêu module
 
-Biến Activity Data thô thành con số **CO2e/kg lúa** tin cậy và truy vết được, tính riêng
+Biến Activity Data thô của **một Crop Season** thành con số **CO2e/kg lúa** tin cậy và truy vết được, tính riêng
 kịch bản **AWD (tưới ngập-khô xen kẽ)** so với **tưới ngập liên tục**.
 
 ---
@@ -26,8 +26,8 @@ kịch bản **AWD (tưới ngập-khô xen kẽ)** so với **tưới ngập li
 ## 2. Input / Output
 
 **Input:**
-- Toàn bộ `Activity` của một `Crop` (từ module 01 qua `POST /v1/sync`).
-- `yield_kg` (sản lượng) của vụ hoặc lô.
+- Toàn bộ Activity Data, plot area, cultivation period và harvest events của một `Crop Season` (từ module 01 qua `POST /v1/sync`). Production Batch chỉ là traceability, không phải input xác định phạm vi CH4.
+- `yield_kg`: tổng sản lượng của harvest events thuộc vụ; không lấy sản lượng một batch làm mẫu số.
 - Bộ hệ số từ `backend/config/emission_factors.yaml`.
 - `water_regime_scenario` ∈ { `awd`, `continuous_flooding`, `as_recorded` }.
 

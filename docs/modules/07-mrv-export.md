@@ -21,8 +21,9 @@ PDF/Excel bố cục theo đúng **6 bước MRV** để nộp cho đơn vị th
 
 ## 2. Input / Output
 
-**Input:** dữ liệu `Carbon` của một hoặc nhiều Crop/Batch, hồ sơ Farm/Plot/HTX, phiên bản bộ
-hệ số (`ef_config_version`), phạm vi báo cáo (1 hộ / 1 HTX / toàn vùng).
+**Input:** dữ liệu `Carbon Calculation` của một hoặc nhiều Crop Season (Carbon Calculation
+thuộc Crop Season, Batch chỉ là traceability), hồ sơ Farm/Plot/HTX, phiên bản bộ hệ số
+(`ef_config_version`), phạm vi báo cáo (1 hộ / 1 HTX / toàn vùng).
 
 **Output:** file **PDF hoặc Excel** (chọn một, không cần cả hai ở MVP).
 

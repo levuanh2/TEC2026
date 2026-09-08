@@ -156,7 +156,7 @@ class Harvest:
 class CropActivityData:
     """Activity Data của một vụ canh tác trên một thửa."""
 
-    crop_id: str
+    crop_season_id: str
     area_ha: float
 
     # Biến bắt buộc của phương pháp luận CH4
@@ -197,7 +197,7 @@ class CropActivityData:
             nitrogen = application.nitrogen_kg
             if nitrogen is None:
                 raise ValidationError(
-                    f"Lần bón '{application.fertilizer_type}' của vụ '{self.crop_id}' thiếu "
+                    f"Lần bón '{application.fertilizer_type}' của vụ '{self.crop_season_id}' thiếu "
                     f"'n_content_pct'. Phương pháp luận áp hệ số lên **kg N**, không phải kg phân — "
                     f"engine không đoán hàm lượng N."
                 )
@@ -212,8 +212,8 @@ class CropActivityData:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> CropActivityData:
-        if "crop_id" not in raw or "area_ha" not in raw:
-            raise ValidationError("Activity Data phải có 'crop_id' và 'area_ha'.")
+        if "crop_season_id" not in raw or "area_ha" not in raw:
+            raise ValidationError("Activity Data phải có 'crop_season_id' và 'area_ha'.")
 
         harvest_raw = dict(raw.get("harvest") or {})
         if "yield_kg" in raw:
@@ -225,7 +225,7 @@ class CropActivityData:
             return [value] if isinstance(value, dict) else list(value)
 
         return cls(
-            crop_id=raw["crop_id"],
+            crop_season_id=raw["crop_season_id"],
             area_ha=raw["area_ha"],
             water_regime=raw.get("water_regime"),
             pre_season_water_regime=raw.get("pre_season_water_regime"),

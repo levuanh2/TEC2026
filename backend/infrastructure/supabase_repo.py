@@ -51,15 +51,15 @@ class SupabaseCarbonRepository:
 
     # -- đọc ---------------------------------------------------------------
 
-    def get_crop_bundle(self, crop_id: str) -> RawCropBundle:
-        crop = self._one("crop_seasons", {"id": crop_id})
+    def get_crop_bundle(self, crop_season_id: str) -> RawCropBundle:
+        crop = self._one("crop_seasons", {"id": crop_season_id})
         if crop is None or crop.get("deleted_at") is not None:
-            raise CropNotFoundError(f"Không tìm thấy vụ canh tác '{crop_id}'.")
+            raise CropNotFoundError(f"Không tìm thấy vụ canh tác '{crop_season_id}'.")
 
         plot = self._one("plots", {"id": crop["plot_id"]}) or {}
         farm = self._one("farms", {"id": plot["farm_id"]}) if plot.get("farm_id") else None
 
-        batches = self._many("production_batches", {"crop_season_id": crop_id})
+        batches = self._many("production_batches", {"crop_season_id": crop_season_id})
         batch_ids = [b["id"] for b in batches if b.get("deleted_at") is None]
 
         activities: list[dict[str, Any]] = []
@@ -143,12 +143,12 @@ class SupabaseCarbonRepository:
         return calc_id
 
     def latest_calculation(
-        self, crop_id: str, scenario: str | None = None
+        self, crop_season_id: str, scenario: str | None = None
     ) -> dict[str, Any] | None:
         query = (
             self.client.table("carbon_calculations")
             .select("*")
-            .eq("crop_season_id", crop_id)
+            .eq("crop_season_id", crop_season_id)
             .eq("status", "succeeded")  # không trả bản tính thất bại như kết quả thành công
             .order("calculated_at", desc=True)
             .limit(1)

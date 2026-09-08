@@ -110,7 +110,7 @@ pip install -r requirements.txt && uvicorn main:app --reload
 cd app && flutter pub get && flutter run
 
 # web-dashboard — Người A
-# mở web-dashboard/index.html bằng trình duyệt, không cần build
+cd web-dashboard && npm install && npm run dev
 
 # ml — Người B
 cd ml && pip install -r requirements.txt && python train.py
@@ -143,7 +143,7 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
       khí / ranh giới hệ thống). Đây là *emission intensity benchmark*, không phải emission
       factor — đã tách khỏi khối `factors` trong config.
 - [ ] **OI-06 — hệ số nhiên liệu** diesel/xăng/LPG và hệ số lưới điện VN.
-- [ ] Chạy `supabase/migrations/20260908_carbon_methodology_alignment.sql` lên DB, rồi backfill
+- [ ] Chạy đầy đủ migration chain trong `supabase/migrations/` lên môi trường không-production, rồi backfill
       `pre_season_water_regime`, `dry_matter_fraction`, `days_before_cultivation` — ba trường
       này **không suy được từ dữ liệu cũ, phải đi hỏi**.
 - [ ] Chốt hợp đồng API 1a giữa Người A và Người B trước khi code song song
