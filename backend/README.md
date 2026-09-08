@@ -10,13 +10,14 @@
 
 | Phần | Trạng thái |
 |---|---|
-| `carbon/` — Carbon Engine | ✅ chạy được, 57 unit test pass |
+| `carbon/` — Carbon Engine | ✅ chạy được, 90 test pass (57 engine + 33 integration/API) |
 | Phương pháp luận CH4 / N2O / đốt rơm | ✅ VERIFIED theo IPCC, trích dẫn số hiệu bảng |
 | **GWP** | ⛔ **PENDING_VERIFICATION — đang chặn toàn bộ việc ra số CO2e** |
 | Hệ số nhiên liệu | ⏳ PENDING_VERIFICATION |
 | QĐ 4801/QĐ-BNNMT (Tier 1) | ❌ chưa lấy được toàn văn → **không được nói "MRV-compliant"** |
-| `main.py` — API FastAPI | ❌ mới là entrypoint TODO |
-| Supabase | migration ở `../supabase/migrations/`, chưa chạy lên DB |
+| API `/v1/carbon/*` | ✅ POST calculate + GET result, chạy trên repository in-memory |
+| Supabase repository | ⚠️ code xong, **CHƯA kết nối DB thật lần nào** |
+| Migration | 2 file ở `../supabase/migrations/`, **chưa chạy lên DB** |
 
 **Chạy với config thật sẽ dừng ở `MissingEmissionFactorError: gwp.ch4`.** Đó là hành vi
 đúng, không phải bug.
@@ -32,14 +33,23 @@ backend/
 │   ├── engine.py                # điều phối, tổng hợp, validation, input hash
 │   ├── errors.py                # lỗi rõ ràng, không fallback
 │   └── demo.py                  # chạy thử end-to-end
+├── infrastructure/              # biết Supabase, KHÔNG được import ngược vào carbon/
+│   ├── config.py                # đọc .env
+│   ├── mapping.py               # THUẦN: hàng DB <-> CropActivityData <-> hàng kết quả
+│   ├── repository.py            # Protocol + InMemoryCarbonRepository
+│   └── supabase_repo.py         # repository thật (service role)
+├── service.py                   # Repository -> Engine -> Repository
+├── api.py                       # routes /v1/carbon/*
+├── main.py                      # FastAPI app + /health
 ├── config/
 │   └── emission_factors.yaml    # hệ số + nguồn + status (RB-01)
-├── tests/
-│   ├── test_carbon_engine.py    # 57 test
-│   └── fixtures/
-│       ├── demo_crop.json       # DEMO — dữ liệu bịa
-│       └── test_factors.yaml    # TEST ONLY — NOT SCIENTIFIC VALUES
-└── main.py                      # API — chưa làm
+└── tests/
+    ├── test_carbon_engine.py        # 57 test engine
+    ├── test_integration_supabase.py # 33 test adapter + persistence + API
+    └── fixtures/
+        ├── demo_crop.json           # DEMO — dữ liệu bịa
+        ├── supabase_rows.py         # DEMO — hàng mô phỏng đúng schema
+        └── test_factors.yaml        # TEST ONLY — NOT SCIENTIFIC VALUES
 ```
 
 ## Cài đặt
@@ -55,6 +65,34 @@ pip install -r requirements.txt
 cd backend
 python -m pytest tests -q
 ```
+
+## Chạy API
+
+```bash
+cp .env.example .env          # điền SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+uvicorn main:app --reload
+```
+
+Chưa có `.env` thì app vẫn chạy, `/health` báo `supabase_configured: false`, và mọi
+route `/v1/carbon/*` trả **503** kèm hướng dẫn — cố ý, để không âm thầm chạy bằng dữ liệu giả.
+
+| Route | Việc |
+|---|---|
+| `GET /health` | trạng thái thật: `ef_config_version`, `carbon_production_ready`, `mrv_compliant` |
+| `POST /v1/carbon/calculate` | `{crop_id, water_regime_scenario}` → tính + lưu |
+| `GET /v1/crops/{crop_id}/carbon?scenario=` | bản tính **thành công** gần nhất |
+
+Mã lỗi: 404 không có vụ · 409 dữ liệu mâu thuẫn / phạm vi không rõ · 422 thiếu dữ liệu
+hoặc thiếu hệ số (gồm GWP) · 503 chưa import bộ hệ số vào Supabase.
+
+## Kiểm tra schema Supabase thật
+
+```bash
+# đặt SUPABASE_DB_URL trong backend/.env — KHÔNG dán vào chat/commit
+python ../scripts/validate_supabase_schema.py
+```
+
+Chỉ đọc. Kiểm bảng/cột/enum/index/RLS/policy/hàm phân quyền của phần MVP 1a.
 
 ## Chạy thử engine
 
@@ -122,3 +160,8 @@ Hàm `assert_consistent_water_records()` dành cho lớp adapter đó: gộp nhi
    AWD giảm CH4 nhưng **tăng** N2O.
 6. **Số sinh từ TEST FACTORS không được đem đi pitch.**
 7. **Không gắn nhãn "MRV-compliant"** khi chưa lấy được QĐ 4801/QĐ-BNNMT.
+8. **Service-role key chỉ tồn tại ở backend.** Không bao giờ đưa vào Flutter app hay web.
+   Client đọc qua API này, hoặc qua Supabase với anon key + RLS.
+9. **YAML là nguồn sự thật cho GIÁ TRỊ hệ số.** Bảng `emission_factor_sets`/`emission_factors`
+   là bản sao có kiểm soát để bản tính liên kết được `factor_set_id`. Không có bộ hệ số
+   published trùng `version_code` → backend từ chối ghi, **không tự tạo bộ rỗng**.

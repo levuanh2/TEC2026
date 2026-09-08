@@ -1,21 +1,68 @@
-"""AgriCarbon backend - entrypoint.
+"""AgriCarbon backend — entrypoint.
 
-Lop 1a (Walking Skeleton) + 1b/1c. Nguoi B phu trach.
-Dac ta: docs/modules/02-carbon-engine.md, docs/SRS.md
+Lớp 1a (Walking Skeleton). Người B phụ trách.
+Đặc tả: docs/modules/02-carbon-engine.md · docs/SRS.md §4
+
+Luồng:
+    App -> API -> SupabaseCarbonRepository -> CropActivityData -> Carbon Engine
+                                                                       |
+    App <- API <----------- carbon_calculations / carbon_breakdowns <---+
 """
+
+from __future__ import annotations
 
 from fastapi import FastAPI
 
-app = FastAPI(title="AgriCarbon API", version="0.1.0")
+import api
+from carbon import ENGINE_VERSION, ParameterSet
+from infrastructure.config import load_settings
+from infrastructure.supabase_repo import SupabaseCarbonRepository
+from service import CarbonService
+
+settings = load_settings()
+
+app = FastAPI(title="AgriCarbon API", version="0.2.0")
+
+
+def _build_service() -> CarbonService:
+    """Repository thật. Thiếu cấu hình -> ConfigError, KHÔNG âm thầm dùng bản in-memory."""
+    parameters = ParameterSet.load(settings.ef_config_path)
+    return CarbonService(SupabaseCarbonRepository(settings), parameters)
+
+
+if settings.supabase_configured:
+    _service_singleton = _build_service()
+    app.dependency_overrides[api._service] = lambda: _service_singleton
+
+app.include_router(api.router)
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    """Nói thật trạng thái. `carbon_production_ready` chỉ true khi GWP đã xác minh."""
+    parameters = ParameterSet.load(settings.ef_config_path)
+    try:
+        parameters.gwp("ch4")
+        parameters.gwp("n2o")
+        gwp_ready = True
+    except Exception:  # noqa: BLE001
+        gwp_ready = False
+
+    return {
+        "status": "ok",
+        "engine_version": ENGINE_VERSION,
+        "ef_config_version": parameters.version,
+        "methodology": parameters.methodology.to_dict(),
+        "supabase_configured": settings.supabase_configured,
+        "carbon_production_ready": gwp_ready,
+        "mrv_compliant": False,
+        "note": (
+            "GWP chưa xác minh (OI-05) nên chưa ra được CO2e thật. "
+            "Chưa lấy được QĐ 4801/QĐ-BNNMT nên KHÔNG được gọi là MRV-compliant."
+        ),
+    }
 
 
-# TODO(1a): POST /v1/sync  - nhan batch Activity offline tu app (FR-1a-07)
-# TODO(1a): POST /v1/carbon/calculate - Activity Data x Emission Factor -> CO2e/kg (FR-1a-08)
-# TODO(1a): nap emission factor tu config/emission_factors.yaml, KHONG hardcode (SRS RB-01)
-# TODO(1b): GET /v1/plots/{id}/efficiency - nuoc/kg, phan/kg, carbon/kg, cost/kg (FR-1b-05)
-# TODO(1c): GET /v1/reports/mrv - xuat bao cao 6 buoc MRV (FR-1c-05)
+# TODO(1a): POST /v1/sync — nhận batch Activity offline từ app (FR-1a-07)
+# TODO(1b): GET /v1/plots/{id}/efficiency (FR-1b-05)
+# TODO(1c): GET /v1/reports/mrv (FR-1c-05)
