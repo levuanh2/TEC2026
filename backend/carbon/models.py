@@ -37,6 +37,16 @@ SCENARIO_TO_REGIME = {
     "continuous_flooding": "irrigated_continuous_flooding",
 }
 
+# Ánh xạ sang enum `public.carbon_scenario` của Supabase: DB gọi là 'actual', engine gọi là
+# 'as_recorded'. Hai tên cho cùng một khái niệm — KHÔNG thêm giá trị enum mới, lớp adapter
+# dịch qua bảng này. Xem supabase/migrations/20260908_carbon_methodology_alignment.sql §1.5.
+SCENARIO_TO_DB = {
+    "as_recorded": "actual",
+    "awd": "awd",
+    "continuous_flooding": "continuous_flooding",
+}
+SCENARIO_FROM_DB = {v: k for k, v in SCENARIO_TO_DB.items()}
+
 # --- Chế độ nước trước vụ (SFp) -------------------------------------------
 # Khớp 1-1 với khoá trong factors.ch4_rice.sfp (IPCC Table 5.13, cột disaggregated).
 PRE_SEASON_REGIMES = (

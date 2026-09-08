@@ -95,7 +95,7 @@ def calculate_carbon(
     warnings: list[str] = []
 
     regime = _resolve_water_regime(activity_data, scenario)
-    cultivation_days = _resolve_cultivation_days(activity_data, params, warnings)
+    cultivation_days = _resolve_cultivation_days(activity_data)
 
     amendments, burned = classify_straw(
         activity_data.straw, activity_data.crop_id, activity_data.area_ha
@@ -124,6 +124,7 @@ def calculate_carbon(
     if yield_warning:
         warnings.append(yield_warning)
 
+    warnings.extend(_missing_record_warnings(activity_data))
     warnings.extend(_scope_warnings(activity_data, amendments))
     warnings.extend(_provenance_warnings(breakdown, params))
 
@@ -204,24 +205,25 @@ def assert_consistent_water_records(crop_id: str, regimes: list[str]) -> str:
     return distinct.pop()
 
 
-def _resolve_cultivation_days(
-    data: CropActivityData, params: ParameterSet, warnings: list[str]
-) -> int:
-    recorded = data.recorded_cultivation_days
-    if recorded is not None:
-        if recorded <= 0:
-            raise MissingActivityDataError(
-                f"Vụ '{data.crop_id}': số ngày canh tác = {recorded}, không hợp lệ."
-            )
-        return recorded
+def _resolve_cultivation_days(data: CropActivityData) -> int:
+    """Số ngày canh tác (t trong Eq 5.1). KHÔNG có giá trị mặc định.
 
-    default = params.factor("ch4_rice", "default_cultivation_days")
-    warnings.append(
-        f"Vụ '{data.crop_id}': thiếu ngày gieo sạ/thu hoạch nên dùng số ngày canh tác mặc định "
-        f"{default.value:g} ngày ({default.source}). Độ không chắc chắn cao — "
-        f"khoảng {default.uncertainty_range}."
-    )
-    return int(default.value)
+    `factors.ch4_rice.default_cultivation_days` (IPCC Table 5.11A) là trung bình VÙNG dùng cho
+    kiểm kê quốc gia. Áp nó cho một thửa ruộng cụ thể trong báo cáo MRV cấp nông hộ là sai
+    phạm vi — engine bắt buộc có ngày thực tế.
+    """
+    recorded = data.recorded_cultivation_days
+    if recorded is None:
+        raise MissingActivityDataError(
+            f"Vụ '{data.crop_id}' thiếu số ngày canh tác: cần 'cultivation_days', hoặc cả "
+            f"'sowing_date' và 'harvest_date'. Engine KHÔNG dùng giá trị mặc định vùng "
+            f"(IPCC Table 5.11A) cho tính toán cấp thửa ruộng."
+        )
+    if recorded <= 0:
+        raise MissingActivityDataError(
+            f"Vụ '{data.crop_id}': số ngày canh tác = {recorded}, không hợp lệ."
+        )
+    return recorded
 
 
 def _per_kg(total: float, yield_kg: float | None) -> tuple[float | None, str | None]:
@@ -257,6 +259,27 @@ def _assert_no_double_counting(amendments, burned, crop_id: str) -> None:
 # -- cảnh báo ---------------------------------------------------------------
 
 
+def _missing_record_warnings(data: CropActivityData) -> list[str]:
+    """Phân biệt "không có dữ liệu" với "bằng không".
+
+    Vụ không có bản ghi rơm rạ cho SFo = 1,0; vụ không có bản ghi phân bón cho N2O = 0.
+    Hai kết quả đó chỉ đúng nếu nông dân THỰC SỰ không bón/không xử lý rơm — nếu chỉ là
+    chưa nhập liệu thì con số bị thiếu. Engine không phân biệt được, nên phải nói ra.
+    """
+    notes: list[str] = []
+    if not data.straw:
+        notes.append(
+            f"Vụ '{data.crop_id}': KHÔNG có bản ghi xử lý rơm rạ nào nên SFo = 1,0 (coi như không "
+            f"bổ sung chất hữu cơ). Nếu thực tế có vùi rơm mà chưa nhập, CH4 đang bị tính thiếu."
+        )
+    if not data.fertilizer:
+        notes.append(
+            f"Vụ '{data.crop_id}': KHÔNG có bản ghi bón phân nào nên N2O = 0. Nếu thực tế có bón "
+            f"mà chưa nhập, phát thải đang bị tính thiếu."
+        )
+    return notes
+
+
 def _scope_warnings(data: CropActivityData, amendments) -> list[str]:
     """Nêu rõ những gì CỐ Ý không nằm trong ranh giới hệ thống."""
     notes: list[str] = []
@@ -279,7 +302,8 @@ def _scope_warnings(data: CropActivityData, amendments) -> list[str]:
 
 def _provenance_warnings(breakdown: list[BreakdownEntry], params: ParameterSet) -> list[str]:
     notes: list[str] = []
-    unverified = sorted(
+
+    missing_source = sorted(
         {
             path
             for entry in breakdown
@@ -287,8 +311,23 @@ def _provenance_warnings(breakdown: list[BreakdownEntry], params: ParameterSet) 
             if not str(entry.provenance[path]).strip()
         }
     )
+    if missing_source:
+        notes.append("Tham số thiếu nguồn trích dẫn: " + ", ".join(missing_source) + ".")
+
+    unverified = sorted(
+        {
+            f"{path} ({status})"
+            for entry in breakdown
+            for path, status in entry.parameter_status.items()
+            if status != STATUS_VERIFIED
+        }
+    )
     if unverified:
-        notes.append("Tham số thiếu nguồn trích dẫn: " + ", ".join(unverified) + ".")
+        notes.append(
+            "Tham số CHƯA ở trạng thái VERIFIED: "
+            + ", ".join(unverified)
+            + ". Kết quả không dùng được cho báo cáo chính thức."
+        )
 
     if params.methodology.tier == 1:
         notes.append(

@@ -10,7 +10,7 @@
 
 | Phần | Trạng thái |
 |---|---|
-| `carbon/` — Carbon Engine | ✅ chạy được, 52 unit test pass |
+| `carbon/` — Carbon Engine | ✅ chạy được, 57 unit test pass |
 | Phương pháp luận CH4 / N2O / đốt rơm | ✅ VERIFIED theo IPCC, trích dẫn số hiệu bảng |
 | **GWP** | ⛔ **PENDING_VERIFICATION — đang chặn toàn bộ việc ra số CO2e** |
 | Hệ số nhiên liệu | ⏳ PENDING_VERIFICATION |
@@ -35,7 +35,7 @@ backend/
 ├── config/
 │   └── emission_factors.yaml    # hệ số + nguồn + status (RB-01)
 ├── tests/
-│   ├── test_carbon_engine.py    # 52 test
+│   ├── test_carbon_engine.py    # 57 test
 │   └── fixtures/
 │       ├── demo_crop.json       # DEMO — dữ liệu bịa
 │       └── test_factors.yaml    # TEST ONLY — NOT SCIENTIFIC VALUES
@@ -113,8 +113,10 @@ Hàm `assert_consistent_water_records()` dành cho lớp adapter đó: gộp nhi
    (`test_no_magic_numbers_in_engine_source`).
 2. **Không tự điền số chưa xác minh.** `status: VERIFIED` chỉ khi đã trích dẫn được số hiệu
    bảng/phương trình trong tài liệu gốc, và ghi số hiệu đó vào `source`.
-3. **Không fallback.** Thiếu tham số → `MissingEmissionFactorError`. Thiếu biến phương pháp
-   luận → `MethodologyGapError`. Thiếu sản lượng → `co2e_per_kg = None`, **không trả 0**.
+3. **Không fallback, không default.** Thiếu tham số → `MissingEmissionFactorError`. Thiếu biến
+   phương pháp luận → `MethodologyGapError`. Thiếu sản lượng → `co2e_per_kg = None`,
+   **không trả 0**. Thiếu số ngày canh tác → lỗi, **không dùng 102 ngày mặc định của IPCC**
+   (đó là trung bình vùng cho kiểm kê quốc gia, sai phạm vi cho cấp thửa ruộng).
 4. **Không double count rơm rạ.** Rơm vùi vào SFo; rơm đốt là nguồn riêng; không bao giờ cả hai.
 5. **Không áp tỷ lệ giảm phẳng cho kịch bản AWD.** Đổi SFw và EF1FR rồi chạy lại công thức —
    AWD giảm CH4 nhưng **tăng** N2O.

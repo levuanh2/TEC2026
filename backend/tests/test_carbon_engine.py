@@ -163,11 +163,50 @@ def test_missing_pre_season_regime_fails(demo, params):
     assert "SFp" in str(exc.value)
 
 
-def test_default_cultivation_days_used_with_warning(demo, params):
+def test_cultivation_days_is_never_defaulted(demo, params):
+    """IPCC Table 5.11A là trung bình VÙNG cho kiểm kê quốc gia.
+
+    Áp nó cho một thửa ruộng cụ thể trong báo cáo MRV cấp nông hộ là sai phạm vi.
+    Engine phải báo lỗi, không được lặng lẽ dùng 102 ngày.
+    """
     demo.cultivation_days = None
+    with pytest.raises(MissingActivityDataError) as exc:
+        calculate_carbon(demo, "awd", params)
+    assert "cultivation_days" in str(exc.value)
+
+
+def test_cultivation_days_derived_from_dates(demo, params):
+    demo.cultivation_days = None
+    demo.sowing_date = "2026-01-01"
+    demo.harvest_date = "2026-04-11"  # 100 ngày
     result = calculate_carbon(demo, "awd", params)
-    assert result.total_co2e_kg == pytest.approx(AWD_TOTAL)  # default = 100 trong TEST FACTORS
-    assert any("mặc định" in w for w in result.warnings)
+    assert result.total_co2e_kg == pytest.approx(AWD_TOTAL)
+
+
+def test_unverified_parameter_status_is_warned(demo, params):
+    """TEST FACTORS có status 'TEST' -> engine phải nói rõ chưa VERIFIED."""
+    result = calculate_carbon(demo, "awd", params)
+    assert any("CHƯA ở trạng thái VERIFIED" in w for w in result.warnings)
+    assert any("gwp.ch4" in w for w in result.warnings)
+
+
+def test_missing_straw_records_warned_not_silently_zero(demo, params):
+    demo.straw = []
+    result = calculate_carbon(demo, "awd", params)
+    assert any("KHÔNG có bản ghi xử lý rơm rạ" in w for w in result.warnings)
+
+
+def test_missing_fertilizer_records_warned_not_silently_zero(demo, params):
+    demo.fertilizer = []
+    result = calculate_carbon(demo, "awd", params)
+    assert any("KHÔNG có bản ghi bón phân" in w for w in result.warnings)
+
+
+def test_breakdown_carries_parameter_status(demo, params):
+    result = calculate_carbon(demo, "awd", params)
+    for entry in result.breakdown:
+        assert entry.parameter_status, entry.source
+        assert set(entry.parameter_status) <= set(entry.provenance)
 
 
 # ===========================================================================

@@ -87,7 +87,7 @@ Eq 5.3 :  SFo       =  (1 + Σ ROAi × CFOAi) ^ 0,59
 | `SFw` | Điều chỉnh theo chế độ nước **trong** vụ | — | Table 5.12 |
 | `SFp` | Điều chỉnh theo chế độ nước **trước** vụ | — | Table 5.13 |
 | `SFo` | Điều chỉnh theo chất hữu cơ bổ sung | — | Eq 5.3 + Table 5.14 |
-| `t` | Số ngày canh tác | ngày | Dữ liệu thực tế; mặc định Table 5.11A = 102 |
+| `t` | Số ngày canh tác | ngày | **Bắt buộc dữ liệu thực tế.** Table 5.11A (102 ngày) là trung bình vùng cho kiểm kê quốc gia — engine KHÔNG dùng làm mặc định |
 | `A` | Diện tích | ha | Dữ liệu thực tế |
 
 Tier 2 (Eq 5.2a) thêm `SFs` (đất) và `SFr` (giống) — **NOT_IMPLEMENTED**, chưa có hệ số VN.
@@ -367,6 +367,16 @@ CO2e/kg  =  CO2e_tổng  /  yield_kg
 6. **Tên 6 bước MRV cần đối chiếu lại.** Báo chí ghi *"giám sát/xác minh"*, tài liệu dự án ghi
    *"Đo đạc/Thẩm định"* (OI-07).
 7. **Giá tín chỉ carbon chưa chốt** — không quy đổi ra tiền (SRS RB-02).
+8. **"Không có bản ghi" ≠ "bằng không".** Vụ không có bản ghi rơm cho SFo = 1,0; không có bản
+   ghi phân cho N2O = 0. Engine không phân biệt được "nông dân thực sự không làm" với "chưa
+   nhập liệu", nên **cảnh báo mỗi lần gặp**. Người đọc báo cáo phải tự kiểm.
+9. **Số ngày canh tác không có giá trị mặc định.** IPCC Table 5.11A (102 ngày, SE Asia) là
+   trung bình VÙNG cho kiểm kê quốc gia — áp cho một thửa ruộng cụ thể là sai phạm vi.
+   Thiếu ngày gieo sạ/thu hoạch thì engine **báo lỗi**, không thay bằng số mặc định.
+10. **Đơn vị nước chưa nhất quán giữa tài liệu.** SRS FR-1b-05 ghi *"lít nước/kg"* nhưng
+    Supabase lưu `irrigation_events.water_volume_m3`. Không ảnh hưởng Carbon Engine (nước
+    không vào công thức phát thải nào) nhưng **chặn module 04** — phải chốt một đơn vị và
+    ghi phép quy đổi tường minh.
 
 ---
 

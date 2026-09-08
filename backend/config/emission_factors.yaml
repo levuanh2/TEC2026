@@ -192,11 +192,14 @@ factors:
         source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.14 (UPDATED)"
         uncertainty_range: "0.36 – 0.57"
 
-    # Chỉ dùng khi thiếu ngày gieo sạ / ngày thu hoạch thực tế.
+    # ⛔ ENGINE KHÔNG DÙNG GIÁ TRỊ NÀY. Giữ lại để tham chiếu/đối chiếu thôi.
+    #    Đây là trung bình VÙNG dùng cho kiểm kê quốc gia; áp cho một thửa ruộng cụ thể
+    #    trong báo cáo MRV cấp nông hộ là sai phạm vi. Thiếu ngày gieo sạ/thu hoạch thì
+    #    engine raise MissingActivityDataError, không thay bằng số này.
     default_cultivation_days:
       value: 102
       unit: "day"
-      status: "VERIFIED"
+      status: "NOT_IMPLEMENTED"
       source: "IPCC 2019 Refinement, Vol.4, Ch.5, Table 5.11A (NEW) — Southeast Asia"
       uncertainty_range: "78 – 150"
 

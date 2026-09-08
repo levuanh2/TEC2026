@@ -49,6 +49,7 @@ class BreakdownEntry:
     formula: str
     factors_used: dict[str, float] = field(default_factory=dict)
     provenance: dict[str, str] = field(default_factory=dict)
+    parameter_status: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,13 +62,18 @@ class BreakdownEntry:
             "formula": self.formula,
             "factors_used": self.factors_used,
             "provenance": self.provenance,
+            "parameter_status": self.parameter_status,
         }
 
 
-def _record(entry_factors: dict[str, Parameter]) -> tuple[dict[str, float], dict[str, str]]:
+def _record(
+    entry_factors: dict[str, Parameter]
+) -> tuple[dict[str, float], dict[str, str], dict[str, str]]:
+    """Trả (giá trị, nguồn, trạng thái xác minh) theo đường dẫn config của từng tham số."""
     used = {p.path: p.value for p in entry_factors.values()}
     provenance = {p.path: (p.source or "") for p in entry_factors.values()}
-    return used, provenance
+    statuses = {p.path: p.status for p in entry_factors.values()}
+    return used, provenance, statuses
 
 
 # ===========================================================================
@@ -219,7 +225,9 @@ class RiceMethaneCalculator:
         ch4_kg = ef_i * activity_value
 
         gwp = params.gwp("ch4")
-        used, provenance = _record({"efc": efc, "sfw": sfw, "sfp": sfp, "gwp_ch4": gwp, **sfo_used})
+        used, provenance, statuses = _record(
+            {"efc": efc, "sfw": sfw, "sfp": sfp, "gwp_ch4": gwp, **sfo_used}
+        )
         used["_derived.sfo"] = sfo_value
         used["_derived.ef_i_kgCH4_per_ha_day"] = ef_i
 
@@ -237,6 +245,7 @@ class RiceMethaneCalculator:
             ),
             factors_used={**used, "_sfo_terms": sfo_terms},  # type: ignore[dict-item]
             provenance=provenance,
+            parameter_status=statuses,
         )
 
 
@@ -298,7 +307,9 @@ class FertilizerN2OCalculator:
         n2o_n_kg = nitrogen_kg * ef1fr.value
         n2o_kg = n2o_n_kg * conversion.value
 
-        used, provenance = _record({"ef1fr": ef1fr, "n2o_n_to_n2o": conversion, "gwp_n2o": gwp})
+        used, provenance, statuses = _record(
+            {"ef1fr": ef1fr, "n2o_n_to_n2o": conversion, "gwp_n2o": gwp}
+        )
         used["_derived.n2o_n_kg"] = n2o_n_kg
 
         warnings.append(
@@ -320,6 +331,7 @@ class FertilizerN2OCalculator:
                 ),
                 factors_used=used,
                 provenance=provenance,
+                parameter_status=statuses,
             ),
             warnings,
         )
@@ -370,8 +382,8 @@ class StrawBurningCalculator:
 
         formula = "IPCC 2006 GL Eq 2.27: L = M_dm × Cf × Gef × 1e-3; CO2e = L × GWP"
 
-        ch4_used, ch4_prov = _record({"cf": cf, "gef_ch4": gef_ch4, "gwp_ch4": gwp_ch4})
-        n2o_used, n2o_prov = _record({"cf": cf, "gef_n2o": gef_n2o, "gwp_n2o": gwp_n2o})
+        ch4_used, ch4_prov, ch4_status = _record({"cf": cf, "gef_ch4": gef_ch4, "gwp_ch4": gwp_ch4})
+        n2o_used, n2o_prov, n2o_status = _record({"cf": cf, "gef_n2o": gef_n2o, "gwp_n2o": gwp_n2o})
 
         return [
             BreakdownEntry(
@@ -384,6 +396,7 @@ class StrawBurningCalculator:
                 formula=formula,
                 factors_used=ch4_used,
                 provenance=ch4_prov,
+                parameter_status=ch4_status,
             ),
             BreakdownEntry(
                 source="straw_burning",
@@ -395,6 +408,7 @@ class StrawBurningCalculator:
                 formula=formula,
                 factors_used=n2o_used,
                 provenance=n2o_prov,
+                parameter_status=n2o_status,
             ),
         ]
 
@@ -421,7 +435,7 @@ class FuelEmissionCalculator:
             if litres <= 0:
                 continue
             ef = params.factor("fuel", fuel_type)
-            used, provenance = _record({"ef": ef})
+            used, provenance, statuses = _record({"ef": ef})
             entries.append(
                 BreakdownEntry(
                     source=f"fuel_{fuel_type}",
@@ -433,6 +447,7 @@ class FuelEmissionCalculator:
                     formula="CO2e = litre × EF_fuel",
                     factors_used=used,
                     provenance=provenance,
+                    parameter_status=statuses,
                 )
             )
 

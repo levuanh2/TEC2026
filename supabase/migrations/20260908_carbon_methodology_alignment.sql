@@ -74,9 +74,17 @@ exception when duplicate_object then null; end $$;
 -- 1.5 Danh mục nguồn phát thải: tách rơm ĐỐT thành nguồn riêng.
 --     Giá trị 'straw' cũ gây hiểu nhầm: rơm VÙI không phải một nguồn phát thải, nó là
 --     đầu vào của SFo (điều chỉnh CH4 ruộng ngập). Chỉ rơm ĐỐT mới là nguồn riêng.
-do $$ begin alter type public.emission_category add value if not exists 'straw_burning_ch4'; exception when others then null; end $$;
-do $$ begin alter type public.emission_category add value if not exists 'straw_burning_n2o'; exception when others then null; end $$;
-do $$ begin alter type public.emission_category add value if not exists 'electricity'; exception when others then null; end $$;
+-- `if not exists` đã idempotent. KHÔNG bọc trong DO...exception when others then null:
+-- nó nuốt cả lỗi thật (sai tên type, thiếu quyền) và migration sẽ "thành công" giả.
+-- PG12+ cho phép ADD VALUE trong transaction block; giá trị mới chỉ không DÙNG được
+-- cho tới khi commit — migration này chỉ thêm, không dùng, nên an toàn.
+alter type public.emission_category add value if not exists 'straw_burning_ch4';
+alter type public.emission_category add value if not exists 'straw_burning_n2o';
+alter type public.emission_category add value if not exists 'electricity';
+
+-- Kịch bản: engine dùng 'as_recorded', enum carbon_scenario hiện có 'actual'.
+-- KHÔNG thêm giá trị mới — hai tên chỉ một khái niệm. Lớp adapter phải ánh xạ
+-- 'as_recorded' (engine) <-> 'actual' (DB). Xem carbon.models.SCENARIO_TO_DB.
 
 -- --------------------------------------------------------------------------
 -- 2. CROP_SEASONS: các biến hoạt động mà công thức CH4 đòi hỏi
@@ -181,6 +189,15 @@ do $$ begin
     );
 exception when duplicate_object then null; end $$;
 
+-- QUY ƯỚC factor_code (bắt buộc, nếu không hai người sẽ đặt hai kiểu):
+--   factor_code = đường dẫn trong backend/config/emission_factors.yaml, bỏ tiền tố 'factors.'
+--   ví dụ  'ch4_rice.efc' · 'ch4_rice.sfw.irrigated_multiple_drainage'
+--          'ch4_rice.sfp.flooded_pre_season_gt_30d' · 'ch4_rice.cfoa.straw_incorporated_lt_30d'
+--          'ch4_rice.sfo_exponent' · 'n2o_fertilizer.ef1fr.single_and_multiple_drainage'
+--          'n2o_fertilizer.n2o_n_to_n2o' · 'straw_burning.gef_ch4' · 'fuel.diesel'
+--   GWP nằm ngoài khối factors -> factor_code 'gwp.ch4', 'gwp.n2o', parameter_kind = 'gwp'.
+-- Nhờ vậy `factors_used` trong kết quả engine map thẳng 1-1 sang emission_factors.factor_code.
+
 comment on column public.emission_factors.parameter_kind is
   'emission_factor | scaling_factor (SFw/SFp/SFo/CFOA) | conversion_factor (44/28) | '
   'gwp | exponent (0,59 của Eq 5.3) | default_value. Ngăn việc ép mọi tham số thành '
@@ -188,6 +205,16 @@ comment on column public.emission_factors.parameter_kind is
 comment on column public.emission_factors.verification_status is
   'Trạng thái xác minh của CHÍNH tham số này (khác ef_status là vòng đời của cả bộ). '
   'Chỉ VERIFIED mới được dùng cho báo cáo.';
+-- result_unit mặc định 'kgCO2e' là bẫy: SFw/SFp/CFOA/exponent không thứ nguyên.
+do $$ begin
+  alter table public.emission_factors
+    add constraint ef_dimensionless_unit_chk
+    check (
+      parameter_kind not in ('scaling_factor','exponent')
+      or result_unit = 'dimensionless'
+    );
+exception when duplicate_object then null; end $$;
+
 comment on column public.emission_factors.source_table_reference is
   'Số hiệu bảng/phương trình chính xác, ví dụ "IPCC 2019 Refinement Vol.4 Ch.5 Table 5.12". '
   'Bắt buộc khi verification_status = VERIFIED.';
@@ -207,6 +234,20 @@ do $$ begin
   alter table public.carbon_breakdowns
     add constraint carbon_breakdown_gas_kg_chk
     check (gas_kg is null or gas_kg >= 0);
+exception when duplicate_object then null; end $$;
+
+-- Dòng CH4 lúa dùng 5 tham số (EFc, SFw, SFp, CFOA, GWP) nhưng emission_factor_id là
+-- NOT NULL và chỉ trỏ được MỘT dòng. Quy ước bắt buộc:
+--   emission_factor_id -> tham số CHÍNH của nguồn (CH4 lúa: EFc; N2O: EF1FR; đốt rơm: Gef;
+--                         nhiên liệu: EF nhiên liệu)
+--   factor_value_used  -> hệ số HIỆU DỤNG sau khi nhân hết (CH4 lúa: EFi = EFc×SFw×SFp×SFo),
+--                         KHÔNG phải giá trị thô của emission_factor_id
+--   formula_metadata   -> toàn bộ tham số + nguồn + trạng thái + giá trị trung gian
+-- Không có formula_metadata thì dòng CH4 không tái hiện được -> ràng buộc dưới đây bắt buộc.
+do $$ begin
+  alter table public.carbon_breakdowns
+    add constraint carbon_breakdown_multiparam_needs_metadata_chk
+    check (category <> 'irrigation_ch4' or formula_metadata is not null);
 exception when duplicate_object then null; end $$;
 
 comment on column public.carbon_breakdowns.formula_metadata is
@@ -245,32 +286,49 @@ comment on column public.carbon_calculations.warnings is
   'xác minh, phần nào ngoài ranh giới hệ thống).';
 
 -- --------------------------------------------------------------------------
--- 7. VIEW: sửa v_carbon_results để lộ thông tin provenance mới
+-- 7. VIEW: THÊM view mới, KHÔNG thay view cũ
 -- --------------------------------------------------------------------------
--- Chỉ thêm cột, không đổi ý nghĩa cột cũ.
+-- ⛔ KHÔNG dùng `create or replace view public.v_carbon_results`. Hai lý do:
+--
+--   1. View gốc có cột theo thứ tự (calculation_id, production_batch_id, scenario,
+--      engine_version, ef_config_version, total_co2e_kg, ...). CREATE OR REPLACE VIEW
+--      chỉ được PHỤ THÊM cột vào cuối, không được đổi tên/thứ tự cột đang có
+--      -> lệnh sẽ FAIL.
+--   2. View gốc khai báo `with (security_invoker = true)`. Replace mà không khai lại
+--      sẽ reset option đó -> view chạy bằng quyền của owner -> **BỎ QUA RLS**.
+--      Đây là lỗi bảo mật, không phải lỗi cú pháp.
+--
+-- Vì vậy: tạo view MỚI, view cũ giữ nguyên không đụng tới.
 
-create or replace view public.v_carbon_results as
+create or replace view public.v_carbon_results_detailed
+with (security_invoker = true)
+as
 select
   c.id                      as calculation_id,
   c.production_batch_id,
   c.scenario,
-  c.status,
+  c.engine_version,
+  efs.version_code          as ef_config_version,
   c.total_co2e_kg,
   c.yield_kg,
   c.co2e_per_kg,
-  c.engine_version,
+  c.status,
+  c.failure_reason,
+  c.calculated_at,
   c.input_hash,
   c.methodology_tier,
   c.mrv_compliant,
   c.warnings,
-  c.calculated_at,
-  s.version_code            as factor_set_version,
-  s.methodology_name,
-  s.methodology_version,
-  s.source_name,
-  s.source_url
+  efs.methodology_name,
+  efs.methodology_version,
+  efs.source_name,
+  efs.source_url
 from public.carbon_calculations c
-join public.emission_factor_sets s on s.id = c.factor_set_id;
+join public.emission_factor_sets efs on efs.id = c.factor_set_id;
+
+comment on view public.v_carbon_results_detailed is
+  'Bản mở rộng của v_carbon_results, thêm provenance phương pháp luận. '
+  'security_invoker = true để RLS của carbon_calculations vẫn được áp cho người truy vấn.';
 
 commit;
 

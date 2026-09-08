@@ -32,6 +32,8 @@ from .methodology import (
 )
 from .models import (
     PRE_SEASON_REGIMES,
+    SCENARIO_FROM_DB,
+    SCENARIO_TO_DB,
     SCENARIOS,
     STRAW_METHODS,
     WATER_REGIMES,
@@ -50,6 +52,8 @@ __all__ = [
     "ENGINE_VERSION",
     "PRE_SEASON_REGIMES",
     "SCENARIOS",
+    "SCENARIO_FROM_DB",
+    "SCENARIO_TO_DB",
     "STRAW_METHODS",
     "WATER_REGIMES",
     "BreakdownEntry",
