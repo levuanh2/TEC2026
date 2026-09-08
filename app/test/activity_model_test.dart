@@ -6,7 +6,7 @@ import 'package:agricarbon_app/models/activity.dart';
 void main() {
   test('Activity round-trip qua local map giữ nguyên payload lồng nhau', () {
     final original = Activity(
-      id: 'client-uuid-1',
+      clientEventId: 'client-uuid-1',
       cropSeasonId: 'season-1',
       type: 'straw_management',
       occurredAt: DateTime(2026, 4, 10),
@@ -22,7 +22,7 @@ void main() {
 
     final restored = Activity.fromLocalMap(original.toLocalMap());
 
-    expect(restored.id, original.id);
+    expect(restored.clientEventId, original.clientEventId);
     expect(restored.type, 'straw_management');
     expect(restored.payload['dry_matter_fraction'], 0.85);
     expect(restored.payload['days_before_cultivation'], 10);
@@ -30,20 +30,25 @@ void main() {
     expect(restored.syncState, SyncState.pending);
   });
 
-  test('client_event_id (id) ổn định qua copyWith khi đổi sync state', () {
+  test('clientEventId ổn định qua copyWith khi đổi sync state — khác serverActivityId', () {
     final a = Activity(
-      id: 'stable-id',
+      clientEventId: 'stable-client-id',
       cropSeasonId: 's1',
       type: 'harvest',
       occurredAt: DateTime(2026, 5, 1),
       payload: {'yield_kg': 5200},
       createdAt: DateTime.now(),
     );
-    final synced = a.copyWith(syncState: SyncState.synced, serverActivityId: 'server-1');
+    expect(a.serverActivityId, isNull); // chưa đồng bộ -> chưa có id thật
 
-    // id KHÔNG đổi qua trạng thái đồng bộ - đây là client_event_id gửi lên server,
-    // đổi nó sẽ phá idempotency khi retry.
-    expect(synced.id, 'stable-id');
-    expect(synced.serverActivityId, 'server-1');
+    final synced = a.copyWith(syncState: SyncState.synced, serverActivityId: 'server-uuid-1');
+
+    // clientEventId KHÔNG đổi qua trạng thái đồng bộ - đây là client_event_id gửi
+    // lên server, đổi nó sẽ phá idempotency khi retry.
+    expect(synced.clientEventId, 'stable-client-id');
+    // serverActivityId là activities.id THẬT trên Supabase — một giá trị KHÁC,
+    // chỉ có sau khi sync xong. Hai id này không bao giờ được lẫn vào nhau.
+    expect(synced.serverActivityId, 'server-uuid-1');
+    expect(synced.clientEventId, isNot(synced.serverActivityId));
   });
 }

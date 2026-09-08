@@ -43,20 +43,26 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
       _syncing = true;
       _syncMessage = null;
     });
+    // Đồng bộ có thể mất vài giây — người dùng hoàn toàn có thể bấm Back trước
+    // khi xong. Mọi setState SAU await đều phải kiểm `mounted` trước, không chỉ
+    // ở finally — gọi setState trên State đã dispose là crash thật (không phải
+    // lỗi lý thuyết), xem app/README.md phần audit.
+    String? message;
     try {
       final summary = await widget.services.sync.syncAll();
-      setState(() {
-        _syncMessage = summary.hasErrors
-            ? 'Đồng bộ xong nhưng còn ${summary.errors.length} lỗi — sẽ thử lại lần sau.'
-            : 'Đồng bộ xong: ${summary.activitiesSynced} hoạt động, '
-                '${summary.plotsSynced} thửa, ${summary.cropSeasonsSynced} vụ.';
-      });
+      message = summary.hasErrors
+          ? 'Đồng bộ xong nhưng còn ${summary.errors.length} lỗi — sẽ thử lại lần sau.'
+          : 'Đồng bộ xong: ${summary.activitiesSynced} hoạt động, '
+              '${summary.plotsSynced} thửa, ${summary.cropSeasonsSynced} vụ.';
     } catch (e) {
-      setState(() => _syncMessage = 'Không có mạng hoặc lỗi kết nối — thử lại sau.');
-    } finally {
-      if (mounted) setState(() => _syncing = false);
-      await _load();
+      message = 'Không có mạng hoặc lỗi kết nối — thử lại sau.';
     }
+    if (!mounted) return;
+    setState(() {
+      _syncMessage = message;
+      _syncing = false;
+    });
+    await _load();
   }
 
   Future<void> _openActivityForm(String type) async {

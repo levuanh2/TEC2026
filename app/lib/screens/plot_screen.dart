@@ -6,7 +6,7 @@ import '../models/farm.dart';
 import '../models/plot.dart';
 import 'crop_season_screen.dart';
 
-const _uuid = Uuid();
+final _uuid = Uuid();
 
 class PlotScreen extends StatefulWidget {
   const PlotScreen({super.key, required this.services, required this.farm});

@@ -5,7 +5,7 @@ import '../app_services.dart';
 import '../models/activity.dart';
 import '../models/activity_field_spec.dart';
 
-const _uuid = Uuid();
+final _uuid = Uuid();
 
 /// Form động theo `kActivityFieldSpecs` — 1 file thay vì 7 file gần giống
 /// nhau cho từng loại hoạt động (§11–15).
@@ -32,7 +32,8 @@ class ActivityFormScreen extends StatefulWidget {
 class _ActivityFormScreenState extends State<ActivityFormScreen> {
   final _controllers = <String, TextEditingController>{};
   final _selectValues = <String, String?>{};
-  final _boolValues = <String, bool>{};
+  final _boolValues = <String, bool>{}; // FieldKind.boolean — mặc định false, không nhạy methodology
+  final _nullableBoolValues = <String, bool?>{}; // FieldKind.nullableBoolean — null = CHƯA CHỌN, không gửi lên
   final _noteController = TextEditingController();
   DateTime _occurredAt = DateTime.now();
 
@@ -44,6 +45,8 @@ class _ActivityFormScreenState extends State<ActivityFormScreen> {
     for (final spec in _specs) {
       if (spec.kind == FieldKind.boolean) {
         _boolValues[spec.key] = false;
+      } else if (spec.kind == FieldKind.nullableBoolean) {
+        _nullableBoolValues[spec.key] = null; // CHƯA CHỌN — không tự default
       } else {
         _controllers[spec.key] = TextEditingController();
       }
@@ -84,6 +87,14 @@ class _ActivityFormScreenState extends State<ActivityFormScreen> {
         case FieldKind.boolean:
           payload[spec.key] = _boolValues[spec.key] ?? false;
           break;
+        case FieldKind.nullableBoolean:
+          // Chưa chọn -> KHÔNG đưa key vào payload. Gửi "false" thay cho "chưa
+          // biết" chính là default một methodology input — cấm (xem
+          // activity_field_spec.dart). Backend tự báo MethodologyGapError khi
+          // thiếu, đúng như thiết kế.
+          final v = _nullableBoolValues[spec.key];
+          if (v != null) payload[spec.key] = v;
+          break;
         case FieldKind.number:
           final raw = _controllers[spec.key]?.text.trim() ?? '';
           if (raw.isNotEmpty) payload[spec.key] = double.tryParse(raw.replaceAll(',', '.'));
@@ -100,7 +111,7 @@ class _ActivityFormScreenState extends State<ActivityFormScreen> {
     }
 
     final activity = Activity(
-      id: _uuid.v4(),
+      clientEventId: _uuid.v4(),
       cropSeasonId: widget.cropSeasonId,
       type: widget.activityType,
       occurredAt: _occurredAt,
@@ -170,6 +181,36 @@ class _ActivityFormScreenState extends State<ActivityFormScreen> {
           title: Text(spec.label),
           value: _boolValues[spec.key] ?? false,
           onChanged: (v) => setState(() => _boolValues[spec.key] = v),
+        );
+        break;
+      case FieldKind.nullableBoolean:
+        final current = _nullableBoolValues[spec.key];
+        field = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(spec.label),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Chưa rõ'),
+                  selected: current == null,
+                  onSelected: (_) => setState(() => _nullableBoolValues[spec.key] = null),
+                ),
+                ChoiceChip(
+                  label: const Text('Có'),
+                  selected: current == true,
+                  onSelected: (_) => setState(() => _nullableBoolValues[spec.key] = true),
+                ),
+                ChoiceChip(
+                  label: const Text('Không'),
+                  selected: current == false,
+                  onSelected: (_) => setState(() => _nullableBoolValues[spec.key] = false),
+                ),
+              ],
+            ),
+          ],
         );
         break;
       case FieldKind.number:

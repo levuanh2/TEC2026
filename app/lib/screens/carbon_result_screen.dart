@@ -28,15 +28,23 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
   }
 
   Future<void> _loadLatest() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
+      // `latest()` tự trả null cho trường hợp "hợp lệ, chỉ chưa từng tính" —
+      // đây là empty state bình thường, không set _error.
+      // Bất kỳ exception nào rơi tới đây (401 hết phiên, crop_not_found do RLS
+      // từ chối, lỗi mạng, 500...) là lỗi THẬT, phải hiện cho người dùng thấy —
+      // không được nuốt im lặng (Phase 17: loading/success/empty/error/offline).
       final result = await widget.services.carbonApi.latest(
         cropSeasonId: widget.cropSeasonId,
         scenario: _scenario,
       );
       setState(() => _result = result);
     } catch (e) {
-      // Chưa từng tính -> không phải lỗi hiển thị, chỉ để trống, mời bấm Tính.
+      setState(() => _error = CarbonApiService.friendlyMessage(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

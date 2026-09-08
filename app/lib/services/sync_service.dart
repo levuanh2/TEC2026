@@ -91,7 +91,7 @@ class SyncService {
         continue; // vụ canh tác cha chưa có id thật trên server — thử lại lượt sau
       }
       try {
-        await _db.updateActivitySyncState(activity.id, state: SyncState.syncing);
+        await _db.updateActivitySyncState(activity.clientEventId, state: SyncState.syncing);
         final batchId = await _ensureDefaultBatch(activity.cropSeasonId);
 
         final activityRow = await _client
@@ -104,7 +104,7 @@ class SyncService {
                 'recorded_at': activity.createdAt.toIso8601String(),
                 'source': 'mobile_offline',
                 'device_id': deviceId,
-                'client_event_id': activity.id,
+                'client_event_id': activity.clientEventId,
                 if (activity.note != null) 'note': activity.note,
               },
               onConflict: 'device_id,client_event_id',
@@ -122,14 +122,14 @@ class SyncService {
         }
 
         await _db.updateActivitySyncState(
-          activity.id,
+          activity.clientEventId,
           state: SyncState.synced,
           serverActivityId: serverActivityId,
         );
         summary.activitiesSynced++;
       } catch (e) {
         await _db.updateActivitySyncState(
-          activity.id,
+          activity.clientEventId,
           state: SyncState.failed,
           error: e.toString(),
         );

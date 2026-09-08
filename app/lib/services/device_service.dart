@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 const _kInstallationIdKey = 'agricarbon_installation_id';
-const _kUuid = Uuid();
+final _kUuid = Uuid();
 
 /// Định danh thiết bị ổn định qua các lần mở app (FR-1a-07 cần device_id để
 /// khử trùng lặp khi đồng bộ) + đăng ký/lấy `devices.id` thật trên Supabase.

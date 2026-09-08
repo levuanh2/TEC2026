@@ -1,7 +1,12 @@
 /// Đặc tả field cho từng loại Activity — 1 form render động thay vì 7 file gần
 /// giống nhau. Field `key` khớp thẳng tên cột bảng chi tiết trên Supabase
 /// (xem sync_service.dart) để không cần một tầng đổi tên nào ở giữa.
-enum FieldKind { text, number, integer, select, boolean }
+/// `nullableBoolean` khác `boolean` ở chỗ có 3 trạng thái: Có / Không / CHƯA CHỌN.
+/// Dùng cho field mà backend coi "chưa biết" khác hẳn "false" (methodology input
+/// như `returned_to_field` — không được tự default, xem CARBON_METHOD.md).
+/// `boolean` (2 trạng thái, mặc định false) chỉ dùng cho field KHÔNG ảnh hưởng
+/// methodology (hiện chưa field nào dùng, giữ lại cho tương lai).
+enum FieldKind { text, number, integer, select, boolean, nullableBoolean }
 
 class FieldOption {
   const FieldOption(this.value, this.label);
@@ -140,8 +145,9 @@ const kActivityFieldSpecs = <String, List<ActivityFieldSpec>>{
     ActivityFieldSpec(
       key: 'returned_to_field',
       label: 'Có trả lại ruộng không',
-      kind: FieldKind.boolean,
-      hint: 'Chỉ áp dụng khi ủ compost',
+      kind: FieldKind.nullableBoolean,
+      hint: 'Chỉ áp dụng khi ủ compost. Để "Chưa rõ" nếu không chắc — '
+          'KHÔNG mặc định là "Không", hệ thống sẽ hỏi lại khi cần.',
     ),
     ActivityFieldSpec(key: 'total_cost_vnd', label: 'Chi phí (đồng)', kind: FieldKind.number),
   ],

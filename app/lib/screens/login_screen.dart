@@ -32,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => FarmScreen(services: widget.services)),
       );
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = 'Đăng nhập thất bại. Kiểm tra lại email/mật khẩu.');
     } finally {
       if (mounted) setState(() => _loading = false);

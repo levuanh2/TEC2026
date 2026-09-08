@@ -27,11 +27,17 @@ class _FarmScreenState extends State<FarmScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       await widget.services.sync.pullFarmsPlotsSeasons();
-    } catch (_) {
-      // Offline hoặc lỗi mạng — vẫn hiện được cache local, không chặn màn hình.
+    } catch (e) {
+      // Offline/lỗi mạng: KHÔNG chặn màn hình — vẫn hiện cache local (offline-first).
+      // Nhưng nếu cache cũng trống, phải nói rõ "chưa kiểm tra được" khác với
+      // "chắc chắn chưa có hộ nào" — hai trạng thái khác nhau (Phase 17).
+      _error = 'Không kết nối được máy chủ. Đang hiện dữ liệu đã lưu trên máy (nếu có).';
     }
     final farms = await widget.services.db.listFarms();
     if (!mounted) return;
@@ -111,9 +117,19 @@ class _FarmScreenState extends State<FarmScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text('Chưa có hộ/trang trại nào.'),
+                      if (_error != null) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text(_error!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.orange)),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      const Text('Chưa có hộ/trang trại nào (trên máy này).'),
                       const SizedBox(height: 12),
                       ElevatedButton(onPressed: _createFarm, child: const Text('Tạo mới')),
+                      TextButton(onPressed: _load, child: const Text('Thử tải lại')),
                     ],
                   ),
                 )

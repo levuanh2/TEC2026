@@ -26,11 +26,20 @@ const kActivityTypes = <String>[
 
 /// Một hoạt động canh tác, lưu offline trước, đồng bộ sau.
 ///
-/// `id` = `client_event_id` gửi lên Supabase (client tự sinh — server KHÔNG sinh
-/// thay). Ghép với `deviceId` tạo khoá duy nhất `(device_id, client_event_id)` —
-/// gửi lại vẫn idempotent, retry an toàn (FR-1a-07).
+/// `clientEventId` ≠ id thật trên Supabase (`activities.id`, server tự sinh bằng
+/// `gen_random_uuid()`). Đây là hai giá trị KHÁC NHAU, cố tình tách rõ:
+///
+///   - `clientEventId` : app tự sinh (UUID v4) lúc tạo activity, KHÔNG BAO GIỜ đổi.
+///                       Gửi lên Supabase làm cột `activities.client_event_id`.
+///                       Ghép với `device_id` tạo khoá duy nhất
+///                       `(device_id, client_event_id)` — gửi lại vẫn idempotent,
+///                       retry an toàn (FR-1a-07). Cũng là khoá chính trong SQLite
+///                       cục bộ (cột `id` trong bảng — chi tiết lưu trữ nội bộ,
+///                       không phải "id thật" theo nghĩa server).
+///   - `serverActivityId` : `activities.id` thật, CHỈ có sau khi đồng bộ thành
+///                       công. `null` nghĩa là bản ghi này server chưa từng thấy.
 class Activity {
-  final String id; // = client_event_id
+  final String clientEventId;
   final String cropSeasonId;
   final String type;
   final DateTime occurredAt;
@@ -39,10 +48,10 @@ class Activity {
   final SyncState syncState;
   final String? syncError;
   final DateTime createdAt;
-  final String? serverActivityId; // id thật trên Supabase, có sau khi sync xong
+  final String? serverActivityId; // activities.id thật trên Supabase, sau khi sync xong
 
   const Activity({
-    required this.id,
+    required this.clientEventId,
     required this.cropSeasonId,
     required this.type,
     required this.occurredAt,
@@ -60,7 +69,7 @@ class Activity {
     String? serverActivityId,
   }) =>
       Activity(
-        id: id,
+        clientEventId: clientEventId,
         cropSeasonId: cropSeasonId,
         type: type,
         occurredAt: occurredAt,
@@ -72,8 +81,10 @@ class Activity {
         serverActivityId: serverActivityId ?? this.serverActivityId,
       );
 
+  /// `map['id']` ở đây là cột khoá chính CỤC BỘ trong SQLite — về giá trị nó
+  /// luôn bằng `clientEventId` (xem toLocalMap), không phải server id.
   factory Activity.fromLocalMap(Map<String, dynamic> map) => Activity(
-        id: map['id'] as String,
+        clientEventId: map['id'] as String,
         cropSeasonId: map['crop_season_id'] as String,
         type: map['type'] as String,
         occurredAt: DateTime.parse(map['occurred_at'] as String),
@@ -86,7 +97,7 @@ class Activity {
       );
 
   Map<String, dynamic> toLocalMap() => {
-        'id': id,
+        'id': clientEventId, // khoá chính CỤC BỘ = clientEventId, cố ý
         'crop_season_id': cropSeasonId,
         'type': type,
         'occurred_at': occurredAt.toIso8601String(),

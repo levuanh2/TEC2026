@@ -23,12 +23,26 @@ class CarbonApiException implements Exception {
 
 /// Gọi FastAPI backend cho CO2e. KHÔNG tính carbon trong app — Carbon Engine
 /// chỉ chạy ở backend (docs/BACKEND_1A.md). App chỉ gửi request + hiển thị kết quả.
+///
+/// Nhận `http.Client` qua constructor (mặc định tự tạo) — KHÔNG thêm package
+/// mock nào, test tự viết 1 `http.BaseClient` giả (xem test/carbon_api_service_test.dart)
+/// để kiểm request/response mà không cần mạng thật.
 class CarbonApiService {
-  CarbonApiService(this._auth);
-  final AuthService _auth;
+  CarbonApiService(AuthService auth, {http.Client? httpClient})
+      : _tokenProvider = (() => auth.accessToken),
+        _http = httpClient ?? http.Client();
+
+  /// Chỉ dùng cho test — bơm thẳng token giả, không cần khởi tạo `Supabase`
+  /// thật (AuthService.accessToken đọc `Supabase.instance`, không gọi được
+  /// trong unit test thuần không có binding Flutter/Supabase).
+  CarbonApiService.withTokenProvider(this._tokenProvider, {http.Client? httpClient})
+      : _http = httpClient ?? http.Client();
+
+  final String? Function() _tokenProvider;
+  final http.Client _http;
 
   Map<String, String> get _headers {
-    final token = _auth.accessToken;
+    final token = _tokenProvider();
     if (token == null) {
       throw CarbonApiException(401, 'missing_authorization', 'Chưa đăng nhập.');
     }
@@ -42,7 +56,7 @@ class CarbonApiService {
     required String cropSeasonId,
     String scenario = kScenarioAsRecorded,
   }) async {
-    final response = await http.post(
+    final response = await _http.post(
       Uri.parse('${AppConfig.backendBaseUrl}/v1/carbon/calculate'),
       headers: _headers,
       body: jsonEncode({
@@ -59,8 +73,18 @@ class CarbonApiService {
   }) async {
     final uri = Uri.parse('${AppConfig.backendBaseUrl}/v1/crop-seasons/$cropSeasonId/carbon')
         .replace(queryParameters: scenario == null ? null : {'scenario': scenario});
-    final response = await http.get(uri, headers: _headers);
-    if (response.statusCode == 404) return null; // chưa có bản tính nào — không phải lỗi
+    final response = await _http.get(uri, headers: _headers);
+
+    // 404 có HAI nguyên nhân khác hẳn nhau (backend/api.py) — không được gộp làm một:
+    //   error = "no_calculation" -> vụ hợp lệ, chỉ chưa từng tính -> im lặng trả null,
+    //           màn hình hiện "chưa tính" là đúng.
+    //   error = "crop_not_found" -> RLS từ chối HOẶC vụ không tồn tại -> đây LÀ lỗi,
+    //           phải ném ra để UI báo đúng, không được âm thầm coi là "chưa tính".
+    if (response.statusCode == 404) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final errorCode = (body['detail'] as Map<String, dynamic>?)?['error'] as String?;
+      if (errorCode == 'no_calculation') return null;
+    }
     return _parseOrThrow(response);
   }
 
@@ -79,7 +103,20 @@ class CarbonApiService {
 
   /// Thông báo tiếng Việt theo đúng docs/BACKEND_1A.md §9 — không hiện mã lỗi thô.
   static String friendlyMessage(Object error) {
-    if (error is! CarbonApiException) return 'Có lỗi hệ thống. Vui lòng thử lại sau.';
+    if (error is! CarbonApiException) {
+      // http package/SocketException không có type ổn định giữa các nền tảng —
+      // dò theo nội dung message là cách thực dụng để phân biệt "mất mạng" với
+      // "lỗi khác" (Phase 17 cần trạng thái "offline" riêng, không gộp chung
+      // "error"). Không hoàn hảo, nhưng bao trùm trường hợp thường gặp nhất.
+      final msg = error.toString().toLowerCase();
+      if (msg.contains('socketexception') ||
+          msg.contains('failed host lookup') ||
+          msg.contains('connection refused') ||
+          msg.contains('network is unreachable')) {
+        return 'Không có kết nối mạng. Dữ liệu vẫn được lưu trên máy — thử lại khi có mạng.';
+      }
+      return 'Có lỗi hệ thống. Vui lòng thử lại sau.';
+    }
     switch (error.statusCode) {
       case 401:
         return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
