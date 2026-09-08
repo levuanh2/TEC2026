@@ -12,10 +12,15 @@ nhiều hộ trong một HTX, phân quyền 3 vai trò (Nông dân / Quản lý 
 
 ## Stack
 
-Hiện tại: 1 file `index.html` tĩnh, dữ liệu mock. Cố ý — 1c là lớp có thể cắt, không
-đáng dựng build toolchain trước khi 1a và 1b xong. Nâng lên Vite + React chỉ khi
-dashboard thật sự cần gọi API động.
+Vite + React + `@supabase/supabase-js`. Biến browser chỉ nhận publishable key; service-role
+key không bao giờ xuất hiện trong dashboard. Trạng thái đăng nhập được lấy qua Supabase Auth,
+và các truy vấn dữ liệu sau này phải dựa vào RLS thay vì lọc dữ liệu ở giao diện.
 
 ## Chạy
 
-Mở `index.html` bằng trình duyệt. Không cần build, không cần cài gì.
+```bash
+npm install
+npm run dev
+```
+
+Sao chép `.env.example` thành `.env` và điền URL + publishable key. Không commit `.env`.
