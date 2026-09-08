@@ -10,9 +10,30 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Auth + ghi/doc truc tiep Supabase (RLS quyet dinh, khong qua backend rieng).
+  # Token luu boi chinh package nay (flutter_secure_storage o duoi), khong tu che.
+  supabase_flutter: ^2.5.0
+
+  # Luu offline local. sqflite_common_ffi KHONG dua vao day - chi can cho unit test
+  # tren desktop, khai trong dev_dependencies.
+  sqflite: ^2.3.0
+  path: ^1.9.0
+
+  # UUID cho client_event_id (client_id) va installation_id cua device.
+  uuid: ^4.4.0
+
+  # Luu installation_id on dinh qua cac lan mo app - khong dung device_info_plus
+  # (khong can thong tin thiet bi that, chi can 1 UUID on dinh).
+  shared_preferences: ^2.2.0
+
+  # Goi FastAPI backend (POST /v1/carbon/calculate, GET .../carbon).
+  http: ^1.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Chay test cho local_database.dart tren desktop (khong can emulator).
+  sqflite_common_ffi: ^2.3.0
 
 flutter:
   uses-material-design: true

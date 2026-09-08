@@ -1,22 +1,47 @@
-// AgriCarbon mobile app - entrypoint.
-// Lop 1a (Walking Skeleton). Nguoi A phu trach.
-// Dac ta: docs/modules/01-mobile-app.md
-
 import 'package:flutter/material.dart';
 
-void main() => runApp(const AgriCarbonApp());
+import 'app_services.dart';
+import 'config.dart';
+import 'screens/farm_screen.dart';
+import 'screens/login_screen.dart';
+import 'services/auth_service.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AuthService.init();
+  final services = await AppServices.bootstrap();
+  runApp(AgriCarbonApp(services: services));
+}
 
 class AgriCarbonApp extends StatelessWidget {
-  const AgriCarbonApp({super.key});
+  const AgriCarbonApp({super.key, required this.services});
+  final AppServices services;
 
   @override
   Widget build(BuildContext context) {
-    // TODO(1a): form nhat ky canh tac theo khung "1 phai 5 giam" (FR-1a-01..05)
-    // TODO(1a): luu offline SQLite + hang doi dong bo (FR-1a-06, FR-1a-07)
-    // TODO(1a): man hinh hien thi CO2e/kg tra ve tu Carbon Engine (FR-1a-10)
+    if (!AppConfig.isConfigured) {
+      return const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Thiếu cấu hình. Chạy app kèm --dart-define SUPABASE_URL, '
+                'SUPABASE_PUBLISHABLE_KEY, BACKEND_BASE_URL (xem app/README.md).',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return MaterialApp(
       title: 'AgriCarbon',
-      home: const Scaffold(body: Center(child: Text('AgriCarbon'))),
+      theme: ThemeData(colorSchemeSeed: Colors.green, useMaterial3: true),
+      home: services.auth.isSignedIn
+          ? FarmScreen(services: services)
+          : LoginScreen(services: services),
     );
   }
 }
