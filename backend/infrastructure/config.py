@@ -40,6 +40,10 @@ class Settings:
     ef_config_path: Path
     # Bộ hệ số phải đã được import vào Supabase với version_code trùng YAML.
     require_factor_set_in_db: bool
+    # Origin trình duyệt được phép gọi API (CORS) — KHÔNG phải secret, không liên
+    # quan RLS/auth. Thiếu origin đúng = browser chặn fetch trước khi tới được
+    # backend (khác hẳn lỗi 401/403 — request không bao giờ rời trình duyệt).
+    cors_origins: list[str]
 
     @property
     def supabase_configured(self) -> bool:
@@ -75,4 +79,12 @@ def load_settings(dotenv_path: Path | None = None) -> Settings:
         ef_config_path=Path(os.environ.get("AGRICARBON_EF_CONFIG") or DEFAULT_EF_CONFIG),
         require_factor_set_in_db=os.environ.get("AGRICARBON_REQUIRE_FACTOR_SET_IN_DB", "1")
         != "0",
+        cors_origins=[
+            origin.strip()
+            for origin in os.environ.get(
+                "AGRICARBON_CORS_ORIGINS",
+                "http://localhost:5173,http://127.0.0.1:5173",
+            ).split(",")
+            if origin.strip()
+        ],
     )

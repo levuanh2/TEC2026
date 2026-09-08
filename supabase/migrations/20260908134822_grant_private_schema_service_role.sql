@@ -1,0 +1,11 @@
+-- Bug thật phát hiện qua hosted E2E (SMOKE-TEST-REST): baseline migration chỉ
+-- `grant usage on schema private to authenticated;` — KHÔNG cấp cho service_role.
+-- Mọi bảng có trigger gọi hàm private.* (mrv_evidence, mrv_exports, plant_images,
+-- recommendations, ...) sẽ CHẶN insert từ service-role client với lỗi
+-- "permission denied for schema private", dù service_role bypass RLS bình thường —
+-- đây là schema-level GRANT, khác với RLS, service_role KHÔNG tự động có.
+--
+-- Additive-only: chỉ thêm 1 GRANT, không đổi/xoá gì đã có. An toàn chạy trên dữ
+-- liệu thật, không cần rollback đặc biệt (REVOKE USAGE ON SCHEMA private FROM
+-- service_role; là thao tác ngược nếu cần).
+grant usage on schema private to service_role;

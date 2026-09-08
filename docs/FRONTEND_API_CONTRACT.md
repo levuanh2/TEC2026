@@ -1,5 +1,12 @@
 # Frontend API Contract — Flutter + React dùng chung
 
+> ⚠️ **Superseded bởi `docs/API_FOR_FLUTTER.md`** (2026-09-08, sau khi thêm đầy
+> đủ route đọc dashboard). Tài liệu này giữ lại vì §5 vẫn đúng (kiến trúc ghi
+> trực tiếp Supabase). **Hình dạng lỗi bên dưới (`detail.error` là string) đã
+> LỖI THỜI** — API giờ trả `detail.error.code`/`detail.error.message` (nested)
+> cho MỌI route, xem `docs/API_FOR_FLUTTER.md` §0. Response 200 (trường dữ
+> liệu carbon) dưới đây vẫn đúng, không đổi.
+
 Phiên bản: 0.1 · Ngày: 2026-09-08
 Nguồn sự thật: `backend/api.py`, `backend/infrastructure/auth.py` (đọc code thật, không
 suy từ prompt cũ). Mọi thay đổi hợp đồng phải sửa file này CÙNG lúc với `backend/api.py`.

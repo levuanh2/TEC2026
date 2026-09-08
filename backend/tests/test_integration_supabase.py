@@ -428,7 +428,7 @@ def test_post_then_get_roundtrip(client):
 def test_get_without_calculation_returns_404(client):
     response = client.get(f"/v1/crop-seasons/{rows.CROP_ID}/carbon")
     assert response.status_code == 404
-    assert response.json()["detail"]["error"] == "no_calculation"
+    assert response.json()["detail"]["error"]["code"] == "no_calculation"
 
 
 def test_get_never_returns_failed_calculation(repo, client):
@@ -471,8 +471,8 @@ def test_api_missing_gwp_returns_422(bundle, repo):
     )
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert detail["error"] == "missing_emission_factor"
-    assert "gwp.ch4" in detail["message"]
+    assert detail["error"]["code"] == "missing_emission_factor"
+    assert "gwp.ch4" in detail["error"]["message"]
 
 
 def test_api_crop_not_found(client):
@@ -481,7 +481,7 @@ def test_api_crop_not_found(client):
         json={"crop_season_id": "00000000-0000-0000-0000-000000000000"},
     )
     assert response.status_code == 404
-    assert response.json()["detail"]["error"] == "crop_not_found"
+    assert response.json()["detail"]["error"]["code"] == "crop_not_found"
 
 
 def test_api_conflicting_water_returns_409(bundle, client):
@@ -497,7 +497,7 @@ def test_api_conflicting_water_returns_409(bundle, client):
         json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "as_recorded"},
     )
     assert response.status_code == 409
-    assert response.json()["detail"]["error"] == "conflicting_water_records"
+    assert response.json()["detail"]["error"]["code"] == "conflicting_water_records"
 
 
 # ===========================================================================
@@ -688,7 +688,7 @@ def test_missing_authorization_header_returns_401(service, access_checker):
         json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
     )
     assert response.status_code == 401
-    assert response.json()["detail"]["error"] == "missing_authorization"
+    assert response.json()["detail"]["error"]["code"] == "missing_authorization"
     assert access_checker.calls == []  # chặn trước khi chạm tới RLS check, không nói gì thêm
 
 
@@ -719,7 +719,7 @@ def test_farmer_scope_isolation_denied_by_rls_returns_404(client, access_checker
         json={"crop_season_id": rows.CROP_ID, "water_regime_scenario": "awd"},
     )
     assert response.status_code == 404
-    assert response.json()["detail"]["error"] == "crop_not_found"
+    assert response.json()["detail"]["error"]["code"] == "crop_not_found"
 
 
 def test_farmer_scope_isolation_applies_to_get_too(client, access_checker):
@@ -727,7 +727,7 @@ def test_farmer_scope_isolation_applies_to_get_too(client, access_checker):
 
     response = client.get(f"/v1/crop-seasons/{rows.CROP_ID}/carbon")
     assert response.status_code == 404
-    assert response.json()["detail"]["error"] == "crop_not_found"
+    assert response.json()["detail"]["error"]["code"] == "crop_not_found"
 
 
 def test_access_checker_called_with_the_actual_crop_season_id(client, access_checker):

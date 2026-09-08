@@ -29,7 +29,11 @@ from carbon.errors import (
     MissingActivityDataError,
     MissingEmissionFactorError,
 )
+import schemas
+from infrastructure.api_errors import error_detail
 from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthError, extract_bearer_token
+from infrastructure.pagination import paginate
+from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
 from service import CarbonService
 
@@ -47,27 +51,39 @@ class CalculateRequest(BaseModel):
 def _service() -> CarbonService:  # bị ghi đè bằng dependency_overrides trong test/main.py
     raise HTTPException(
         status_code=503,
-        detail={
-            "error": "backend_not_configured",
-            "message": (
-                "Chưa cấu hình repository. Tạo backend/.env từ .env.example "
-                "(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY), hoặc chạy với repository in-memory."
-            ),
-        },
+        detail=error_detail(
+            "backend_not_configured",
+            "Chưa cấu hình repository. Tạo backend/.env từ .env.example "
+            "(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY), hoặc chạy với repository in-memory.",
+        ),
     )
 
 
 def _access_checker() -> CropAccessChecker:  # bị ghi đè bằng dependency_overrides
     raise HTTPException(
         status_code=503,
-        detail={
-            "error": "auth_not_configured",
-            "message": (
-                "Chưa cấu hình kiểm tra quyền. Tạo backend/.env với SUPABASE_URL và "
-                "SUPABASE_PUBLISHABLE_KEY."
-            ),
-        },
+        detail=error_detail(
+            "auth_not_configured",
+            "Chưa cấu hình kiểm tra quyền. Tạo backend/.env với SUPABASE_URL và "
+            "SUPABASE_PUBLISHABLE_KEY.",
+        ),
     )
+
+
+def _read_repo(authorization: str | None = Header(default=None)) -> SupabaseReadRepository:
+    """Overridden by main. Keeping token extraction here makes every read route JWT-only."""
+    try:
+        extract_bearer_token(authorization)
+    except MissingAuthError as exc:
+        raise HTTPException(status_code=401, detail=error_detail("unauthenticated", str(exc))) from exc
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Read repository chưa được cấu hình."))
+
+
+def _read_or_404(callback):
+    try:
+        return callback()
+    except (ReadNotFoundError, StopIteration) as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.")) from exc
 
 
 def _require_caller(
@@ -82,13 +98,13 @@ def _require_caller(
         token = extract_bearer_token(authorization)
     except MissingAuthError as exc:
         raise HTTPException(
-            status_code=401, detail={"error": "missing_authorization", "message": str(exc)}
+            status_code=401, detail=error_detail("missing_authorization", str(exc))
         ) from exc
     try:
         checker.assert_can_access(token, crop_season_id)
     except CropAccessError as exc:
         raise HTTPException(
-            status_code=404, detail={"error": "crop_not_found", "message": str(exc)}
+            status_code=404, detail=error_detail("crop_not_found", str(exc))
         ) from exc
 
 
@@ -119,16 +135,16 @@ def _raise_http(exc: Exception, request_id: str) -> None:
     for exc_type, status, code in _ERROR_STATUS:
         if isinstance(exc, exc_type):
             raise HTTPException(
-                status_code=status, detail={"error": code, "message": str(exc)}
+                status_code=status, detail=error_detail(code, str(exc))
             ) from exc
     logger.exception("unhandled_error request_id=%s", request_id)
     raise HTTPException(
         status_code=500,
-        detail={"error": "internal_error", "message": "Lỗi hệ thống.", "request_id": request_id},
+        detail=error_detail("internal_error", "Lỗi hệ thống.", request_id=request_id),
     ) from exc
 
 
-@router.post("/carbon/calculate")
+@router.post("/carbon/calculate", tags=['Carbon'])
 def calculate_carbon_endpoint(
     payload: CalculateRequest,
     request: Request,
@@ -167,7 +183,7 @@ def calculate_carbon_endpoint(
     return _payload(outcome.result, outcome.calculation_id)
 
 
-@router.get("/crop-seasons/{crop_season_id}/carbon")
+@router.get("/crop-seasons/{crop_season_id}/carbon", tags=['Carbon'])
 def get_crop_carbon(
     crop_season_id: str,
     scenario: Scenario | None = None,
@@ -188,18 +204,176 @@ def get_crop_carbon(
     if row is None:
         raise HTTPException(
             status_code=404,
-            detail={
-                "error": "no_calculation",
-                "message": (
-                    f"Vụ '{crop_season_id}' chưa có bản tính thành công nào"
-                    + (f" cho kịch bản '{scenario}'" if scenario else "")
-                    + ". Gọi POST /v1/carbon/calculate trước."
-                ),
-            },
+            detail=error_detail(
+                "no_calculation",
+                f"Vụ '{crop_season_id}' chưa có bản tính thành công nào"
+                + (f" cho kịch bản '{scenario}'" if scenario else "")
+                + ". Gọi POST /v1/carbon/calculate trước.",
+            ),
         )
     return row
 
 
-@router.get("/carbon/scenarios")
+@router.get("/carbon/scenarios", tags=['Carbon'], response_model=schemas.CarbonScenarioResponse)
 def list_scenarios() -> dict[str, Any]:
     return {"scenarios": list(SCENARIOS)}
+
+
+@router.get("/me", tags=['Auth'], response_model=schemas.MeResponse)
+def get_me(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(repo.me)
+
+
+@router.get("/farms", tags=['Farms'], response_model=schemas.PaginatedResponse[schemas.FarmResponse])
+def list_farms(
+    page: int = 1, page_size: int = 20, repo: SupabaseReadRepository = Depends(_read_repo)
+) -> dict[str, Any]:
+    return paginate(repo.farms(), page, page_size)
+
+
+@router.get("/farms/{farm_id}", tags=['Farms'], response_model=schemas.FarmResponse)
+def get_farm(farm_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.farm(farm_id))
+
+
+@router.get("/farms/{farm_id}/plots", tags=['Plots'], response_model=schemas.ItemsResponse[schemas.PlotResponse])
+def list_farm_plots(farm_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.plots_for_farm(farm_id)})
+
+
+@router.get("/farms/{farm_id}/crop-seasons", tags=['Crop Seasons'], response_model=schemas.ItemsResponse[schemas.CropSeasonResponse])
+def list_farm_seasons(farm_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Gộp vụ của MỌI thửa trong farm — tiện cho dashboard cấp farm, không cần lặp qua từng plot."""
+    return _read_or_404(lambda: {"items": repo.farm_crop_seasons(farm_id)})
+
+
+@router.get("/farms/{farm_id}/metrics", tags=['Metrics'], response_model=schemas.MetricResponse)
+def get_farm_metrics(farm_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.farm_metrics(farm_id))
+
+
+@router.get("/plots/{plot_id}", tags=['Plots'], response_model=schemas.PlotResponse)
+def get_plot(plot_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.plot(plot_id))
+
+
+@router.get("/plots/{plot_id}/crop-seasons", tags=['Crop Seasons'], response_model=schemas.ItemsResponse[schemas.CropSeasonResponse])
+def list_plot_seasons(plot_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.seasons_for_plot(plot_id)})
+
+
+@router.get("/crop-seasons/{crop_season_id}", tags=['Crop Seasons'], response_model=schemas.CropSeasonResponse)
+def get_crop_season(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.season(crop_season_id))
+
+
+@router.get("/crop-seasons/{crop_season_id}/activities", tags=['Activities'], response_model=schemas.PaginatedResponse[schemas.ActivityResponse])
+def list_activities(
+    crop_season_id: str, page: int = 1, page_size: int = 20,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+) -> dict[str, Any]:
+    return _read_or_404(lambda: paginate(repo.activities(crop_season_id), page, page_size))
+
+
+@router.get("/activities/{activity_id}", tags=['Activities'], response_model=schemas.ActivityResponse)
+def get_activity(activity_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.activity(activity_id))
+
+
+@router.get("/production-batches/{production_batch_id}", tags=['Production Batches'], response_model=schemas.ProductionBatchResponse)
+def get_production_batch(production_batch_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Chỉ đọc, tra cứu — batch KHÔNG phải scope tính carbon (đó là crop_season)."""
+    return _read_or_404(lambda: repo.production_batch(production_batch_id))
+
+
+@router.get("/crop-seasons/{crop_season_id}/production-batches", tags=['Production Batches'], response_model=schemas.ItemsResponse[schemas.ProductionBatchResponse])
+def list_production_batches(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.production_batches(crop_season_id)})
+
+
+@router.get("/crop-seasons/{crop_season_id}/metrics", tags=['Metrics'], response_model=schemas.MetricResponse)
+def get_metrics(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.metrics(crop_season_id))
+
+@router.get("/organizations", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.OrganizationResponse])
+def list_organizations(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return {"items": repo.organizations()}
+
+
+@router.get("/organizations/{organization_id}", tags=['Organizations'], response_model=schemas.OrganizationResponse)
+def get_organization(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.organization(organization_id))
+
+
+@router.get("/organizations/{organization_id}/farms", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.FarmResponse])
+def list_organization_farms(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.organization_farms(organization_id)})
+
+
+@router.get("/organizations/{organization_id}/summary", tags=['Organizations'], response_model=schemas.OrganizationSummaryResponse)
+def organization_summary(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.organization_summary(organization_id))
+
+
+@router.get("/organizations/{organization_id}/metrics", tags=['Organizations'], response_model=schemas.MetricResponse)
+def get_organization_metrics(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.organization_metrics(organization_id))
+
+
+@router.get("/organizations/{organization_id}/farm-performance", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.FarmPerformanceResponse])
+def farm_performance(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.farm_performance(organization_id)})
+
+@router.get("/mrv/cases", tags=['MRV'], response_model=schemas.PaginatedResponse[schemas.MrvCaseResponse])
+def mrv_cases(
+    page: int = 1, page_size: int = 20, repo: SupabaseReadRepository = Depends(_read_repo)
+) -> dict[str, Any]:
+    return paginate(repo.mrv_cases(), page, page_size)
+
+@router.get("/mrv/cases/{mrv_case_id}", tags=['MRV'], response_model=schemas.MrvCaseResponse)
+def mrv_case(mrv_case_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.mrv_case(mrv_case_id))
+
+
+@router.get("/mrv/cases/{mrv_case_id}/steps", tags=['MRV'], response_model=schemas.ItemsResponse[schemas.MrvStepResponse])
+def mrv_case_steps(mrv_case_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Luôn đủ 6 bước theo QĐ 4801, kể cả bước chưa có record (status='not_started')."""
+    return _read_or_404(lambda: {"items": repo.mrv_steps(mrv_case_id)})
+
+
+@router.get("/mrv/cases/{mrv_case_id}/batches", tags=['MRV'], response_model=schemas.ItemsResponse[schemas.MrvBatchResponse])
+def mrv_case_batches(mrv_case_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Chỉ trả batch thuộc case này (qua mrv_case_batches), không phải toàn bộ batch của tổ chức."""
+    return _read_or_404(lambda: {"items": repo.mrv_batches(mrv_case_id)})
+
+
+@router.get("/mrv/cases/{mrv_case_id}/evidence", tags=['MRV'], response_model=schemas.ItemsResponse[schemas.MrvEvidenceResponse])
+def mrv_case_evidence(mrv_case_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Metadata bằng chứng — KHÔNG trả signed URL (chưa có nhu cầu tải file qua API này)."""
+    return _read_or_404(lambda: {"items": repo.mrv_evidence(mrv_case_id)})
+
+
+@router.get("/mrv/cases/{mrv_case_id}/exports", tags=['MRV'], response_model=schemas.ItemsResponse[schemas.MrvExportResponse])
+def mrv_case_exports(mrv_case_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.mrv_exports(mrv_case_id)})
+
+
+@router.get("/mrv/exports/{mrv_export_id}", tags=['MRV'], response_model=schemas.MrvExportResponse)
+def mrv_export(mrv_export_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.mrv_export(mrv_export_id))
+
+
+@router.get("/emission-factor-sets", tags=['Emission Factors'], response_model=schemas.ItemsResponse[schemas.EmissionFactorSetResponse])
+def list_emission_factor_sets(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Chỉ bộ hệ số đã published — farmer không sửa/xem bản draft."""
+    return {"items": repo.emission_factor_sets()}
+
+
+@router.get("/emission-factor-sets/{emission_factor_set_id}", tags=['Emission Factors'], response_model=schemas.EmissionFactorSetResponse)
+def get_emission_factor_set(emission_factor_set_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: repo.emission_factor_set(emission_factor_set_id))
+
+
+@router.get("/emission-factor-sets/{emission_factor_set_id}/factors", tags=['Emission Factors'], response_model=schemas.ItemsResponse[schemas.EmissionFactorResponse])
+def list_emission_factors(emission_factor_set_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.emission_factors(emission_factor_set_id)})
