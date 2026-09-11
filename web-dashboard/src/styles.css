@@ -30,10 +30,22 @@
   --ink-faint: #6b7a71;
   --surface: #ffffff;
   --surface-sunk: #f6faf7;
-  --bg-page: #f4f8f4;
+  --surface-muted: #f1f0e9;   /* warm cream neutral — depth without a 2nd green */
+  --bg-page: #f5f6f1;         /* was pure --surface-green tint; slightly warmer/cream now */
   --border: #dce6de;
   --border-strong: #c6d4c9;
   --border-input: #bfd0c3;
+
+  /* Aliases matching the requested token vocabulary — same values as above,
+     no visual change, just names other code/reviewers expect. */
+  --text-primary: var(--ink-body);
+  --text-secondary: var(--ink-muted);
+  --text-muted: var(--ink-faint);
+  --brand-soft: var(--surface-green);
+  --shadow-sm: var(--shadow-card);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-card);
+  --radius-lg: 18px;
 
   /* Carbon accent — carbon KPI nặng hơn metric phụ (brief §5) */
   --carbon-bg: #10352c;
@@ -238,6 +250,9 @@ h1, h2, h3, p { margin: 0; }
 .hero__stat { display: grid; gap: 2px; text-align: right; }
 .hero__stat b { font-size: 21px; font-weight: 700; color: #fff; letter-spacing: -.01em; }
 .hero__stat span { font-size: var(--fs-caption); color: rgb(234 244 239 / .68); }
+.hero__actions { display: flex; gap: 10px; z-index: 1; flex: none; }
+.hero__actions .btn--ghost { background: rgb(255 255 255 / .14); color: #fff; border-color: rgb(255 255 255 / .28); }
+.hero__actions .btn--ghost:hover { background: rgb(255 255 255 / .22); }
 
 /* ------------------------------------------------------------- KPI strip */
 .kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap); }
@@ -300,13 +315,13 @@ table.data .cell-empty { color: var(--ink-faint); }
 .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--brand-strong); box-shadow: var(--shadow-card); }
 
 /* ---------------------------------------------------------------- Tabs */
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 22px; overflow-x: auto; }
+.tabs { display: flex; gap: 2px; background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 24px; overflow-x: auto; width: fit-content; max-width: 100%; }
 .tab {
-  border: 0; background: none; padding: 11px 14px; font-size: var(--fs-sm); font-weight: 600;
-  color: var(--ink-muted); border-bottom: 2px solid transparent; white-space: nowrap;
+  border: 0; background: none; padding: 9px 16px; font-size: var(--fs-sm); font-weight: 600;
+  color: var(--ink-muted); border-radius: 9px; white-space: nowrap; transition: background .14s, color .14s;
 }
-.tab:hover { color: var(--ink-body); }
-.tab[aria-current="page"] { color: var(--brand-strong); border-bottom-color: var(--brand); }
+.tab:hover { color: var(--ink-body); background: rgb(255 255 255 / .6); }
+.tab[aria-current="page"] { color: var(--brand-strong); background: var(--surface); box-shadow: var(--shadow-card); font-weight: 700; }
 
 /* -------------------------------------------------------------- Buttons */
 .btn { border: 0; border-radius: var(--radius-control); padding: 9px 16px; font-weight: 600; font-size: var(--fs-sm); background: var(--brand); color: #fff; display: inline-flex; align-items: center; gap: 7px; }
@@ -542,12 +557,6 @@ select.select { border: 1px solid var(--border-input); border-radius: 8px; paddi
 .farmer-main { min-width: 0; }
 .farmer-content { width: min(100%, 1060px); margin: 0 auto; padding: 42px max(28px, 5vw) 64px; }
 .farmer-stack { display: grid; gap: 24px; }
-.farmer-season-card { display: grid; gap: 8px; padding: 28px; color: var(--carbon-fg); background: linear-gradient(120deg, var(--carbon-bg), var(--brand-strong)); border-radius: 18px; box-shadow: var(--shadow-raise); }
-.farmer-season-card p { color: rgb(234 244 239 / .7); font-size: var(--fs-caption); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.farmer-season-card h2 { font-size: clamp(27px, 3vw, 38px); letter-spacing: -.035em; }
-.farmer-season-card > span { color: rgb(234 244 239 / .78); }
-.farmer-season-card > div { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
-.farmer-season-card .btn--ghost { background: #fff; color: var(--brand-strong); border: 0; }
 .farmer-quick { display: grid; grid-template-columns: minmax(180px, .7fr) 1.5fr; gap: 20px; align-items: center; padding: 20px 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
 .farmer-quick h2 { font-size: var(--fs-h3); }
 .farmer-quick p { margin-top: 4px; color: var(--ink-muted); font-size: var(--fs-sm); }
@@ -625,4 +634,4 @@ select.select { border: 1px solid var(--border-input); border-radius: 8px; paddi
 .farmer-bottom-nav { display: none; }
 @media (max-width: 1024px) { .farmer-shell { grid-template-columns: 190px minmax(0, 1fr); }.farmer-content { padding: 32px 28px 56px; }.farmer-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 768px) { .farmer-shell { display: block; }.farmer-rail { display: none; }.farmer-content { padding: 26px 16px 92px; }.farmer-bottom-nav { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); min-height: 66px; padding: 5px 4px env(safe-area-inset-bottom); background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -5px 20px rgb(18 60 49 / .08); }.farmer-bottom-nav a { display: grid; place-items: center; align-content: center; gap: 3px; min-height: 52px; color: var(--ink-muted); font-size: 18px; }.farmer-bottom-nav a.is-active { color: var(--brand-strong); }.farmer-bottom-nav small { font-size: 10px; font-weight: 650; }.farmer-quick { grid-template-columns: 1fr; }.farmer-farm-grid, .farmer-plot-grid { grid-template-columns: 1fr; } }
-@media (max-width: 420px) { .farmer-content { padding-left: 14px; padding-right: 14px; }.farmer-season-card { padding: 22px; }.farmer-metrics { grid-template-columns: 1fr; }.farmer-season-summary dl { grid-template-columns: 1fr; }.farmer-recent__item { grid-template-columns: 32px minmax(0, 1fr); }.farmer-recent__item time { grid-column: 2; text-align: left; }.farmer-quick__button { flex: 1 1 42%; } }
+@media (max-width: 420px) { .farmer-content { padding-left: 14px; padding-right: 14px; }.hero { padding: 22px; }.farmer-metrics { grid-template-columns: 1fr; }.farmer-season-summary dl { grid-template-columns: 1fr; }.farmer-recent__item { grid-template-columns: 32px minmax(0, 1fr); }.farmer-recent__item time { grid-column: 2; text-align: left; }.farmer-quick__button { flex: 1 1 42%; } }

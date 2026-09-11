@@ -104,6 +104,100 @@ export function PageHead({
   )
 }
 
+/**
+ * Identity banner for a page's primary subject (organization, farm, active
+ * season) — one shared component instead of each page hand-rolling its own
+ * gradient header markup (brief: "reuse components instead of writing
+ * page-specific duplicated CSS").
+ */
+export function Hero({
+  eyebrow,
+  title,
+  titleAs = 'h2',
+  meta,
+  stats,
+  actions,
+}: {
+  eyebrow?: string
+  title: ReactNode
+  /** Use 'h1' when Hero is the page's only title (no separate PageHead above
+   * it) so the page keeps exactly one real <h1> for a11y/tests. Defaults to
+   * 'h2' for pages where a route-level PageHead already provides the h1. */
+  titleAs?: 'h1' | 'h2'
+  meta?: ReactNode[]
+  stats?: { label: string; value: ReactNode }[]
+  actions?: ReactNode
+}) {
+  const Title = titleAs
+  return (
+    <div className="hero">
+      <div className="hero__id">
+        {eyebrow && <span className="hero__eyebrow">{eyebrow}</span>}
+        <Title className="hero__title">{title}</Title>
+        {meta && meta.length > 0 && (
+          <div className="hero__meta">
+            {meta.map((m, i) => (
+              <span key={i}>{m}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      {stats && stats.length > 0 && (
+        <div className="hero__stats">
+          {stats.map((s, i) => (
+            <div className="hero__stat" key={i}>
+              <b>{s.value}</b>
+              <span>{s.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {actions && <div className="hero__actions">{actions}</div>}
+    </div>
+  )
+}
+
+/** Shared table chrome (wrap/scroll/empty) so pages stop re-declaring the
+ * same .table-wrap + <table class="data"> boilerplate per page. */
+export function DataTable<T>({
+  columns,
+  rows,
+  rowKey,
+  onRowClick,
+}: {
+  columns: { label: string; align?: 'num'; render: (row: T) => ReactNode; headClassName?: string }[]
+  rows: T[]
+  rowKey: (row: T) => string
+  onRowClick?: (row: T) => void
+}) {
+  return (
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            {columns.map((c, i) => (
+              <th key={i} className={[c.align === 'num' ? 'num' : '', c.headClassName ?? ''].filter(Boolean).join(' ')}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={rowKey(row)} className={onRowClick ? 'is-clickable' : undefined} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+              {columns.map((c, i) => (
+                <td key={i} className={c.align === 'num' ? 'num' : undefined}>
+                  {c.render(row)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export function Section({
   title,
   description,
