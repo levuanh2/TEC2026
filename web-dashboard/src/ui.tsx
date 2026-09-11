@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
 /* ---------------------------------------------------------------- routing */
 
@@ -8,12 +8,21 @@ export function go(to: string) {
   dispatchEvent(new PopStateEvent('popstate'))
 }
 
-export function Link({ to, className, children, ...rest }: { to: string; className?: string; children: ReactNode } & Record<string, unknown>) {
+export function Link({
+  to, className, children, onClick, ...rest
+}: { to: string; className?: string; children: ReactNode; onClick?: (e: MouseEvent<HTMLAnchorElement>) => void } & Record<string, unknown>) {
   return (
     <a
       href={to}
       className={className}
       onClick={(e) => {
+        // A caller-supplied onClick (e.g. closing the mobile sidebar drawer)
+        // must run ALONGSIDE the SPA navigation, not replace it — destructuring
+        // it out here (rather than leaving it in `rest`, spread last) is what
+        // makes that composition happen instead of the caller's handler
+        // silently clobbering this one and falling through to a full page
+        // reload (real bug: every Management sidebar link did exactly this).
+        onClick?.(e)
         if (e.metaKey || e.ctrlKey || e.shiftKey) return
         e.preventDefault()
         go(to)
