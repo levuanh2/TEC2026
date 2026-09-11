@@ -44,6 +44,9 @@ class Settings:
     # quan RLS/auth. Thiếu origin đúng = browser chặn fetch trước khi tới được
     # backend (khác hẳn lỗi 401/403 — request không bao giờ rời trình duyệt).
     cors_origins: list[str]
+    # Trusted backend-only Postgres connection. Required by the Farmer Web
+    # write repository because one logical activity spans base + detail rows.
+    supabase_db_url: str | None = None
 
     @property
     def supabase_configured(self) -> bool:
@@ -69,6 +72,14 @@ class Settings:
             )
         return self.supabase_url, self.supabase_publishable_key  # type: ignore[return-value]
 
+    def require_db(self) -> str:
+        if not self.supabase_db_url:
+            raise ConfigError(
+                "Thiếu SUPABASE_DB_URL cho activity write transaction. "
+                "Chỉ cấu hình ở backend/.env; không đưa vào client."
+            )
+        return self.supabase_db_url
+
 
 def load_settings(dotenv_path: Path | None = None) -> Settings:
     _load_dotenv(dotenv_path or (BACKEND_DIR / ".env"))
@@ -87,4 +98,5 @@ def load_settings(dotenv_path: Path | None = None) -> Settings:
             ).split(",")
             if origin.strip()
         ],
+        supabase_db_url=os.environ.get("SUPABASE_DB_URL") or None,
     )

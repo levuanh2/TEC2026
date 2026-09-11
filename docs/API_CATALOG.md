@@ -9,14 +9,26 @@ tài liệu này.
 bắt buộc header `Authorization: Bearer <supabase_jwt>` (xem `docs/API_FOR_FLUTTER.md`
 §0 cho error contract và semantics 404 dùng chung).
 
+## FW-2 Part 1 supersession
+
+The catalog now also includes three authenticated Farmer Web activity-write
+operations: `POST /v1/crop-seasons/{crop_season_id}/activities`,
+`PATCH /v1/activities/{activity_id}`, and `DELETE /v1/activities/{activity_id}`.
+They support fertilizer, irrigation, and harvest only. The historical count and
+write-gap note below predate FW-2 Part 1; `docs/openapi.json` remains the
+authoritative operation inventory.
+
 | Method | Path | Tag | Auth |
 |---|---|---|---|
 | GET | `/health` | Health | no |
 | GET | `/v1/activities/{activity_id}` | Activities | yes |
+| PATCH | `/v1/activities/{activity_id}` | Activities | yes |
+| DELETE | `/v1/activities/{activity_id}` | Activities | yes |
 | POST | `/v1/carbon/calculate` | Carbon | yes |
 | GET | `/v1/carbon/scenarios` | Carbon | no |
 | GET | `/v1/crop-seasons/{crop_season_id}` | Crop Seasons | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/activities` | Activities | yes |
+| POST | `/v1/crop-seasons/{crop_season_id}/activities` | Activities | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/carbon` | Carbon | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/metrics` | Metrics | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/production-batches` | Production Batches | yes |

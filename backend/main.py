@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -28,9 +28,10 @@ from infrastructure.auth import SupabaseCropAccessChecker
 from infrastructure.config import load_settings
 from infrastructure.supabase_repo import SupabaseCarbonRepository
 from infrastructure.read_repo import SupabaseReadRepository
-from infrastructure.auth import extract_bearer_token
+from infrastructure.write_repo import PostgresActivityWriteRepository
+from infrastructure.auth import MissingAuthError, extract_bearer_token
 from infrastructure.request_context import RequestIdMiddleware
-from service import CarbonService
+from service import ActivityWriteService, CarbonService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -60,7 +61,11 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_methods=["GET", "POST"],
+    # FW-2 Part 1 added PATCH/DELETE activity-write routes; this list predated
+    # them and was never updated, so a browser's PATCH/DELETE preflight was
+    # silently rejected client-side (found via real Farmer write E2E — no
+    # request ever reached the backend, so backend pytest never caught it).
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -105,8 +110,25 @@ if settings.auth_configured:
     _access_checker_singleton = SupabaseCropAccessChecker(settings)
     app.dependency_overrides[api._access_checker] = lambda: _access_checker_singleton
     def _read_repo(authorization: str | None = Header(default=None)) -> SupabaseReadRepository:
-        return SupabaseReadRepository(settings, extract_bearer_token(authorization))
+        """Bind only a valid caller JWT to the read repository.
+
+        The production dependency override must retain the default dependency's
+        401 behavior.  Otherwise a missing Authorization header escapes as a
+        ``MissingAuthError`` and Starlette turns it into a bare 500 response.
+        """
+        try:
+            token = extract_bearer_token(authorization)
+        except MissingAuthError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail=error_detail("unauthenticated", str(exc)),
+            ) from exc
+        return SupabaseReadRepository(settings, token)
     app.dependency_overrides[api._read_repo] = _read_repo
+
+if settings.auth_configured and settings.supabase_db_url:
+    _activity_write_service_singleton = ActivityWriteService(PostgresActivityWriteRepository(settings))
+    app.dependency_overrides[api._activity_write_service] = lambda: _activity_write_service_singleton
 
 app.include_router(api.router)
 

@@ -12,9 +12,11 @@ trả `dict[str, Any]` ở đó, models trong file này dùng để TÀI LIỆU 
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Generic, Literal, TypeVar
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 T = TypeVar("T")
 
@@ -108,6 +110,88 @@ class ActivityResponse(BaseModel):
     # Payload khác nhau theo activity_type (fertilizer/irrigation/harvest/...) —
     # xem DETAIL_TABLES trong infrastructure/read_repo.py cho field cụ thể từng loại.
     payload: dict[str, Any]
+
+
+# -- Farmer Web online activity writes ------------------------------------
+
+class FertilizerActivityData(BaseModel):
+    fertilizer_name: str = Field(min_length=1)
+    fertilizer_type: str | None = None
+    amount_kg: float = Field(gt=0)
+    nitrogen_percent: float | None = Field(default=None, ge=0, le=100)
+    phosphorus_percent: float | None = Field(default=None, ge=0, le=100)
+    potassium_percent: float | None = Field(default=None, ge=0, le=100)
+    total_cost_vnd: float | None = Field(default=None, ge=0)
+
+
+class IrrigationActivityData(BaseModel):
+    method: Literal["awd", "continuous_flooding", "alternate", "other"]
+    # Water is intentionally nullable: a recorded irrigation event without a
+    # measurement remains unknown in metrics, never an invented zero.
+    water_volume_m3: float | None = Field(default=None, ge=0)
+    duration_minutes: int | None = Field(default=None, ge=0)
+    water_level_cm: float | None = None
+    pump_energy_kwh: float | None = Field(default=None, ge=0)
+    total_cost_vnd: float | None = Field(default=None, ge=0)
+
+
+class HarvestActivityData(BaseModel):
+    yield_kg: float = Field(gt=0)
+    harvested_area_ha: float | None = Field(default=None, gt=0)
+    moisture_percent: float | None = Field(default=None, ge=0, le=100)
+    total_cost_vnd: float | None = Field(default=None, ge=0)
+
+
+ActivityType = Literal["fertilizer", "irrigation", "harvest"]
+
+
+class ActivityCreateRequest(BaseModel):
+    idempotency_key: UUID
+    activity_type: ActivityType
+    occurred_at: datetime
+    note: str | None = Field(default=None, max_length=2000)
+    data: dict[str, Any]
+
+    @model_validator(mode="after")
+    def validate_detail(self) -> "ActivityCreateRequest":
+        validate_activity_data(self.activity_type, self.data)
+        return self
+
+
+class ActivityUpdateRequest(BaseModel):
+    occurred_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=2000)
+    data: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "ActivityUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one mutable activity field is required.")
+        return self
+
+
+class ActivityWriteResponse(BaseModel):
+    id: str
+    crop_season_id: str
+    activity_type: ActivityType
+    occurred_at: datetime
+    note: str | None = None
+    data: dict[str, Any]
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    idempotent_replay: bool = False
+
+
+def validate_activity_data(activity_type: ActivityType, data: dict[str, Any]) -> BaseModel:
+    model: type[BaseModel]
+    if activity_type == "fertilizer":
+        model = FertilizerActivityData
+    elif activity_type == "irrigation":
+        model = IrrigationActivityData
+    else:
+        model = HarvestActivityData
+    return model.model_validate(data)
 
 
 class MetricResponse(BaseModel):

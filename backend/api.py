@@ -35,7 +35,8 @@ from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthE
 from infrastructure.pagination import paginate
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
-from service import CarbonService
+from service import ActivityWriteAccessError, ActivityWriteService, CarbonService, InvalidCropSeasonStateError
+from infrastructure.write_repo import IdempotencyConflictError
 
 router = APIRouter(prefix="/v1")
 logger = logging.getLogger("agricarbon.api")
@@ -77,6 +78,10 @@ def _read_repo(authorization: str | None = Header(default=None)) -> SupabaseRead
     except MissingAuthError as exc:
         raise HTTPException(status_code=401, detail=error_detail("unauthenticated", str(exc))) from exc
     raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Read repository chưa được cấu hình."))
+
+
+def _activity_write_service() -> ActivityWriteService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Activity write repository is not configured."))
 
 
 def _read_or_404(callback):
@@ -278,6 +283,43 @@ def list_activities(
 @router.get("/activities/{activity_id}", tags=['Activities'], response_model=schemas.ActivityResponse)
 def get_activity(activity_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.activity(activity_id))
+
+
+def _write_or_http(callback):
+    try:
+        return callback()
+    except ActivityWriteAccessError as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Activity not found or outside your scope.")) from exc
+    except InvalidCropSeasonStateError as exc:
+        raise HTTPException(status_code=422, detail=error_detail("invalid_crop_season_state", "Crop season is not open for journal writes.")) from exc
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=error_detail("duplicate_event", "Idempotency key was already used with different activity data.")) from exc
+
+
+@router.post("/crop-seasons/{crop_season_id}/activities", tags=['Activities'], status_code=201, response_model=schemas.ActivityWriteResponse)
+def create_activity(
+    crop_season_id: str, payload: schemas.ActivityCreateRequest,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ActivityWriteService = Depends(_activity_write_service),
+) -> dict[str, Any]:
+    return _write_or_http(lambda: service.create(read_repository=repo, crop_season_id=crop_season_id, request=payload))
+
+
+@router.patch("/activities/{activity_id}", tags=['Activities'], response_model=schemas.ActivityWriteResponse)
+def update_activity(
+    activity_id: str, payload: schemas.ActivityUpdateRequest,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ActivityWriteService = Depends(_activity_write_service),
+) -> dict[str, Any]:
+    return _write_or_http(lambda: service.update(read_repository=repo, activity_id=activity_id, request=payload))
+
+
+@router.delete("/activities/{activity_id}", tags=['Activities'], status_code=204, response_model=None)
+def delete_activity(
+    activity_id: str, repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ActivityWriteService = Depends(_activity_write_service),
+) -> None:
+    _write_or_http(lambda: service.delete(read_repository=repo, activity_id=activity_id))
 
 
 @router.get("/production-batches/{production_batch_id}", tags=['Production Batches'], response_model=schemas.ProductionBatchResponse)

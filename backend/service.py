@@ -16,6 +16,9 @@ from infrastructure.mapping import (
     map_crop_activity_data,
 )
 from infrastructure.repository import CarbonRepository
+from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
+from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository
+import schemas
 
 
 @dataclass
@@ -72,3 +75,105 @@ class CarbonService:
 
     def latest(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
         return self._repo.latest_calculation(crop_season_id, scenario)
+
+
+class ActivityWriteAccessError(Exception):
+    """Normalized to 404 so write scope cannot enumerate other farmers' data."""
+
+
+class InvalidCropSeasonStateError(Exception):
+    pass
+
+
+class ActivityWriteService:
+    """Domain service for Farmer Web online journal writes.
+
+    RLS-backed reads establish caller and crop scope before the trusted
+    transaction repository writes base/detail rows with a backend DB role.
+    """
+
+    def __init__(self, write_repository: PostgresActivityWriteRepository):
+        self._write_repository = write_repository
+
+    @staticmethod
+    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> str:
+        me = read_repository.me()
+        if "farmer" not in me["roles"]:
+            raise ActivityWriteAccessError()
+        return str(me["user_id"])
+
+    @staticmethod
+    def _write_batch(read_repository: SupabaseReadRepository, crop_season_id: str) -> str:
+        try:
+            season = read_repository.season(crop_season_id)
+            # FW-2 does not revise crop lifecycle: its existing active state is
+            # the only state accepting the three online journal activities.
+            if season.get("status") != "active":
+                raise InvalidCropSeasonStateError()
+            batches = [
+                batch for batch in read_repository.production_batches(crop_season_id)
+                if batch.get("status") not in {"closed", "cancelled"}
+            ]
+        except ReadNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
+        if len(batches) != 1:
+            raise InvalidCropSeasonStateError()
+        return str(batches[0]["id"])
+
+    @staticmethod
+    def _response(row: dict[str, Any], *, replay: bool = False) -> dict[str, Any]:
+        return {
+            "id": row["id"], "crop_season_id": row["crop_season_id"],
+            "activity_type": row["activity_type"], "occurred_at": row["occurred_at"],
+            "note": row.get("note"), "data": row["data"],
+            "created_by": row["created_by"], "created_at": row["created_at"],
+            "updated_at": row["updated_at"], "idempotent_replay": replay,
+        }
+
+    def create(
+        self, *, read_repository: SupabaseReadRepository, crop_season_id: str,
+        request: schemas.ActivityCreateRequest,
+    ) -> dict[str, Any]:
+        actor_id = self._actor_and_farmer_scope(read_repository)
+        batch_id = self._write_batch(read_repository, crop_season_id)
+        data = schemas.validate_activity_data(request.activity_type, request.data).model_dump()
+        row, replay = self._write_repository.create(
+            crop_season_id=crop_season_id, production_batch_id=batch_id,
+            actor_id=actor_id, idempotency_key=str(request.idempotency_key),
+            activity_type=request.activity_type, occurred_at=request.occurred_at,
+            note=request.note, data=data,
+        )
+        return self._response(row, replay=replay)
+
+    def update(
+        self, *, read_repository: SupabaseReadRepository, activity_id: str,
+        request: schemas.ActivityUpdateRequest,
+    ) -> dict[str, Any]:
+        actor_id = self._actor_and_farmer_scope(read_repository)
+        try:
+            # RLS first: an out-of-scope ID and a nonexistent ID look identical.
+            read_repository.activity(activity_id)
+            existing = self._write_repository.get_for_actor(activity_id, actor_id)
+            self._write_batch(read_repository, str(existing["crop_season_id"]))
+        except (ReadNotFoundError, ActivityNotFoundError) as exc:
+            raise ActivityWriteAccessError() from exc
+        data = None
+        if request.data is not None:
+            data = schemas.validate_activity_data(
+                existing["activity_type"], {**existing["data"], **request.data}
+            ).model_dump()
+        row = self._write_repository.update(
+            activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
+            note=request.note, update_note="note" in request.model_fields_set, data=data,
+        )
+        return self._response(row)
+
+    def delete(self, *, read_repository: SupabaseReadRepository, activity_id: str) -> None:
+        actor_id = self._actor_and_farmer_scope(read_repository)
+        try:
+            read_repository.activity(activity_id)
+            existing = self._write_repository.get_for_actor(activity_id, actor_id)
+            self._write_batch(read_repository, str(existing["crop_season_id"]))
+            self._write_repository.soft_delete(activity_id=activity_id, actor_id=actor_id)
+        except (ReadNotFoundError, ActivityNotFoundError) as exc:
+            raise ActivityWriteAccessError() from exc
