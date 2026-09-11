@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cấu hình mạng cho MỌI build type (main).
+  Bản release/profile: KHÔNG cho phép HTTP cleartext dưới bất kỳ hình thức nào —
+  Supabase và backend production đều phải là HTTPS.
+  Debug build ghi đè file này bằng bản ở src/debug/res/xml/ để cho phép gọi
+  backend local qua 10.0.2.2 (loopback host của Android emulator).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

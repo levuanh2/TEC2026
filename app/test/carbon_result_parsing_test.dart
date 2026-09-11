@@ -34,8 +34,18 @@ void main() {
       'yield_kg': 5200.0,
       'co2e_per_kg': 0.5617,
       'breakdown': [
-        {'source': 'ch4_rice_cultivation', 'gas': 'ch4', 'co2e_kg': 2625.0, 'formula': 'Eq 5.1'},
-        {'source': 'n2o_fertilizer_direct', 'gas': 'n2o', 'co2e_kg': 220.8, 'formula': 'Eq 11.1'},
+        {
+          'source': 'ch4_rice_cultivation',
+          'gas': 'ch4',
+          'co2e_kg': 2625.0,
+          'formula': 'Eq 5.1'
+        },
+        {
+          'source': 'n2o_fertilizer_direct',
+          'gas': 'n2o',
+          'co2e_kg': 220.8,
+          'formula': 'Eq 11.1'
+        },
       ],
       'methodology': {'name': 'TEST', 'version': 'test'},
       'ef_config_version': 'TEST-FACTORS-DO-NOT-USE',

@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../app_services.dart';
+import '../design/design.dart';
 import '../models/activity.dart';
 import '../models/activity_field_spec.dart';
 import '../models/crop_season.dart';
+import '../shell/routes.dart';
+import 'activity_detail_screen.dart';
 import 'activity_form_screen.dart';
-import 'carbon_result_screen.dart';
 
+/// Chi tiết một vụ: hàng đợi đồng bộ, nút ghi hoạt động, danh sách đã ghi, và
+/// (nếu vụ đã đồng bộ) nút xem CO₂e.
 class CropSeasonDetailScreen extends StatefulWidget {
-  const CropSeasonDetailScreen({super.key, required this.services, required this.season});
+  const CropSeasonDetailScreen({
+    super.key,
+    required this.services,
+    required this.season,
+  });
   final AppServices services;
   final CropSeason season;
 
@@ -19,8 +27,11 @@ class CropSeasonDetailScreen extends StatefulWidget {
 class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
   List<Activity> _activities = [];
   int _pendingCount = 0;
+  bool _loading = true;
   bool _syncing = false;
   String? _syncMessage;
+
+  AppServices get _s => widget.services;
 
   @override
   void initState() {
@@ -29,12 +40,14 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
   }
 
   Future<void> _load() async {
-    final activities = await widget.services.db.listActivitiesByCropSeason(widget.season.id);
-    final pending = await widget.services.db.countPendingActivities();
+    final activities =
+        await _s.db.listActivitiesByCropSeasonClientId(widget.season.clientId);
+    final pending = await _s.db.countPendingActivities();
     if (!mounted) return;
     setState(() {
       _activities = activities;
       _pendingCount = pending;
+      _loading = false;
     });
   }
 
@@ -43,18 +56,21 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
       _syncing = true;
       _syncMessage = null;
     });
-    // Đồng bộ có thể mất vài giây — người dùng hoàn toàn có thể bấm Back trước
-    // khi xong. Mọi setState SAU await đều phải kiểm `mounted` trước, không chỉ
-    // ở finally — gọi setState trên State đã dispose là crash thật (không phải
-    // lỗi lý thuyết), xem app/README.md phần audit.
-    String? message;
+    String message;
     try {
-      final summary = await widget.services.sync.syncAll();
-      message = summary.hasErrors
-          ? 'Đồng bộ xong nhưng còn ${summary.errors.length} lỗi — sẽ thử lại lần sau.'
-          : 'Đồng bộ xong: ${summary.activitiesSynced} hoạt động, '
-              '${summary.plotsSynced} thửa, ${summary.cropSeasonsSynced} vụ.';
-    } catch (e) {
+      final summary = await _s.sync.syncAll();
+      if (summary.hasPermissionError) {
+        message =
+            'Một số mục không đủ quyền lưu lên hệ thống — liên hệ quản lý HTX.';
+      } else if (summary.hasErrors) {
+        message =
+            'Đồng bộ xong nhưng còn ${summary.errorCount} mục lỗi — sẽ thử lại lần sau.';
+      } else {
+        message = 'Đồng bộ xong: ${summary.activitiesSynced} hoạt động'
+            '${summary.activitiesDeleted > 0 ? ', ${summary.activitiesDeleted} đã xoá' : ''}'
+            ', ${summary.plotsSynced} thửa, ${summary.cropSeasonsSynced} vụ.';
+      }
+    } catch (_) {
       message = 'Không có mạng hoặc lỗi kết nối — thử lại sau.';
     }
     if (!mounted) return;
@@ -65,13 +81,25 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
     await _load();
   }
 
-  Future<void> _openActivityForm(String type) async {
-    await Navigator.of(context).push(
+  Future<void> _writeActivity(String type) async {
+    await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ActivityFormScreen(
-          services: widget.services,
-          cropSeasonId: widget.season.id,
+          services: _s,
+          cropSeasonId: widget.season.clientId,
           activityType: type,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _openActivity(Activity a) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ActivityDetailScreen(
+          services: _s,
+          clientEventId: a.clientEventId,
         ),
       ),
     );
@@ -80,85 +108,168 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.season.seasonCode)),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Card(
-            color: Colors.green.shade50,
-            child: ListTile(
-              leading: const Icon(Icons.cloud_sync),
-              title: Text(_pendingCount == 0
-                  ? 'Đã đồng bộ hết'
-                  : 'Còn $_pendingCount hoạt động chưa đồng bộ'),
-              subtitle: _syncMessage == null ? null : Text(_syncMessage!),
-              trailing: _syncing
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator())
-                  : IconButton(icon: const Icon(Icons.sync), onPressed: _sync),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text('Ghi nhật ký hoạt động', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 2.2,
-            children: kActivityTypes
-                .map((type) => ElevatedButton(
-                      onPressed: () => _openActivityForm(type),
-                      child: Text(
-                        kActivityTypeLabels[type] ?? type,
-                        style: const TextStyle(fontSize: 15),
+    final text = Theme.of(context).textTheme;
+    return AppScaffold(
+      header: AppHeader(
+        title: widget.season.seasonCode,
+        subtitle: 'Vụ canh tác',
+        showBackButton: true,
+      ),
+      scrollable: false,
+      padded: false,
+      body: _loading
+          ? const LoadingState()
+          : ListView(
+              padding: const EdgeInsets.all(AppSpacing.screenH),
+              children: [
+                AppCard(
+                  variant: AppCardVariant.highlight,
+                  child: Row(
+                    children: [
+                      Icon(
+                        _pendingCount == 0
+                            ? Icons.cloud_done_outlined
+                            : Icons.cloud_upload_outlined,
+                        color: _pendingCount == 0
+                            ? AppColors.primary
+                            : AppColors.warningText,
                       ),
-                    ))
-                .toList(),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.eco),
-              label: const Text('Xem CO2e', style: TextStyle(fontSize: 16)),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => CarbonResultScreen(
-                    services: widget.services,
-                    cropSeasonId: widget.season.id,
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _pendingCount == 0
+                                  ? 'Đã đồng bộ hết'
+                                  : 'Còn $_pendingCount bản ghi chưa gửi',
+                              style: text.titleSmall,
+                            ),
+                            if (_syncMessage != null)
+                              Text(_syncMessage!,
+                                  style: text.labelSmall?.copyWith(
+                                      color: AppColors.textSecondary)),
+                          ],
+                        ),
+                      ),
+                      _syncing
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : IconButton(
+                              icon: const Icon(Icons.sync),
+                              tooltip: 'Gửi dữ liệu ngay',
+                              onPressed: _sync,
+                            ),
+                    ],
                   ),
                 ),
-              ),
+                const SizedBox(height: AppSpacing.lg),
+                Text('Ghi nhật ký hoạt động', style: text.titleMedium),
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    for (final type in kActivityTypes)
+                      ActionChip(
+                        avatar: Icon(kActivityTypeIcons[type],
+                            size: 18, color: AppColors.primary),
+                        label: Text(kActivityTypeLabels[type] ?? type),
+                        onPressed: () => _writeActivity(type),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                PrimaryButton(
+                  label: 'Xem kết quả phát thải',
+                  icon: Icons.eco_outlined,
+                  onPressed: () => AppRoutes.openCarbonResult(
+                    context,
+                    _s,
+                    cropSeasonClientId: widget.season.clientId,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                SecondaryButton(
+                  label: 'Xem hiệu quả tài nguyên',
+                  icon: Icons.insights_outlined,
+                  expanded: true,
+                  onPressed: () => AppRoutes.openResourceDashboard(
+                    context,
+                    _s,
+                    cropSeasonClientId: widget.season.clientId,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Text('Đã ghi nhận', style: text.titleMedium),
+                const SizedBox(height: AppSpacing.xs),
+                if (_activities.isEmpty)
+                  Text('Chưa có hoạt động nào.',
+                      style: text.bodyMedium
+                          ?.copyWith(color: AppColors.textSecondary))
+                else
+                  for (final a in _activities) ...[
+                    _ActivityTile(activity: a, onTap: () => _openActivity(a)),
+                    const SizedBox(height: AppSpacing.xs),
+                  ],
+              ],
+            ),
+    );
+  }
+}
+
+class _ActivityTile extends StatelessWidget {
+  const _ActivityTile({required this.activity, required this.onTap});
+  final Activity activity;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return AppCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(kActivityTypeIcons[activity.type], color: AppColors.primary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(kActivityTypeLabels[activity.type] ?? activity.type,
+                    style: text.titleSmall),
+                Text(
+                  '${AppFormat.date(activity.occurredAt)} · ${AppFormat.time(activity.occurredAt)}',
+                  style:
+                      text.labelSmall?.copyWith(color: AppColors.textSecondary),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-          const Text('Đã ghi nhận', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          if (_activities.isEmpty) const Padding(padding: EdgeInsets.all(8), child: Text('Chưa có hoạt động nào.')),
-          ..._activities.map((a) => ListTile(
-                leading: _syncIcon(a.syncState),
-                title: Text(kActivityTypeLabels[a.type] ?? a.type),
-                subtitle: Text('${a.occurredAt.day}/${a.occurredAt.month}/${a.occurredAt.year}'
-                    '${a.syncError != null ? " — lỗi: ${a.syncError}" : ""}'),
-              )),
+          _stateBadge(activity),
+          const SizedBox(width: AppSpacing.xxs),
+          const Icon(Icons.chevron_right, color: AppColors.textSecondary),
         ],
       ),
     );
   }
 
-  Widget _syncIcon(SyncState state) {
-    switch (state) {
+  Widget _stateBadge(Activity a) {
+    if (a.deletedLocally) {
+      return const StatusBadge(label: 'Chờ xoá', tone: StatusTone.warning);
+    }
+    switch (a.syncState) {
       case SyncState.synced:
-        return const Icon(Icons.check_circle, color: Colors.green);
-      case SyncState.syncing:
-        return const Icon(Icons.sync, color: Colors.blue);
+        return const StatusBadge(
+            label: 'Đã gửi', tone: StatusTone.positive, icon: Icons.check);
       case SyncState.failed:
-        return const Icon(Icons.error, color: Colors.red);
+        return const StatusBadge(label: 'Lỗi', tone: StatusTone.danger);
+      case SyncState.syncing:
+        return const StatusBadge(label: 'Đang gửi', tone: StatusTone.neutral);
       case SyncState.pending:
-        return const Icon(Icons.schedule, color: Colors.grey);
+        return const StatusBadge(label: 'Chưa gửi', tone: StatusTone.warning);
     }
   }
 }
