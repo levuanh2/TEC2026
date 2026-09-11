@@ -18,6 +18,8 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
 
   await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Bón phân' })).toBeVisible()
+  // Required fields carry a visible "*" (brief Part A §12 — required/optional distinction).
+  await expect(page.getByRole('dialog', { name: 'Bón phân' }).locator('.form-field__required').first()).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-fertilizer-form-1440.png', fullPage: true })
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Bón phân' })).toHaveCount(0)
@@ -68,16 +70,26 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
 
   await page.getByRole('link', { name: /Ruộng/ }).first().click()
   await expect(page.getByRole('heading', { name: 'Các ruộng trong phạm vi của bạn', level: 1 })).toBeVisible()
+  // Farm card now surfaces plot count/area/active-season count (brief Part A §2).
+  await expect(page.getByText(/thửa$/).first()).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-farms-1440.png', fullPage: true })
+  await page.getByRole('link', { name: 'Xem ruộng' }).first().click()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  // Farm detail is a real Hero (h1) with a breadcrumb back to the farm list.
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Ruộng của tôi' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/farmer-farm-detail-1440.png', fullPage: true })
   await page.getByRole('link', { name: 'Thửa A-01' }).click()
   await expect(page.getByRole('heading', { name: 'Thửa A-01', level: 1 })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-plot-1440.png', fullPage: true })
-  await page.getByRole('link', { name: 'Hè Thu 2026' }).click()
+  // .last() disambiguates from the Hero's own "Vụ đang canh tác: Hè Thu 2026 →"
+  // shortcut link above the season list — both match the loose substring name.
+  await page.getByRole('link', { name: 'Hè Thu 2026' }).last().click()
   await expect(page.getByRole('tab', { name: 'Nhật ký' })).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-season-1440.png', fullPage: true })
 
   await page.getByRole('tab', { name: 'Nhật ký' }).click()
-  await expect(page.getByRole('heading', { name: 'Nhật ký canh tác' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Nhật ký của vụ này' })).toBeVisible()
   await expect(page.getByRole('button', { name: '+ Ghi hoạt động' })).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-journal-1440.png', fullPage: true })
 
@@ -98,7 +110,7 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
   await page.screenshot({ path: 'test-results/farmer-performance-1440.png', fullPage: true })
 
   await page.getByRole('tab', { name: 'Carbon' }).click()
-  await expect(page.getByText('Chưa có kết quả Carbon')).toBeVisible()
+  await expect(page.getByText('Chưa có kết quả phát thải hợp lệ cho vụ này')).toBeVisible()
   await expect(page.getByRole('button', { name: /Tính lại/i })).toHaveCount(0)
   await page.screenshot({ path: 'test-results/farmer-carbon-1440.png', fullPage: true })
   for (const width of [1024, 768, 390]) {
