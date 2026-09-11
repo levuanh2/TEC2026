@@ -18,6 +18,9 @@ venv/
 node_modules/
 dist/
 *.tsbuildinfo
+test-results/
+playwright-report/
+playwright/.cache/
 
 # Flutter (app/)
 .dart_tool/

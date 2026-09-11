@@ -22,3 +22,20 @@ export async function listOrganizations(): Promise<Organization[]> { return (awa
 export async function getOrganization(id: string): Promise<Organization> { return organization(await apiRequest<Parameters<typeof organization>[0]>(`/v1/organizations/${id}`)) }
 export async function getOrganizationSummary(id: string): Promise<OrganizationSummary> { return summary(await apiRequest<Parameters<typeof summary>[0]>(`/v1/organizations/${id}/summary`)) }
 export async function getFarmPerformance(id: string): Promise<FarmPerformance[]> { return (await apiRequest<{ items: Parameters<typeof performance>[0][] }>(`/v1/organizations/${id}/farm-performance`)).items.map(performance) }
+
+// Org-level resource-efficiency rollup (MetricResponse). Used for the Dashboard
+// "Hiệu suất vùng/HTX" section + the Performance page (brief §5, §11).
+export interface OrgMetrics {
+  waterPerKg: number | null; fertilizerPerKg: number | null; co2ePerKg: number | null; costPerKg: number | null
+  yieldKg: number | null; waterM3: number | null; fertilizerKg: number | null; totalCo2eKg: number | null
+  completeness: { water: boolean; fertilizer: boolean; cost: boolean; carbon: boolean }
+}
+export async function getOrganizationMetrics(id: string): Promise<OrgMetrics> {
+  const x = await apiRequest<any>(`/v1/organizations/${id}/metrics`)
+  return {
+    waterPerKg: x.water_per_kg ?? null, fertilizerPerKg: x.fertilizer_per_kg ?? null,
+    co2ePerKg: x.co2e_per_kg ?? null, costPerKg: x.cost_per_kg ?? null,
+    yieldKg: x.yield_kg ?? null, waterM3: x.water_m3 ?? null, fertilizerKg: x.fertilizer_kg ?? null, totalCo2eKg: x.total_co2e_kg ?? null,
+    completeness: { water: Boolean(x.data_completeness?.water), fertilizer: Boolean(x.data_completeness?.fertilizer), cost: Boolean(x.data_completeness?.cost), carbon: Boolean(x.data_completeness?.carbon) },
+  }
+}

@@ -1,0 +1,40 @@
+// Presentation formatting only — NO business math (brief §22). Backend already
+// computed every ratio/aggregate; this file only turns a value into a string.
+
+const EMPTY = 'Chưa đủ dữ liệu'
+
+const nf = (max = 1) => new Intl.NumberFormat('vi-VN', { maximumFractionDigits: max })
+
+/** null / undefined -> "Chưa đủ dữ liệu"; a real 0 stays "0". */
+export function num(value: number | null | undefined, opts: { suffix?: string; max?: number; empty?: string } = {}): string {
+  if (value == null || Number.isNaN(value)) return opts.empty ?? EMPTY
+  return `${nf(opts.max ?? 1).format(value)}${opts.suffix ?? ''}`
+}
+
+export const kg = (v: number | null | undefined, empty?: string) => num(v, { suffix: ' kg', empty })
+export const ha = (v: number | null | undefined, empty?: string) => num(v, { suffix: ' ha', max: 2, empty })
+export const m3 = (v: number | null | undefined, empty?: string) => num(v, { suffix: ' m³', max: 2, empty })
+export const vnd = (v: number | null | undefined, empty?: string) =>
+  v == null ? (empty ?? EMPTY) : `${nf(0).format(v)} ₫`
+export const perKg = (v: number | null | undefined, unit: string, empty?: string) =>
+  v == null ? (empty ?? EMPTY) : `${nf(3).format(v)}${unit ? ` ${unit}` : ''}`
+
+/** ISO date/datetime -> dd/MM/yyyy (locale-stable, no time). */
+export function date(value: string | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+export function dateTime(value: string | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+export const place = (...parts: (string | null | undefined)[]) =>
+  parts.filter(Boolean).join(', ') || '—'
+
+export const shortHash = (h: string | null | undefined) => (h ? `${h.slice(0, 10)}…` : '—')

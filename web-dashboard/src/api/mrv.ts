@@ -9,3 +9,15 @@ const mrvCase = (x: MrvCaseResponse): MrvCase => ({ caseId: x.case_id, caseCode:
 
 export async function listMrvCases(): Promise<MrvCase[]> { return (await apiRequest<{ items: MrvCaseResponse[] }>('/v1/mrv/cases')).items.map(mrvCase) }
 export async function getMrvCase(id: string): Promise<MrvCase> { return mrvCase(await apiRequest<MrvCaseResponse>(`/v1/mrv/cases/${id}`)) }
+
+export interface MrvEvidence { id: string; stepNo: number; evidenceType: string; fileName: string; mimeType: string; sha256: string | null; uploadedAt: string; productionBatchId: string | null }
+export interface MrvBatch { productionBatchId: string; batchCode: string; cropSeasonId: string; farmId: string; plotId: string }
+
+export async function listMrvEvidence(caseId: string): Promise<MrvEvidence[]> {
+  const r = await apiRequest<{ items: any[] }>(`/v1/mrv/cases/${caseId}/evidence`)
+  return r.items.map((x) => ({ id: x.id, stepNo: x.step_no, evidenceType: x.evidence_type, fileName: x.file_name, mimeType: x.mime_type, sha256: x.sha256 ?? null, uploadedAt: x.uploaded_at, productionBatchId: x.production_batch_id ?? null }))
+}
+export async function listMrvBatches(caseId: string): Promise<MrvBatch[]> {
+  const r = await apiRequest<{ items: any[] }>(`/v1/mrv/cases/${caseId}/batches`)
+  return r.items.map((x) => ({ productionBatchId: x.production_batch_id, batchCode: x.batch_code, cropSeasonId: x.crop_season_id, farmId: x.farm_id, plotId: x.plot_id }))
+}
