@@ -218,6 +218,21 @@ function render(path: string, viewer: CurrentUser): ReactNode {
   }
 }
 
+/** A farmer stays inside /farmer/*; anyone else stays out of it, and leaving
+ * /login always lands on the role's home. Takes role/path explicitly (never
+ * reads them back from React state) so callers can invoke it right where a
+ * role was just resolved, with no risk of acting on a stale value from a
+ * race between two effects (see below). */
+function applyRoleRedirect(role: string, currentPath: string) {
+  const home = role === 'farmer' ? '/farmer' : '/dashboard'
+  if (currentPath === '/login') {
+    go(home)
+    return
+  }
+  if (role === 'farmer' && !currentPath.startsWith('/farmer')) go('/farmer')
+  if (role !== 'farmer' && currentPath.startsWith('/farmer')) go('/dashboard')
+}
+
 export default function App() {
   const [path, setPath] = useState(location.pathname)
   const [session, setSession] = useState<Session | null>(null)
@@ -238,24 +253,55 @@ export default function App() {
       .finally(() => setReady(true))
   }, [])
 
+  // Real bug found while deep-link-testing the redesign (brief Part 6): this
+  // effect and the role-redirect effect below both depended on `session`.
+  // When `session` flips from null to a real value, React runs BOTH in the
+  // same commit's effect flush, in declaration order — but the redirect
+  // effect's closure still sees THIS render's stale `viewerReady`/`viewer`
+  // (still the pre-session-change default), because `setViewerReady(false)`
+  // called here only takes effect on a LATER render, not synchronously for
+  // a sibling effect in the same flush. Net result: every full page load
+  // (deep link or refresh) for a non-farmer role spuriously pushed '/farmer'
+  // first, then corrected to '/dashboard' once the real role resolved —
+  // silently swallowing whatever route was actually requested. Fixed by
+  // performing the redirect directly from the freshly-resolved role value
+  // (never a value read back from state), and reserving the separate
+  // path-watching effect below for path changes only.
   useEffect(() => {
     if (!session) {
       setViewer({ role: 'farmer', organizationId: null })
       setViewerReady(true)
       return
     }
+    let alive = true
     setViewerReady(false)
     void getMe()
-      .then(setViewer)
-      .catch(() => setViewer({ role: 'farmer', organizationId: null }))
-      .finally(() => setViewerReady(true))
+      .then((v) => {
+        if (!alive) return
+        setViewer(v)
+        if (!usingMockData) applyRoleRedirect(v.role, location.pathname)
+      })
+      .catch(() => {
+        if (!alive) return
+        setViewer({ role: 'farmer', organizationId: null })
+        if (!usingMockData) applyRoleRedirect('farmer', location.pathname)
+      })
+      .finally(() => alive && setViewerReady(true))
+    return () => {
+      alive = false
+    }
   }, [session])
 
+  // Ongoing protection once viewer/viewerReady are already settled: catches
+  // a manual URL edit into the "wrong side" while already logged in. Keyed
+  // only on `path` (not session/viewer/viewerReady) so it never re-fires
+  // from the same commit as the effect above — by the time `path` itself
+  // changes, viewer/viewerReady for the current session are already settled.
   useEffect(() => {
     if (usingMockData || !session || !viewerReady) return
-    if (viewer.role === 'farmer' && !path.startsWith('/farmer')) go('/farmer')
-    if (viewer.role !== 'farmer' && path.startsWith('/farmer')) go('/dashboard')
-  }, [path, session, viewer.role, viewerReady])
+    applyRoleRedirect(viewer.role, path)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path])
 
   useEffect(() => {
     document.title = 'AgriCarbon — Dashboard'
