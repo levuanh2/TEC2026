@@ -17,7 +17,7 @@ import time
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from carbon import SCENARIOS
@@ -35,7 +35,17 @@ from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthE
 from infrastructure.pagination import paginate
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
-from service import ActivityWriteAccessError, ActivityWriteService, CarbonService, InvalidCropSeasonStateError
+from service import (
+    ActivityWriteAccessError,
+    ActivityWriteService,
+    CarbonService,
+    CvAccessError,
+    CvService,
+    InvalidCropSeasonStateError,
+    InvalidImageError,
+    RecommendationAccessError,
+    RecommendationService,
+)
 from infrastructure.write_repo import IdempotencyConflictError
 
 router = APIRouter(prefix="/v1")
@@ -82,6 +92,14 @@ def _read_repo(authorization: str | None = Header(default=None)) -> SupabaseRead
 
 def _activity_write_service() -> ActivityWriteService:
     raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Activity write repository is not configured."))
+
+
+def _recommendation_service() -> RecommendationService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Recommendation service is not configured."))
+
+
+def _cv_service() -> CvService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "CV service is not configured."))
 
 
 def _read_or_404(callback):
@@ -320,6 +338,80 @@ def delete_activity(
     service: ActivityWriteService = Depends(_activity_write_service),
 ) -> None:
     _write_or_http(lambda: service.delete(read_repository=repo, activity_id=activity_id))
+
+
+# -- M05 recommendations --------------------------------------------------
+
+def _recommendation_or_http(callback):
+    try:
+        return callback()
+    except RecommendationAccessError as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Recommendation or crop season not found or outside your scope.")) from exc
+
+
+@router.get("/crop-seasons/{crop_season_id}/recommendations", tags=['Recommendations'], response_model=schemas.ItemsResponse[schemas.RecommendationResponse])
+def list_recommendations(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    return _read_or_404(lambda: {"items": repo.recommendations(crop_season_id)})
+
+
+@router.post(
+    "/crop-seasons/{crop_season_id}/recommendations/generate", tags=['Recommendations'],
+    response_model=schemas.ItemsResponse[schemas.RecommendationResponse],
+)
+def generate_recommendations_endpoint(
+    crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo),
+    service: RecommendationService = Depends(_recommendation_service),
+) -> dict[str, Any]:
+    return {"items": _recommendation_or_http(lambda: service.generate(read_repository=repo, crop_season_id=crop_season_id))}
+
+
+@router.patch("/recommendations/{recommendation_id}", tags=['Recommendations'], response_model=schemas.RecommendationResponse)
+def update_recommendation_status(
+    recommendation_id: str, payload: schemas.RecommendationStatusUpdateRequest,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: RecommendationService = Depends(_recommendation_service),
+) -> dict[str, Any]:
+    return _recommendation_or_http(
+        lambda: service.set_status(read_repository=repo, recommendation_id=recommendation_id, status=payload.status)
+    )
+
+
+# -- M03 CV Farmer integration ---------------------------------------------
+
+def _cv_or_http(callback):
+    try:
+        return callback()
+    except CvAccessError as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Crop season or CV result not found or outside your scope.")) from exc
+    except InvalidImageError as exc:
+        raise HTTPException(status_code=422, detail=error_detail(exc.code, str(exc))) from exc
+
+
+@router.post("/crop-seasons/{crop_season_id}/cv/infer", tags=['CV'], response_model=schemas.CvInferenceResponse)
+async def infer_leaf_image(
+    crop_season_id: str, file: UploadFile = File(...),
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: CvService = Depends(_cv_service),
+) -> dict[str, Any]:
+    file_bytes = await file.read()
+    content_type = file.content_type or ""
+    return _cv_or_http(
+        lambda: service.infer(read_repository=repo, crop_season_id=crop_season_id, file_bytes=file_bytes, content_type=content_type)
+    )
+
+
+@router.get("/crop-seasons/{crop_season_id}/cv/inferences", tags=['CV'], response_model=schemas.ItemsResponse[schemas.CvInferenceResponse])
+def list_cv_inferences(
+    crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo), service: CvService = Depends(_cv_service),
+) -> dict[str, Any]:
+    return {"items": _cv_or_http(lambda: service.list(read_repository=repo, crop_season_id=crop_season_id))}
+
+
+@router.get("/cv/inferences/{inference_id}", tags=['CV'], response_model=schemas.CvInferenceResponse)
+def get_cv_inference(
+    inference_id: str, repo: SupabaseReadRepository = Depends(_read_repo), service: CvService = Depends(_cv_service),
+) -> dict[str, Any]:
+    return _cv_or_http(lambda: service.get(read_repository=repo, inference_id=inference_id))
 
 
 @router.get("/production-batches/{production_batch_id}", tags=['Production Batches'], response_model=schemas.ProductionBatchResponse)

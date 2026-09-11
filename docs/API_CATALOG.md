@@ -18,6 +18,22 @@ They support fertilizer, irrigation, and harvest only. The historical count and
 write-gap note below predate FW-2 Part 1; `docs/openapi.json` remains the
 authoritative operation inventory.
 
+## M05 supersession
+
+Also added: `GET /v1/crop-seasons/{crop_season_id}/recommendations` (list),
+`POST .../recommendations/generate` (idempotent, farmer-scope only), and
+`PATCH /v1/recommendations/{recommendation_id}` (`{"status": "accepted" |
+"dismissed"}`, farmer-scope only). See `docs/modules/05-ai-recommendation.md`
+and `docs/M05_RECOMMENDATION_REPORT.md`.
+
+## M03 supersession
+
+Also added: `POST /v1/crop-seasons/{crop_season_id}/cv/infer` (multipart
+image upload, farmer scope only), `GET .../cv/inferences` (list),
+`GET /v1/cv/inferences/{inference_id}`. Uses the existing draft M03
+baseline model (MobileNetV2, not field-validated) — see
+`docs/CV_FARMER_INTEGRATION_REPORT.md`.
+
 | Method | Path | Tag | Auth |
 |---|---|---|---|
 | GET | `/health` | Health | no |
@@ -30,8 +46,13 @@ authoritative operation inventory.
 | GET | `/v1/crop-seasons/{crop_season_id}/activities` | Activities | yes |
 | POST | `/v1/crop-seasons/{crop_season_id}/activities` | Activities | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/carbon` | Carbon | yes |
+| POST | `/v1/crop-seasons/{crop_season_id}/cv/infer` | CV | yes |
+| GET | `/v1/crop-seasons/{crop_season_id}/cv/inferences` | CV | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/metrics` | Metrics | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/production-batches` | Production Batches | yes |
+| GET | `/v1/crop-seasons/{crop_season_id}/recommendations` | Recommendations | yes |
+| POST | `/v1/crop-seasons/{crop_season_id}/recommendations/generate` | Recommendations | yes |
+| GET | `/v1/cv/inferences/{inference_id}` | CV | yes |
 | GET | `/v1/emission-factor-sets` | Emission Factors | yes |
 | GET | `/v1/emission-factor-sets/{emission_factor_set_id}` | Emission Factors | yes |
 | GET | `/v1/emission-factor-sets/{emission_factor_set_id}/factors` | Emission Factors | yes |
@@ -57,6 +78,7 @@ authoritative operation inventory.
 | GET | `/v1/plots/{plot_id}` | Plots | yes |
 | GET | `/v1/plots/{plot_id}/crop-seasons` | Crop Seasons | yes |
 | GET | `/v1/production-batches/{production_batch_id}` | Production Batches | yes |
+| PATCH | `/v1/recommendations/{recommendation_id}` | Recommendations | yes |
 
 ## Chưa có (biết rõ, không giả vờ)
 

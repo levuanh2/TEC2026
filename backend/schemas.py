@@ -206,6 +206,59 @@ class MetricResponse(BaseModel):
     data_completeness: dict[str, bool]
 
 
+# -- M03 CV Farmer integration ---------------------------------------------
+
+DiseaseLabel = Literal["rice_blast", "bacterial_leaf_blight", "brown_spot", "healthy"]
+
+
+class CvInferenceResponse(BaseModel):
+    id: str
+    crop_season_id: str
+    image_id: str
+    # None exactly when `uncertain` is true — the model never gets forced
+    # into one of the four labels below the confidence threshold (FR-1b-04).
+    label: DiseaseLabel | None
+    label_vi: str | None
+    confidence: float
+    uncertain: bool
+    threshold_used: float
+    model_version: str
+    created_at: datetime
+
+
+# -- M05 recommendations ---------------------------------------------------
+
+RecommendationType = Literal["optimization", "data_task"]
+RecommendationStatus = Literal["generated", "accepted", "dismissed", "expired"]
+ImpactStatus = Literal["available", "unavailable"]
+
+
+class RecommendationResponse(BaseModel):
+    id: str
+    crop_season_id: str
+    rule_code: str
+    rule_version: str
+    engine_version: str | None = None
+    type: RecommendationType
+    status: RecommendationStatus
+    title: str
+    reason: str
+    compared_to: str | None = None
+    co2e_total_kg_before: float | None = None
+    co2e_total_kg_after: float | None = None
+    co2e_total_kg_delta: float | None = None
+    co2e_percent_delta: float | None = None
+    impact_status: ImpactStatus
+    impact_unavailable_reason: str | None = None
+    generated_at: datetime
+    accepted_at: datetime | None = None
+    dismissed_at: datetime | None = None
+
+
+class RecommendationStatusUpdateRequest(BaseModel):
+    status: Literal["accepted", "dismissed"]
+
+
 # -- Organizations --------------------------------------------------------
 
 class OrganizationResponse(BaseModel):

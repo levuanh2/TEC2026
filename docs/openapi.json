@@ -1092,6 +1092,404 @@
         ]
       }
     },
+    "/v1/crop-seasons/{crop_season_id}/recommendations": {
+      "get": {
+        "tags": [
+          "Recommendations"
+        ],
+        "summary": "List Recommendations",
+        "operationId": "list_recommendations_v1_crop_seasons__crop_season_id__recommendations_get",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemsResponse_RecommendationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/recommendations/generate": {
+      "post": {
+        "tags": [
+          "Recommendations"
+        ],
+        "summary": "Generate Recommendations Endpoint",
+        "operationId": "generate_recommendations_endpoint_v1_crop_seasons__crop_season_id__recommendations_generate_post",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemsResponse_RecommendationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/recommendations/{recommendation_id}": {
+      "patch": {
+        "tags": [
+          "Recommendations"
+        ],
+        "summary": "Update Recommendation Status",
+        "operationId": "update_recommendation_status_v1_recommendations__recommendation_id__patch",
+        "parameters": [
+          {
+            "name": "recommendation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recommendation Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationStatusUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/cv/infer": {
+      "post": {
+        "tags": [
+          "CV"
+        ],
+        "summary": "Infer Leaf Image",
+        "operationId": "infer_leaf_image_v1_crop_seasons__crop_season_id__cv_infer_post",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_infer_leaf_image_v1_crop_seasons__crop_season_id__cv_infer_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CvInferenceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/cv/inferences": {
+      "get": {
+        "tags": [
+          "CV"
+        ],
+        "summary": "List Cv Inferences",
+        "operationId": "list_cv_inferences_v1_crop_seasons__crop_season_id__cv_inferences_get",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemsResponse_CvInferenceResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/cv/inferences/{inference_id}": {
+      "get": {
+        "tags": [
+          "CV"
+        ],
+        "summary": "Get Cv Inference",
+        "operationId": "get_cv_inference_v1_cv_inferences__inference_id__get",
+        "parameters": [
+          {
+            "name": "inference_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Inference Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CvInferenceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/v1/production-batches/{production_batch_id}": {
       "get": {
         "tags": [
@@ -2527,6 +2925,20 @@
         ],
         "title": "ActivityWriteResponse"
       },
+      "Body_infer_leaf_image_v1_crop_seasons__crop_season_id__cv_infer_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_infer_leaf_image_v1_crop_seasons__crop_season_id__cv_infer_post"
+      },
       "CalculateRequest": {
         "properties": {
           "crop_season_id": {
@@ -2643,6 +3055,85 @@
           "status"
         ],
         "title": "CropSeasonResponse"
+      },
+      "CvInferenceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "crop_season_id": {
+            "type": "string",
+            "title": "Crop Season Id"
+          },
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "rice_blast",
+                  "bacterial_leaf_blight",
+                  "brown_spot",
+                  "healthy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "label_vi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Vi"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "uncertain": {
+            "type": "boolean",
+            "title": "Uncertain"
+          },
+          "threshold_used": {
+            "type": "number",
+            "title": "Threshold Used"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "crop_season_id",
+          "image_id",
+          "label",
+          "label_vi",
+          "confidence",
+          "uncertain",
+          "threshold_used",
+          "model_version",
+          "created_at"
+        ],
+        "title": "CvInferenceResponse"
       },
       "EmissionFactorResponse": {
         "properties": {
@@ -2995,6 +3486,22 @@
         ],
         "title": "ItemsResponse[CropSeasonResponse]"
       },
+      "ItemsResponse_CvInferenceResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CvInferenceResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ItemsResponse[CvInferenceResponse]"
+      },
       "ItemsResponse_EmissionFactorResponse_": {
         "properties": {
           "items": {
@@ -3170,6 +3677,22 @@
           "items"
         ],
         "title": "ItemsResponse[ProductionBatchResponse]"
+      },
+      "ItemsResponse_RecommendationResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecommendationResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ItemsResponse[RecommendationResponse]"
       },
       "MeResponse": {
         "properties": {
@@ -4004,6 +4527,197 @@
         ],
         "title": "ProductionBatchResponse"
       },
+      "RecommendationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "crop_season_id": {
+            "type": "string",
+            "title": "Crop Season Id"
+          },
+          "rule_code": {
+            "type": "string",
+            "title": "Rule Code"
+          },
+          "rule_version": {
+            "type": "string",
+            "title": "Rule Version"
+          },
+          "engine_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Version"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "optimization",
+              "data_task"
+            ],
+            "title": "Type"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "generated",
+              "accepted",
+              "dismissed",
+              "expired"
+            ],
+            "title": "Status"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "compared_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compared To"
+          },
+          "co2e_total_kg_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Co2E Total Kg Before"
+          },
+          "co2e_total_kg_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Co2E Total Kg After"
+          },
+          "co2e_total_kg_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Co2E Total Kg Delta"
+          },
+          "co2e_percent_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Co2E Percent Delta"
+          },
+          "impact_status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Impact Status"
+          },
+          "impact_unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Unavailable Reason"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "dismissed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "crop_season_id",
+          "rule_code",
+          "rule_version",
+          "type",
+          "status",
+          "title",
+          "reason",
+          "impact_status",
+          "generated_at"
+        ],
+        "title": "RecommendationResponse"
+      },
+      "RecommendationStatusUpdateRequest": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "dismissed"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "RecommendationStatusUpdateRequest"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -4083,6 +4797,14 @@
     {
       "name": "Carbon",
       "description": "Tính và đọc kết quả CO2e (Carbon Engine)."
+    },
+    {
+      "name": "Recommendations",
+      "description": "Khuyến nghị canh tác có định lượng, sinh từ rule engine (M05)."
+    },
+    {
+      "name": "CV",
+      "description": "Nhận diện bệnh lá lúa từ ảnh (M03 baseline model, draft — chưa xác thực thực địa)."
     },
     {
       "name": "Emission Factors",

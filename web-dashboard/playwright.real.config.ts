@@ -9,7 +9,7 @@ const baseURL = process.env.REAL_E2E_BASE_URL ?? 'http://127.0.0.1:5173'
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: /(?:web-real-data|farmer-real-data|farmer-real-write)\.spec\.ts/,
+  testMatch: /(?:web-real-data|farmer-real-data|farmer-real-write|farmer-real-recommendations|farmer-real-cv)\.spec\.ts/,
   // Generous: a local backend talking to hosted Supabase can take tens of
   // seconds per aggregate rollup query. Progressive per-section loading keeps
   // the page usable meanwhile, but the full click-through still needs headroom.

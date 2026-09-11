@@ -15,6 +15,8 @@ import {
   ActivityRowActions, AddActivityCta, QuickEntryPanel, toSeasonContext, useActivityMutations,
   type SeasonContext,
 } from './ActivityForms'
+import { RecommendationsSection } from './Recommendations'
+import { CvCheckButton, CvHistorySection, CvHomeSummaryCard } from './CvCheck'
 
 type Scope = { farms: Farm[]; plots: Plot[]; seasons: CropSeason[] }
 type SeasonWithContext = CropSeason & { plot?: Plot; farm?: Farm }
@@ -96,6 +98,7 @@ function FarmerHome() {
   const metrics = useAsync(() => current ? getResourceMetrics(current.id) : Promise.resolve(null), [current?.id])
   const activities = useAsync(() => current ? getActivities(current.id) : Promise.resolve([]), [current?.id])
   const mutations = useActivityMutations(() => { activities.reload(); metrics.reload() })
+  const [cvVersion, setCvVersion] = useState(0)
   const writableSeasons: SeasonContext[] = (scope.data?.seasons ?? [])
     .filter((season) => season.status === 'active')
     .map((season) => toSeasonContext(season, scope.data?.plots.find((plot) => plot.id === season.plotId)))
@@ -109,6 +112,11 @@ function FarmerHome() {
         return <div className="farmer-stack">
           <CurrentSeasonCard season={season} />
           <QuickEntryPanel activeSeasons={writableSeasons} mutations={mutations} />
+          <section className="farmer-quick">
+            <div><h2>Kiểm tra lá lúa</h2><p>Chụp hoặc chọn ảnh để nhận diện nhanh bằng AI (baseline, chưa xác nhận thực địa).</p></div>
+            <div><CvCheckButton season={toSeasonContext(season, season.plot)} onChecked={() => setCvVersion((v) => v + 1)} /></div>
+          </section>
+          <CvHomeSummaryCard seasonId={season.id} reloadKey={cvVersion} />
           <Section title="Hiệu suất vụ này" description="Chỉ số dùng dữ liệu đã ghi nhận; thiếu dữ liệu sẽ không được thay bằng số 0.">
             <Async state={metrics} skeleton="kpis">{(m) => m ? <FarmerMetricGrid metrics={m} /> : <EmptyState title="Chưa đủ dữ liệu hiệu suất" />}</Async>
           </Section>
@@ -116,7 +124,7 @@ function FarmerHome() {
           <Section title="Nhật ký gần đây" cta={{ label: 'Xem toàn bộ nhật ký', to: `/farmer/crop-seasons/${season.id}/journal` }}>
             <Async state={activities} skeleton="table">{(items) => <RecentActivities activities={items} />}</Async>
           </Section>
-          <section className="farmer-muted-card"><h2>Khuyến nghị</h2><p>Chưa có khuyến nghị định lượng. Tính năng sẽ hiển thị khi hệ thống có đủ dữ liệu và có thể ước tính tác động.</p></section>
+          <RecommendationsSection seasonId={season.id} />
         </div>
       }}
     </Async>
@@ -181,6 +189,7 @@ function FarmerSeason({ id, tab }: { id: string; tab: FarmerTab }) {
   // Harvest edits change the yield denominator, so a mutation refetches both
   // the journal and the four resource metrics (brief FW-2 §21).
   const mutations = useActivityMutations(() => { activities.reload(); metrics.reload() })
+  const [cvVersion, setCvVersion] = useState(0)
   const base = `/farmer/crop-seasons/${id}`
   const tabs = [{ label: 'Tổng quan', to: base, current: tab === 'overview' }, { label: 'Nhật ký', to: `${base}/journal`, current: tab === 'journal' }, { label: 'Hiệu suất', to: `${base}/performance`, current: tab === 'performance' }, { label: 'Carbon', to: `${base}/carbon`, current: tab === 'carbon' }]
   return <Async state={frame} isEmpty={(data) => !data.season} empty={<EmptyState icon="🔍" title="Không tìm thấy vụ canh tác" />}>{({ season, plot }) => {
@@ -188,7 +197,12 @@ function FarmerSeason({ id, tab }: { id: string; tab: FarmerTab }) {
     const seasonCtx = toSeasonContext(season, plot)
     return <><PageHead eyebrow="Vụ canh tác" title={season.name} meta={[<>{plot?.name ?? 'Thửa ruộng'} · {plot?.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}</>, <>Giống {season.variety ?? 'Chưa có dữ liệu'}</>]} /><Tabs items={tabs} />
       {mutations.flash && <Notice kind="success">{mutations.flash}</Notice>}
-      {tab === 'overview' && <FarmerSeasonOverview season={season} metrics={metrics} activities={activities} />}
+      {tab === 'overview' && (
+        <FarmerSeasonOverview
+          season={season} metrics={metrics} activities={activities} seasonCtx={seasonCtx} cvVersion={cvVersion}
+          onCvChecked={() => setCvVersion((v) => v + 1)}
+        />
+      )}
       {tab === 'journal' && <Section title="Nhật ký canh tác" description="Nhấn một hoạt động để xem thông tin đã ghi nhận.">
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}><AddActivityCta season={seasonCtx} mutations={mutations} /></div>
         <Async state={activities} skeleton="table">{(rows) => <ActivityTimeline activities={rows} resetSignal={mutations.version} renderActions={(a) => <ActivityRowActions activity={a} season={seasonCtx} mutations={mutations} />} />}</Async>
@@ -200,8 +214,17 @@ function FarmerSeason({ id, tab }: { id: string; tab: FarmerTab }) {
   }}</Async>
 }
 
-function FarmerSeasonOverview({ season, metrics, activities }: { season: CropSeason; metrics: ReturnType<typeof useAsync<SeasonMetrics>>; activities: ReturnType<typeof useAsync<Activity[]>> }) {
-  return <div className="farmer-stack"><section className="farmer-season-summary"><dl><div><dt>Trạng thái</dt><dd>{season.status ?? 'Chưa rõ'}</dd></div><div><dt>Ngày gieo sạ</dt><dd>{date(season.plantingDate)}</dd></div><div><dt>Ngày thu hoạch</dt><dd>{date(season.harvestDate)}</dd></div></dl></section><Section title="Hiệu suất"><Async state={metrics} skeleton="kpis">{(m) => <FarmerMetricGrid metrics={m} />}</Async></Section><Section title="Hoạt động gần đây" cta={{ label: 'Xem nhật ký', to: `/farmer/crop-seasons/${season.id}/journal` }}><Async state={activities} skeleton="table">{(rows) => <RecentActivities activities={rows} />}</Async></Section></div>
+function FarmerSeasonOverview({ season, metrics, activities, seasonCtx, cvVersion, onCvChecked }: { season: CropSeason; metrics: ReturnType<typeof useAsync<SeasonMetrics>>; activities: ReturnType<typeof useAsync<Activity[]>>; seasonCtx: SeasonContext; cvVersion: number; onCvChecked: () => void }) {
+  return <div className="farmer-stack">
+    <section className="farmer-season-summary"><dl><div><dt>Trạng thái</dt><dd>{season.status ?? 'Chưa rõ'}</dd></div><div><dt>Ngày gieo sạ</dt><dd>{date(season.plantingDate)}</dd></div><div><dt>Ngày thu hoạch</dt><dd>{date(season.harvestDate)}</dd></div></dl></section>
+    <Section title="Hiệu suất"><Async state={metrics} skeleton="kpis">{(m) => <FarmerMetricGrid metrics={m} />}</Async></Section>
+    <Section title="Hoạt động gần đây" cta={{ label: 'Xem nhật ký', to: `/farmer/crop-seasons/${season.id}/journal` }}><Async state={activities} skeleton="table">{(rows) => <RecentActivities activities={rows} />}</Async></Section>
+    <section className="farmer-quick">
+      <div><h2>Kiểm tra lá lúa</h2><p>Chụp hoặc chọn ảnh để nhận diện nhanh bằng AI (baseline, chưa xác nhận thực địa).</p></div>
+      <div><CvCheckButton season={seasonCtx} onChecked={onCvChecked} /></div>
+    </section>
+    <CvHistorySection seasonId={season.id} reloadKey={cvVersion} />
+  </div>
 }
 
 function seasonContextFromScope(scope: Scope | undefined, seasonId: string | null): SeasonContext | null {

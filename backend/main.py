@@ -29,9 +29,11 @@ from infrastructure.config import load_settings
 from infrastructure.supabase_repo import SupabaseCarbonRepository
 from infrastructure.read_repo import SupabaseReadRepository
 from infrastructure.write_repo import PostgresActivityWriteRepository
+from infrastructure.recommendation_repo import PostgresRecommendationRepository
+from infrastructure.cv_repo import PostgresCvRepository
 from infrastructure.auth import MissingAuthError, extract_bearer_token
 from infrastructure.request_context import RequestIdMiddleware
-from service import ActivityWriteService, CarbonService
+from service import ActivityWriteService, CarbonService, CvService, RecommendationService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -47,6 +49,8 @@ OPENAPI_TAGS = [
     {"name": "Activities", "description": "Nhật ký hoạt động canh tác đã ghi nhận."},
     {"name": "Metrics", "description": "Chỉ số tài nguyên/carbon tổng hợp theo vụ/hộ/tổ chức."},
     {"name": "Carbon", "description": "Tính và đọc kết quả CO2e (Carbon Engine)."},
+    {"name": "Recommendations", "description": "Khuyến nghị canh tác có định lượng, sinh từ rule engine (M05)."},
+    {"name": "CV", "description": "Nhận diện bệnh lá lúa từ ảnh (M03 baseline model, draft — chưa xác thực thực địa)."},
     {"name": "Emission Factors", "description": "Bộ hệ số phát thải đã published (chỉ đọc)."},
     {"name": "MRV", "description": "Hồ sơ MRV theo QĐ 4801/QĐ-BNNMT."},
     {"name": "Health", "description": "Trạng thái vận hành backend."},
@@ -129,6 +133,54 @@ if settings.auth_configured:
 if settings.auth_configured and settings.supabase_db_url:
     _activity_write_service_singleton = ActivityWriteService(PostgresActivityWriteRepository(settings))
     app.dependency_overrides[api._activity_write_service] = lambda: _activity_write_service_singleton
+
+if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
+    _recommendation_service_singleton = RecommendationService(_service_singleton, PostgresRecommendationRepository(settings))
+    app.dependency_overrides[api._recommendation_service] = lambda: _recommendation_service_singleton
+
+
+def _build_cv_service() -> CvService | None:
+    """Load the M03 baseline checkpoint ONCE at process startup, never per
+    request (brief FW M03 §8). If the artifact is missing/broken, CV routes
+    fall back to 503 `backend_not_configured` — the rest of the API keeps
+    working; this is not a reason to crash the whole process, and it is
+    absolutely not a reason to silently retrain a replacement.
+    """
+    import json
+
+    from ml.infer import find_latest_run, resolve_temperature, resolve_threshold
+    from ml.model import load_checkpoint
+
+    try:
+        run_dir = find_latest_run()
+        model, model_config = load_checkpoint(str(run_dir / "model.pt"), device="cpu")
+        threshold = resolve_threshold(run_dir, None)
+        temperature = resolve_temperature(run_dir, None)
+        eval_metrics = json.loads((run_dir / "eval_metrics.json").read_text(encoding="utf-8"))
+    except Exception:
+        logging.getLogger("agricarbon.cv").exception("cv_model_load_failed run_dir=%s", "unresolved")
+        return None
+
+    # eval_metrics.json is the single source of truth for cv_model_versions
+    # metadata (brief §16) — no value here is retyped/duplicated in backend code.
+    model_meta = {
+        "version_code": eval_metrics["version_code"],
+        "model_name": eval_metrics["model_name"],
+        "test_dataset_name": eval_metrics["test_dataset_name"],
+        "test_dataset_version": eval_metrics.get("test_dataset_version"),
+        "test_sample_count": eval_metrics.get("test_sample_count"),
+        "accuracy": eval_metrics["accuracy"],
+        "confusion_matrix": eval_metrics["confusion_matrix"],
+        "confidence_threshold": eval_metrics["confidence_threshold"],
+        "source_reference": eval_metrics.get("source_reference"),
+    }
+    return CvService(model, model_config, threshold, temperature, model_meta, PostgresCvRepository(settings))
+
+
+if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
+    _cv_service_singleton = _build_cv_service()
+    if _cv_service_singleton is not None:
+        app.dependency_overrides[api._cv_service] = lambda: _cv_service_singleton
 
 app.include_router(api.router)
 
