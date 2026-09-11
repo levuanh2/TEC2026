@@ -5,6 +5,7 @@ import { ha, kg, date, perKg } from '../format'
 import {
   Async,
   Breadcrumb,
+  DataTable,
   DL,
   EmptyState,
   MetricCard,
@@ -187,28 +188,16 @@ function Overview({
 
       {(batches.data?.length ?? 0) > 0 && (
         <Section title="Lô sản xuất (truy xuất nguồn gốc)">
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Mã lô</th>
-                  <th>Tên</th>
-                  <th>Trạng thái</th>
-                  <th>Bắt đầu</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.data!.map((b) => (
-                  <tr key={b.id}>
-                    <td className="col-key">{b.batchCode}</td>
-                    <td>{b.name ?? '—'}</td>
-                    <td>{b.status}</td>
-                    <td>{date(b.startedOn)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={batches.data!}
+            rowKey={(b) => b.id}
+            columns={[
+              { label: 'Mã lô', render: (b) => <span className="col-key">{b.batchCode}</span> },
+              { label: 'Tên', render: (b) => b.name ?? '—' },
+              { label: 'Trạng thái', render: (b) => b.status },
+              { label: 'Bắt đầu', render: (b) => date(b.startedOn) },
+            ]}
+          />
         </Section>
       )}
     </div>
@@ -248,28 +237,16 @@ function SeasonMrv({ batches }: { batches: Batches }) {
       {batches.length === 0 ? (
         <EmptyState icon="📋" title="Vụ chưa gắn lô sản xuất nào vào hồ sơ MRV" />
       ) : (
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Mã lô</th>
-                <th>Trạng thái</th>
-                <th>Bắt đầu</th>
-                <th>Kết thúc</th>
-              </tr>
-            </thead>
-            <tbody>
-              {batches.map((b) => (
-                <tr key={b.id}>
-                  <td className="col-key">{b.batchCode}</td>
-                  <td>{b.status}</td>
-                  <td>{date(b.startedOn)}</td>
-                  <td>{date(b.closedOn)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={batches}
+          rowKey={(b) => b.id}
+          columns={[
+            { label: 'Mã lô', render: (b) => <span className="col-key">{b.batchCode}</span> },
+            { label: 'Trạng thái', render: (b) => b.status },
+            { label: 'Bắt đầu', render: (b) => date(b.startedOn) },
+            { label: 'Kết thúc', render: (b) => date(b.closedOn) },
+          ]}
+        />
       )}
     </Section>
   )

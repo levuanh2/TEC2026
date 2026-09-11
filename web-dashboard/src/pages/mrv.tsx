@@ -2,7 +2,7 @@ import { listMrvCases, getMrvCase, listMrvEvidence, type MrvCase, type MrvEviden
 import { usingMockData } from '../api/farms'
 import { date, shortHash } from '../format'
 import { presentMrvStatus, mrvBadgeTone, mrvProgress, MRV_STEP_NAMES } from '../utils/mrvPresentation'
-import { Async, Badge, EmptyState, Notice, PageHead, Progress, Section, useAsync } from '../ui'
+import { Async, Badge, EmptyState, Hero, Notice, PageHead, Progress, Section, useAsync } from '../ui'
 
 type MrvStep = { stepNo: number; name: string; status: string; startedAt: string | null; completedAt: string | null; notes: string | null }
 
@@ -45,30 +45,23 @@ export function MrvPage() {
           const currentIdx = steps.findIndex((s) => s.status === 'in_progress')
           return (
             <div className="stack" style={{ marginTop: 16 }}>
-              <div className="card card--pad stack">
-                {mrvCase && (
-                  <div className="section__head" style={{ marginBottom: 0 }}>
-                    <div>
-                      <h2 style={{ fontSize: 'var(--fs-h2)' }}>{mrvCase.name}</h2>
-                      <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
-                        {mrvCase.caseCode} · Kỳ {date(mrvCase.periodStart)} – {date(mrvCase.periodEnd)}
-                      </p>
-                    </div>
-                    <Badge tone={mrvBadgeTone(mrvCase.status)} dot>
-                      {presentMrvStatus(mrvCase.status).label}
-                    </Badge>
-                  </div>
-                )}
+              {mrvCase && (
+                <Hero
+                  eyebrow={`${mrvCase.caseCode} · Kỳ ${date(mrvCase.periodStart)} – ${date(mrvCase.periodEnd)}`}
+                  title={mrvCase.name}
+                  meta={[<Badge tone={mrvBadgeTone(mrvCase.status)} dot>{presentMrvStatus(mrvCase.status).label}</Badge>]}
+                  stats={[
+                    { label: 'Bước hoàn thành', value: `${p.done}/${p.total}` },
+                    { label: 'Lô sản xuất', value: mrvCase.batchCount },
+                    { label: 'Minh chứng', value: mrvCase.evidenceCount },
+                  ]}
+                />
+              )}
+              <div className="card card--pad">
                 <Progress value={p.done} max={p.total} unitLabel={`bước hoàn thành · ${p.inProgress} đang thực hiện`} />
-                {mrvCase && (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span className="chip">{mrvCase.batchCount} lô sản xuất</span>
-                    <span className="chip">{mrvCase.evidenceCount} minh chứng</span>
-                  </div>
-                )}
               </div>
 
-              <Section title="Tiến trình 6 bước">
+              <Section title="Tiến trình 6 bước" description="Đo đạc – Báo cáo – Thẩm định, theo đúng thứ tự bắt buộc">
                 <ol className="stepper">
                   {steps.map((s, i) => {
                     const st = presentMrvStatus(s.status)
@@ -92,6 +85,18 @@ export function MrvPage() {
                     )
                   })}
                 </ol>
+              </Section>
+
+              <Section title="Xuất báo cáo" description="Tạo tài liệu PDF/Excel theo 6 bước MRV để nộp cho đơn vị thẩm định">
+                <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                  <div>
+                    <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất hồ sơ MRV (PDF/Excel)</b>
+                    <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
+                      Chức năng tạo file đang được phát triển — chưa có bản xuất chính thức.
+                    </p>
+                  </div>
+                  <button className="btn btn--ghost" disabled aria-disabled="true">Sắp có</button>
+                </div>
               </Section>
             </div>
           )
