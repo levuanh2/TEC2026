@@ -38,3 +38,14 @@ export const place = (...parts: (string | null | undefined)[]) =>
   parts.filter(Boolean).join(', ') || '—'
 
 export const shortHash = (h: string | null | undefined) => (h ? `${h.slice(0, 10)}…` : '—')
+
+/** Days elapsed since an ISO date, today inclusive of the start day — pure
+ * presentation math on a real recorded date (planting date), never a
+ * fabricated/estimated duration. */
+export function daysSince(value: string | null | undefined): number | null {
+  if (!value) return null
+  const start = new Date(value)
+  if (Number.isNaN(start.getTime())) return null
+  const days = Math.floor((Date.now() - start.getTime()) / 86_400_000)
+  return days >= 0 ? days : null
+}

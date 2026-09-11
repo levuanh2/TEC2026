@@ -8,9 +8,9 @@ import { getCarbon, type CarbonResult } from '../api/carbon'
 import { signOut } from '../api/auth'
 import { usingMockData } from '../api/farms'
 import { activityIcon, presentActivity } from '../utils/activityPresentation'
-import { date, ha, perKg } from '../format'
+import { date, daysSince, ha, perKg } from '../format'
 import { ActivityTimeline } from '../features/activities'
-import { Async, Badge, EmptyState, ErrorState, Link, MetricCard, Notice, PageHead, Section, Tabs, useAsync, go } from '../ui'
+import { Async, Badge, EmptyState, ErrorState, Hero, Link, MetricCard, Notice, PageHead, Section, Tabs, useAsync, go } from '../ui'
 import {
   ActivityRowActions, AddActivityCta, QuickEntryPanel, toSeasonContext, useActivityMutations,
   type SeasonContext,
@@ -110,21 +110,25 @@ function FarmerHome() {
         const season = activeSeason(data)
         if (!season) return <EmptyState icon="🌱" title="Chưa có vụ đang canh tác" body="Bạn vẫn có thể xem các ruộng và vụ đã ghi nhận." action={<Link to="/farmer/farms" className="btn btn--ghost">Xem ruộng của tôi</Link>} />
         return <div className="farmer-stack">
+          {/* Hierarchy per FW design pass: hero -> quick actions -> attention
+              -> performance -> recommendations -> recent activity -> CV
+              preview (brief Part 4.1) — CV moved from the top to a bottom
+              preview since it's a secondary tool, not the day's main task. */}
           <CurrentSeasonCard season={season} />
           <QuickEntryPanel activeSeasons={writableSeasons} mutations={mutations} />
+          <DataAttention metrics={metrics.data} loading={metrics.loading} />
+          <Section title="Hiệu suất vụ này" description="Chỉ số dùng dữ liệu đã ghi nhận; thiếu dữ liệu sẽ không được thay bằng số 0.">
+            <Async state={metrics} skeleton="kpis">{(m) => m ? <FarmerMetricGrid metrics={m} /> : <EmptyState title="Chưa đủ dữ liệu hiệu suất" />}</Async>
+          </Section>
+          <RecommendationsSection seasonId={season.id} />
+          <Section title="Nhật ký gần đây" cta={{ label: 'Xem toàn bộ nhật ký', to: `/farmer/crop-seasons/${season.id}/journal` }}>
+            <Async state={activities} skeleton="table">{(items) => <RecentActivities activities={items} />}</Async>
+          </Section>
           <section className="farmer-quick">
             <div><h2>Kiểm tra lá lúa</h2><p>Chụp hoặc chọn ảnh để nhận diện nhanh bằng AI (baseline, chưa xác nhận thực địa).</p></div>
             <div><CvCheckButton season={toSeasonContext(season, season.plot)} onChecked={() => setCvVersion((v) => v + 1)} /></div>
           </section>
           <CvHomeSummaryCard seasonId={season.id} reloadKey={cvVersion} />
-          <Section title="Hiệu suất vụ này" description="Chỉ số dùng dữ liệu đã ghi nhận; thiếu dữ liệu sẽ không được thay bằng số 0.">
-            <Async state={metrics} skeleton="kpis">{(m) => m ? <FarmerMetricGrid metrics={m} /> : <EmptyState title="Chưa đủ dữ liệu hiệu suất" />}</Async>
-          </Section>
-          <DataAttention metrics={metrics.data} loading={metrics.loading} />
-          <Section title="Nhật ký gần đây" cta={{ label: 'Xem toàn bộ nhật ký', to: `/farmer/crop-seasons/${season.id}/journal` }}>
-            <Async state={activities} skeleton="table">{(items) => <RecentActivities activities={items} />}</Async>
-          </Section>
-          <RecommendationsSection seasonId={season.id} />
         </div>
       }}
     </Async>
@@ -132,7 +136,19 @@ function FarmerHome() {
 }
 
 function CurrentSeasonCard({ season }: { season: SeasonWithContext }) {
-  return <section className="farmer-season-card"><p>Vụ đang canh tác</p><h2>{season.name}</h2><span>{season.plot?.name ?? 'Thửa ruộng'} · {season.plot?.areaHa == null ? 'Chưa có diện tích' : ha(season.plot.areaHa)}</span><div><Badge tone="success" dot>{season.status ?? 'Đang canh tác'}</Badge><Link className="btn btn--ghost" to={`/farmer/crop-seasons/${season.id}`}>Xem vụ</Link></div></section>
+  const growingDays = daysSince(season.plantingDate)
+  return (
+    <Hero
+      eyebrow="Vụ đang canh tác"
+      title={season.name}
+      meta={[
+        <>{season.plot?.name ?? 'Thửa ruộng'} · {season.plot?.areaHa == null ? 'Chưa có diện tích' : ha(season.plot.areaHa)}</>,
+        <Badge tone="success" dot>{season.status ?? 'Đang canh tác'}</Badge>,
+      ]}
+      stats={growingDays == null ? undefined : [{ label: 'Ngày đang canh tác', value: growingDays }]}
+      actions={<Link className="btn btn--ghost" to={`/farmer/crop-seasons/${season.id}`}>Xem vụ →</Link>}
+    />
+  )
 }
 
 function FarmerMetricGrid({ metrics }: { metrics: SeasonMetrics }) {
@@ -275,7 +291,28 @@ function FarmerCarbon({ id }: { id: string }) {
 function CarbonEmpty() { return <section className="farmer-carbon-empty"><span aria-hidden="true">◎</span><h2>Chưa có kết quả Carbon</h2><p>Hệ thống chưa thể tạo kết quả CO₂e chính thức cho vụ này vì bộ hệ số cần thiết chưa được xác minh đầy đủ.</p><small>Dữ liệu canh tác của bạn vẫn được lưu bình thường.</small></section> }
 function FarmerCarbonSuccess({ result }: { result: CarbonResult }) { return <div className="farmer-stack"><section className="farmer-carbon-result"><p>Carbon của vụ này</p><strong>{result.co2e_per_kg == null ? 'Chưa đủ dữ liệu' : perKg(result.co2e_per_kg, '')}</strong><span>{result.co2e_per_kg == null ? 'Cần sản lượng hợp lệ để tính CO₂e/kg' : 'kg CO₂e / kg lúa'}</span><small>Kịch bản: {result.water_regime_scenario ?? result.scenario ?? 'Chưa có dữ liệu'}</small></section><Section title="Nguồn phát thải chính"><div className="farmer-source-list">{result.breakdown.map((item, index) => <div key={index}><b>{item.source}</b><span>{perKg(item.co2e_kg, 'kg CO₂e')}</span></div>)}</div></Section><Notice kind="info">Kết quả là ước tính theo bộ phương pháp hiện tại; không phải chứng nhận hoặc tín chỉ carbon.</Notice></div> }
 
-function FarmerAccount({ session }: { session: Session | null }) { return <><PageHead eyebrow="Tài khoản" title="Thông tin của tôi" /><section className="farmer-account"><span className="avatar" aria-hidden="true">{session?.user.email?.[0]?.toUpperCase() ?? 'N'}</span><div><b>{session?.user.email ?? 'Tài khoản nông hộ'}</b><small>Vai trò: Nông hộ</small></div><button className="btn btn--ghost" onClick={() => void signOut().then(() => go('/login'))}>Đăng xuất</button></section></> }
+function FarmerAccount({ session }: { session: Session | null }) {
+  const scope = useAsync(loadScope, [])
+  return <>
+    <PageHead eyebrow="Tài khoản" title="Thông tin của tôi" />
+    <section className="farmer-account">
+      <span className="avatar" aria-hidden="true">{session?.user.email?.[0]?.toUpperCase() ?? 'N'}</span>
+      <div><b>{session?.user.email ?? 'Tài khoản nông hộ'}</b><small>Vai trò: Nông hộ</small></div>
+      <button className="btn btn--ghost" onClick={() => void signOut().then(() => go('/login'))}>Đăng xuất</button>
+    </section>
+    <Section title="Phạm vi truy cập" description="Ruộng và vụ canh tác bạn đang được gán quyền xem/ghi">
+      <Async state={scope} skeleton="kpis">
+        {(data) => (
+          <div className="farmer-metrics">
+            <MetricCard name="Ruộng" value={data.farms.length} />
+            <MetricCard name="Thửa ruộng" value={data.plots.length} />
+            <MetricCard name="Vụ canh tác" value={data.seasons.length} />
+          </div>
+        )}
+      </Async>
+    </Section>
+  </>
+}
 
 type FarmerRoute = 'home' | 'journal' | 'farms' | 'farm' | 'plot' | 'season' | 'season-journal' | 'season-performance' | 'season-carbon' | 'performance' | 'account' | 'not-found'
 function farmerRoute(path: string): FarmerRoute {
