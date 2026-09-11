@@ -142,7 +142,41 @@ class HarvestActivityData(BaseModel):
     total_cost_vnd: float | None = Field(default=None, ge=0)
 
 
-ActivityType = Literal["fertilizer", "irrigation", "harvest"]
+class SeedingActivityData(BaseModel):
+    variety_name: str | None = None
+    seed_kg: float = Field(gt=0)
+    seeding_method: str | None = None
+    # `seeding_events.cost_vnd`, NOT `total_cost_vnd` — the one activity type
+    # whose canonical cost column is named differently (FW-2 Part 3 §6); the
+    # resource-metrics cost aggregation already keys off this exact name.
+    cost_vnd: float | None = Field(default=None, ge=0)
+
+
+class PesticideActivityData(BaseModel):
+    product_name: str = Field(min_length=1)
+    active_ingredient: str | None = None
+    amount: float = Field(gt=0)
+    unit: str = Field(min_length=1)
+    total_cost_vnd: float | None = Field(default=None, ge=0)
+
+
+class StrawManagementActivityData(BaseModel):
+    method: Literal["incorporated", "removed", "burned", "composted", "other"]
+    straw_mass_kg: float | None = Field(default=None, ge=0)
+    total_cost_vnd: float | None = Field(default=None, ge=0)
+    # The three fields below are Carbon-methodology inputs (IPCC Table 5.14 /
+    # Eq 5.3 / Eq 2.27), deliberately not collected by the simple Farmer Web
+    # form (brief FW-2 Part 3 §25: no SFo/CFOA jargon in the UI). Left null
+    # here, exactly like fertilizer's `nitrogen_percent`: the Carbon Engine
+    # raises a fail-closed MethodologyGapError at *calculation* time if a
+    # method that needs them (incorporated/composted/burned) is missing one,
+    # rather than the write API inventing or requiring a value.
+    days_before_cultivation: int | None = Field(default=None, ge=0)
+    dry_matter_fraction: float | None = Field(default=None, gt=0, le=1)
+    returned_to_field: bool | None = None
+
+
+ActivityType = Literal["fertilizer", "irrigation", "harvest", "seeding", "pesticide", "straw_management"]
 
 
 class ActivityCreateRequest(BaseModel):
@@ -183,15 +217,18 @@ class ActivityWriteResponse(BaseModel):
     idempotent_replay: bool = False
 
 
+_ACTIVITY_DATA_MODELS: dict[ActivityType, type[BaseModel]] = {
+    "fertilizer": FertilizerActivityData,
+    "irrigation": IrrigationActivityData,
+    "harvest": HarvestActivityData,
+    "seeding": SeedingActivityData,
+    "pesticide": PesticideActivityData,
+    "straw_management": StrawManagementActivityData,
+}
+
+
 def validate_activity_data(activity_type: ActivityType, data: dict[str, Any]) -> BaseModel:
-    model: type[BaseModel]
-    if activity_type == "fertilizer":
-        model = FertilizerActivityData
-    elif activity_type == "irrigation":
-        model = IrrigationActivityData
-    else:
-        model = HarvestActivityData
-    return model.model_validate(data)
+    return _ACTIVITY_DATA_MODELS[activity_type].model_validate(data)
 
 
 class MetricResponse(BaseModel):

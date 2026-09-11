@@ -131,6 +131,9 @@ def request_body(kind="fertilizer", data=None, *, key="00000000-0000-0000-0000-0
     ("fertilizer", {"fertilizer_name": "Urea", "amount_kg": 120, "nitrogen_percent": 46}),
     ("irrigation", {"method": "awd", "water_volume_m3": 32}),
     ("harvest", {"yield_kg": 3100, "moisture_percent": 14}),
+    ("seeding", {"variety_name": "OM5451", "seed_kg": 120, "seeding_method": "sạ lan"}),
+    ("pesticide", {"product_name": "Regent", "amount": 0.5, "unit": "kg"}),
+    ("straw_management", {"method": "incorporated", "straw_mass_kg": 4000}),
 ])
 def test_farmer_can_create_each_supported_activity_type(kind, data):
     result = service().create(read_repository=FakeRead(), crop_season_id=SEASON, request=request(kind, data))
@@ -181,6 +184,14 @@ def test_harvest_update_changes_the_same_denominator_source_and_soft_delete_excl
     ("fertilizer", {"fertilizer_name": "Urea", "amount_kg": 1, "nitrogen_percent": 101}),
     ("irrigation", {"method": "awd", "water_volume_m3": -1}),
     ("harvest", {"yield_kg": 0}),
+    ("seeding", {"variety_name": "OM5451", "seed_kg": 0}),
+    ("seeding", {"variety_name": "OM5451", "seed_kg": 120, "cost_vnd": -1}),
+    ("pesticide", {"product_name": "Regent", "amount": 0, "unit": "kg"}),
+    ("pesticide", {"product_name": "", "amount": 1, "unit": "kg"}),
+    ("straw_management", {"method": "not_a_method", "straw_mass_kg": 100}),
+    ("straw_management", {"method": "incorporated", "straw_mass_kg": -1}),
+    ("straw_management", {"method": "incorporated", "dry_matter_fraction": 0}),
+    ("straw_management", {"method": "incorporated", "dry_matter_fraction": 1.5}),
 ])
 def test_payload_validation_rejects_invalid_domain_values(bad):
     kind, data = bad

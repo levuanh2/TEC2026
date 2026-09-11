@@ -4,23 +4,48 @@
 as design context; the implementation-status section is authoritative for the
 three supported activity types. Farmer Web UI remains read-only in this phase.
 
-## FW-2 Part 1 implementation status
+## FW-2 Part 1 + Part 3 implementation status
 
 > **Supersession:** references below to routes being "proposed", "not currently
 > available", or requiring a future implementation are historical and do not
-> apply to fertilizer, irrigation, or harvest.
+> apply to fertilizer, irrigation, harvest, seeding, pesticide, or
+> straw_management — all six are implemented.
 
-The proposal is now implemented for **fertilizer**, **irrigation**, and
-**harvest** through FastAPI. The Farmer Web remains read-only in this phase:
-there is no React write client, form, or direct browser database write.
+The proposal is now implemented for **fertilizer**, **irrigation**,
+**harvest** (FW-2 Part 1), and **seeding**, **pesticide**, **straw_management**
+(FW-2 Part 3) through FastAPI. Part 3 added zero new routes and zero new
+cross-cutting code: it only extended `schemas.ActivityType`'s enum plus three
+Pydantic detail models, and added three entries to
+`infrastructure/write_repo.py`'s table/column mapping. Auth, scope
+resolution, transaction handling, idempotency, soft-delete, and the read
+mapper are the exact same code path for all six types. The Farmer Web is no
+longer read-only: `web-dashboard/src/farmer/ActivityForms.tsx` has a working
+create/edit/delete form for each of the six.
 
 Implemented routes:
 
 | Method | Route | Status |
 |---|---|---|
-| POST | `/v1/crop-seasons/{crop_season_id}/activities` | fertilizer, irrigation, harvest |
-| PATCH | `/v1/activities/{activity_id}` | same three immutable types |
-| DELETE | `/v1/activities/{activity_id}` | soft delete, same three types |
+| POST | `/v1/crop-seasons/{crop_season_id}/activities` | fertilizer, irrigation, harvest, seeding, pesticide, straw_management |
+| PATCH | `/v1/activities/{activity_id}` | same six immutable types |
+| DELETE | `/v1/activities/{activity_id}` | soft delete, same six types |
+
+### Straw management — Carbon methodology fields
+
+`straw_management_events` has three additional columns
+(`days_before_cultivation`, `dry_matter_fraction`, `returned_to_field`) added
+by `20260908000000_carbon_methodology_alignment.sql`, required by
+`classify_straw()`/`RiceMethaneCalculator`/`StrawBurningCalculator` for
+incorporated/composted/burned methods. The write schema
+(`schemas.StrawManagementActivityData`) accepts all three as optional, but
+the Farmer Web form deliberately never collects them — no SFo/CFOA jargon in
+the UI, same convention as fertilizer's `nitrogen_percent`. A season with
+incorporated/composted/burned straw missing one of these fails closed with
+`MethodologyGapError` at Carbon *calculation* time, not at write time; the
+write itself always succeeds. The schema is one `method` enum per row
+(`incorporated|removed|burned|composted|other`), so a single straw activity
+can never be counted on both the SFo amendment path and the burned-residue
+path — that invariant is structural, not application logic.
 
 The implementation uses a backend-only psycopg transaction for the base
 `activities` row and its one subtype row. For harvest, that subtype is the

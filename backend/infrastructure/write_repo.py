@@ -25,6 +25,12 @@ _DETAILS: dict[str, tuple[str, tuple[str, ...]]] = {
     "fertilizer": ("fertilizer_applications", ("fertilizer_name", "fertilizer_type", "amount_kg", "nitrogen_percent", "phosphorus_percent", "potassium_percent", "total_cost_vnd")),
     "irrigation": ("irrigation_events", ("method", "water_volume_m3", "duration_minutes", "water_level_cm", "pump_energy_kwh", "total_cost_vnd")),
     "harvest": ("harvest_events", ("yield_kg", "harvested_area_ha", "moisture_percent", "total_cost_vnd")),
+    "seeding": ("seeding_events", ("variety_name", "seed_kg", "seeding_method", "cost_vnd")),
+    "pesticide": ("pesticide_applications", ("product_name", "active_ingredient", "amount", "unit", "total_cost_vnd")),
+    "straw_management": (
+        "straw_management_events",
+        ("method", "straw_mass_kg", "total_cost_vnd", "days_before_cultivation", "dry_matter_fraction", "returned_to_field"),
+    ),
 }
 
 

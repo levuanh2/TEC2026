@@ -9,13 +9,16 @@ tài liệu này.
 bắt buộc header `Authorization: Bearer <supabase_jwt>` (xem `docs/API_FOR_FLUTTER.md`
 §0 cho error contract và semantics 404 dùng chung).
 
-## FW-2 Part 1 supersession
+## FW-2 Part 1 + Part 3 supersession
 
 The catalog now also includes three authenticated Farmer Web activity-write
 operations: `POST /v1/crop-seasons/{crop_season_id}/activities`,
 `PATCH /v1/activities/{activity_id}`, and `DELETE /v1/activities/{activity_id}`.
-They support fertilizer, irrigation, and harvest only. The historical count and
-write-gap note below predate FW-2 Part 1; `docs/openapi.json` remains the
+They support six activity types: fertilizer, irrigation, and harvest (FW-2
+Part 1), plus seeding, pesticide, and straw_management (FW-2 Part 3, same
+routes/transaction/idempotency — only `schemas.ActivityType`'s enum and
+`infrastructure/write_repo.py`'s detail-table mapping grew). The historical
+count and write-gap note below predate FW-2; `docs/openapi.json` remains the
 authoritative operation inventory.
 
 ## M05 supersession

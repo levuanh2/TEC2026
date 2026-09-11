@@ -2724,7 +2724,10 @@
             "enum": [
               "fertilizer",
               "irrigation",
-              "harvest"
+              "harvest",
+              "seeding",
+              "pesticide",
+              "straw_management"
             ],
             "title": "Activity Type"
           },
@@ -2867,7 +2870,10 @@
             "enum": [
               "fertilizer",
               "irrigation",
-              "harvest"
+              "harvest",
+              "seeding",
+              "pesticide",
+              "straw_management"
             ],
             "title": "Activity Type"
           },

@@ -275,12 +275,12 @@ Backend:              165 passed — rerun twice: once before any backend
 ## M. Remaining Gaps
 
 ```text
-Seeding                → not implemented
-Pesticide               → not implemented
-Straw                   → not implemented
-Recommendation          → M05 backend missing
-CV integration          → later
-REAL CO2e                → scientific blocker
+Seeding                → DONE (FW-2 Part 3, see below)
+Pesticide               → DONE (FW-2 Part 3, see below)
+Straw                   → DONE (FW-2 Part 3, see below)
+Recommendation          → DONE, see docs/M05_RECOMMENDATION_REPORT.md
+CV integration          → DONE (implemented scope), see docs/CV_FARMER_INTEGRATION_REPORT.md
+REAL CO2e                → scientific blocker (unchanged)
 Flutter runtime test    → pending if SDK still unavailable
 ```
 
@@ -288,4 +288,34 @@ Flutter runtime test    → pending if SDK still unavailable
 
 ```text
 FW-2 PART 2 FARMER WRITE UI: DONE
+```
+
+## O. FW-2 Part 3 — Seeding / Pesticide / Straw (this task)
+
+Extended the Part 2 write UI to the three remaining activity types with zero
+new backend architecture: same routes, same `ActivityWriteService`, same
+transaction/idempotency/soft-delete/error-envelope code path — only
+`schemas.ActivityType`'s enum, three Pydantic detail models, and three
+entries in `infrastructure/write_repo.py`'s `_DETAILS` table/column map grew.
+`ActivityForms.tsx` gained seeding/pesticide/straw_management form branches
+reusing the existing field components, validation pattern, and mutation
+hub; the Journal/read side (`activityPresentation.ts`, `read_repo.py`'s
+`DETAIL_TABLES`/`_COST_FIELD_BY_ACTIVITY`) already supported all six types
+before this task, so no read-path changes were needed beyond straw's new
+Carbon-methodology column labels.
+
+Straw is one `method` enum per activity row (schema-level, not
+application-level) — a single write can never land in both the SFo amendment
+path and the burned-residue path. The Carbon-methodology fields
+(`days_before_cultivation`, `dry_matter_fraction`, `returned_to_field`) are
+accepted by the write schema but never collected by the simple Farmer Web
+form; a season missing them fails closed with `MethodologyGapError` at
+Carbon *calculation* time (pre-existing engine behavior, unchanged), never
+at write time.
+
+```text
+SEEDING WRITE: DONE
+PESTICIDE WRITE: DONE
+STRAW WRITE: DONE
+FW-2 FARMER ACTIVITY ENTRY: DONE
 ```
