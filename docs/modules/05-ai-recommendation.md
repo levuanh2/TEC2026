@@ -9,6 +9,35 @@
 
 > **Lưu ý về task ID:** ID tạm — đối chiếu lại với `AgriCarbon Sprint Tracker`.
 
+## Implementation status (2026-09-11)
+
+MVP software implemented — `backend/recommendation/` (rule engine),
+`backend/service.py::RecommendationService`,
+`backend/infrastructure/recommendation_repo.py`, 3 routes under
+`/v1/.../recommendations`, Farmer Web integration. Full report:
+`docs/M05_RECOMMENDATION_REPORT.md`.
+
+Implemented (1 rule per family, chosen for real evidence over count):
+- **R1 water_regime_continuous → AWD**: quantified impact comes from calling
+  the *existing* Carbon Engine twice (`as_recorded` vs `awd`, `persist=False`
+  what-if) and diffing `total_co2e_kg` — never a separately written formula.
+- **R3 data completeness**: a `data_task` type, never a quantified impact —
+  matches this doc's own distinction that not every useful nudge is an
+  "optimization" result.
+
+Deferred (not implemented in this pass, no fabricated placeholder):
+- **R2 fertilizer_n_above_benchmark / pesticide_above_benchmark / seed_rate /
+  awd_drainage_too_few / straw_burned**: no legitimate cross-farm/HTX
+  benchmark data source exists in this codebase today (confirmed by audit —
+  only per-farm/org self-aggregation, no cohort comparison). Rather than
+  invent a benchmark or an "official" target value, these stay unimplemented
+  until a real benchmark data source exists.
+- Production carbon-impact numbers: blocked exactly as documented in
+  `docs/CARBON_METHOD.md` OI-05 (`gwp.ch4` unverified) — R1 correctly
+  produces zero actionable rows against real hosted data today; verified end
+  to end with a test factor fixture instead (same fixture
+  `test_carbon_engine.py` already verifies by hand).
+
 ---
 
 ## 1. Mục tiêu module

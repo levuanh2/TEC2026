@@ -210,6 +210,119 @@ def test_metrics_yield_none_when_any_harvest_missing_value(repo_a):
     assert metrics["co2e_per_kg"] is None  # không có yield -> không được chia ra số
 
 
+def _add_activity(client, activity_id: str, activity_type: str, detail_table: str, detail: dict):
+    client._visible_rows["activities"].append({
+        "id": activity_id, "production_batch_id": f"{SEASON_A}-b1",
+        "activity_type": activity_type, "occurred_at": "2026-01-03",
+        "recorded_at": "2026-01-03", "recorded_by": "user-a", "source": "manual",
+        "deleted_at": None, "note": None,
+    })
+    client._visible_rows[detail_table].append({"activity_id": activity_id, **detail})
+
+
+def test_metrics_no_water_or_fertilizer_record_is_unknown_not_zero(repo_a):
+    metrics = repo_a.metrics(SEASON_A)
+    assert metrics["water_m3"] is None
+    assert metrics["water_per_kg"] is None
+    assert metrics["fertilizer_kg"] is None
+    assert metrics["fertilizer_per_kg"] is None
+    assert metrics["data_completeness"]["water"] is False
+    assert metrics["data_completeness"]["fertilizer"] is False
+
+
+def test_metrics_known_zero_water_is_not_unknown(repo_a):
+    _add_activity(
+        repo_a.client, "water-zero", "irrigation", "irrigation_events",
+        {"method": "awd", "water_volume_m3": 0.0, "total_cost_vnd": None},
+    )
+
+    metrics = repo_a.metrics(SEASON_A)
+    assert metrics["water_m3"] == 0.0
+    assert metrics["water_per_kg"] == 0.0
+    assert metrics["data_completeness"]["water"] is True
+
+
+def test_metrics_missing_water_or_fertilizer_value_is_incomplete(repo_a):
+    _add_activity(
+        repo_a.client, "water-missing", "irrigation", "irrigation_events",
+        {"method": "awd", "water_volume_m3": None, "total_cost_vnd": None},
+    )
+    _add_activity(
+        repo_a.client, "fert-missing", "fertilizer", "fertilizer_applications",
+        {"fertilizer_name": "Urea", "amount_kg": None, "total_cost_vnd": None},
+    )
+
+    metrics = repo_a.metrics(SEASON_A)
+    assert metrics["water_m3"] is None
+    assert metrics["fertilizer_kg"] is None
+    assert metrics["data_completeness"]["water"] is False
+    assert metrics["data_completeness"]["fertilizer"] is False
+
+
+def test_metrics_uses_seeding_cost_vnd_and_all_recorded_direct_costs(repo_a):
+    client = repo_a.client
+    client._visible_rows["harvest_events"][0]["total_cost_vnd"] = 200.0
+    client._visible_rows["harvest_events"][1]["total_cost_vnd"] = 300.0
+    _add_activity(client, "seed-1", "seeding", "seeding_events", {"seed_kg": 50.0, "cost_vnd": 100.0})
+
+    metrics = repo_a.metrics(SEASON_A)
+    assert metrics["cost_per_kg"] == pytest.approx(600.0 / 2500.0)
+    assert metrics["data_completeness"]["cost"] is True
+
+
+def test_metrics_missing_direct_cost_is_incomplete_not_partial_total(repo_a):
+    client = repo_a.client
+    client._visible_rows["harvest_events"][0]["total_cost_vnd"] = 200.0
+    client._visible_rows["harvest_events"][1]["total_cost_vnd"] = 300.0
+    _add_activity(client, "seed-1", "seeding", "seeding_events", {"seed_kg": 50.0, "cost_vnd": None})
+
+    metrics = repo_a.metrics(SEASON_A)
+    assert metrics["cost_per_kg"] is None
+    assert metrics["data_completeness"]["cost"] is False
+
+
+def test_farm_performance_exposes_backend_resource_metrics(repo_a):
+    client = repo_a.client
+    client._visible_rows["harvest_events"][0]["total_cost_vnd"] = 200.0
+    client._visible_rows["harvest_events"][1]["total_cost_vnd"] = 300.0
+    _add_activity(client, "seed-1", "seeding", "seeding_events", {"seed_kg": 50.0, "cost_vnd": 100.0})
+    _add_activity(client, "water-1", "irrigation", "irrigation_events", {"method": "awd", "water_volume_m3": 500.0, "total_cost_vnd": 0.0})
+    _add_activity(client, "fert-1", "fertilizer", "fertilizer_applications", {"fertilizer_name": "Urea", "amount_kg": 125.0, "total_cost_vnd": 0.0})
+
+    item = repo_a.farm_performance(ORG_A)[0]
+    assert item["water_per_kg"] == pytest.approx(500.0 / 2500.0)
+    assert item["fertilizer_per_kg"] == pytest.approx(125.0 / 2500.0)
+    assert item["cost_per_kg"] == pytest.approx(600.0 / 2500.0)
+
+
+def test_aggregate_metrics_uses_sum_over_sum_not_average_of_averages(repo_a, monkeypatch):
+    values = {
+        "a": {"yield_kg": 100.0, "water_m3": 100.0, "fertilizer_kg": 100.0, "total_co2e_kg": 100.0, "_total_cost_vnd": 100.0},
+        "b": {"yield_kg": 300.0, "water_m3": 900.0, "fertilizer_kg": 900.0, "total_co2e_kg": 900.0, "_total_cost_vnd": 900.0},
+    }
+    monkeypatch.setattr(repo_a, "_metric_totals", lambda season_id: values[season_id])
+
+    aggregate = repo_a._aggregate_metrics(["a", "b"])
+    assert aggregate["water_per_kg"] == pytest.approx(2.5)
+    assert aggregate["fertilizer_per_kg"] == pytest.approx(2.5)
+    assert aggregate["co2e_per_kg"] == pytest.approx(2.5)
+    assert aggregate["cost_per_kg"] == pytest.approx(2.5)
+
+
+def test_organization_metrics_uses_weighted_resource_intensity(repo_a, monkeypatch):
+    values = {
+        "a": {"yield_kg": 100.0, "water_m3": 100.0, "fertilizer_kg": 100.0, "total_co2e_kg": 100.0, "_total_cost_vnd": 100.0},
+        "b": {"yield_kg": 300.0, "water_m3": 900.0, "fertilizer_kg": 900.0, "total_co2e_kg": 900.0, "_total_cost_vnd": 900.0},
+    }
+    monkeypatch.setattr(repo_a, "_season_ids_for_farms", lambda _farms: ["a", "b"])
+    monkeypatch.setattr(repo_a, "_metric_totals", lambda season_id: values[season_id])
+
+    metrics = repo_a.organization_metrics(ORG_A)
+    assert metrics["water_per_kg"] == pytest.approx(2.5)
+    assert metrics["fertilizer_per_kg"] == pytest.approx(2.5)
+    assert metrics["cost_per_kg"] == pytest.approx(2.5)
+
+
 def test_farmer_a_cannot_read_farmer_b_organization(repo_a):
     with pytest.raises(ReadNotFoundError):
         repo_a.organization(ORG_B)
@@ -347,6 +460,16 @@ def test_query_param_type_error_uses_unified_error_contract():
     body = response.json()["detail"]["error"]
     assert body["code"] == "validation_error"
     assert isinstance(body["errors"], list) and body["errors"]
+
+
+def test_missing_authorization_uses_unified_401_error_contract():
+    """The configured production read dependency must not leak MissingAuthError as 500."""
+    from fastapi.testclient import TestClient
+    from main import app
+
+    response = TestClient(app).get("/v1/farms")
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"]["code"] == "unauthenticated"
 
 
 # ---------------------------------------------------------------------------

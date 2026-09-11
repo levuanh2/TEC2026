@@ -18,6 +18,19 @@ DETAIL_TABLES = {
     "harvest": "harvest_events",
 }
 
+# MVP cost means directly recorded activity/input cost.  Labor and contract
+# machinery do not have separate fields in the current contract, so they are
+# never inferred here.
+_COST_FIELD_BY_ACTIVITY = {
+    "seeding": "cost_vnd",
+    "fertilizer": "total_cost_vnd",
+    "irrigation": "total_cost_vnd",
+    "pesticide": "total_cost_vnd",
+    "fuel": "total_cost_vnd",
+    "straw_management": "total_cost_vnd",
+    "harvest": "total_cost_vnd",
+}
+
 class ReadNotFoundError(Exception): pass
 
 class SupabaseReadRepository:
@@ -88,6 +101,11 @@ class SupabaseReadRepository:
         for batch_id in batch_ids: rows.extend(self._many("activities", production_batch_id=batch_id))
         return [x for x in rows if x.get("deleted_at") is None]
 
+    def recommendations(self, season_id: str) -> list[dict[str, Any]]:
+        self._one("crop_seasons", season_id)
+        rows = self._many("season_recommendations", crop_season_id=season_id)
+        return sorted(rows, key=lambda x: str(x.get("generated_at") or ""))
+
     def activities(self, season_id: str) -> list[dict[str, Any]]:
         rows = self._activities(season_id); ids = [str(x["id"]) for x in rows]; details: dict[str, dict[str, Any]] = {}
         # Fetch each 1:1 detail table independently then merge by activity_id.
@@ -114,29 +132,57 @@ class SupabaseReadRepository:
         users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
         return self._activity_view(row, detail, users)
 
-    def metrics(self, season_id: str) -> dict[str, Any]:
+    @staticmethod
+    def _activity_cost_vnd(activity_type: str, payload: dict[str, Any]) -> float | None:
+        field = _COST_FIELD_BY_ACTIVITY.get(activity_type)
+        if field is None or payload.get(field) is None:
+            return None
+        return float(payload[field])
+
+    def _metric_totals(self, season_id: str) -> dict[str, Any]:
+        """Compute season numerators once; underscore keys are internal only."""
         activities = self.activities(season_id)
         yield_kg = water_m3 = fertilizer_kg = total_cost = 0.0
-        has_yield = has_water = has_fertilizer = has_cost = True
+        has_yield = has_cost = True
+        has_water = has_fertilizer = False
         for item in activities:
             payload = item["payload"]; kind = item["activity_type"]
             if kind == "harvest":
                 if payload.get("yield_kg") is None: has_yield = False
                 else: yield_kg += float(payload["yield_kg"])
             if kind == "irrigation":
+                has_water = True
                 if payload.get("water_volume_m3") is None: has_water = False
                 else: water_m3 += float(payload["water_volume_m3"])
             if kind == "fertilizer":
+                has_fertilizer = True
                 if payload.get("amount_kg") is None: has_fertilizer = False
                 else: fertilizer_kg += float(payload["amount_kg"])
-            if payload.get("total_cost_vnd") is None: has_cost = False
-            else: total_cost += float(payload["total_cost_vnd"])
+            cost = self._activity_cost_vnd(kind, payload)
+            if cost is None: has_cost = False
+            else: total_cost += cost
         carbon = self._many("carbon_calculations", crop_season_id=season_id)
         succeeded = [x for x in carbon if x.get("status") == "succeeded" and x.get("scenario") == "actual"]
         latest = max(succeeded, key=lambda x: str(x.get("calculated_at")), default=None)
         y = yield_kg if has_yield and yield_kg > 0 else None
         co2e = float(latest["total_co2e_kg"]) if latest else None
-        return {"yield_kg": y, "water_m3": water_m3 if has_water else None, "fertilizer_kg": fertilizer_kg if has_fertilizer else None, "total_co2e_kg": co2e, "water_per_kg": water_m3 / y if has_water and y else None, "fertilizer_per_kg": fertilizer_kg / y if has_fertilizer and y else None, "co2e_per_kg": co2e / y if co2e is not None and y else None, "cost_per_kg": total_cost / y if has_cost and y else None, "data_completeness": {"water": has_water, "fertilizer": has_fertilizer, "cost": has_cost, "carbon": latest is not None}}
+        return {
+            "yield_kg": y, "water_m3": water_m3 if has_water else None,
+            "fertilizer_kg": fertilizer_kg if has_fertilizer else None,
+            "total_co2e_kg": co2e,
+            "water_per_kg": water_m3 / y if has_water and y else None,
+            "fertilizer_per_kg": fertilizer_kg / y if has_fertilizer and y else None,
+            "co2e_per_kg": co2e / y if co2e is not None and y else None,
+            "cost_per_kg": total_cost / y if has_cost and y else None,
+            "data_completeness": {
+                "water": has_water, "fertilizer": has_fertilizer,
+                "cost": has_cost, "carbon": latest is not None,
+            },
+            "_total_cost_vnd": total_cost if has_cost else None,
+        }
+
+    def metrics(self, season_id: str) -> dict[str, Any]:
+        return {key: value for key, value in self._metric_totals(season_id).items() if not key.startswith("_")}
 
     def _organization_farms(self, organization_id: str) -> list[dict[str, Any]]:
         self._one("organizations", organization_id)  # RLS scope check, never trust URL alone.
@@ -170,7 +216,7 @@ class SupabaseReadRepository:
         null nếu BẤT KỲ vụ nào trong tập hợp thiếu dữ liệu của field đó, để không
         âm thầm bỏ qua vụ chưa đo — giống hệt cách metrics()/organization_summary() xử lý.
         """
-        ms = [self.metrics(sid) for sid in season_ids]
+        ms = [self._metric_totals(sid) for sid in season_ids]
 
         def total(key: str) -> float | None:
             if not ms:
@@ -182,16 +228,17 @@ class SupabaseReadRepository:
 
         yield_kg = total("yield_kg"); water_m3 = total("water_m3")
         fertilizer_kg = total("fertilizer_kg"); total_co2e = total("total_co2e_kg")
+        total_cost = total("_total_cost_vnd")
         return {
             "yield_kg": yield_kg, "water_m3": water_m3, "fertilizer_kg": fertilizer_kg,
             "total_co2e_kg": total_co2e,
             "water_per_kg": water_m3 / yield_kg if water_m3 is not None and yield_kg else None,
             "fertilizer_per_kg": fertilizer_kg / yield_kg if fertilizer_kg is not None and yield_kg else None,
             "co2e_per_kg": total_co2e / yield_kg if total_co2e is not None and yield_kg else None,
-            "cost_per_kg": None,  # chưa tổng hợp cost ở cấp farm/org — metrics() không trả cost_per_kg per-season để cộng
+            "cost_per_kg": total_cost / yield_kg if total_cost is not None and yield_kg else None,
             "data_completeness": {
                 "water": water_m3 is not None, "fertilizer": fertilizer_kg is not None,
-                "cost": False, "carbon": total_co2e is not None,
+                "cost": total_cost is not None, "carbon": total_co2e is not None,
             },
         }
 
@@ -226,11 +273,11 @@ class SupabaseReadRepository:
     def farm_performance(self, organization_id: str) -> list[dict[str, Any]]:
         items = []
         for farm in self._organization_farms(organization_id):
-            plots = self._many("plots", farm_id=str(farm["id"])); seasons = [s for p in plots for s in self._many("crop_seasons", plot_id=str(p["id"]))]; ms = [self.metrics(str(s["id"])) for s in seasons]
+            plots = self._many("plots", farm_id=str(farm["id"])); seasons = [s for p in plots for s in self._many("crop_seasons", plot_id=str(p["id"]))]; aggregate = self._aggregate_metrics([str(s["id"]) for s in seasons]); ms = [self._metric_totals(str(s["id"])) for s in seasons]
             complete = [m for m in ms if m["yield_kg"] is not None]; yield_kg = sum(float(m["yield_kg"]) for m in complete) if len(complete) == len(ms) else None
             carbon = [m for m in ms if m["total_co2e_kg"] is not None]; total_co2e = sum(float(m["total_co2e_kg"]) for m in carbon) if len(carbon) == len(ms) else None
             status = "complete" if ms and all(all(m["data_completeness"].values()) for m in ms) else "partial" if ms else "missing"
-            items.append({"farm_id": farm["id"], "farm_name": farm["farm_name"], "area_ha": sum(float(p["area_ha"]) for p in plots), "yield_kg": yield_kg, "water_per_kg": None, "fertilizer_per_kg": None, "co2e_per_kg": total_co2e / yield_kg if total_co2e is not None and yield_kg else None, "cost_per_kg": None, "data_status": status})
+            items.append({"farm_id": farm["id"], "farm_name": farm["farm_name"], "area_ha": sum(float(p["area_ha"]) for p in plots), "yield_kg": yield_kg, "water_per_kg": aggregate["water_per_kg"], "fertilizer_per_kg": aggregate["fertilizer_per_kg"], "co2e_per_kg": total_co2e / yield_kg if total_co2e is not None and yield_kg else None, "cost_per_kg": aggregate["cost_per_kg"], "data_status": status})
         return items
 
     def mrv_cases(self) -> list[dict[str, Any]]:
