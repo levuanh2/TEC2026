@@ -21,6 +21,12 @@ class CarbonApiException implements Exception {
   String toString() => message;
 }
 
+class _ApiErrorEnvelope {
+  const _ApiErrorEnvelope(this.code, this.message);
+  final String code;
+  final String? message;
+}
+
 /// Gọi FastAPI backend cho CO2e. KHÔNG tính carbon trong app — Carbon Engine
 /// chỉ chạy ở backend (docs/BACKEND_1A.md). App chỉ gửi request + hiển thị kết quả.
 ///
@@ -82,8 +88,7 @@ class CarbonApiService {
     //           phải ném ra để UI báo đúng, không được âm thầm coi là "chưa tính".
     if (response.statusCode == 404) {
       final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final errorCode = (body['detail'] as Map<String, dynamic>?)?['error'] as String?;
-      if (errorCode == 'no_calculation') return null;
+      if (_errorEnvelope(body).code == 'no_calculation') return null;
     }
     return _parseOrThrow(response);
   }
@@ -93,11 +98,30 @@ class CarbonApiService {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return CarbonResult.fromJson(body);
     }
-    final detail = body['detail'] as Map<String, dynamic>? ?? {};
+    final error = _errorEnvelope(body);
     throw CarbonApiException(
       response.statusCode,
-      detail['error'] as String? ?? 'unknown_error',
-      detail['message'] as String? ?? 'Lỗi không xác định (${response.statusCode}).',
+      error.code,
+      error.message ?? 'Lỗi không xác định (${response.statusCode}).',
+    );
+  }
+
+  /// Frozen FastAPI envelope: {detail: {error: {code, message}}}.
+  /// The flat branch only preserves a useful message during deployment rollout;
+  /// all current backend routes use the nested envelope.
+  static _ApiErrorEnvelope _errorEnvelope(Map<String, dynamic> body) {
+    final detail = body['detail'];
+    if (detail is! Map) return const _ApiErrorEnvelope('unknown_error', null);
+    final rawError = detail['error'];
+    if (rawError is Map) {
+      return _ApiErrorEnvelope(
+        rawError['code'] as String? ?? 'unknown_error',
+        rawError['message'] as String? ?? detail['message'] as String?,
+      );
+    }
+    return _ApiErrorEnvelope(
+      rawError as String? ?? 'unknown_error',
+      detail['message'] as String?,
     );
   }
 

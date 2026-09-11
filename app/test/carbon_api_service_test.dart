@@ -116,7 +116,12 @@ void main() {
   group('GET .../carbon — hai loại 404 KHÔNG được gộp làm một', () {
     test('404 no_calculation -> trả null (chưa từng tính, không phải lỗi)', () async {
       final fakeClient = _FakeHttpClient((request, body) => _json(404, {
-            'detail': {'error': 'no_calculation', 'message': 'chưa có bản tính'}
+            'detail': {
+              'error': {
+                'code': 'no_calculation',
+                'message': 'chưa có bản tính',
+              }
+            }
           }));
       final service = CarbonApiService.withTokenProvider(() => 't', httpClient: fakeClient);
 
@@ -126,7 +131,12 @@ void main() {
 
     test('404 crop_not_found (RLS từ chối) -> PHẢI ném lỗi, không được trả null', () async {
       final fakeClient = _FakeHttpClient((request, body) => _json(404, {
-            'detail': {'error': 'crop_not_found', 'message': 'không có quyền'}
+            'detail': {
+              'error': {
+                'code': 'crop_not_found',
+                'message': 'không có quyền',
+              }
+            }
           }));
       final service = CarbonApiService.withTokenProvider(() => 't', httpClient: fakeClient);
 
@@ -139,6 +149,25 @@ void main() {
   });
 
   group('API error mapping -> thông báo tiếng Việt', () {
+    test('đọc error object đã đóng băng từ FastAPI', () async {
+      final fakeClient = _FakeHttpClient((request, body) => _json(422, {
+            'detail': {
+              'error': {
+                'code': 'missing_emission_factor',
+                'message': 'GWP CH4 chưa xác minh',
+              }
+            }
+          }));
+      final service = CarbonApiService.withTokenProvider(() => 't', httpClient: fakeClient);
+
+      await expectLater(
+        service.calculate(cropSeasonId: 'season-1'),
+        throwsA(isA<CarbonApiException>()
+            .having((e) => e.errorCode, 'errorCode', 'missing_emission_factor')
+            .having((e) => e.message, 'message', 'GWP CH4 chưa xác minh')),
+      );
+    });
+
     test('401 -> phiên hết hạn', () {
       final e = CarbonApiException(401, 'missing_authorization', 'x');
       expect(CarbonApiService.friendlyMessage(e), contains('hết hạn'));

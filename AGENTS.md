@@ -177,6 +177,29 @@ FW-2 PART 2". Codex báo còn <5% quota tuần — không nhận task lớn roun
 |---|---|---|---|
 | `web-dashboard/src/farmer/**`, `web-dashboard/src/api/activities.ts` (mới), `web-dashboard/src/features/activities.tsx`, `web-dashboard/src/ui.tsx` (Sheet/ConfirmDialog), `web-dashboard/src/mocks/data.ts`, `web-dashboard/tests/e2e/farmer-web.spec.ts`, `web-dashboard/tests/e2e/farmer-real-write.spec.ts` (mới), `web-dashboard/playwright.real.config.ts` (testMatch), `docs/FARMER_WEB_FW2_REPORT.md` (mới), `backend/main.py` (CHỈ CORS `allow_methods` — genuine blocker, xem report §G), `supabase/migrations/20260910080441_farmer_web_activity_idempotency.sql` (đã apply hosted, xem report §G) | — (released) | FW-2 Part 2 Farmer Web write UI cho fertilizer/irrigation/harvest (create/edit/soft-delete), idempotency client, read-after-write refresh, real Farmer E2E. | **DONE**: Vitest 58 passed, build passed, Management + Farmer mock Playwright 2 passed, backend pytest 165 passed, **real Farmer write E2E 1 passed** (fertilizer/irrigation/harvest create+edit+delete qua API thật, hosted Supabase). Real E2E phát hiện + fix 2 blocker backend thật (migration `web_idempotency_key` chưa deploy hosted; CORS `allow_methods` thiếu PATCH/DELETE) + 1 bug frontend thật (Postgres `numeric` → chuỗi JSON trong write-response, số 0 khi edit/toast). Chi tiết đầy đủ: `docs/FARMER_WEB_FW2_REPORT.md`. |
 
+## Round 11 (2026-09-11) — M05 Recommendation Engine (Claude)
+
+Sau khi commit sạch milestone Farmer Web FW-2 (2 commit: `feat(backend): add
+transactional farmer activity write API`, `feat(web): add farmer web read
+experience and activity write UI`), user giao M05 tiếp theo — KHÔNG trộn vào
+commit FW-2.
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/recommendation/**` (mới), `backend/infrastructure/recommendation_repo.py` (mới), `backend/service.py` (chỉ `RecommendationService`), `backend/schemas.py` (chỉ recommendation models), `backend/api.py`/`main.py` (chỉ 3 route recommendations + wiring), `supabase/migrations/20260911120000_season_recommendations.sql` (mới, đã apply hosted), `backend/tests/test_recommendation_*.py` (mới), `web-dashboard/src/api/recommendations.ts`+test (mới), `web-dashboard/src/farmer/Recommendations.tsx` (mới), `FarmerExperience.tsx` (chỉ thay placeholder khuyến nghị), `web-dashboard/tests/e2e/farmer-real-recommendations.spec.ts` (mới), `docs/modules/05-ai-recommendation.md`, `docs/M05_RECOMMENDATION_REPORT.md` (mới) | Claude | Deterministic rule engine, quantified impact tái dùng Carbon Engine thật (as_recorded vs awd, persist=False), 2 rule family thật (AWD optimization + data-completeness), không fake benchmark/impact. | **DONE**: backend 196 passed, Vitest 60 passed, build passed, mock Playwright (Farmer+Management) 2 passed, **real Farmer recommendations E2E 1 passed** (hosted, QA identity mới, 0 khuyến nghị carbon thật vì REAL CO2e vẫn blocked OI-05 — đúng kỳ vọng; 1 data_task thật "Bổ sung chi phí vật tư" accept qua UI thật). Real E2E phát hiện + fix 2 bug thật: (1) exception hạ tầng không phải CarbonEngineError làm crash toàn bộ generate endpoint; (2) psycopg trả UUID object thay vì string cho response. Chi tiết đầy đủ: `docs/M05_RECOMMENDATION_REPORT.md`. **CHƯA COMMIT** — chờ user yêu cầu rõ (theo git policy). |
+
+## Round 12 (2026-09-11) — M03 CV Farmer Web Integration (Claude)
+
+Baseline CV (`ml/`) đã verify trước đó (85.60% acc, threshold 0.939849,
+temperature 1.65, uncertain rate 42.4% trên test) — task này KHÔNG train lại,
+chỉ nối model đã có vào backend + Farmer Web. Schema (`plant_images`,
+`cv_inferences`, `cv_model_versions`) đã tồn tại từ baseline migration nhưng
+0% được dùng ở backend trước round này.
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/infrastructure/cv_repo.py` (mới), `backend/service.py` (chỉ `CvService` + bootstrap sys.path), `backend/schemas.py` (chỉ `CvInferenceResponse`/`DiseaseLabel`), `backend/api.py`/`main.py` (chỉ 3 route CV + wiring load-once model), `backend/tests/test_cv_service.py` + `test_cv_real_model_smoke.py` (mới), `ml/infer.py` (chỉ tách `predict_with_model()` khỏi `predict()`, không đổi logic), `web-dashboard/src/api/cv.ts`+test (mới), `web-dashboard/src/api/client.ts` (chỉ FormData Content-Type), `web-dashboard/src/farmer/CvCheck.tsx` (mới), `FarmerExperience.tsx` (chỉ thêm CV entry point ở Home + Season Overview), `web-dashboard/src/styles.css` (chỉ `.cv-*`), `web-dashboard/tests/e2e/farmer-web.spec.ts` (chỉ thêm assertion CV mock), `web-dashboard/tests/e2e/farmer-real-cv.spec.ts` (mới), `playwright.real.config.ts` (testMatch), `docs/API_CATALOG.md` (chỉ thêm route CV), `docs/CV_FARMER_INTEGRATION_REPORT.md` (mới) | Claude | Backend CV integration (upload validate/infer/persist/list, reuse `ml.infer` preprocessing — không path preprocessing thứ 2), Farmer Web upload + confident/uncertain UX đúng copy, real model E2E. | **DONE**: backend 223 passed (27 mới), `ml/tests` 9/9, Vitest 64 passed, build sạch, mock Playwright Farmer+Management 2 passed, **real Farmer CV E2E 1 passed** (upload thật, model thật, backend thật, không mock/intercept). Real E2E tự phát hiện 1 lỗi locator Playwright của chính spec (nút "Đóng" trùng accessible name với nút đóng Sheet) — đã sửa, không phải bug app. Chạy song song 2 real-E2E khác trên cùng QA identity gây rác 2 harvest 5kg (tự dọn qua `DELETE /v1/activities/{id}` đã authorize, không đụng DB trực tiếp) — không phải regression CV, chi tiết ở report §K.1. Chi tiết đầy đủ: `docs/CV_FARMER_INTEGRATION_REPORT.md`. **CHƯA COMMIT** — chờ user yêu cầu rõ (theo git policy). |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash

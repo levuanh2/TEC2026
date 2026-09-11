@@ -21,6 +21,7 @@ dist/
 test-results/
 playwright-report/
 playwright/.cache/
+.vite-dev.log
 
 # Flutter (app/)
 .dart_tool/
