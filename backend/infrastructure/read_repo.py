@@ -48,6 +48,17 @@ class SupabaseReadRepository:
         for key, value in filters.items(): query = query.eq(key, value)
         return query.execute().data or []
 
+    def _many_in(self, table: str, column: str, values: list[str]) -> list[dict[str, Any]]:
+        """Same as `_many` but for `column IN (values)` — one hosted-Supabase
+        round trip for many parent ids instead of one round trip per id.  The
+        per-id loop this replaces is the actual measured cause of the
+        multi-second/minute organization rollup latency (see
+        docs/PERFORMANCE_INVESTIGATION.md) — RLS still applies identically,
+        this only changes how many requests fetch the same allowed rows.
+        """
+        if not values: return []
+        return self.client.table(table).select("*").in_(column, values).execute().data or []
+
     def _one(self, table: str, id: str) -> dict[str, Any]:
         rows = self._many(table, id=id)
         if not rows: raise ReadNotFoundError(table)
@@ -106,15 +117,63 @@ class SupabaseReadRepository:
         rows = self._many("season_recommendations", crop_season_id=season_id)
         return sorted(rows, key=lambda x: str(x.get("generated_at") or ""))
 
+    def _details_by_activity_id(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """One batched `IN` query per distinct activity_type present, instead
+        of one query per (detail table, activity_id) pair — `rows` already
+        carries `activity_type`, so which of the 7 detail tables a given
+        activity lives in is already known; no need to probe all 7.
+        """
+        by_type: dict[str, list[str]] = defaultdict(list)
+        for row in rows:
+            table = DETAIL_TABLES.get(str(row["activity_type"]))
+            if table: by_type[table].append(str(row["id"]))
+        details: dict[str, dict[str, Any]] = {}
+        for table, activity_ids in by_type.items():
+            for found in self._many_in(table, "activity_id", activity_ids):
+                details[str(found["activity_id"])] = found
+        return details
+
     def activities(self, season_id: str) -> list[dict[str, Any]]:
-        rows = self._activities(season_id); ids = [str(x["id"]) for x in rows]; details: dict[str, dict[str, Any]] = {}
-        # Fetch each 1:1 detail table independently then merge by activity_id.
-        for table in DETAIL_TABLES.values():
-            for activity_id in ids:
-                found = self._many(table, activity_id=activity_id)
-                if found: details[activity_id] = found[0]
+        rows = self._activities(season_id)
+        details = self._details_by_activity_id(rows)
         users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
         return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in rows]
+
+    def _bulk_activities_by_season(self, season_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Same shape as calling `activities(season_id)` for each id, but a
+        fixed ~4 requests total (batches, activities, per-type details,
+        profiles) instead of `O(seasons × detail types)` — this is what
+        actually made the organization/farm rollups take 12-15s instead of
+        instant even after the per-season N+1 fix: each season was still its
+        own fully sequential round-trip chain. Used only by rollups; the
+        single-season `activities()` path (season hub page) is unaffected.
+        """
+        if not season_ids: return {sid: [] for sid in season_ids}
+        batches = self._many_in("production_batches", "crop_season_id", season_ids)
+        season_by_batch = {str(b["id"]): str(b["crop_season_id"]) for b in batches}
+        batch_ids = list(season_by_batch)
+        activity_rows = self._many_in("activities", "production_batch_id", batch_ids) if batch_ids else []
+        activity_rows = [a for a in activity_rows if a.get("deleted_at") is None]
+        details = self._details_by_activity_id(activity_rows)
+        users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
+        by_season: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in activity_rows:
+            sid = season_by_batch.get(str(row["production_batch_id"]))
+            if sid: by_season[sid].append(self._activity_view(row, details.get(str(row["id"]), {}), users))
+        return {sid: by_season.get(sid, []) for sid in season_ids}
+
+    def _bulk_metric_totals(self, season_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Bulk-batched equivalent of calling `_metric_totals(season_id)` for
+        each id — see `_bulk_activities_by_season` for why this exists.
+        """
+        activities_by_season = self._bulk_activities_by_season(season_ids)
+        carbon_rows = self._many_in("carbon_calculations", "crop_season_id", season_ids) if season_ids else []
+        carbon_by_season: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in carbon_rows: carbon_by_season[str(row["crop_season_id"])].append(row)
+        return {
+            sid: self._compute_metric_totals(activities_by_season.get(sid, []), carbon_by_season.get(sid, []))
+            for sid in season_ids
+        }
 
     def _activity_view(self, row: dict[str, Any], detail: dict[str, Any], users: dict[str, str | None]) -> dict[str, Any]:
         return {"id": row["id"], "activity_type": row["activity_type"], "occurred_at": row["occurred_at"], "recorded_at": row["recorded_at"], "recorded_by": users.get(str(row.get("recorded_by"))), "source": row["source"], "payload": {**detail, "note": row.get("note")}}
@@ -123,12 +182,9 @@ class SupabaseReadRepository:
         row = self._one("activities", activity_id)
         if row.get("deleted_at") is not None:
             raise ReadNotFoundError("activities")
-        detail: dict[str, Any] = {}
-        for table in DETAIL_TABLES.values():
-            found = self._many(table, activity_id=activity_id)
-            if found:
-                detail = found[0]
-                break
+        table = DETAIL_TABLES.get(str(row["activity_type"]))
+        found = self._many(table, activity_id=activity_id) if table else []
+        detail = found[0] if found else {}
         users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
         return self._activity_view(row, detail, users)
 
@@ -142,6 +198,14 @@ class SupabaseReadRepository:
     def _metric_totals(self, season_id: str) -> dict[str, Any]:
         """Compute season numerators once; underscore keys are internal only."""
         activities = self.activities(season_id)
+        carbon = self._many("carbon_calculations", crop_season_id=season_id)
+        return self._compute_metric_totals(activities, carbon)
+
+    @staticmethod
+    def _compute_metric_totals(activities: list[dict[str, Any]], carbon: list[dict[str, Any]]) -> dict[str, Any]:
+        """Pure aggregation over already-fetched rows — no DB access — shared
+        by the single-season path above and `_bulk_metric_totals` (rollups).
+        """
         yield_kg = water_m3 = fertilizer_kg = total_cost = 0.0
         has_yield = has_cost = True
         has_water = has_fertilizer = False
@@ -158,10 +222,9 @@ class SupabaseReadRepository:
                 has_fertilizer = True
                 if payload.get("amount_kg") is None: has_fertilizer = False
                 else: fertilizer_kg += float(payload["amount_kg"])
-            cost = self._activity_cost_vnd(kind, payload)
+            cost = SupabaseReadRepository._activity_cost_vnd(kind, payload)
             if cost is None: has_cost = False
             else: total_cost += cost
-        carbon = self._many("carbon_calculations", crop_season_id=season_id)
         succeeded = [x for x in carbon if x.get("status") == "succeeded" and x.get("scenario") == "actual"]
         latest = max(succeeded, key=lambda x: str(x.get("calculated_at")), default=None)
         y = yield_kg if has_yield and yield_kg > 0 else None
@@ -203,12 +266,20 @@ class SupabaseReadRepository:
         farm_ids = {str(x["id"]) for x in self._organization_farms(organization_id)}
         return [x for x in self.farms() if str(x["id"]) in farm_ids]
 
+    def _plots_and_seasons_for_farms(self, farms: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Batched replacement for the old one-request-per-farm-then-per-plot
+        loop: 2 requests total (all plots for these farms, then all seasons
+        for those plots) instead of `len(farms) + len(plots)` requests.
+        """
+        farm_ids = [str(f["id"]) for f in farms]
+        plots = self._many_in("plots", "farm_id", farm_ids)
+        plot_ids = [str(p["id"]) for p in plots]
+        seasons = self._many_in("crop_seasons", "plot_id", plot_ids)
+        return plots, seasons
+
     def _season_ids_for_farms(self, farms: list[dict[str, Any]]) -> list[str]:
-        season_ids: list[str] = []
-        for farm in farms:
-            for plot in self._many("plots", farm_id=str(farm["id"])):
-                season_ids.extend(str(s["id"]) for s in self._many("crop_seasons", plot_id=str(plot["id"])))
-        return season_ids
+        _, seasons = self._plots_and_seasons_for_farms(farms)
+        return [str(s["id"]) for s in seasons]
 
     def _aggregate_metrics(self, season_ids: list[str]) -> dict[str, Any]:
         """Tổng (sum), KHÔNG trung bình — cùng nguyên tắc organization_summary().
@@ -216,14 +287,34 @@ class SupabaseReadRepository:
         null nếu BẤT KỲ vụ nào trong tập hợp thiếu dữ liệu của field đó, để không
         âm thầm bỏ qua vụ chưa đo — giống hệt cách metrics()/organization_summary() xử lý.
         """
-        ms = [self._metric_totals(sid) for sid in season_ids]
+        totals_by_season = self._bulk_metric_totals(season_ids)
+        return self._aggregate_from_totals([totals_by_season[sid] for sid in season_ids])
 
+    def organization_metrics(self, organization_id: str) -> dict[str, Any]:
+        return self._aggregate_metrics(self._season_ids_for_farms(self._organization_farms(organization_id)))
+
+    def farm_crop_seasons(self, farm_id: str) -> list[dict[str, Any]]:
+        farm = self._one("farms", farm_id)
+        _, seasons = self._plots_and_seasons_for_farms([farm])
+        return [self.season_view(s) for s in seasons]
+
+    def farm_metrics(self, farm_id: str) -> dict[str, Any]:
+        farm = self._one("farms", farm_id)
+        _, seasons = self._plots_and_seasons_for_farms([farm])
+        return self._aggregate_metrics([str(s["id"]) for s in seasons])
+
+    @staticmethod
+    def _aggregate_from_totals(ms: list[dict[str, Any]]) -> dict[str, Any]:
+        """Shared by organization_metrics/farm_metrics (via _aggregate_metrics)
+        and farm_performance — factored out so farm_performance can reuse the
+        exact same per-season `_metric_totals` list it already computed for
+        its own yield/co2e columns, instead of a second, redundant pass that
+        redoes every activities()/detail-table fetch for the same seasons.
+        """
         def total(key: str) -> float | None:
-            if not ms:
-                return None
+            if not ms: return None
             values = [m[key] for m in ms]
-            if any(v is None for v in values):
-                return None
+            if any(v is None for v in values): return None
             return sum(float(v) for v in values)
 
         yield_kg = total("yield_kg"); water_m3 = total("water_m3")
@@ -242,42 +333,40 @@ class SupabaseReadRepository:
             },
         }
 
-    def organization_metrics(self, organization_id: str) -> dict[str, Any]:
-        return self._aggregate_metrics(self._season_ids_for_farms(self._organization_farms(organization_id)))
-
-    def farm_crop_seasons(self, farm_id: str) -> list[dict[str, Any]]:
-        self._one("farms", farm_id)
-        seasons: list[dict[str, Any]] = []
-        for plot in self._many("plots", farm_id=farm_id):
-            seasons.extend(self.season_view(x) for x in self._many("crop_seasons", plot_id=str(plot["id"])))
-        return seasons
-
-    def farm_metrics(self, farm_id: str) -> dict[str, Any]:
-        self._one("farms", farm_id)
-        season_ids: list[str] = []
-        for plot in self._many("plots", farm_id=farm_id):
-            season_ids.extend(str(s["id"]) for s in self._many("crop_seasons", plot_id=str(plot["id"])))
-        return self._aggregate_metrics(season_ids)
-
     def organization_summary(self, organization_id: str) -> dict[str, Any]:
-        farms = self._organization_farms(organization_id); plots = []; seasons = []
-        for farm in farms:
-            farm_plots = self._many("plots", farm_id=str(farm["id"])); plots.extend(farm_plots)
-            for plot in farm_plots: seasons.extend(self._many("crop_seasons", plot_id=str(plot["id"])))
-        metrics = [self.metrics(str(season["id"])) for season in seasons]
+        farms = self._organization_farms(organization_id)
+        plots, seasons = self._plots_and_seasons_for_farms(farms)
+        season_ids = [str(s["id"]) for s in seasons]
+        totals_by_season = self._bulk_metric_totals(season_ids)
+        metrics = [totals_by_season[sid] for sid in season_ids]
         complete = [m for m in metrics if m["yield_kg"] is not None and m["total_co2e_kg"] is not None]
         total_yield = sum(float(m["yield_kg"]) for m in complete) if len(complete) == len(metrics) else None
         total_co2e = sum(float(m["total_co2e_kg"]) for m in complete) if len(complete) == len(metrics) else None
         return {"organization_id": organization_id, "farm_count": len(farms), "plot_count": len(plots), "crop_season_count": len(seasons), "total_area_ha": sum(float(p["area_ha"]) for p in plots), "total_yield_kg": total_yield, "total_co2e_kg": total_co2e, "co2e_per_kg": total_co2e / total_yield if total_yield and total_co2e is not None else None}
 
     def farm_performance(self, organization_id: str) -> list[dict[str, Any]]:
+        farms = self._organization_farms(organization_id)
+        plots, seasons = self._plots_and_seasons_for_farms(farms)
+        plots_by_farm: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for p in plots: plots_by_farm[str(p["farm_id"])].append(p)
+        seasons_by_plot: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for s in seasons: seasons_by_plot[str(s["plot_id"])].append(s)
+        # One bulk-batched pass across the WHOLE org, not per farm/season —
+        # each season appears in exactly one farm, so this is still exactly
+        # one computation per season, just fetched together (fixed request
+        # count) instead of separately per season (O(seasons) round trips).
+        totals_by_season = self._bulk_metric_totals([str(s["id"]) for s in seasons])
+
         items = []
-        for farm in self._organization_farms(organization_id):
-            plots = self._many("plots", farm_id=str(farm["id"])); seasons = [s for p in plots for s in self._many("crop_seasons", plot_id=str(p["id"]))]; aggregate = self._aggregate_metrics([str(s["id"]) for s in seasons]); ms = [self._metric_totals(str(s["id"])) for s in seasons]
+        for farm in farms:
+            farm_plots = plots_by_farm[str(farm["id"])]
+            farm_season_ids = [str(s["id"]) for p in farm_plots for s in seasons_by_plot[str(p["id"])]]
+            ms = [totals_by_season[sid] for sid in farm_season_ids]
+            aggregate = self._aggregate_from_totals(ms)
             complete = [m for m in ms if m["yield_kg"] is not None]; yield_kg = sum(float(m["yield_kg"]) for m in complete) if len(complete) == len(ms) else None
             carbon = [m for m in ms if m["total_co2e_kg"] is not None]; total_co2e = sum(float(m["total_co2e_kg"]) for m in carbon) if len(carbon) == len(ms) else None
             status = "complete" if ms and all(all(m["data_completeness"].values()) for m in ms) else "partial" if ms else "missing"
-            items.append({"farm_id": farm["id"], "farm_name": farm["farm_name"], "area_ha": sum(float(p["area_ha"]) for p in plots), "yield_kg": yield_kg, "water_per_kg": aggregate["water_per_kg"], "fertilizer_per_kg": aggregate["fertilizer_per_kg"], "co2e_per_kg": total_co2e / yield_kg if total_co2e is not None and yield_kg else None, "cost_per_kg": aggregate["cost_per_kg"], "data_status": status})
+            items.append({"farm_id": farm["id"], "farm_name": farm["farm_name"], "area_ha": sum(float(p["area_ha"]) for p in farm_plots), "yield_kg": yield_kg, "water_per_kg": aggregate["water_per_kg"], "fertilizer_per_kg": aggregate["fertilizer_per_kg"], "co2e_per_kg": total_co2e / yield_kg if total_co2e is not None and yield_kg else None, "cost_per_kg": aggregate["cost_per_kg"], "data_status": status})
         return items
 
     def mrv_cases(self) -> list[dict[str, Any]]:

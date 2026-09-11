@@ -41,6 +41,7 @@ class _FakeTable:
     def __init__(self, rows: list[dict]):
         self._rows = rows
         self._filters: dict[str, str] = {}
+        self._in_filters: dict[str, set[str]] = {}
 
     def select(self, *_args, **_kwargs):
         return self
@@ -49,10 +50,15 @@ class _FakeTable:
         self._filters[key] = str(value)
         return self
 
+    def in_(self, key, values):
+        self._in_filters[key] = {str(v) for v in values}
+        return self
+
     def execute(self):
         matched = [
             row for row in self._rows
             if all(str(row.get(k)) == v for k, v in self._filters.items())
+            and all(str(row.get(k)) in values for k, values in self._in_filters.items())
         ]
         return SimpleNamespace(data=matched)
 
@@ -300,7 +306,7 @@ def test_aggregate_metrics_uses_sum_over_sum_not_average_of_averages(repo_a, mon
         "a": {"yield_kg": 100.0, "water_m3": 100.0, "fertilizer_kg": 100.0, "total_co2e_kg": 100.0, "_total_cost_vnd": 100.0},
         "b": {"yield_kg": 300.0, "water_m3": 900.0, "fertilizer_kg": 900.0, "total_co2e_kg": 900.0, "_total_cost_vnd": 900.0},
     }
-    monkeypatch.setattr(repo_a, "_metric_totals", lambda season_id: values[season_id])
+    monkeypatch.setattr(repo_a, "_bulk_metric_totals", lambda season_ids: {sid: values[sid] for sid in season_ids})
 
     aggregate = repo_a._aggregate_metrics(["a", "b"])
     assert aggregate["water_per_kg"] == pytest.approx(2.5)
@@ -315,7 +321,7 @@ def test_organization_metrics_uses_weighted_resource_intensity(repo_a, monkeypat
         "b": {"yield_kg": 300.0, "water_m3": 900.0, "fertilizer_kg": 900.0, "total_co2e_kg": 900.0, "_total_cost_vnd": 900.0},
     }
     monkeypatch.setattr(repo_a, "_season_ids_for_farms", lambda _farms: ["a", "b"])
-    monkeypatch.setattr(repo_a, "_metric_totals", lambda season_id: values[season_id])
+    monkeypatch.setattr(repo_a, "_bulk_metric_totals", lambda season_ids: {sid: values[sid] for sid in season_ids})
 
     metrics = repo_a.organization_metrics(ORG_A)
     assert metrics["water_per_kg"] == pytest.approx(2.5)
