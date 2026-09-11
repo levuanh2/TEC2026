@@ -55,16 +55,23 @@ function DashboardBody({ organizationId }: { organizationId: string }) {
       <Async state={core} skeleton="kpis">
         {([org, summary]) => (
           <>
-            <div className="card card--pad" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 20px', alignItems: 'baseline' }}>
-              <strong style={{ fontSize: 'var(--fs-h3)' }}>{org.name}</strong>
-              <span className="muted">{org.organizationType === 'cooperative' ? 'Hợp tác xã' : org.organizationType}</span>
-              <span className="muted">·</span>
-              <span className="muted">
-                {summary.farmCount} nông hộ · {summary.plotCount} thửa · {summary.cropSeasonCount} vụ canh tác
-              </span>
+            <div className="hero">
+              <div className="hero__id">
+                <span className="hero__eyebrow">{org.organizationType === 'cooperative' ? 'Hợp tác xã' : org.organizationType}</span>
+                <h2 className="hero__title">{org.name}</h2>
+                <div className="hero__meta">
+                  <span>{summary.farmCount} nông hộ</span>
+                  <span>{summary.plotCount} thửa</span>
+                  <span>{summary.cropSeasonCount} vụ canh tác</span>
+                </div>
+              </div>
+              <div className="hero__stats">
+                <div className="hero__stat"><b>{ha(summary.totalAreaHa)}</b><span>Tổng diện tích</span></div>
+                <div className="hero__stat"><b>{kg(summary.totalYieldKg)}</b><span>Tổng sản lượng</span></div>
+              </div>
             </div>
 
-            <div className="kpi-strip" style={{ marginTop: 'var(--gap)' }}>
+            <div className="kpi-strip" style={{ marginTop: 'var(--gap-lg)' }}>
               <Kpi label="Tổng diện tích" value={ha(summary.totalAreaHa)} sub="ha canh tác trong phạm vi" />
               <Kpi label="Tổng sản lượng" value={kg(summary.totalYieldKg)} sub="thóc đã ghi nhận thu hoạch" />
               <Kpi accent label="Tổng CO₂e" value={summary.totalCo2eKg == null ? 'Chưa đủ dữ liệu' : num(summary.totalCo2eKg)} sub="kg CO₂e toàn vùng" />
