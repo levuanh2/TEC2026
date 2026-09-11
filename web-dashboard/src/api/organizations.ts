@@ -19,7 +19,27 @@ const summary = (x: { organization_id: string; farm_count: number; plot_count: n
 const performance = (x: { farm_id: string; farm_name: string; area_ha: number; yield_kg: number | null; water_per_kg: number | null; fertilizer_per_kg: number | null; co2e_per_kg: number | null; cost_per_kg: number | null; data_status: 'complete' | 'partial' | 'missing' }): FarmPerformance => ({ farmId: x.farm_id, farmName: x.farm_name, areaHa: x.area_ha, yieldKg: x.yield_kg, waterPerKg: x.water_per_kg, fertilizerPerKg: x.fertilizer_per_kg, co2ePerKg: x.co2e_per_kg, costPerKg: x.cost_per_kg, dataStatus: x.data_status })
 
 export async function listOrganizations(): Promise<Organization[]> { return (await apiRequest<{ items: Parameters<typeof organization>[0][] }>('/v1/organizations')).items.map(organization) }
-export async function getOrganization(id: string): Promise<Organization> { return organization(await apiRequest<Parameters<typeof organization>[0]>(`/v1/organizations/${id}`)) }
+
+// Session-scoped memoization: org identity (name/code/type/province) is
+// stable reference data, not a business metric — unlike summary/metrics/
+// farm-performance below, which stay uncached because they are live rollups
+// that must never look stale (brief Part B §18). This alone removes the
+// duplicate `getOrganization` call that both the shell nav header
+// (App.tsx's AppShell) and whichever page is showing (Dashboard/Directory/
+// Performance) were each issuing for the same organization id on every
+// render of that page (brief Part B §20).
+const organizationCache = new Map<string, Promise<Organization>>()
+export function getOrganization(id: string): Promise<Organization> {
+  let cached = organizationCache.get(id)
+  if (!cached) {
+    cached = apiRequest<Parameters<typeof organization>[0]>(`/v1/organizations/${id}`).then(organization)
+    cached.catch(() => organizationCache.delete(id))
+    organizationCache.set(id, cached)
+  }
+  return cached
+}
+export function clearOrganizationCache(): void { organizationCache.clear() }
+
 export async function getOrganizationSummary(id: string): Promise<OrganizationSummary> { return summary(await apiRequest<Parameters<typeof summary>[0]>(`/v1/organizations/${id}/summary`)) }
 export async function getFarmPerformance(id: string): Promise<FarmPerformance[]> { return (await apiRequest<{ items: Parameters<typeof performance>[0][] }>(`/v1/organizations/${id}/farm-performance`)).items.map(performance) }
 
