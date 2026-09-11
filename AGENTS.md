@@ -200,6 +200,30 @@ chỉ nối model đã có vào backend + Farmer Web. Schema (`plant_images`,
 |---|---|---|---|
 | `backend/infrastructure/cv_repo.py` (mới), `backend/service.py` (chỉ `CvService` + bootstrap sys.path), `backend/schemas.py` (chỉ `CvInferenceResponse`/`DiseaseLabel`), `backend/api.py`/`main.py` (chỉ 3 route CV + wiring load-once model), `backend/tests/test_cv_service.py` + `test_cv_real_model_smoke.py` (mới), `ml/infer.py` (chỉ tách `predict_with_model()` khỏi `predict()`, không đổi logic), `web-dashboard/src/api/cv.ts`+test (mới), `web-dashboard/src/api/client.ts` (chỉ FormData Content-Type), `web-dashboard/src/farmer/CvCheck.tsx` (mới), `FarmerExperience.tsx` (chỉ thêm CV entry point ở Home + Season Overview), `web-dashboard/src/styles.css` (chỉ `.cv-*`), `web-dashboard/tests/e2e/farmer-web.spec.ts` (chỉ thêm assertion CV mock), `web-dashboard/tests/e2e/farmer-real-cv.spec.ts` (mới), `playwright.real.config.ts` (testMatch), `docs/API_CATALOG.md` (chỉ thêm route CV), `docs/CV_FARMER_INTEGRATION_REPORT.md` (mới) | Claude | Backend CV integration (upload validate/infer/persist/list, reuse `ml.infer` preprocessing — không path preprocessing thứ 2), Farmer Web upload + confident/uncertain UX đúng copy, real model E2E. | **DONE**: backend 223 passed (27 mới), `ml/tests` 9/9, Vitest 64 passed, build sạch, mock Playwright Farmer+Management 2 passed, **real Farmer CV E2E 1 passed** (upload thật, model thật, backend thật, không mock/intercept). Real E2E tự phát hiện 1 lỗi locator Playwright của chính spec (nút "Đóng" trùng accessible name với nút đóng Sheet) — đã sửa, không phải bug app. Chạy song song 2 real-E2E khác trên cùng QA identity gây rác 2 harvest 5kg (tự dọn qua `DELETE /v1/activities/{id}` đã authorize, không đụng DB trực tiếp) — không phải regression CV, chi tiết ở report §K.1. Chi tiết đầy đủ: `docs/CV_FARMER_INTEGRATION_REPORT.md`. **CHƯA COMMIT** — chờ user yêu cầu rõ (theo git policy). |
 
+## Round 13 (2026-09-11) — Stabilize dirty tree: commit M05 + M03 (Claude)
+
+User yêu cầu audit/stabilize riêng (không thêm feature mới) trước khi làm
+FW-2 seeding/pesticide/straw. Round 11/12 để lại "CHƯA COMMIT" — task này
+verify lại từ đầu (không tin lại nhãn DONE cũ mà không kiểm) rồi commit.
+
+Kết quả audit: M05 Recommendation và M03 CV đều hoàn chỉnh nội bộ (rule
+engine tái dùng Carbon Engine thật qua `persist=False`, không công thức
+CH4/N2O riêng, có test AST chặn identifier methodology; CV baseline
+85.60% acc trên public dataset, tự khai KHÔNG field-validated và OOD/non-
+rice reject KHÔNG robust — đúng như đã ghi, không bị thổi phồng). Phát
+hiện thêm 1 nhóm file không liên quan cả hai (Herdr tooling, Flutter
+error-envelope fix, vài báo cáo audit cũ) cũng chưa commit từ trước.
+
+`backend/api.py`/`main.py`/`schemas.py`/`service.py` + `docs/openapi.json`
++ `docs/API_CATALOG.md` + `FarmerExperience.tsx`/`styles.css` chứa CẢ HAI
+feature trộn trong cùng hàm/file (không có cách tách hunk an toàn không
+rủi ro cho JSON generated) — tách riêng thành 1 commit "wiring" cuối,
+không gộp bừa vào 1 commit lớn.
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| Toàn bộ cây dirty tại thời điểm bắt đầu round (xem `git log` 4 commit `8ada8ca`/`44fff22`/`a13e342`/`82ac04d`) | — (released) | Audit + verify + 4 commit tách theo feature: (1) housekeeping không liên quan (Herdr/.agents/CLAUDE.md/Flutter fix/demo scripts/báo cáo cũ), (2) M05 recommendation, (3) M03 CV, (4) FastAPI wiring chung (không tách được, giải thích trong commit message). | **DONE**: backend pytest 223/223, `test_activity_writes.py` 20/20 (FW-2 regression), web vitest 64/64, web build sạch, mock Playwright Farmer+Management 2/2 passed. Không chạy real-E2E hosted trong round này (đã pass ở round 11/12, tránh tạo thêm rác demo). Không đổi Carbon methodology/scientific factors/Management Web/FW-1/FW-2 write contract. |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
