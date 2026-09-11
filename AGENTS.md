@@ -224,6 +224,30 @@ không gộp bừa vào 1 commit lớn.
 |---|---|---|---|
 | Toàn bộ cây dirty tại thời điểm bắt đầu round (xem `git log` 4 commit `8ada8ca`/`44fff22`/`a13e342`/`82ac04d`) | — (released) | Audit + verify + 4 commit tách theo feature: (1) housekeeping không liên quan (Herdr/.agents/CLAUDE.md/Flutter fix/demo scripts/báo cáo cũ), (2) M05 recommendation, (3) M03 CV, (4) FastAPI wiring chung (không tách được, giải thích trong commit message). | **DONE**: backend pytest 223/223, `test_activity_writes.py` 20/20 (FW-2 regression), web vitest 64/64, web build sạch, mock Playwright Farmer+Management 2/2 passed. Không chạy real-E2E hosted trong round này (đã pass ở round 11/12, tránh tạo thêm rác demo). Không đổi Carbon methodology/scientific factors/Management Web/FW-1/FW-2 write contract. |
 
+## Round 14 (2026-09-11) — FW-2 Part 3: seeding/pesticide/straw writes (Claude)
+
+Sau round 13 (stabilize M05/M03), user giao tiếp FW-2 Part 3 — mở rộng write
+API sang 3 activity type còn lại. Audit trước khi code: `activity_type` DB
+enum thật có `seeding`/`pesticide`/`straw_management` (không phải "straw"),
+`ActivityWriteService`/routes đã hoàn toàn generic (không type-specific
+branch) nên chỉ cần mở `schemas.ActivityType` + 3 model + 3 entry trong
+`write_repo.py::_DETAILS`. Read/Journal/cost-completeness (`read_repo.py`)
+đã hỗ trợ sẵn cả 6 type từ round M05 — không đụng. Carbon mapping
+(`straw_management` -> SFo/đốt đồng, cột `days_before_cultivation`/
+`dry_matter_fraction`/`returned_to_field`) đã tồn tại từ migration
+`20260908000000_carbon_methodology_alignment.sql` + test
+`tests/test_carbon_engine.py` — không sửa, chỉ verify.
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/schemas.py` (3 model + enum), `backend/infrastructure/write_repo.py` (`_DETAILS` +3), `backend/tests/test_activity_writes.py` (mở rộng parametrize), `backend/tests/test_activity_writes_expansion.py` (mới), `docs/openapi.json`, `docs/API_CATALOG.md`, `docs/FARMER_WEB_WRITE_CONTRACT.md`, `docs/FARMER_WEB_FW2_REPORT.md` | — (released) | Backend write API cho seeding/pesticide/straw_management, cùng route/service/transaction/idempotency đã có, không route mới. | **DONE**: backend pytest 258 passed (223+35). |
+| `web-dashboard/src/api/activities.ts`+test, `web-dashboard/src/farmer/ActivityForms.tsx`+test, `activityValidation.ts`+test, `web-dashboard/src/utils/activityPresentation.ts` (chỉ thêm label), `web-dashboard/tests/e2e/farmer-web.spec.ts` | — (released) | Farmer Web form Gieo sạ/Thuốc BVTV/Rơm rạ, bỏ 3 nút "Sắp có". Không SFo/CFOA/emission factor trong UI; chọn "Đốt" hiện thông báo trung tính, không CO2e giả. | **DONE**: Vitest 86 passed (64+22), build sạch, mock Playwright Farmer+Management 2 passed. |
+
+Không chạy real hosted E2E round này (tránh tạo thêm rác demo, mock +
+integration-level fake-cursor test đã đủ chứng minh SQL đúng cột/bảng thật —
+xem `test_activity_writes_expansion.py::test_postgres_repository_inserts_into_the_correct_detail_table`).
+Không đụng M05/M03/Carbon methodology/Management Web.
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
