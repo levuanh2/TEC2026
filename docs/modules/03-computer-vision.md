@@ -40,7 +40,10 @@ cho vòng lặp tối ưu (phát hiện sớm → giảm thuốc/phân dư thừ
 }
 ```
 
-`label` ∈ { `blast`, `bacterial_blight`, `brown_spot`, `healthy` }.
+`label` ∈ { `rice_blast`, `bacterial_leaf_blight`, `brown_spot`, `healthy` } —
+khớp enum `public.disease_label` trong `supabase/migrations/20260907000000_baseline.sql`
+(nguồn sự thật cho tên nhãn; bản trước của tài liệu này dùng `blast`/`bacterial_blight`
+— đã sửa ngày 2026-09-09 để khớp DB thật, xem `ml/class_mapping.py`).
 Khi `confidence` dưới ngưỡng → `is_uncertain: true`, **không ép chọn nhãn** (FR-1b-04).
 
 ---
@@ -49,7 +52,7 @@ Khi `confidence` dưới ngưỡng → `is_uncertain: true`, **không ép chọn
 
 | Bộ | Vai trò | Quy mô | Trạng thái |
 |---|---|---|---|
-| **Sethy et al.** — Rice Leaf Disease | Pretrain | ~5.932 ảnh, 4 lớp | Cần **xác nhận license** trước khi dùng (dự kiến CC BY 4.0) |
+| Rice Leaf Bacterial and Fungal Disease Dataset (Mendeley, `hx6f852hw4`) | Pretrain/train | 909 ảnh sau dedup (4/8 lớp dùng) | **Dùng thật (2026-09-09), license CC BY 4.0 đã xác nhận qua API.** Thay cho Sethy et al. — bộ đó thiếu lớp `healthy` |
 | Ảnh thực địa HTX pilot | Fine-tune | mục tiêu ≥ vài trăm ảnh | **Chưa có** — phụ thuộc R1 (chưa chốt HTX pilot) |
 
 Chi tiết và checklist license: [`ml/datasets/README.md`](../../ml/datasets/README.md).
@@ -116,14 +119,14 @@ thuốc và bón phân dư thừa → trực tiếp giảm CO2e và chi phí. Đ
 
 ## 6. Definition of Done
 
-- [ ] **T2-11** Nạp được dataset public, xác nhận license và ghi ngày xác nhận vào `ml/datasets/README.md` (RB-05)
-- [ ] **T2-12** Train model phân loại 4 lớp, chạy được inference trên 1 ảnh (FR-1b-01)
-- [ ] **T2-13** Tập test tách riêng, có báo cáo accuracy + confusion matrix (FR-1b-03)
-- [ ] **T2-14** Accuracy đạt **≥ 85%** trên tập test dataset public (M4)
-- [ ] **T2-15** Báo cáo ghi rõ điều kiện đo (dataset public hay ảnh thực địa) (RB-06)
-- [ ] **T2-16** Ngưỡng confidence hoạt động: ảnh không phải lá lúa → `is_uncertain: true` (FR-1b-04)
-- [ ] **T2-17** Fine-tune bằng ảnh thực địa **nếu có**, ghi so sánh accuracy trước/sau (FR-1b-02)
-- [ ] **T2-18** Tích hợp vào app: chụp ảnh → hiện nhãn bệnh tiếng Việt + độ tin cậy
+- [x] **T2-11** Nạp được dataset public, xác nhận license và ghi ngày xác nhận vào `ml/datasets/README.md` (RB-05) — 2026-09-09
+- [x] **T2-12** Train model phân loại 4 lớp, chạy được inference trên 1 ảnh (FR-1b-01) — `ml/train.py`, `ml/infer.py`
+- [x] **T2-13** Tập test tách riêng, có báo cáo accuracy + confusion matrix (FR-1b-03) — `ml/reports/cv_baseline_report.md`
+- [x] **T2-14** Accuracy đạt **≥ 85%** trên tập test dataset public (M4) — 85.60% thật, không chỉnh số
+- [x] **T2-15** Báo cáo ghi rõ điều kiện đo (dataset public hay ảnh thực địa) (RB-06) — "PUBLIC DATASET — NOT FIELD VALIDATED"
+- [x] **T2-16** Ngưỡng confidence hoạt động: `is_uncertain: true` khi dưới ngưỡng, không ép nhãn (FR-1b-04) — test `test_low_confidence_becomes_uncertain_not_forced_label`. Chưa có benchmark riêng cho "ảnh không phải lá lúa" (xem RR-02) — chỉ đảm bảo cơ chế ngưỡng hoạt động đúng
+- [ ] **T2-17** Fine-tune bằng ảnh thực địa **nếu có**, ghi so sánh accuracy trước/sau (FR-1b-02) — vẫn chưa có ảnh (phụ thuộc R1 PRD/HTX pilot)
+- [ ] **T2-18** Tích hợp vào app: chụp ảnh → hiện nhãn bệnh tiếng Việt + độ tin cậy — ngoài phạm vi task này (không code Flutter), xem `docs/CV_INTEGRATION.md` cho contract
 
 ---
 

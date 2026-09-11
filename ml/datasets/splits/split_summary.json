@@ -1,0 +1,42 @@
+{
+  "seed": 42,
+  "ratios": {
+    "train": 0.7,
+    "validation": 0.15,
+    "test": 0.15000000000000005
+  },
+  "classes": {
+    "rice_blast": {
+      "total_after_dedup": 271,
+      "near_dup_groups": 163,
+      "train": 192,
+      "validation": 42,
+      "test": 37
+    },
+    "bacterial_leaf_blight": {
+      "total_after_dedup": 180,
+      "near_dup_groups": 138,
+      "train": 126,
+      "validation": 27,
+      "test": 27
+    },
+    "brown_spot": {
+      "total_after_dedup": 260,
+      "near_dup_groups": 161,
+      "train": 182,
+      "validation": 40,
+      "test": 38
+    },
+    "healthy": {
+      "total_after_dedup": 154,
+      "near_dup_groups": 126,
+      "train": 108,
+      "validation": 23,
+      "test": 23
+    }
+  },
+  "dedup": {
+    "exact_duplicates_removed": 44
+  },
+  "near_duplicate_groups_total": 588
+}

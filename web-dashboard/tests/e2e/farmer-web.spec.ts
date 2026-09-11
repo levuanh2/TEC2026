@@ -34,6 +34,16 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toHaveCount(0)
 
+  // M03 CV entry point (brief FW M03 §19) — opens, shows the picker, closes
+  // cleanly. No file is chosen: usingMockData guards uploadAndInferLeaf from
+  // ever hitting the real API in mock mode.
+  await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
+  await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Phân tích ảnh' })).toBeDisabled()
+  await page.screenshot({ path: 'test-results/farmer-cv-check-1440.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toHaveCount(0)
+
   await page.getByRole('link', { name: /Ruộng/ }).first().click()
   await expect(page.getByRole('heading', { name: 'Các ruộng trong phạm vi của bạn', level: 1 })).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-farms-1440.png', fullPage: true })
@@ -86,4 +96,10 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
   await page.getByRole('button', { name: 'Thu hoạch', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toBeVisible()
   await page.screenshot({ path: 'test-results/farmer-harvest-form-390.png', fullPage: true })
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
+  await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/farmer-cv-check-390.png', fullPage: true })
 })

@@ -6,7 +6,9 @@ let accessToken: string | null = null
 export const setAccessToken = (token: string | null) => { accessToken = token }
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers); headers.set('Accept', 'application/json')
-  if (init.body) headers.set('Content-Type', 'application/json')
+  // A FormData body (multipart upload) must NOT get a manual Content-Type —
+  // the browser sets one itself with the correct boundary.
+  if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   let response: Response
   try { response = await fetch(`${baseUrl}${path}`, { ...init, headers }) }
