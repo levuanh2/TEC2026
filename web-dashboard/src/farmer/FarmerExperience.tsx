@@ -8,9 +8,9 @@ import { getCarbon, type CarbonResult } from '../api/carbon'
 import { signOut } from '../api/auth'
 import { usingMockData } from '../api/farms'
 import { activityIcon, presentActivity } from '../utils/activityPresentation'
-import { date, daysSince, ha, perKg } from '../format'
-import { ActivityTimeline } from '../features/activities'
-import { Async, Badge, EmptyState, ErrorState, Hero, Link, MetricCard, Notice, PageHead, Section, Tabs, useAsync, go } from '../ui'
+import { date, dateTime, daysSince, ha, perKg } from '../format'
+import { FarmerJournalTimeline } from './journal'
+import { Async, Badge, Breadcrumb, EmptyState, ErrorState, Hero, Link, MetricCard, Notice, PageHead, Section, Tabs, useAsync, go } from '../ui'
 import {
   ActivityRowActions, AddActivityCta, QuickEntryPanel, toSeasonContext, useActivityMutations,
   type SeasonContext,
@@ -177,29 +177,140 @@ function RecentActivities({ activities }: { activities: Activity[] }) {
   })}</div>
 }
 
+const isActiveStatus = (status: string | undefined | null) => /(^active$|đang|canh tác)/i.test(status ?? '')
+
 function FarmerFarms() {
   const scope = useAsync(loadScope, [])
-  return <><PageHead eyebrow="Ruộng của tôi" title="Các ruộng trong phạm vi của bạn" /><Async state={scope} skeleton="page" isEmpty={(data) => data.farms.length === 0} empty={<EmptyState icon="🌾" title="Chưa có ruộng nào" body="Chưa có farm được cấp quyền cho tài khoản này." />}>{({ farms, plots, seasons }) => <div className="farmer-farm-grid">{farms.map((farm) => <article className="farmer-farm-card" key={farm.id}><p>{farm.code}</p><h2>{farm.name}</h2><span>{plots.filter((plot) => plot.farmId === farm.id).length} thửa ruộng</span><div className="farmer-farm-card__plots">{plots.filter((plot) => plot.farmId === farm.id).map((plot) => { const latest = seasons.filter((season) => season.plotId === plot.id).sort((a,b) => String(b.plantingDate ?? '').localeCompare(String(a.plantingDate ?? '')))[0]; return <Link key={plot.id} to={`/farmer/plots/${plot.id}`}><b>{plot.name}</b><small>{plot.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}{latest ? ` · ${latest.name}` : ''}</small></Link> })}</div><Link className="btn btn--ghost" to={`/farmer/farms/${farm.id}`}>Xem ruộng</Link></article>)}</div>}</Async></>
+  return <>
+    <PageHead eyebrow="Ruộng của tôi" title="Các ruộng trong phạm vi của bạn" />
+    <Async state={scope} skeleton="page" isEmpty={(data) => data.farms.length === 0} empty={<EmptyState icon="🌾" title="Chưa có ruộng nào" body="Chưa có farm được cấp quyền cho tài khoản này." />}>
+      {({ farms, plots, seasons }) => (
+        <div className="farmer-farm-grid">
+          {farms.map((farm) => {
+            const farmPlots = plots.filter((plot) => plot.farmId === farm.id)
+            const farmSeasons = seasons.filter((s) => farmPlots.some((p) => p.id === s.plotId))
+            const activeCount = farmSeasons.filter((s) => isActiveStatus(s.status)).length
+            return (
+              <article className="farmer-farm-card" key={farm.id}>
+                <p>{farm.code}</p>
+                <h2>{farm.name}</h2>
+                <div className="farmer-farm-card__stats">
+                  <span>{farm.plotCount} thửa</span>
+                  <span>{farm.areaHa == null ? 'Chưa có diện tích' : ha(farm.areaHa)}</span>
+                  <span className={activeCount ? 'is-active' : undefined}>{activeCount} vụ đang canh tác</span>
+                </div>
+                <div className="farmer-farm-card__plots">
+                  {farmPlots.map((plot) => {
+                    const latest = seasons.filter((season) => season.plotId === plot.id).sort((a, b) => String(b.plantingDate ?? '').localeCompare(String(a.plantingDate ?? '')))[0]
+                    return <Link key={plot.id} to={`/farmer/plots/${plot.id}`}><b>{plot.name}</b><small>{plot.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}{latest ? ` · ${latest.name}` : ''}</small></Link>
+                  })}
+                </div>
+                <Link className="btn btn--ghost" to={`/farmer/farms/${farm.id}`}>Xem ruộng</Link>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </Async>
+  </>
 }
 
 function FarmerFarm({ id }: { id: string }) {
-  const state = useAsync(async () => ({ farm: await getFarm(id), plots: await getPlotsForFarm(id) }), [id])
-  return <Async state={state} isEmpty={(data) => !data.farm} empty={<EmptyState icon="🔍" title="Không tìm thấy nông hộ" />}>{({ farm, plots }) => farm && <><PageHead eyebrow="Ruộng của tôi" title={farm.name} meta={[<>{farm.code}</>, <>{plots.length} thửa ruộng</>]} /><PlotCards plots={plots} /></>}</Async>
+  const state = useAsync(async () => {
+    const [farm, plots, seasons] = await Promise.all([getFarm(id), getPlotsForFarm(id), getFarmCropSeasonsFor(id)])
+    return { farm, plots, seasons }
+  }, [id])
+  return <Async state={state} isEmpty={(data) => !data.farm} empty={<EmptyState icon="🔍" title="Không tìm thấy nông hộ" />}>
+    {({ farm, plots, seasons }) => {
+      if (!farm) return null
+      const activeCount = seasons.filter((s) => isActiveStatus(s.status)).length
+      return <>
+        <Breadcrumb items={[{ label: 'Ruộng của tôi', to: '/farmer/farms' }, { label: farm.name }]} />
+        <Hero
+          eyebrow="Nông hộ"
+          title={farm.name}
+          titleAs="h1"
+          meta={[<>Mã hộ {farm.code}</>]}
+          stats={[
+            { label: 'Thửa ruộng', value: farm.plotCount },
+            { label: 'Diện tích', value: farm.areaHa == null ? '—' : ha(farm.areaHa) },
+            { label: 'Vụ đang canh tác', value: activeCount },
+          ]}
+        />
+        <PlotCards plots={plots} seasons={seasons} />
+      </>
+    }}
+  </Async>
 }
 
-function PlotCards({ plots }: { plots: Plot[] }) {
+async function getFarmCropSeasonsFor(farmId: string): Promise<CropSeason[]> {
+  const plots = await getPlotsForFarm(farmId)
+  const groups = await Promise.all(plots.map((p) => getCropSeasons(p.id)))
+  return groups.flat()
+}
+
+function PlotCards({ plots, seasons }: { plots: Plot[]; seasons: CropSeason[] }) {
   if (!plots.length) return <EmptyState icon="🗺️" title="Chưa có thửa ruộng nào" />
-  return <div className="farmer-plot-grid">{plots.map((plot) => <Link key={plot.id} to={`/farmer/plots/${plot.id}`} className="farmer-plot-card"><span>Thửa {plot.code}</span><b>{plot.name}</b><small>{plot.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}</small><em>Xem mùa vụ →</em></Link>)}</div>
+  return <div className="farmer-plot-grid">
+    {plots.map((plot) => {
+      const plotSeasons = seasons.filter((s) => s.plotId === plot.id)
+      const active = plotSeasons.find((s) => isActiveStatus(s.status))
+      return (
+        <Link key={plot.id} to={`/farmer/plots/${plot.id}`} className="farmer-plot-card">
+          <span>Thửa {plot.code}</span>
+          <b>{plot.name}</b>
+          <small>{plot.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}</small>
+          {active ? <small style={{ color: 'var(--brand-strong)', fontWeight: 650 }}>Đang canh tác: {active.name}</small> : <small>Chưa có vụ đang canh tác</small>}
+          <em>Xem mùa vụ →</em>
+        </Link>
+      )
+    })}
+  </div>
 }
 
 function FarmerPlot({ id }: { id: string }) {
-  const state = useAsync(async () => ({ plot: await getPlot(id), seasons: await getCropSeasons(id) }), [id])
-  return <Async state={state} isEmpty={(data) => !data.plot} empty={<EmptyState icon="🔍" title="Không tìm thấy thửa ruộng" />}>{({ plot, seasons }) => plot && <><PageHead eyebrow="Thửa ruộng" title={plot.name} meta={[<>Mã thửa {plot.code}</>, <>{plot.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}</>]} /><Section title="Mùa vụ">{!seasons.length ? <EmptyState icon="🌱" title="Thửa này chưa có vụ canh tác nào." /> : <div className="farmer-season-list">{seasons.map((season) => <Link key={season.id} to={`/farmer/crop-seasons/${season.id}`}><span>{season.status ?? 'Chưa rõ trạng thái'}</span><b>{season.name}</b><small>{season.variety ?? 'Chưa có giống'} · Gieo {date(season.plantingDate)}</small><em>Xem vụ →</em></Link>)}</div>}</Section></>}</Async>
+  const state = useAsync(async () => {
+    const plot = await getPlot(id)
+    const [seasons, farm] = await Promise.all([
+      getCropSeasons(id),
+      plot?.farmId ? getFarm(plot.farmId).catch(() => undefined) : Promise.resolve(undefined),
+    ])
+    return { plot, seasons, farm }
+  }, [id])
+  return <Async state={state} isEmpty={(data) => !data.plot} empty={<EmptyState icon="🔍" title="Không tìm thấy thửa ruộng" />}>
+    {({ plot, seasons, farm }) => {
+      if (!plot) return null
+      const active = seasons.find((s) => isActiveStatus(s.status))
+      return <>
+        <Breadcrumb items={[
+          { label: 'Ruộng của tôi', to: '/farmer/farms' },
+          ...(farm ? [{ label: farm.name, to: `/farmer/farms/${farm.id}` }] : []),
+          { label: plot.name },
+        ]} />
+        <Hero
+          eyebrow="Thửa ruộng"
+          title={plot.name}
+          titleAs="h1"
+          meta={[<>Mã thửa {plot.code}</>, ...(farm ? [<>Thuộc {farm.name}</>] : [])]}
+          stats={[{ label: 'Diện tích', value: plot.areaHa == null ? '—' : ha(plot.areaHa) }]}
+          actions={active ? <Link className="btn btn--ghost" to={`/farmer/crop-seasons/${active.id}`}>Vụ đang canh tác: {active.name} →</Link> : undefined}
+        />
+        <Section title="Mùa vụ" description={active ? undefined : 'Thửa này hiện chưa có vụ nào đang canh tác'}>
+          {!seasons.length ? <EmptyState icon="🌱" title="Thửa này chưa có vụ canh tác nào." /> : <div className="farmer-season-list">{seasons.map((season) => <Link key={season.id} to={`/farmer/crop-seasons/${season.id}`}><span>{season.status ?? 'Chưa rõ trạng thái'}</span><b>{season.name}</b><small>{season.variety ?? 'Chưa có giống'} · Gieo {date(season.plantingDate)}</small><em>Xem vụ →</em></Link>)}</div>}
+        </Section>
+      </>
+    }}
+  </Async>
 }
 
 type FarmerTab = 'overview' | 'journal' | 'performance' | 'carbon'
 function FarmerSeason({ id, tab }: { id: string; tab: FarmerTab }) {
-  const frame = useAsync(async () => { const season = await getCropSeason(id); const plot = season ? await getPlot(season.plotId) : undefined; return { season, plot } }, [id])
+  const frame = useAsync(async () => {
+    const season = await getCropSeason(id)
+    const plot = season ? await getPlot(season.plotId) : undefined
+    const farm = plot?.farmId ? await getFarm(plot.farmId).catch(() => undefined) : undefined
+    return { season, plot, farm }
+  }, [id])
   const metrics = useAsync(() => getResourceMetrics(id), [id])
   const activities = useAsync(() => getActivities(id), [id])
   // Harvest edits change the yield denominator, so a mutation refetches both
@@ -208,32 +319,62 @@ function FarmerSeason({ id, tab }: { id: string; tab: FarmerTab }) {
   const [cvVersion, setCvVersion] = useState(0)
   const base = `/farmer/crop-seasons/${id}`
   const tabs = [{ label: 'Tổng quan', to: base, current: tab === 'overview' }, { label: 'Nhật ký', to: `${base}/journal`, current: tab === 'journal' }, { label: 'Hiệu suất', to: `${base}/performance`, current: tab === 'performance' }, { label: 'Carbon', to: `${base}/carbon`, current: tab === 'carbon' }]
-  return <Async state={frame} isEmpty={(data) => !data.season} empty={<EmptyState icon="🔍" title="Không tìm thấy vụ canh tác" />}>{({ season, plot }) => {
+  return <Async state={frame} isEmpty={(data) => !data.season} empty={<EmptyState icon="🔍" title="Không tìm thấy vụ canh tác" />}>{({ season, plot, farm }) => {
     if (!season) return null
     const seasonCtx = toSeasonContext(season, plot)
-    return <><PageHead eyebrow="Vụ canh tác" title={season.name} meta={[<>{plot?.name ?? 'Thửa ruộng'} · {plot?.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}</>, <>Giống {season.variety ?? 'Chưa có dữ liệu'}</>]} /><Tabs items={tabs} />
+    return <>
+      <Breadcrumb items={[
+        { label: 'Ruộng của tôi', to: '/farmer/farms' },
+        ...(farm ? [{ label: farm.name, to: `/farmer/farms/${farm.id}` }] : []),
+        ...(plot ? [{ label: plot.name, to: `/farmer/plots/${plot.id}` }] : []),
+        { label: season.name },
+      ]} />
+      <Hero
+        eyebrow="Vụ canh tác"
+        title={season.name}
+        titleAs="h1"
+        meta={[
+          <>{plot?.name ?? 'Thửa ruộng'} · {plot?.areaHa == null ? 'Chưa có diện tích' : ha(plot.areaHa)}</>,
+          <>Giống {season.variety ?? 'Chưa có dữ liệu'}</>,
+          <Badge tone={isActiveStatus(season.status) ? 'success' : 'neutral'} dot>{season.status ?? 'Chưa rõ'}</Badge>,
+        ]}
+        stats={[
+          { label: 'Gieo sạ', value: date(season.plantingDate) },
+          { label: 'Thu hoạch', value: date(season.harvestDate) },
+        ]}
+      />
+      <Tabs items={tabs} />
       {mutations.flash && <Notice kind="success">{mutations.flash}</Notice>}
       {tab === 'overview' && (
         <FarmerSeasonOverview
           season={season} metrics={metrics} activities={activities} seasonCtx={seasonCtx} cvVersion={cvVersion}
-          onCvChecked={() => setCvVersion((v) => v + 1)}
+          mutations={mutations} onCvChecked={() => setCvVersion((v) => v + 1)}
         />
       )}
-      {tab === 'journal' && <Section title="Nhật ký canh tác" description="Nhấn một hoạt động để xem thông tin đã ghi nhận.">
+      {tab === 'journal' && <Section title="Nhật ký của vụ này" description={`Chỉ hoạt động thuộc "${season.name}" — nhấn một hoạt động để xem chi tiết.`}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}><AddActivityCta season={seasonCtx} mutations={mutations} /></div>
-        <Async state={activities} skeleton="table">{(rows) => <ActivityTimeline activities={rows} resetSignal={mutations.version} renderActions={(a) => <ActivityRowActions activity={a} season={seasonCtx} mutations={mutations} />} />}</Async>
+        <Async state={activities} skeleton="table">{(rows) => <FarmerJournalTimeline activities={rows} resetSignal={mutations.version} renderActions={(a) => <ActivityRowActions activity={a} season={seasonCtx} mutations={mutations} />} />}</Async>
       </Section>}
       {tab === 'performance' && <Section title="Hiệu suất vụ này"><Async state={metrics} skeleton="kpis">{(m) => <FarmerMetricGrid metrics={m} />}</Async></Section>}
       {tab === 'carbon' && <FarmerCarbon id={id} />}
-      {mutations.node}
+      {/* Overview's QuickEntryPanel already self-renders mutations.node (see
+          ActivityForms.tsx) — rendering it again here would mount the same
+          open Sheet/ConfirmDialog twice. Only the journal tab's
+          AddActivityCta/ActivityRowActions need this outer render. */}
+      {tab === 'journal' && mutations.node}
     </>
   }}</Async>
 }
 
-function FarmerSeasonOverview({ season, metrics, activities, seasonCtx, cvVersion, onCvChecked }: { season: CropSeason; metrics: ReturnType<typeof useAsync<SeasonMetrics>>; activities: ReturnType<typeof useAsync<Activity[]>>; seasonCtx: SeasonContext; cvVersion: number; onCvChecked: () => void }) {
+function FarmerSeasonOverview({ season, metrics, activities, seasonCtx, cvVersion, mutations, onCvChecked }: { season: CropSeason; metrics: ReturnType<typeof useAsync<SeasonMetrics>>; activities: ReturnType<typeof useAsync<Activity[]>>; seasonCtx: SeasonContext; cvVersion: number; mutations: ReturnType<typeof useActivityMutations>; onCvChecked: () => void }) {
   return <div className="farmer-stack">
     <section className="farmer-season-summary"><dl><div><dt>Trạng thái</dt><dd>{season.status ?? 'Chưa rõ'}</dd></div><div><dt>Ngày gieo sạ</dt><dd>{date(season.plantingDate)}</dd></div><div><dt>Ngày thu hoạch</dt><dd>{date(season.harvestDate)}</dd></div></dl></section>
+    <DataAttention metrics={metrics.data} loading={metrics.loading} />
+    <Section title="Ghi nhanh cho vụ này" description="Chọn việc bạn vừa làm — không cần chọn lại vụ.">
+      <QuickEntryPanel activeSeasons={[seasonCtx]} mutations={mutations} />
+    </Section>
     <Section title="Hiệu suất"><Async state={metrics} skeleton="kpis">{(m) => <FarmerMetricGrid metrics={m} />}</Async></Section>
+    <RecommendationsSection seasonId={season.id} />
     <Section title="Hoạt động gần đây" cta={{ label: 'Xem nhật ký', to: `/farmer/crop-seasons/${season.id}/journal` }}><Async state={activities} skeleton="table">{(rows) => <RecentActivities activities={rows} />}</Async></Section>
     <section className="farmer-quick">
       <div><h2>Kiểm tra lá lúa</h2><p>Chụp hoặc chọn ảnh để nhận diện nhanh bằng AI (baseline, chưa xác nhận thực địa).</p></div>
@@ -257,13 +398,17 @@ function FarmerJournal({ seasonId }: { seasonId: string | null }) {
   const mutations = useActivityMutations(() => activities.reload())
   const seasonCtx = seasonContextFromScope(scope.data, selected)
   return <>
-    <PageHead eyebrow="Nhật ký" title="Hoạt động canh tác" meta={[<>Chỉ hiển thị các hoạt động đã ghi nhận.</>]} />
+    <PageHead
+      eyebrow="Nhật ký"
+      title="Hoạt động canh tác"
+      meta={[seasonCtx ? <>Vụ đang xem: <b>{seasonCtx.label}</b></> : <>Chỉ hiển thị các hoạt động đã ghi nhận.</>]}
+    />
     {mutations.flash && <Notice kind="success">{mutations.flash}</Notice>}
     <Async state={scope} skeleton="page" isEmpty={(data) => data.seasons.length === 0} empty={<EmptyState icon="🗒️" title="Chưa có vụ canh tác để xem nhật ký." />}>
       {() => !selected ? <EmptyState icon="🗒️" title="Chưa có vụ đang canh tác" body="Chọn một vụ từ Ruộng của tôi để xem nhật ký." /> : (
-        <Section title="Nhật ký vụ hiện tại">
+        <Section title="Toàn bộ nhật ký của vụ" description="Nhóm theo ngày — nhấn một hoạt động để xem chi tiết.">
           {seasonCtx && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}><AddActivityCta season={seasonCtx} mutations={mutations} /></div>}
-          <Async state={activities} skeleton="table">{(rows) => <ActivityTimeline activities={rows} resetSignal={mutations.version} renderActions={seasonCtx ? (a) => <ActivityRowActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined} />}</Async>
+          <Async state={activities} skeleton="table">{(rows) => <FarmerJournalTimeline activities={rows} resetSignal={mutations.version} renderActions={seasonCtx ? (a) => <ActivityRowActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined} />}</Async>
         </Section>
       )}
     </Async>
@@ -288,8 +433,44 @@ function FarmerCarbon({ id }: { id: string }) {
   return <FarmerCarbonSuccess result={state.data} />
 }
 
-function CarbonEmpty() { return <section className="farmer-carbon-empty"><span aria-hidden="true">◎</span><h2>Chưa có kết quả Carbon</h2><p>Hệ thống chưa thể tạo kết quả CO₂e chính thức cho vụ này vì bộ hệ số cần thiết chưa được xác minh đầy đủ.</p><small>Dữ liệu canh tác của bạn vẫn được lưu bình thường.</small></section> }
-function FarmerCarbonSuccess({ result }: { result: CarbonResult }) { return <div className="farmer-stack"><section className="farmer-carbon-result"><p>Carbon của vụ này</p><strong>{result.co2e_per_kg == null ? 'Chưa đủ dữ liệu' : perKg(result.co2e_per_kg, '')}</strong><span>{result.co2e_per_kg == null ? 'Cần sản lượng hợp lệ để tính CO₂e/kg' : 'kg CO₂e / kg lúa'}</span><small>Kịch bản: {result.water_regime_scenario ?? result.scenario ?? 'Chưa có dữ liệu'}</small></section><Section title="Nguồn phát thải chính"><div className="farmer-source-list">{result.breakdown.map((item, index) => <div key={index}><b>{item.source}</b><span>{perKg(item.co2e_kg, 'kg CO₂e')}</span></div>)}</div></Section><Notice kind="info">Kết quả là ước tính theo bộ phương pháp hiện tại; không phải chứng nhận hoặc tín chỉ carbon.</Notice></div> }
+function CarbonEmpty() {
+  return (
+    <section className="farmer-carbon-empty">
+      <span aria-hidden="true">◎</span>
+      <h2>Chưa có kết quả phát thải hợp lệ cho vụ này</h2>
+      <p>Hệ thống chưa thể tạo kết quả CO₂e chính thức cho vụ này vì bộ hệ số cần thiết chưa được xác minh đầy đủ.</p>
+      <small>Dữ liệu canh tác của bạn vẫn được lưu bình thường.</small>
+    </section>
+  )
+}
+
+function FarmerCarbonSuccess({ result }: { result: CarbonResult }) {
+  return (
+    <div className="farmer-stack">
+      <section className="farmer-carbon-result">
+        <p>Carbon của vụ này</p>
+        <strong>{result.co2e_per_kg == null ? 'Chưa đủ dữ liệu' : perKg(result.co2e_per_kg, '')}</strong>
+        <span>{result.co2e_per_kg == null ? 'Cần sản lượng hợp lệ để tính CO₂e/kg' : 'kg CO₂e / kg lúa'}</span>
+        <small>Tổng vụ: {result.total_co2e_kg == null ? 'Chưa đủ dữ liệu' : `${Math.round(result.total_co2e_kg)} kg CO₂e`} · Kịch bản: {result.water_regime_scenario ?? result.scenario ?? 'Chưa có dữ liệu'}</small>
+        {result.calculated_at && <small>Tính lúc {dateTime(result.calculated_at)}</small>}
+      </section>
+      <Section title="Nguồn phát thải chính">
+        <div className="farmer-source-list">
+          {result.breakdown.map((item, index) => <div key={index}><b>{item.source}</b><span>{perKg(item.co2e_kg, 'kg CO₂e')}</span></div>)}
+        </div>
+      </Section>
+      <Notice kind="info">Kết quả là ước tính theo bộ phương pháp hiện tại; không phải chứng nhận hoặc tín chỉ carbon.</Notice>
+      <details className="activity-form__disclosure">
+        <summary>Cách tính (chi tiết phương pháp luận)</summary>
+        <dl className="dl" style={{ gridTemplateColumns: '1fr', marginTop: 10 }}>
+          <div><dt>Phiên bản bộ hệ số</dt><dd>{result.ef_config_version ?? 'Chưa có dữ liệu'}</dd></div>
+          <div><dt>Phiên bản công cụ tính</dt><dd>{result.engine_version ?? 'Chưa có dữ liệu'}</dd></div>
+          {result.warnings.length > 0 && <div><dt>Cảnh báo</dt><dd>{result.warnings.join('; ')}</dd></div>}
+        </dl>
+      </details>
+    </div>
+  )
+}
 
 function FarmerAccount({ session }: { session: Session | null }) {
   const scope = useAsync(loadScope, [])

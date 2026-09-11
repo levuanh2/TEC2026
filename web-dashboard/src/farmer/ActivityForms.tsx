@@ -61,6 +61,10 @@ export const numOrUndef = (v: unknown): number | undefined => {
 
 /* --------------------------------------------------------------- fields */
 
+function RequiredMark() {
+  return <span className="form-field__required" aria-hidden="true"> *</span>
+}
+
 function TextField({ label, value, onChange, type = 'text', required, error, hint, autoFocus }: {
   label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean
   error?: string; hint?: string; autoFocus?: boolean
@@ -69,7 +73,7 @@ function TextField({ label, value, onChange, type = 'text', required, error, hin
   const errId = `${id}-err`
   return (
     <div className="form-field" aria-invalid={error ? 'true' : undefined}>
-      <label htmlFor={id}>{label}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
+      <label htmlFor={id}>{label}{required && <RequiredMark />}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
       <input id={id} type={type} value={value} required={required} autoFocus={autoFocus}
         aria-describedby={error ? errId : undefined} onChange={(e) => onChange(e.target.value)} />
       {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
@@ -77,14 +81,14 @@ function TextField({ label, value, onChange, type = 'text', required, error, hin
   )
 }
 
-function NumberField({ label, value, onChange, unit, error, hint }: {
-  label: string; value: string; onChange: (v: string) => void; unit?: string; error?: string; hint?: string
+function NumberField({ label, value, onChange, unit, required, error, hint }: {
+  label: string; value: string; onChange: (v: string) => void; unit?: string; required?: boolean; error?: string; hint?: string
 }) {
   const id = useId()
   const errId = `${id}-err`
   return (
     <div className="form-field" aria-invalid={error ? 'true' : undefined}>
-      <label htmlFor={id}>{label}{unit && ` (${unit})`}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
+      <label htmlFor={id}>{label}{unit && ` (${unit})`}{required && <RequiredMark />}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
       <input id={id} type="number" inputMode="decimal" step="any" value={value}
         aria-describedby={error ? errId : undefined} onChange={(e) => onChange(e.target.value)} />
       {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
@@ -301,7 +305,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
           <>
             <TextField label="Loại phân" value={fName} onChange={setFName} error={err('fertilizerName')} required />
             <div className="form-grid">
-              <NumberField label="Lượng bón" unit="kg" value={fAmount} onChange={setFAmount} error={err('amountKg')} />
+              <NumberField label="Lượng bón" unit="kg" value={fAmount} onChange={setFAmount} error={err('amountKg')} required />
               <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} />
             </div>
             <details className="activity-form__disclosure" open={fMore} onToggle={(e) => setFMore((e.target as HTMLDetailsElement).open)}>
@@ -334,7 +338,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
 
         {activityType === 'harvest' && (
           <>
-            <NumberField label="Sản lượng thu hoạch" unit="kg" value={hYield} onChange={setHYield} error={err('yieldKg')} />
+            <NumberField label="Sản lượng thu hoạch" unit="kg" value={hYield} onChange={setHYield} error={err('yieldKg')} required />
             <div className="form-grid">
               <NumberField label="Diện tích thu hoạch" unit="ha" value={hArea} onChange={setHArea} hint="Không bắt buộc" error={err('harvestedAreaHa')} />
               <NumberField label="Độ ẩm" unit="%" value={hMoisture} onChange={setHMoisture} hint="Không bắt buộc" error={err('moisturePercent')} />
@@ -347,7 +351,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
           <>
             <TextField label="Giống" value={sVariety} onChange={setSVariety} hint="Không bắt buộc" />
             <div className="form-grid">
-              <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} />
+              <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} required />
               <TextField label="Phương pháp gieo" value={sMethod} onChange={setSMethod} hint="Không bắt buộc" />
             </div>
             <NumberField label="Chi phí vật tư" unit="đ" value={sCost} onChange={setSCost} hint="Không bắt buộc" error={err('costVnd')} />
@@ -358,8 +362,8 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
           <>
             <TextField label="Tên thuốc" value={pName} onChange={setPName} error={err('productName')} required />
             <div className="form-grid">
-              <NumberField label="Lượng sử dụng" value={pAmount} onChange={setPAmount} error={err('amount')} />
-              <TextField label="Đơn vị" value={pUnit} onChange={setPUnit} hint="ví dụ: kg, lít, gói" error={err('unit')} />
+              <NumberField label="Lượng sử dụng" value={pAmount} onChange={setPAmount} error={err('amount')} required />
+              <TextField label="Đơn vị" value={pUnit} onChange={setPUnit} hint="ví dụ: kg, lít, gói" error={err('unit')} required />
             </div>
             <TextField label="Mục đích / đối tượng" value={pTarget} onChange={setPTarget} hint="Không bắt buộc" />
             <NumberField label="Chi phí vật tư" unit="đ" value={pCost} onChange={setPCost} hint="Không bắt buộc" error={err('totalCostVnd')} />

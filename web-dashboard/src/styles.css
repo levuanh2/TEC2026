@@ -438,6 +438,7 @@ select.select { border: 1px solid var(--border-input); border-radius: 8px; paddi
 .form-field__error { color: var(--error-fg); font-weight: 600; font-size: var(--fs-caption); }
 .form-field[aria-invalid="true"] input, .form-field[aria-invalid="true"] select { border-color: var(--error-line); }
 .form-field__hint { color: var(--ink-faint); font-weight: 400; font-size: var(--fs-caption); }
+.form-field__required { color: var(--error-line); font-weight: 700; }
 .activity-form__actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 16px; }
 .activity-form__disclosure { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
 .activity-form__disclosure summary { cursor: pointer; font-weight: 600; font-size: var(--fs-sm); }
@@ -571,7 +572,11 @@ select.select { border: 1px solid var(--border-input); border-radius: 8px; paddi
 
 /* ------------------------------------------------------ recommendations */
 .farmer-recommendations { display: grid; gap: 14px; }
-.recommendation-card { display: grid; gap: 10px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.recommendation-card { display: grid; gap: 10px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 14px; }
+.recommendation-card--optimization { border-left-color: var(--success-line); }
+.recommendation-card--data_task { border-left-color: var(--info-line); }
+.recommendation-card__kind { display: flex; align-items: center; gap: 8px; }
+.recommendation-card__kind small { margin-left: auto; color: var(--ink-faint); font-size: var(--fs-caption); }
 .recommendation-card h3 { font-size: var(--fs-h3); }
 .recommendation-card > p { color: var(--ink-muted); font-size: var(--fs-sm); }
 .recommendation-card__impact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 10px 14px; background: var(--surface-sunk); border-radius: 10px; font-size: var(--fs-sm); }
@@ -614,11 +619,35 @@ select.select { border: 1px solid var(--border-input); border-radius: 8px; paddi
 .farmer-recent__item div { min-width: 0; display: grid; gap: 2px; }
 .farmer-recent__item b { font-size: var(--fs-sm); }
 .farmer-recent__item small, .farmer-recent__item time { color: var(--ink-muted); font-size: var(--fs-caption); }
+
+/* --------------------------------------------------- Farmer date-grouped journal */
+.f-journal { display: grid; gap: 22px; }
+.f-journal__day { display: grid; gap: 8px; }
+.f-journal__date {
+  font-size: var(--fs-caption); font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--brand-strong); padding-left: 2px;
+}
+.f-journal__rows { display: grid; gap: 8px; }
+.f-journal__row {
+  display: grid; grid-template-columns: 42px 1fr 18px; gap: 12px; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 13px;
+  padding: 13px 14px; min-height: 60px; text-align: left; width: 100%;
+  box-shadow: var(--shadow-card); transition: box-shadow .14s, transform .14s, border-color .14s;
+}
+.f-journal__row:hover { border-color: var(--border-strong); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
+.f-journal__icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-green); font-size: 20px; flex: none; }
+.f-journal__body { display: grid; gap: 2px; min-width: 0; }
+.f-journal__title { font-size: var(--fs-body); font-weight: 700; color: var(--ink-body); }
+.f-journal__value { font-size: var(--fs-sm); color: var(--ink-body); }
+.f-journal__meta { font-size: var(--fs-caption); color: var(--ink-muted); }
+.f-journal__chev { color: var(--ink-faint); font-size: 18px; }
 .farmer-farm-grid, .farmer-plot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .farmer-farm-card { display: grid; gap: 7px; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-card); }
 .farmer-farm-card > p { color: var(--brand); font-size: var(--fs-caption); font-weight: 700; letter-spacing: .06em; }
 .farmer-farm-card h2 { font-size: var(--fs-h2); }
 .farmer-farm-card > span { color: var(--ink-muted); font-size: var(--fs-sm); }
+.farmer-farm-card__stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: var(--fs-sm); color: var(--ink-muted); }
+.farmer-farm-card__stats span.is-active { color: var(--brand-strong); font-weight: 650; }
 .farmer-farm-card__plots { display: grid; gap: 6px; margin: 6px 0 9px; }
 .farmer-farm-card__plots a { display: grid; gap: 1px; padding: 10px 11px; background: var(--surface-sunk); border-radius: 9px; color: var(--ink-body); }
 .farmer-farm-card__plots b { font-size: var(--fs-sm); }.farmer-farm-card__plots small { color: var(--ink-muted); font-size: var(--fs-caption); }

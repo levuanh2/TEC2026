@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { generateRecommendations, setRecommendationStatus, type Recommendation } from '../api/recommendations'
-import { num } from '../format'
-import { Async, EmptyState, Section, useAsync } from '../ui'
+import { date, num } from '../format'
+import { Async, Badge, EmptyState, Section, useAsync } from '../ui'
 
 /**
  * M05 recommendations (brief §B23-§B26): rule-generated cards with a
@@ -54,7 +54,14 @@ export function RecommendationsSection({ seasonId }: { seasonId: string }) {
 
 function RecommendationCard({ item, busy, onAccept, onDismiss }: { item: Recommendation; busy: boolean; onAccept: () => void; onDismiss: () => void }) {
   return (
-    <article className="recommendation-card">
+    <article className={`recommendation-card recommendation-card--${item.type}`}>
+      <div className="recommendation-card__kind">
+        <span aria-hidden="true">{item.type === 'optimization' ? '💡' : '📝'}</span>
+        <Badge tone={item.type === 'optimization' ? 'success' : 'info'}>
+          {item.type === 'optimization' ? 'Khuyến nghị hành động' : 'Cần bổ sung dữ liệu'}
+        </Badge>
+        <small>Tạo lúc {date(item.generatedAt)}</small>
+      </div>
       <h3>{item.title}</h3>
       <p>{item.reason}</p>
       {item.type === 'optimization' && (
