@@ -7,7 +7,8 @@ service-role key and never accepts a user id supplied by the frontend.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
 from .config import Settings
 
@@ -64,6 +65,24 @@ class SupabaseReadRepository:
         if not rows: raise ReadNotFoundError(table)
         return rows[0]
 
+    def _concurrent(self, *thunks: Callable[[], Any]) -> tuple[Any, ...]:
+        """Run independent zero-arg callables concurrently instead of one
+        network round trip at a time — each still issues its own PostgREST
+        request through this same caller-bound client, so RLS/auth are
+        unaffected; this only overlaps otherwise-sequential network latency
+        (the measured cause of multi-second rollups, see
+        docs/PERFORMANCE_INVESTIGATION.md round 3). Results come back in the
+        same order as `thunks`; if any raised, that exception propagates
+        (after every thread has finished) instead of a value at that index —
+        callers that must gate on one result before trusting another (e.g.
+        an authorization check) keep that ordering by reading results in the
+        same order they matter, since `.result()` re-raises at that point.
+        """
+        if len(thunks) == 1: return (thunks[0](),)
+        with ThreadPoolExecutor(max_workers=len(thunks)) as pool:
+            futures = [pool.submit(t) for t in thunks]
+            return tuple(f.result() for f in futures)
+
     def user_id(self) -> str:
         user = self.client.auth.get_user(self.token).user
         if user is None: raise ReadNotFoundError("user")
@@ -71,9 +90,14 @@ class SupabaseReadRepository:
 
     def me(self) -> dict[str, Any]:
         user_id = self.user_id()
-        profile = self._one("profiles", user_id)
-        orgs = self._many("organization_memberships", user_id=user_id)
-        farms = self._many("farm_members", user_id=user_id)
+        # profile/orgs/farms are 3 independent filters on user_id — nothing
+        # here depends on another's result, so they run concurrently instead
+        # of as 3 sequential round trips.
+        profile, orgs, farms = self._concurrent(
+            lambda: self._one("profiles", user_id),
+            lambda: self._many("organization_memberships", user_id=user_id),
+            lambda: self._many("farm_members", user_id=user_id),
+        )
         return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms})}
 
     def farms(self) -> list[dict[str, Any]]:
@@ -122,14 +146,24 @@ class SupabaseReadRepository:
         of one query per (detail table, activity_id) pair — `rows` already
         carries `activity_type`, so which of the 7 detail tables a given
         activity lives in is already known; no need to probe all 7.
+
+        The per-type queries are independent of each other (different
+        tables, disjoint activity ids), so they run concurrently rather than
+        one-at-a-time — with all 7 detail tables present this was the single
+        largest sequential chain inside an organization rollup.
         """
         by_type: dict[str, list[str]] = defaultdict(list)
         for row in rows:
             table = DETAIL_TABLES.get(str(row["activity_type"]))
             if table: by_type[table].append(str(row["id"]))
+        if not by_type: return {}
+        results = self._concurrent(*(
+            (lambda t=table, ids=activity_ids: self._many_in(t, "activity_id", ids))
+            for table, activity_ids in by_type.items()
+        ))
         details: dict[str, dict[str, Any]] = {}
-        for table, activity_ids in by_type.items():
-            for found in self._many_in(table, "activity_id", activity_ids):
+        for found_rows in results:
+            for found in found_rows:
                 details[str(found["activity_id"])] = found
         return details
 
@@ -149,13 +183,23 @@ class SupabaseReadRepository:
         single-season `activities()` path (season hub page) is unaffected.
         """
         if not season_ids: return {sid: [] for sid in season_ids}
-        batches = self._many_in("production_batches", "crop_season_id", season_ids)
-        season_by_batch = {str(b["id"]): str(b["crop_season_id"]) for b in batches}
-        batch_ids = list(season_by_batch)
-        activity_rows = self._many_in("activities", "production_batch_id", batch_ids) if batch_ids else []
-        activity_rows = [a for a in activity_rows if a.get("deleted_at") is None]
+
+        def _batches_then_activities() -> tuple[dict[str, str], list[dict[str, Any]]]:
+            batches = self._many_in("production_batches", "crop_season_id", season_ids)
+            season_by_batch = {str(b["id"]): str(b["crop_season_id"]) for b in batches}
+            batch_ids = list(season_by_batch)
+            rows = self._many_in("activities", "production_batch_id", batch_ids) if batch_ids else []
+            return season_by_batch, [a for a in rows if a.get("deleted_at") is None]
+
+        # `profiles` (no filter) never depends on batches/activities, so it
+        # is fetched in parallel with that sequential 2-step chain instead of
+        # after it.
+        (season_by_batch, activity_rows), users_rows = self._concurrent(
+            _batches_then_activities,
+            lambda: self._many("profiles"),
+        )
         details = self._details_by_activity_id(activity_rows)
-        users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
+        users = {str(x["id"]): x.get("full_name") for x in users_rows}
         by_season: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in activity_rows:
             sid = season_by_batch.get(str(row["production_batch_id"]))
@@ -166,8 +210,13 @@ class SupabaseReadRepository:
         """Bulk-batched equivalent of calling `_metric_totals(season_id)` for
         each id — see `_bulk_activities_by_season` for why this exists.
         """
-        activities_by_season = self._bulk_activities_by_season(season_ids)
-        carbon_rows = self._many_in("carbon_calculations", "crop_season_id", season_ids) if season_ids else []
+        # Independent of each other — activities come from
+        # production_batches/activities/detail tables, carbon_calculations
+        # is its own table filtered only by season id.
+        activities_by_season, carbon_rows = self._concurrent(
+            lambda: self._bulk_activities_by_season(season_ids),
+            lambda: self._many_in("carbon_calculations", "crop_season_id", season_ids) if season_ids else [],
+        )
         carbon_by_season: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in carbon_rows: carbon_by_season[str(row["crop_season_id"])].append(row)
         return {
@@ -248,8 +297,17 @@ class SupabaseReadRepository:
         return {key: value for key, value in self._metric_totals(season_id).items() if not key.startswith("_")}
 
     def _organization_farms(self, organization_id: str) -> list[dict[str, Any]]:
-        self._one("organizations", organization_id)  # RLS scope check, never trust URL alone.
-        return self._many("farms", cooperative_id=organization_id)
+        # Both requests fire concurrently, but the org lookup's result is
+        # read first — if RLS/existence rejects it, that exception propagates
+        # from `.result()` before the farms result is ever returned, so the
+        # authorization gate (never trust the URL's org id alone) still
+        # holds despite running them in parallel.
+        org, farms = self._concurrent(
+            lambda: self._one("organizations", organization_id),
+            lambda: self._many("farms", cooperative_id=organization_id),
+        )
+        del org
+        return farms
 
     def _organization_view(self, row: dict[str, Any]) -> dict[str, Any]:
         return {key: row.get(key) for key in ("id", "organization_code", "name", "organization_type", "province_name", "district_name", "commune_name", "is_active")}
