@@ -117,4 +117,28 @@ test.describe('authenticated real-data dashboard', () => {
     const realConsoleErrors = consoleErrors.filter((e) => !/Failed to load resource.*\b404\b/i.test(e))
     expect(realConsoleErrors).toEqual([])
   })
+
+  // Regression for a real bug found while redesigning the Management shell:
+  // App.tsx had two effects both keyed on `session` — when session flipped
+  // from null to real on a fresh load, the role-redirect effect ran once
+  // with the STILL-default 'farmer' role (a one-commit-flush stale read),
+  // spuriously pushing '/farmer' before correcting to '/dashboard' — losing
+  // whatever route was actually requested. A full page load/refresh/deep
+  // link to any non-farmer route for a non-farmer role therefore always
+  // ended up on '/dashboard' instead. Fixed by driving the redirect off the
+  // freshly-resolved role value directly, never a value read back from
+  // state. This must stay on the route it was given.
+  test('a full page load straight to a management route stays on that route', async ({ page }) => {
+    await page.goto('/login')
+    await page.getByLabel('Email').fill(email!)
+    await page.getByLabel('Mật khẩu').fill(password!)
+    await page.getByRole('button', { name: 'Đăng nhập' }).click()
+    await page.waitForURL((u) => u.pathname !== '/login')
+
+    for (const path of ['/organizations', '/farms', '/performance', '/mrv']) {
+      await page.goto(path, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(1500)
+      expect(new URL(page.url()).pathname).toBe(path)
+    }
+  })
 })
