@@ -6,13 +6,13 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
   await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
   await expect(page.getByText('Vụ đang canh tác', { exact: true })).toBeVisible()
 
-  // FW-2 §32: Giống/Phun thuốc/Rơm rạ stay disabled "Sắp có"; the three
-  // supported types are enabled Quick Entry buttons.
-  await expect(page.getByRole('button', { name: 'Giống — sắp có' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Phun thuốc — sắp có' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Rơm rạ — sắp có' })).toBeDisabled()
+  // FW-2 Part 3: seeding/pesticide/straw_management are no longer "Sắp có" —
+  // all six Quick Entry types are enabled buttons.
+  await expect(page.getByRole('button', { name: 'Gieo sạ', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Bón phân', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Tưới nước', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Thuốc BVTV', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Rơm rạ', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Thu hoạch', exact: true })).toBeEnabled()
   await page.screenshot({ path: 'test-results/farmer-home-1440.png', fullPage: true })
 
@@ -33,6 +33,28 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
   await page.screenshot({ path: 'test-results/farmer-harvest-form-1440.png', fullPage: true })
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toHaveCount(0)
+
+  // FW-2 Part 3: seeding / pesticide / straw_management forms.
+  await page.getByRole('button', { name: 'Gieo sạ', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Gieo sạ' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/farmer-seeding-form-1440.png', fullPage: true })
+  await page.getByRole('button', { name: 'Hủy' }).click()
+  await expect(page.getByRole('dialog', { name: 'Gieo sạ' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Thuốc BVTV', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Thuốc BVTV' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/farmer-pesticide-form-1440.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Thuốc BVTV' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Rơm rạ', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toBeVisible()
+  // Selecting "Đốt" (burned) shows a neutral factual notice, never a fake CO2e number.
+  await page.getByLabel('Cách xử lý rơm rạ').selectOption('burned')
+  await expect(page.getByText('sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng')).toBeVisible()
+  await page.screenshot({ path: 'test-results/farmer-straw-form-1440.png', fullPage: true })
+  await page.getByRole('button', { name: 'Hủy' }).click()
+  await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toHaveCount(0)
 
   // M03 CV entry point (brief FW M03 §19) — opens, shows the picker, closes
   // cleanly. No file is chosen: usingMockData guards uploadAndInferLeaf from

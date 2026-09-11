@@ -32,10 +32,38 @@ export interface HarvestActivityInput {
   totalCostVnd?: number | null
 }
 
+export interface SeedingActivityInput {
+  varietyName?: string | null
+  seedKg: number
+  seedingMethod?: string | null
+  // `seeding_events.cost_vnd`, NOT `total_cost_vnd` (backend/schemas.py::SeedingActivityData) —
+  // the one activity type whose canonical cost column is named differently.
+  costVnd?: number | null
+}
+
+export interface PesticideActivityInput {
+  productName: string
+  activeIngredient?: string | null
+  amount: number
+  unit: string
+  totalCostVnd?: number | null
+}
+
+export type StrawManagementMethod = 'incorporated' | 'removed' | 'burned' | 'composted' | 'other'
+
+export interface StrawManagementActivityInput {
+  method: StrawManagementMethod
+  strawMassKg?: number | null
+  totalCostVnd?: number | null
+}
+
 export type ActivityInput =
   | { activityType: 'fertilizer'; data: FertilizerActivityInput }
   | { activityType: 'irrigation'; data: IrrigationActivityInput }
   | { activityType: 'harvest'; data: HarvestActivityInput }
+  | { activityType: 'seeding'; data: SeedingActivityInput }
+  | { activityType: 'pesticide'; data: PesticideActivityInput }
+  | { activityType: 'straw_management'; data: StrawManagementActivityInput }
 
 export type SupportedActivityType = ActivityInput['activityType']
 
@@ -84,11 +112,47 @@ function harvestPayload(input: HarvestActivityInput): Record<string, unknown> {
   }
 }
 
+function seedingPayload(input: SeedingActivityInput): Record<string, unknown> {
+  return {
+    variety_name: input.varietyName ?? null,
+    seed_kg: input.seedKg,
+    seeding_method: input.seedingMethod ?? null,
+    cost_vnd: input.costVnd ?? null,
+  }
+}
+
+function pesticidePayload(input: PesticideActivityInput): Record<string, unknown> {
+  return {
+    product_name: input.productName,
+    active_ingredient: input.activeIngredient ?? null,
+    amount: input.amount,
+    unit: input.unit,
+    total_cost_vnd: input.totalCostVnd ?? null,
+  }
+}
+
+function strawManagementPayload(input: StrawManagementActivityInput): Record<string, unknown> {
+  // days_before_cultivation / dry_matter_fraction / returned_to_field are
+  // deliberately never submitted from the Farmer Web form (brief FW-2 Part 3
+  // §25 — no SFo/CFOA jargon in the UI). They stay unset/null; the Carbon
+  // Engine raises a fail-closed methodology gap at calculation time if a
+  // method that needs them is missing one, rather than this form inventing
+  // or requiring a value.
+  return {
+    method: input.method,
+    straw_mass_kg: input.strawMassKg ?? null,
+    total_cost_vnd: input.totalCostVnd ?? null,
+  }
+}
+
 export function activityDataPayload(input: ActivityInput): Record<string, unknown> {
   switch (input.activityType) {
     case 'fertilizer': return fertilizerPayload(input.data)
     case 'irrigation': return irrigationPayload(input.data)
     case 'harvest': return harvestPayload(input.data)
+    case 'seeding': return seedingPayload(input.data)
+    case 'pesticide': return pesticidePayload(input.data)
+    case 'straw_management': return strawManagementPayload(input.data)
   }
 }
 

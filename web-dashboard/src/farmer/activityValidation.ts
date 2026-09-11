@@ -65,6 +65,50 @@ export function validateHarvest(draft: HarvestDraft): FieldErrors {
   return errors
 }
 
+export interface SeedingDraft {
+  seedKg: number | null
+  costVnd: number | null
+}
+
+export function validateSeeding(draft: SeedingDraft): FieldErrors {
+  const errors: FieldErrors = {}
+  if (draft.seedKg == null || draft.seedKg <= 0) errors.seedKg = 'Lượng giống phải lớn hơn 0.'
+  if (draft.costVnd != null && draft.costVnd < 0) errors.costVnd = 'Chi phí không thể là số âm.'
+  return errors
+}
+
+export interface PesticideDraft {
+  productName: string
+  amount: number | null
+  unit: string
+  totalCostVnd: number | null
+}
+
+export function validatePesticide(draft: PesticideDraft): FieldErrors {
+  const errors: FieldErrors = {}
+  if (!draft.productName.trim()) errors.productName = 'Vui lòng nhập tên thuốc.'
+  if (draft.amount == null || draft.amount <= 0) errors.amount = 'Lượng sử dụng phải lớn hơn 0.'
+  if (!draft.unit.trim()) errors.unit = 'Vui lòng nhập đơn vị.'
+  if (draft.totalCostVnd != null && draft.totalCostVnd < 0) errors.totalCostVnd = 'Chi phí không thể là số âm.'
+  return errors
+}
+
+export interface StrawManagementDraft {
+  method: string
+  strawMassKg: number | null
+  totalCostVnd: number | null
+}
+
+const STRAW_METHODS = new Set(['incorporated', 'removed', 'burned', 'composted', 'other'])
+
+export function validateStrawManagement(draft: StrawManagementDraft): FieldErrors {
+  const errors: FieldErrors = {}
+  if (!STRAW_METHODS.has(draft.method)) errors.method = 'Vui lòng chọn cách xử lý rơm rạ.'
+  if (draft.strawMassKg != null && draft.strawMassKg < 0) errors.strawMassKg = 'Lượng rơm rạ không thể là số âm.'
+  if (draft.totalCostVnd != null && draft.totalCostVnd < 0) errors.totalCostVnd = 'Chi phí không thể là số âm.'
+  return errors
+}
+
 /**
  * Number input -> number | null respecting the blank-vs-zero rule (brief §12):
  * an empty string must stay `null` (unknown), never become 0.

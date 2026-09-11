@@ -2,9 +2,12 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import type { Activity, CropSeason, Plot } from '../types'
 import {
   createActivity, deleteActivity, updateActivity,
-  type ActivityInput, type ActivityWriteResult, type IrrigationMethod, type SupportedActivityType,
+  type ActivityInput, type ActivityWriteResult, type IrrigationMethod, type StrawManagementMethod, type SupportedActivityType,
 } from '../api/activities'
-import { blankToNumber, validateFertilizer, validateHarvest, validateIrrigation, type FieldErrors } from './activityValidation'
+import {
+  blankToNumber, validateFertilizer, validateHarvest, validateIrrigation,
+  validatePesticide, validateSeeding, validateStrawManagement, type FieldErrors,
+} from './activityValidation'
 import { mapActivityError, type ActivityErrorPresentation } from './activityErrors'
 import { nextIdempotencyKey } from './idempotency'
 import { ConfirmDialog, Notice, Sheet } from '../ui'
@@ -19,14 +22,18 @@ export function toSeasonContext(season: CropSeason, plot?: Plot | null): SeasonC
 
 export function isSupportedActivityType(type: string): type is SupportedActivityType {
   return type === 'fertilizer' || type === 'irrigation' || type === 'harvest'
+    || type === 'seeding' || type === 'pesticide' || type === 'straw_management'
 }
 
 export const QUICK_ENTRY_ACTIVE: { type: SupportedActivityType; label: string }[] = [
+  { type: 'seeding', label: 'Gieo sạ' },
   { type: 'fertilizer', label: 'Bón phân' },
   { type: 'irrigation', label: 'Tưới nước' },
+  { type: 'pesticide', label: 'Thuốc BVTV' },
+  { type: 'straw_management', label: 'Rơm rạ' },
   { type: 'harvest', label: 'Thu hoạch' },
 ]
-export const QUICK_ENTRY_DISABLED = ['Giống', 'Phun thuốc', 'Rơm rạ']
+export const QUICK_ENTRY_DISABLED: string[] = []
 
 function parseDetail(activity?: Activity): Record<string, unknown> {
   if (!activity) return {}
@@ -129,10 +136,21 @@ const IRRIGATION_METHOD_OPTIONS: { value: IrrigationMethod; label: string }[] = 
   { value: 'other', label: 'Khác' },
 ]
 
+const STRAW_METHOD_OPTIONS: { value: StrawManagementMethod; label: string }[] = [
+  { value: 'incorporated', label: 'Vùi vào đất' },
+  { value: 'burned', label: 'Đốt' },
+  { value: 'removed', label: 'Mang ra khỏi ruộng' },
+  { value: 'composted', label: 'Ủ compost' },
+  { value: 'other', label: 'Khác' },
+]
+
 const TITLES: Record<SupportedActivityType, { create: string; edit: string }> = {
   fertilizer: { create: 'Bón phân', edit: 'Chỉnh sửa bón phân' },
   irrigation: { create: 'Ghi tưới nước', edit: 'Chỉnh sửa tưới nước' },
   harvest: { create: 'Ghi thu hoạch', edit: 'Chỉnh sửa thu hoạch' },
+  seeding: { create: 'Gieo sạ', edit: 'Chỉnh sửa gieo sạ' },
+  pesticide: { create: 'Thuốc BVTV', edit: 'Chỉnh sửa thuốc BVTV' },
+  straw_management: { create: 'Rơm rạ', edit: 'Chỉnh sửa rơm rạ' },
 }
 
 /* --------------------------------------------------------- the form sheet */
@@ -180,6 +198,24 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
   const [hMoisture, setHMoisture] = useState(numOrUndef(detail.moisture_percent)?.toString() ?? '')
   const [hCost, setHCost] = useState(numOrUndef(detail.total_cost_vnd)?.toString() ?? '')
 
+  // seeding
+  const [sVariety, setSVariety] = useState(typeof detail.variety_name === 'string' ? detail.variety_name : '')
+  const [sSeedKg, setSSeedKg] = useState(numOrUndef(detail.seed_kg)?.toString() ?? '')
+  const [sMethod, setSMethod] = useState(typeof detail.seeding_method === 'string' ? detail.seeding_method : '')
+  const [sCost, setSCost] = useState(numOrUndef(detail.cost_vnd)?.toString() ?? '')
+
+  // pesticide
+  const [pName, setPName] = useState(typeof detail.product_name === 'string' ? detail.product_name : '')
+  const [pAmount, setPAmount] = useState(numOrUndef(detail.amount)?.toString() ?? '')
+  const [pUnit, setPUnit] = useState(typeof detail.unit === 'string' ? detail.unit : '')
+  const [pTarget, setPTarget] = useState(typeof detail.active_ingredient === 'string' ? detail.active_ingredient : '')
+  const [pCost, setPCost] = useState(numOrUndef(detail.total_cost_vnd)?.toString() ?? '')
+
+  // straw management
+  const [wMethod, setWMethod] = useState(typeof detail.method === 'string' ? detail.method : '')
+  const [wMass, setWMass] = useState(numOrUndef(detail.straw_mass_kg)?.toString() ?? '')
+  const [wCost, setWCost] = useState(numOrUndef(detail.total_cost_vnd)?.toString() ?? '')
+
   let input: ActivityInput
   let errors: FieldErrors
   if (activityType === 'fertilizer') {
@@ -190,10 +226,22 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
     const draft = { method: iMethod, waterVolumeM3: blankToNumber(iWater), durationMinutes: blankToNumber(iDuration), waterLevelCm: blankToNumber(iLevel), pumpEnergyKwh: iPump ? blankToNumber(iPumpEnergy) : null, totalCostVnd: blankToNumber(iCost) }
     errors = validateIrrigation(draft)
     input = { activityType: 'irrigation', data: { method: (draft.method || 'other') as IrrigationMethod, waterVolumeM3: draft.waterVolumeM3, durationMinutes: draft.durationMinutes, waterLevelCm: draft.waterLevelCm, pumpEnergyKwh: draft.pumpEnergyKwh, totalCostVnd: draft.totalCostVnd } }
-  } else {
+  } else if (activityType === 'harvest') {
     const draft = { yieldKg: blankToNumber(hYield), harvestedAreaHa: blankToNumber(hArea), moisturePercent: blankToNumber(hMoisture), totalCostVnd: blankToNumber(hCost) }
     errors = validateHarvest(draft)
     input = { activityType: 'harvest', data: { yieldKg: draft.yieldKg ?? 0, harvestedAreaHa: draft.harvestedAreaHa, moisturePercent: draft.moisturePercent, totalCostVnd: draft.totalCostVnd } }
+  } else if (activityType === 'seeding') {
+    const draft = { seedKg: blankToNumber(sSeedKg), costVnd: blankToNumber(sCost) }
+    errors = validateSeeding(draft)
+    input = { activityType: 'seeding', data: { varietyName: sVariety.trim() || null, seedKg: draft.seedKg ?? 0, seedingMethod: sMethod.trim() || null, costVnd: draft.costVnd } }
+  } else if (activityType === 'pesticide') {
+    const draft = { productName: pName, amount: blankToNumber(pAmount), unit: pUnit, totalCostVnd: blankToNumber(pCost) }
+    errors = validatePesticide(draft)
+    input = { activityType: 'pesticide', data: { productName: draft.productName, activeIngredient: pTarget.trim() || null, amount: draft.amount ?? 0, unit: draft.unit, totalCostVnd: draft.totalCostVnd } }
+  } else {
+    const draft = { method: wMethod, strawMassKg: blankToNumber(wMass), totalCostVnd: blankToNumber(wCost) }
+    errors = validateStrawManagement(draft)
+    input = { activityType: 'straw_management', data: { method: (draft.method || 'other') as StrawManagementMethod, strawMassKg: draft.strawMassKg, totalCostVnd: draft.totalCostVnd } }
   }
   const hasErrors = Object.keys(errors).length > 0
   const err = (key: string) => (touched ? errors[key] : undefined)
@@ -238,7 +286,14 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
         <div className="activity-form__context">Vụ <b>{season.label}</b></div>
 
         <TextField
-          label={activityType === 'harvest' ? 'Ngày thu hoạch' : activityType === 'irrigation' ? 'Ngày thực hiện' : 'Ngày bón'}
+          label={
+            activityType === 'harvest' ? 'Ngày thu hoạch'
+              : activityType === 'irrigation' ? 'Ngày thực hiện'
+              : activityType === 'seeding' ? 'Ngày gieo sạ'
+              : activityType === 'pesticide' ? 'Ngày phun'
+              : activityType === 'straw_management' ? 'Ngày xử lý'
+              : 'Ngày bón'
+          }
           type="date" value={date} onChange={setDate} required autoFocus
         />
 
@@ -288,6 +343,40 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
           </>
         )}
 
+        {activityType === 'seeding' && (
+          <>
+            <TextField label="Giống" value={sVariety} onChange={setSVariety} hint="Không bắt buộc" />
+            <div className="form-grid">
+              <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} />
+              <TextField label="Phương pháp gieo" value={sMethod} onChange={setSMethod} hint="Không bắt buộc" />
+            </div>
+            <NumberField label="Chi phí vật tư" unit="đ" value={sCost} onChange={setSCost} hint="Không bắt buộc" error={err('costVnd')} />
+          </>
+        )}
+
+        {activityType === 'pesticide' && (
+          <>
+            <TextField label="Tên thuốc" value={pName} onChange={setPName} error={err('productName')} required />
+            <div className="form-grid">
+              <NumberField label="Lượng sử dụng" value={pAmount} onChange={setPAmount} error={err('amount')} />
+              <TextField label="Đơn vị" value={pUnit} onChange={setPUnit} hint="ví dụ: kg, lít, gói" error={err('unit')} />
+            </div>
+            <TextField label="Mục đích / đối tượng" value={pTarget} onChange={setPTarget} hint="Không bắt buộc" />
+            <NumberField label="Chi phí vật tư" unit="đ" value={pCost} onChange={setPCost} hint="Không bắt buộc" error={err('totalCostVnd')} />
+          </>
+        )}
+
+        {activityType === 'straw_management' && (
+          <>
+            <SelectField label="Cách xử lý rơm rạ" value={wMethod} onChange={setWMethod} options={STRAW_METHOD_OPTIONS} error={err('method')} />
+            {wMethod === 'burned' && (
+              <Notice kind="info">Hình thức xử lý này sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng.</Notice>
+            )}
+            <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint="Không bắt buộc" error={err('strawMassKg')} />
+            <NumberField label="Chi phí" unit="đ" value={wCost} onChange={setWCost} hint="Không bắt buộc" error={err('totalCostVnd')} />
+          </>
+        )}
+
         <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint="Không bắt buộc" />
 
         {error && (
@@ -312,6 +401,9 @@ const DELETE_COPY: Record<SupportedActivityType, { title: string; body: string }
   fertilizer: { title: 'Xóa hoạt động', body: 'Xóa bản ghi bón phân này?\n\nBản ghi sẽ không còn được dùng trong nhật ký và tính toán hiệu suất.' },
   irrigation: { title: 'Xóa hoạt động', body: 'Xóa bản ghi tưới nước này?\n\nBản ghi sẽ không còn được dùng trong nhật ký và tính toán hiệu suất.' },
   harvest: { title: 'Xóa bản ghi thu hoạch', body: 'Xóa bản ghi thu hoạch?\n\nSản lượng này sẽ không còn được dùng để tính các chỉ số trên mỗi kg sản phẩm.' },
+  seeding: { title: 'Xóa hoạt động', body: 'Xóa bản ghi gieo sạ này?\n\nBản ghi sẽ không còn được dùng trong nhật ký và tính toán hiệu suất.' },
+  pesticide: { title: 'Xóa hoạt động', body: 'Xóa bản ghi thuốc BVTV này?\n\nBản ghi sẽ không còn được dùng trong nhật ký và tính toán hiệu suất.' },
+  straw_management: { title: 'Xóa hoạt động', body: 'Xóa bản ghi xử lý rơm rạ này?\n\nBản ghi sẽ không còn được dùng trong nhật ký, tính toán hiệu suất và không còn đóng góp vào tính toán phát thải.' },
 }
 
 function DeleteActivityDialog({ activity, onCancel, onDeleted }: { activity: Activity; onCancel: () => void; onDeleted: () => void }) {

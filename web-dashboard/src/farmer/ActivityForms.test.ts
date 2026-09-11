@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { numOrUndef } from './ActivityForms'
+import { isSupportedActivityType, numOrUndef, QUICK_ENTRY_ACTIVE } from './ActivityForms'
 
 // Numeric activity-detail fields are Postgres `numeric` columns: the read
 // endpoint (PostgREST) serializes them as JSON numbers, but the write
@@ -23,5 +23,25 @@ describe('numOrUndef', () => {
     expect(numOrUndef('  ')).toBeUndefined()
     expect(numOrUndef('abc')).toBeUndefined()
     expect(numOrUndef(Number.NaN)).toBeUndefined()
+  })
+})
+
+describe('isSupportedActivityType (FW-2 Part 3)', () => {
+  it('accepts all six writable types', () => {
+    for (const type of ['fertilizer', 'irrigation', 'harvest', 'seeding', 'pesticide', 'straw_management']) {
+      expect(isSupportedActivityType(type)).toBe(true)
+    }
+  })
+  it('rejects an unwritable/unknown type', () => {
+    expect(isSupportedActivityType('fuel')).toBe(false)
+    expect(isSupportedActivityType('other')).toBe(false)
+  })
+})
+
+describe('QUICK_ENTRY_ACTIVE (FW-2 Part 3 — nothing left "Sắp có")', () => {
+  it('lists all six activity types with no disabled placeholders remaining', () => {
+    expect(QUICK_ENTRY_ACTIVE.map((e) => e.type).sort()).toEqual(
+      ['fertilizer', 'harvest', 'irrigation', 'pesticide', 'seeding', 'straw_management'].sort(),
+    )
   })
 })

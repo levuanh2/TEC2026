@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { blankToNumber, validateFertilizer, validateHarvest, validateIrrigation } from './activityValidation'
+import {
+  blankToNumber, validateFertilizer, validateHarvest, validateIrrigation,
+  validatePesticide, validateSeeding, validateStrawManagement,
+} from './activityValidation'
 
 const fertilizerBase = { fertilizerName: 'Urê', amountKg: 120, nitrogenPercent: 46, phosphorusPercent: null, potassiumPercent: null, totalCostVnd: null }
 const irrigationBase = { method: 'awd', waterVolumeM3: 32, durationMinutes: null, waterLevelCm: null, pumpEnergyKwh: null, totalCostVnd: null }
 const harvestBase = { yieldKg: 3100, harvestedAreaHa: null, moisturePercent: null, totalCostVnd: null }
+const seedingBase = { seedKg: 120, costVnd: null }
+const pesticideBase = { productName: 'Regent', amount: 0.5, unit: 'kg', totalCostVnd: null }
+const strawBase = { method: 'incorporated', strawMassKg: 4000, totalCostVnd: null }
 
 describe('fertilizer validation', () => {
   it('accepts a valid draft', () => {
@@ -55,6 +61,61 @@ describe('harvest validation', () => {
   })
   it('rejects moisture outside 0-100', () => {
     expect(validateHarvest({ ...harvestBase, moisturePercent: 101 }).moisturePercent).toBeDefined()
+  })
+})
+
+describe('seeding validation', () => {
+  it('accepts a valid draft', () => {
+    expect(validateSeeding(seedingBase)).toEqual({})
+  })
+  it('rejects seedKg <= 0', () => {
+    expect(validateSeeding({ ...seedingBase, seedKg: 0 }).seedKg).toBeDefined()
+    expect(validateSeeding({ ...seedingBase, seedKg: null }).seedKg).toBeDefined()
+  })
+  it('rejects negative cost', () => {
+    expect(validateSeeding({ ...seedingBase, costVnd: -1 }).costVnd).toBeDefined()
+  })
+  it('accepts cost omitted (blank stays null, not an error)', () => {
+    expect(validateSeeding({ ...seedingBase, costVnd: null })).toEqual({})
+  })
+})
+
+describe('pesticide validation', () => {
+  it('accepts a valid draft', () => {
+    expect(validatePesticide(pesticideBase)).toEqual({})
+  })
+  it('requires a product name', () => {
+    expect(validatePesticide({ ...pesticideBase, productName: '  ' }).productName).toBeDefined()
+  })
+  it('rejects amount <= 0', () => {
+    expect(validatePesticide({ ...pesticideBase, amount: 0 }).amount).toBeDefined()
+  })
+  it('requires a unit', () => {
+    expect(validatePesticide({ ...pesticideBase, unit: '' }).unit).toBeDefined()
+  })
+  it('rejects negative cost', () => {
+    expect(validatePesticide({ ...pesticideBase, totalCostVnd: -1 }).totalCostVnd).toBeDefined()
+  })
+})
+
+describe('straw management validation', () => {
+  it('accepts a valid draft', () => {
+    expect(validateStrawManagement(strawBase)).toEqual({})
+  })
+  it('rejects an unsupported method', () => {
+    expect(validateStrawManagement({ ...strawBase, method: 'composted_extra' }).method).toBeDefined()
+  })
+  it('accepts mass omitted (blank stays null, not an error)', () => {
+    expect(validateStrawManagement({ ...strawBase, strawMassKg: null })).toEqual({})
+  })
+  it('rejects negative mass/cost', () => {
+    expect(validateStrawManagement({ ...strawBase, strawMassKg: -1 }).strawMassKg).toBeDefined()
+    expect(validateStrawManagement({ ...strawBase, totalCostVnd: -1 }).totalCostVnd).toBeDefined()
+  })
+  it('accepts every backend-supported enum value', () => {
+    for (const method of ['incorporated', 'removed', 'burned', 'composted', 'other']) {
+      expect(validateStrawManagement({ ...strawBase, method })).toEqual({})
+    }
   })
 })
 

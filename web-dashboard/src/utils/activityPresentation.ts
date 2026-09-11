@@ -61,6 +61,8 @@ const KEY_LABELS: Record<string, string> = {
   fuel_type: 'Loại nhiên liệu', amount_liter: 'Lượng (L)', amount_litre: 'Lượng (L)', equipment_name: 'Thiết bị',
   management_method: 'Phương pháp xử lý', straw_amount_kg: 'Khối lượng rơm (kg)', straw_mass_kg: 'Khối lượng rơm (kg)',
   yield_kg: 'Sản lượng (kg)', harvested_area_ha: 'Diện tích thu hoạch (ha)', note: 'Ghi chú',
+  cost_vnd: 'Chi phí (đ)', total_cost_vnd: 'Chi phí (đ)', active_ingredient: 'Mục đích / đối tượng',
+  days_before_cultivation: 'Số ngày trước canh tác', dry_matter_fraction: 'Tỷ lệ chất khô', returned_to_field: 'Trả lại ruộng',
 }
 export function activityFields(detail: string): { label: string; value: string }[] {
   const payload = parse(detail)

@@ -42,4 +42,54 @@ describe('activityDataPayload (exact runtime field names, backend/schemas.py)', 
       yield_kg: 3100, harvested_area_ha: 1.2, moisture_percent: 14, total_cost_vnd: null,
     })
   })
+
+  it('builds the seeding payload using cost_vnd, not total_cost_vnd (FW-2 Part 3 §6)', () => {
+    const input: ActivityInput = {
+      activityType: 'seeding',
+      data: { varietyName: 'OM5451', seedKg: 120, seedingMethod: 'sạ lan', costVnd: 500000 },
+    }
+    const payload = activityDataPayload(input)
+    expect(payload).toEqual({
+      variety_name: 'OM5451', seed_kg: 120, seeding_method: 'sạ lan', cost_vnd: 500000,
+    })
+    expect(payload.total_cost_vnd).toBeUndefined()
+  })
+
+  it('builds the seeding payload preserving null (blank) cost, not 0', () => {
+    const input: ActivityInput = {
+      activityType: 'seeding',
+      data: { varietyName: null, seedKg: 120, seedingMethod: null, costVnd: null },
+    }
+    expect(activityDataPayload(input).cost_vnd).toBeNull()
+  })
+
+  it('builds the pesticide payload with snake_case keys', () => {
+    const input: ActivityInput = {
+      activityType: 'pesticide',
+      data: { productName: 'Regent', activeIngredient: 'Fipronil', amount: 0.5, unit: 'kg', totalCostVnd: 120000 },
+    }
+    expect(activityDataPayload(input)).toEqual({
+      product_name: 'Regent', active_ingredient: 'Fipronil', amount: 0.5, unit: 'kg', total_cost_vnd: 120000,
+    })
+  })
+
+  it('builds the straw_management payload and never sends the methodology-only fields from the form', () => {
+    const input: ActivityInput = {
+      activityType: 'straw_management',
+      data: { method: 'burned', strawMassKg: 4000, totalCostVnd: null },
+    }
+    const payload = activityDataPayload(input)
+    expect(payload).toEqual({ method: 'burned', straw_mass_kg: 4000, total_cost_vnd: null })
+    expect(payload.days_before_cultivation).toBeUndefined()
+    expect(payload.dry_matter_fraction).toBeUndefined()
+    expect(payload.returned_to_field).toBeUndefined()
+  })
+
+  it('builds the straw_management payload preserving null (blank) mass, not 0', () => {
+    const input: ActivityInput = {
+      activityType: 'straw_management',
+      data: { method: 'incorporated', strawMassKg: null, totalCostVnd: null },
+    }
+    expect(activityDataPayload(input).straw_mass_kg).toBeNull()
+  })
 })
