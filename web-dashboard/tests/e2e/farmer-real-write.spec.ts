@@ -136,8 +136,15 @@ test.describe('authenticated Farmer real write flows', () => {
     await row.locator('.fw-entry__open').click()
     // An explicit 0 persists as 0, distinct from the earlier blank/unknown state.
     await expect(page.getByRole('dialog')).toContainText(marker)
-    const irrigationSnapshot = await page.getByRole('dialog').innerText()
-    expect(irrigationSnapshot).toMatch(/\b0\b/)
+    // Asserted on the water-volume row itself and with a polling matcher: the
+    // edit invalidates this season's read, and the drawer shows the refreshed
+    // value when that read lands. A one-shot `innerText()` snapshot instead
+    // raced that refresh and read "—", the pre-edit blank.
+    const waterVolume = page.getByRole('dialog')
+      .locator('.fw-detail > div')
+      .filter({ has: page.getByText('Lượng nước (m³)', { exact: true }) })
+      .locator('dd')
+    await expect(waterVolume).toHaveText('0', { timeout: 30_000 })
     // A delete invalidates that season's cached metrics, so its settled reload
     // is the harvest section's "before" baseline.
     let beforeCount = metricsLog.length
