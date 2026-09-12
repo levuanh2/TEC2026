@@ -210,10 +210,18 @@ class SupabaseReadRepository:
         self._one("plots", plot_id); return [self.season_view(x) for x in self._many("crop_seasons", plot_id=plot_id)]
 
     def _activities(self, season_id: str) -> list[dict[str, Any]]:
-        self._one("crop_seasons", season_id)
-        batch_ids = [str(x["id"]) for x in self._many("production_batches", crop_season_id=season_id)]
-        rows: list[dict[str, Any]] = []
-        for batch_id in batch_ids: rows.extend(self._many("activities", production_batch_id=batch_id))
+        # The season read is the 404/RLS gate and `production_batches` does not
+        # depend on its *value*, so the two overlap; the gate's result is still
+        # read first, so an invisible season raises before any batch row is
+        # returned (same ordering rule as `_organization_farms`).
+        season, batches = self._concurrent(
+            lambda: self._one("crop_seasons", season_id),
+            lambda: self._many("production_batches", crop_season_id=season_id),
+        )
+        del season
+        batch_ids = [str(x["id"]) for x in batches]
+        # One `IN` query for every batch instead of one query per batch.
+        rows = self._many_in("activities", "production_batch_id", batch_ids)
         return [x for x in rows if x.get("deleted_at") is None]
 
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
@@ -249,8 +257,13 @@ class SupabaseReadRepository:
 
     def activities(self, season_id: str) -> list[dict[str, Any]]:
         rows = self._activities(season_id)
-        details = self._details_by_activity_id(rows)
-        users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
+        # `profiles` is an unfiltered read that depends on nothing here, so it
+        # overlaps the per-type detail reads instead of following them.
+        details, users_rows = self._concurrent(
+            lambda: self._details_by_activity_id(rows),
+            lambda: self._many("profiles"),
+        )
+        users = {str(x["id"]): x.get("full_name") for x in users_rows}
         return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in rows]
 
     def _bulk_activities_by_season(self, season_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -326,8 +339,12 @@ class SupabaseReadRepository:
 
     def _metric_totals(self, season_id: str) -> dict[str, Any]:
         """Compute season numerators once; underscore keys are internal only."""
-        activities = self.activities(season_id)
-        carbon = self._many("carbon_calculations", crop_season_id=season_id)
+        # Independent: activities come from production_batches/activities/detail
+        # tables, carbon_calculations is its own table filtered by season id.
+        activities, carbon = self._concurrent(
+            lambda: self.activities(season_id),
+            lambda: self._many("carbon_calculations", crop_season_id=season_id),
+        )
         return self._compute_metric_totals(activities, carbon)
 
     @staticmethod
