@@ -139,6 +139,20 @@ export const useCarbon = (id: string | null) => useQuery<CarbonState>(id ? keys.
 
 /* ---------------------------------------------------------- prefetch */
 
+/** Start the Farmer scope read as soon as a session exists, in parallel with
+ * `/v1/me` instead of after it.
+ *
+ * Measured on login: `/v1/me` took 1686ms because it was the first read on a
+ * brand-new token and therefore paid for building that caller's Supabase
+ * client (~800ms) on its own, and only then did `/v1/farmer/scope` start. Both
+ * reads need nothing but the token, so overlapping them both shares that
+ * one-time cost and puts the scope in cache before the Farmer shell mounts.
+ * Routing is untouched: the role still comes from `/v1/me`, never from here. */
+export function prefetchFarmerScope(): void {
+  if (usingMockData) return
+  prefetchQuery(keys.scope, getFarmerScope, STABLE_MS)
+}
+
 /** Bounded warm-up on nav hover/focus: at most scope + one season read per target. */
 export function prefetchNav(to: string): void {
   prefetchQuery(keys.scope, getFarmerScope, STABLE_MS)
