@@ -20,7 +20,11 @@ test.describe('authenticated Farmer real recommendations flow', () => {
     const unexpectedApi: string[] = []
     const directBusiness: string[] = []
     let generateResponseBody: any = null
+    const generateRequests: string[] = []
     page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()) })
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && /\/recommendations\/generate$/.test(new URL(r.url()).pathname)) generateRequests.push(r.url())
+    })
     page.on('request', (r) => {
       const p = new URL(r.url()).pathname
       if (/\/rest\/v1\/(organizations|farms|plots|crop_seasons|activities|carbon_calculations|season_recommendations)/.test(p)) directBusiness.push(r.url())
@@ -48,7 +52,20 @@ test.describe('authenticated Farmer real recommendations flow', () => {
     // Either a truthful empty state or real cards — never a fabricated number.
     await expect(section.getByText('Chưa có khuyến nghị định lượng').or(section.locator('.recommendation-card').first())).toBeVisible({ timeout: 60_000 })
 
-    expect(generateResponseBody).not.toBeNull()
+    // Generation is NOT part of loading the page. Measured at 7.3-9.5s and 33
+    // Supabase round trips, it was ~7s of Home's time to full content; the page
+    // now renders what is stored and regenerates only on request or when the
+    // stored set is actually out of date.
+    expect(generateRequests, 'a page load must not trigger recommendation generation').toEqual([])
+
+    // Explicit refresh: the section updates, the rest of the page keeps working
+    // while it runs, and one click means exactly one generation run.
+    await section.getByRole('button', { name: 'Cập nhật khuyến nghị' }).click()
+    await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Tưới nước', exact: true })).toBeEnabled()
+    await expect.poll(() => generateResponseBody, { timeout: 120_000 }).not.toBeNull()
+    expect(generateRequests, 'one click must not fan out into several runs').toHaveLength(1)
+
     const items: any[] = generateResponseBody.items
     // REAL CO2e is blocked today -> the AWD optimization rule must not have
     // produced a fabricated quantified carbon result for this real season.

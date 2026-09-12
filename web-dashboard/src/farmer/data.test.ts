@@ -40,20 +40,55 @@ describe('Farmer read cache (stale-while-revalidate)', () => {
     expect(peekQuery('recs')).toEqual(['generated'])
   })
 
-  it('a season write invalidates only that season’s derived reads, never the stable scope', async () => {
-    const scope = vi.fn().mockResolvedValue('scope')
-    const metrics = vi.fn().mockResolvedValue('m')
-    const other = vi.fn().mockResolvedValue('other')
-    await fetchQuery(keys.scope, scope, { staleMs: 60_000 })
-    await fetchQuery(keys.metrics('s1'), metrics, { staleMs: 60_000 })
-    await fetchQuery(keys.metrics('s2'), other, { staleMs: 60_000 })
+  /* Every Farmer write — seeding, fertilizer, irrigation, pesticide, straw
+   * management, harvest, and the edit/delete of any of them — goes through one
+   * `done()` in ActivityForms and therefore through `markSeasonDataChanged`.
+   * This pins exactly which reads that is allowed to touch: the ones an
+   * activity write can actually change, and nothing else. Over-invalidating
+   * here is what turns one save into a refetch storm. */
+  it('a season write refetches only that season’s derived reads', async () => {
+    const fetchers = {
+      scope: vi.fn().mockResolvedValue('scope'),
+      activities: vi.fn().mockResolvedValue('a'),
+      metrics: vi.fn().mockResolvedValue('m'),
+      recs: vi.fn().mockResolvedValue('r'),
+      recsGen: vi.fn().mockResolvedValue(1),
+      cv: vi.fn().mockResolvedValue('cv'),
+      carbon: vi.fn().mockResolvedValue('c'),
+      org: vi.fn().mockResolvedValue('o'),
+      otherSeasonMetrics: vi.fn().mockResolvedValue('m2'),
+    }
+    const read = async () => {
+      await fetchQuery(keys.scope, fetchers.scope, { staleMs: 60_000 })
+      await fetchQuery(keys.activities('s1'), fetchers.activities, { staleMs: 60_000 })
+      await fetchQuery(keys.metrics('s1'), fetchers.metrics, { staleMs: 60_000 })
+      await fetchQuery(keys.recs('s1'), fetchers.recs, { staleMs: 60_000 })
+      await fetchQuery(keys.recsGen('s1'), fetchers.recsGen, { staleMs: 60_000 })
+      await fetchQuery(keys.cv('s1'), fetchers.cv, { staleMs: 60_000 })
+      await fetchQuery(keys.carbon('s1'), fetchers.carbon, { staleMs: 60_000 })
+      await fetchQuery(keys.org('org-1'), fetchers.org, { staleMs: 60_000 })
+      await fetchQuery(keys.metrics('s2'), fetchers.otherSeasonMetrics, { staleMs: 60_000 })
+    }
+
+    await read()
     markSeasonDataChanged('s1')
-    await fetchQuery(keys.scope, scope, { staleMs: 60_000 })
-    await fetchQuery(keys.metrics('s1'), metrics, { staleMs: 60_000 })
-    await fetchQuery(keys.metrics('s2'), other, { staleMs: 60_000 })
-    expect(scope).toHaveBeenCalledTimes(1)
-    expect(metrics).toHaveBeenCalledTimes(2)
-    expect(other).toHaveBeenCalledTimes(1)
+    await read()
+
+    // Refetched: everything an activity write can change.
+    expect(fetchers.activities).toHaveBeenCalledTimes(2)
+    expect(fetchers.metrics).toHaveBeenCalledTimes(2)
+    expect(fetchers.recs).toHaveBeenCalledTimes(2)
+    expect(fetchers.recsGen).toHaveBeenCalledTimes(2)
+    // Untouched: writing an activity changes none of these, and re-reading the
+    // viewer's hierarchy or organization identity on every save is pure waste.
+    expect(fetchers.scope).toHaveBeenCalledTimes(1)
+    expect(fetchers.org).toHaveBeenCalledTimes(1)
+    // A Carbon calculation is never triggered by an activity write (the harvest
+    // confirmation says so explicitly), and a leaf photo is unrelated.
+    expect(fetchers.carbon).toHaveBeenCalledTimes(1)
+    expect(fetchers.cv).toHaveBeenCalledTimes(1)
+    // And another season's reads are not collateral damage.
+    expect(fetchers.otherSeasonMetrics).toHaveBeenCalledTimes(1)
   })
 
   it('sign-out clears everything', async () => {
