@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearFarmerCache, fetchQuery, invalidateQueries, keys, markSeasonDataChanged, peekQuery, setQueryData } from './data'
+import { clearFarmerCache, fetchQuery, invalidateQueries, keys, markSeasonDataChanged, peekQuery, querySeq, setQueryData, subscribeQuery } from './data'
 
 describe('Farmer read cache (stale-while-revalidate)', () => {
   beforeEach(() => clearFarmerCache())
@@ -95,6 +95,29 @@ describe('Farmer read cache (stale-while-revalidate)', () => {
     await fetchQuery(keys.scope, () => Promise.resolve('scope'))
     clearFarmerCache()
     expect(peekQuery(keys.scope)).toBeUndefined()
+  })
+
+  /* A read can start before the component that displays it mounts (a prefetch,
+   * or another page reading the same key) and resolve in the gap between that
+   * component's render and its subscription. `useQuery` subscribes through
+   * `useSyncExternalStore`, which re-reads this sequence right after
+   * subscribing — so the change must still be visible then, not only through
+   * the notification that was already missed. */
+  it('a change that lands before a subscriber attaches is still visible to it', async () => {
+    const seen = querySeq('k')
+    await fetchQuery('k', () => Promise.resolve('value'))
+    let notified = false
+    subscribeQuery('k', () => { notified = true })
+    expect(notified).toBe(false)
+    expect(querySeq('k')).not.toBe(seen)
+    expect(peekQuery('k')).toBe('value')
+  })
+
+  it('counts every change to a key, including one back to the same value', async () => {
+    const start = querySeq('k')
+    setQueryData('k', 'x')
+    setQueryData('k', 'x')
+    expect(querySeq('k')).toBe(start + 2)
   })
 
   it('keeps no data for a failed first load', async () => {

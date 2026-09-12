@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 /**
  * Farmer Web read cache: stale-while-revalidate with in-flight dedupe.
@@ -17,12 +17,27 @@ type Entry = { data?: unknown; error?: string; at: number; promise?: Promise<unk
 
 const store = new Map<string, Entry>()
 const listeners = new Map<string, Set<() => void>>()
+/** Monotonic per key, bumped on every change. Kept outside `store` so it also
+ * survives `clearFarmerCache`, and so a reader can tell "nothing changed" from
+ * "changed back to the same value". */
+const seqs = new Map<string, number>()
 
 export const STABLE_MS = 5 * 60_000
 export const LIVE_MS = 20_000
 
 function notify(key: string) {
+  seqs.set(key, (seqs.get(key) ?? 0) + 1)
   listeners.get(key)?.forEach((fn) => fn())
+}
+
+/** How many times `key` has changed. The snapshot `useQuery` subscribes with. */
+export const querySeq = (key: string): number => seqs.get(key) ?? 0
+
+export function subscribeQuery(key: string, onChange: () => void): () => void {
+  let set = listeners.get(key)
+  if (!set) { set = new Set(); listeners.set(key, set) }
+  set.add(onChange)
+  return () => { set!.delete(onChange) }
 }
 
 function entry(key: string): Entry {
@@ -120,17 +135,21 @@ export interface QueryState<T> {
  * armed explicitly once the page is usable.
  */
 export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, staleMs = LIVE_MS, enabled = true): QueryState<T> {
-  const [, rerender] = useReducer((n: number) => n + 1, 0)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
 
-  useEffect(() => {
-    if (!key) return
-    let set = listeners.get(key)
-    if (!set) { set = new Set(); listeners.set(key, set) }
-    set.add(rerender)
-    return () => { set!.delete(rerender) }
-  }, [key])
+  /* `useSyncExternalStore`, not a subscribe-in-an-effect: a request started
+   * before this component mounted (a prefetch, or another page's read of the
+   * same key) can resolve between this render and an effect, and a hand-rolled
+   * subscription drops that notification — which left the Home hero in its
+   * skeleton forever, roughly one login in five, once the scope read began at
+   * login instead of at mount. React re-reads the snapshot right after
+   * subscribing, so that update cannot be missed. */
+  const subscribe = useCallback(
+    (onChange: () => void) => (key ? subscribeQuery(key, onChange) : () => undefined),
+    [key],
+  )
+  useSyncExternalStore(subscribe, () => (key ? querySeq(key) : 0), () => 0)
 
   const e = key ? store.get(key) : undefined
   const version = e?.version ?? 0
