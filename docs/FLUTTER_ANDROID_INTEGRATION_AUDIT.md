@@ -134,13 +134,122 @@ M05 landed on main after this branch's base. The app ships
 `UnavailableRecommendationRepository`, which is the honest behaviour, but mobile
 is not yet connected to the endpoint that now exists.
 
-## Not verifiable in this environment
+## Runtime verification (2026-09-13, emulator + hosted Supabase)
 
-No Flutter SDK, no Dart SDK, no JDK and no Android SDK are installed on this
-machine. `flutter pub get`, `dart format`, `flutter analyze`, `flutter test`,
-`flutter build apk` and any device or emulator run are therefore **BLOCKED**,
-not passed. No Dart source was edited in this integration, because a change that
-cannot be compiled or tested should not be committed.
+The toolchain was installed after the audit above was written, so the section
+that previously said "not verifiable" no longer applies. Recorded here instead
+is what was actually executed.
 
-The two P1 fixes above are specified precisely enough to be applied and verified
-by whoever next has a Flutter toolchain.
+Environment: Flutter 3.47.4 / Dart 3.13.3, OpenJDK 17, Android SDK 36,
+AVD `agri_qa` (`sdk_gphone64_x86_64`, API 35) with the device clock set to
+`Asia/Ho_Chi_Minh`. Hosted project `awazhdqzkktekbwaqiic`, publishable key only
+— no service-role key ever reached the device.
+
+| Gate | Result |
+| --- | --- |
+| `dart format --set-exit-if-changed lib test integration_test` | clean |
+| `flutter analyze` | No issues found |
+| `flutter test` | 365 passed |
+| `flutter build apk --debug` | PASS, 158.0 MB |
+| `flutter build apk --release` | PASS, 56.1 MB (debug-signed — release signing BLOCKED) |
+
+`integration_test/hosted_runtime_smoke_test.dart` runs the real stack on the
+emulator against hosted Supabase. Network is cut and restored from the host with
+`adb shell svc wifi|data`; the test only observes the transition with a real
+request, so "offline" means offline. One pass covers: login, scope, offline
+create, reopening the persisted sqlite file, reconnect, sync, forced re-sync,
+timezone round trip through `timestamptz`, permanent-failure handling and QA
+cleanup accounting.
+
+Measured, from the run that passed:
+
+- own scope only — 1 farm (`DEMO-FARM-01`), 2 plots, 0 plots outside it;
+  `DEMO-FARM-02` returns 0 rows;
+- offline create → `sync_state = failed`, `sync_error = network`, row kept;
+- reopening the database returns the same `client_event_id`, still queued;
+- reconnect → `sync1` wrote exactly **1** remote row; `sync2` wrote 0; forcing
+  the same record back to `pending` and syncing again still leaves exactly
+  **1** row, same `id`, same `device_id`, same `client_event_id`;
+- `occurred_at` 23:00 ICT stored as `2026-09-13T16:00:00+00:00`, read back as
+  23:00 on 13/09 — P1-1 confirmed fixed against a real Postgres `timestamptz`;
+- an activity pointing at an out-of-scope season fails `rlsDenied` once and is
+  **not** re-queued — P1-2 confirmed fixed against the real server.
+
+### P1-3 · Mobile cannot soft-delete a synced activity (NEW, found at runtime)
+
+`SupabaseSyncGateway.softDeleteActivity` sets `deleted_at` through PostgREST.
+The server rejects it with `42501 new row violates row-level security policy for
+table "activities"`, every time, for the row the same user has just inserted.
+
+Isolated with psql against the hosted database, same user, same row:
+
+```
+private.user_can_write_batch(batch) -> true
+update activities set deleted_at = null  -> OK, 1 row
+update activities set deleted_at = now() -> FAIL 42501
+```
+
+So `activities_update`'s own `WITH CHECK` is satisfied; what rejects the row is
+`activities_select`'s `deleted_at is null`, which Postgres applies as a check on
+the updated row. Any row a client soft-deletes becomes invisible to itself and
+the statement aborts. Farmer Web is unaffected because its delete goes through
+`DELETE /v1/activities/{id}` on FastAPI, which uses a privileged connection.
+
+Effect on the farmer: deleting a synced entry on the phone never succeeds. It is
+not data loss — the tombstone is preserved locally and, because of P1-2, it is
+classified permanent and stops being retried instead of hammering the server.
+
+Not fixed here. Both candidate fixes cross the line the brief drew: changing the
+RLS policy is a database contract change, and routing mobile deletes through the
+FastAPI endpoint is a new client-server dependency. Recommended direction, for a
+decision rather than a silent change:
+
+1. route mobile delete through `DELETE /v1/activities/{id}` (matches Farmer Web,
+   no schema change) — but see P1-4, which blocks it today; or
+2. add a policy that permits an update whose only effect is setting `deleted_at`.
+
+### P1-4 · Mobile activities carry `recorded_by = null` (NEW, found at runtime)
+
+`sync_service.dart` never sends `recorded_by`, so every mobile row lands with it
+null. `activities_insert` permits that (`recorded_by is null or = auth.uid()`),
+so nothing fails — but two things follow:
+
+- `ActivityWriteRepository.soft_delete` scopes its update with
+  `and recorded_by = %s`, so the backend delete endpoint cannot remove a mobile
+  row either; option 1 of P1-3 does not work until this is fixed;
+- an audit trail that identifies who recorded an entry is empty for mobile.
+
+The fix is client-side and allowed by the existing policy — send
+`recorded_by: auth.currentUser.id` — but it changes what lands in a column the
+backend and Management read, so it is reported, not applied.
+
+### QA data created and removed
+
+All rows created by the smoke were tagged `QA-RUNTIME-SMOKE` in `note`.
+
+| | created | cleaned | remaining |
+| --- | --- | --- | --- |
+| `activities` (+ `irrigation_events`) | 4 | 4 | 0 |
+| `devices` | 7 | 7 | 0 |
+| `production_batches` | 0 | 0 | 0 |
+
+The default `production_batch` on season `2e63e128` was created 2026-09-08, before
+this work, and was left alone. Cleanup had to run from the host with a privileged
+connection: `authenticated` has no `delete` grant on `activities` or `devices`,
+and soft delete is blocked by P1-3.
+
+## What was not verifiable
+
+
+**Release signing** — `android/app/build.gradle.kts:36` still points the release
+build at `signingConfigs.getByName("debug")` and there is no `key.properties`, so
+`app-release.apk` is debug-signed. A real release signature is **BLOCKED** until
+a keystore exists; it is not a pass.
+
+**A physical device** — everything above ran on an emulator. Camera capture
+(`camera_cv_screen`), runtime permission prompts and real cellular hand-off were
+not exercised.
+
+**The app's own UI flow** — the smoke drives the service and database layers that
+the screens call, not the widgets. Login, scope and logout were verified at the
+service layer; tapping through the six activity forms on the device was not.
