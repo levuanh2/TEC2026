@@ -50,6 +50,7 @@
   --ac-warning: oklch(47% 0.115 65);
   --ac-warning-soft: oklch(94% 0.04 82);
   --ac-danger: oklch(46% 0.15 32);
+  --ac-danger-deep: oklch(38% 0.15 32);
   --ac-danger-soft: oklch(94% 0.03 40);
 
   /* --- domain accents. Used as ink on an icon or a figure, never as a fill.
@@ -64,6 +65,9 @@
   --ac-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --ac-serif: Fraunces, "Be Vietnam Pro", ui-serif, Georgia, serif;
   --ac-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, monospace;
+
+  /* --- the scrim behind the one raised surface each app has -------------- */
+  --ac-scrim: oklch(24% 0.03 165 / 0.34);
 
   /* --- motion ----------------------------------------------------------- */
   --ac-ease: cubic-bezier(0.16, 1, 0.3, 1);

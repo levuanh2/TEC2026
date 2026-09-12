@@ -53,7 +53,7 @@
   --fw-amber: var(--ac-warning);
   --fw-amber-soft: var(--ac-warning-soft);
   --fw-danger: var(--ac-danger);
-  --fw-danger-deep: oklch(38% 0.15 32);
+  --fw-danger-deep: var(--ac-danger-deep);
   --fw-danger-soft: var(--ac-danger-soft);
 
   /* type ----------------------------------------------------------------- */
@@ -95,5 +95,5 @@
 
   /* the single raised surface in the app, and the scrim behind it */
   --fw-lift: 0 24px 48px -28px oklch(24% 0.03 165 / 0.42);
-  --fw-scrim: oklch(24% 0.03 165 / 0.34);
+  --fw-scrim: var(--ac-scrim);
 }

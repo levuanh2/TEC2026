@@ -400,7 +400,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .act__date { font-size: var(--fs-caption); color: var(--text-muted); text-align: right; white-space: nowrap; }
 
 /* --------------------------------------------------------------- Drawer */
-.drawer-overlay { position: fixed; inset: 0; background: oklch(24% 0.03 165 / .34); z-index: 40; display: flex; justify-content: flex-end; }
+.drawer-overlay { position: fixed; inset: 0; background: var(--ac-scrim); z-index: 40; display: flex; justify-content: flex-end; }
 .drawer { width: min(460px, 100%); background: var(--bg-elevated); height: 100%; box-shadow: var(--shadow-drawer); display: flex; flex-direction: column; }
 .drawer__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border-strong); }
 .drawer__head h3 { font-size: var(--fs-h3); font-weight: 700; color: var(--text-primary); }
@@ -411,7 +411,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .drawer__actions { display: flex; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
 
 /* ------------------------------------------------------------------ sheet */
-.sheet-overlay { position: fixed; inset: 0; background: oklch(24% 0.03 165 / .34); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.sheet-overlay { position: fixed; inset: 0; background: var(--ac-scrim); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .sheet { width: min(580px, 100%); max-height: min(88vh, 780px); background: var(--bg-elevated); border-radius: var(--radius-card); box-shadow: var(--shadow-raise); display: flex; flex-direction: column; }
 .sheet__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--border-strong); }
 .sheet__head h3 { font-size: var(--fs-h3); font-weight: 700; color: var(--text-primary); }
@@ -429,7 +429,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .confirm-dialog p { color: var(--text-secondary); font-size: var(--fs-sm); white-space: pre-line; }
 .confirm-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; }
 .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--ac-accent-ink); }
-.btn--danger:hover { background: oklch(38% 0.15 32); border-color: oklch(38% 0.15 32); }
+.btn--danger:hover { background: var(--ac-danger-deep); border-color: var(--ac-danger-deep); }
 
 /* ------------------------------------------------------------ activity form */
 .activity-form { display: grid; gap: 16px; }
