@@ -32,7 +32,7 @@ test.describe('authenticated Farmer real-data experience', () => {
     await expect(page).toHaveURL(/\/farmer$/)
     await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
     await expect(page.getByText('MOCK DATA — NOT PRODUCTION.')).toHaveCount(0)
-    await expect(page.locator('.fw-hero')).toBeVisible({ timeout: 60_000 })
+    await expect(page.locator('.fw-ledger')).toBeVisible({ timeout: 60_000 })
     await expect(page.getByRole('button', { name: 'Bón phân', exact: true })).toBeEnabled()
     await page.screenshot({ path: 'test-results/farmer-real-home-1440.png', fullPage: true })
 

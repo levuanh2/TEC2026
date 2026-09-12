@@ -17,7 +17,15 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/farmer')
   await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
-  await expect(page.getByText('Vụ đang canh tác', { exact: true })).toBeVisible()
+  // The Stat-Led ledger head. The figure never stands alone: it is paired with
+  // the words that say what it counts, and with the season it belongs to. (The
+  // old dark-green hero and its 'Vụ đang canh tác' eyebrow are gone.)
+  const ledger = page.locator('.fw-ledger')
+  await expect(ledger).toBeVisible()
+  await expect(ledger.getByText('ngày kể từ gieo sạ')).toBeVisible()
+  // Which of the two mock seasons is primary is business logic covered by the
+  // unit tests; here it only has to be one of them, rendered as the ledger head.
+  await expect(ledger.locator('#fw-hero-title')).toHaveText(/Hè Thu 2026|Thu Đông 2026/)
 
   // V2 shell: grouped desktop nav with one icon family (SVG, no emoji glyphs).
   const nav = page.getByRole('navigation', { name: 'Điều hướng nông hộ', exact: true })

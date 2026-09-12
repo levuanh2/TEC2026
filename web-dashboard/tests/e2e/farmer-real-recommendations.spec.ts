@@ -47,7 +47,7 @@ test.describe('authenticated Farmer real recommendations flow', () => {
     await expect(page).toHaveURL(/\/farmer$/)
     await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible({ timeout: 60_000 })
 
-    const section = page.locator('section.section', { has: page.getByRole('heading', { name: 'Khuyến nghị' }) })
+    const section = page.locator('section.fw-section', { has: page.getByRole('heading', { name: 'Khuyến nghị' }) })
     await expect(section).toBeVisible({ timeout: 60_000 })
     // Either a truthful empty state or real cards — never a fabricated number.
     await expect(section.getByText('Chưa có khuyến nghị định lượng').or(section.locator('.recommendation-card').first())).toBeVisible({ timeout: 60_000 })
