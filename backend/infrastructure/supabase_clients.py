@@ -29,6 +29,11 @@ from .config import Settings
 
 MAX_CLIENTS = 32
 TTL_SECONDS = 600.0
+# Matches postgrest-py's own default; a custom httpx client would otherwise
+# bring httpx's 5s default, and hosted rollup reads legitimately exceed that.
+REQUEST_TIMEOUT_SECONDS = 120.0
+# Enough concurrency for the handful of reads one page issues, per caller.
+MAX_CONNECTIONS = 20
 
 _lock = threading.Lock()
 _clients: OrderedDict[str, tuple[float, Any]] = OrderedDict()
@@ -37,6 +42,32 @@ _clients: OrderedDict[str, tuple[float, Any]] = OrderedDict()
 # page load asks for /me and /farmer/scope together), and without this each of
 # them would build its own ~450ms client just to have all but one thrown away.
 _building: dict[str, threading.Lock] = {}
+
+
+def _transport() -> Any:
+    """The HTTP client a cached Supabase client talks through.
+
+    HTTP/2 is deliberately off. Supabase offers it, and httpx will then put
+    every concurrent request on ONE multiplexed connection — which is fine for
+    a client used by one request at a time, but these clients are shared by all
+    of a caller's in-flight requests. Two consequences, both observed against
+    hosted Supabase: `httpcore`'s sync HTTP/2 connection lost track of a stream
+    under that concurrency and raised `KeyError: <stream id>` out of
+    `_response_closed`, and a single server-side close took down every read
+    multiplexed on it at once instead of one.
+
+    Plain keep-alive HTTP/1.1 with a real connection pool gives each concurrent
+    read its own connection, keeps the whole point of reuse (no TLS handshake
+    per request — measured ~187ms warm, against ~390ms cold), and confines a
+    dropped connection to the one read using it.
+    """
+    import httpx
+
+    return httpx.Client(
+        http2=False,
+        timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS),
+        limits=httpx.Limits(max_connections=MAX_CONNECTIONS, max_keepalive_connections=MAX_CONNECTIONS),
+    )
 
 
 def _close(client: Any) -> None:
@@ -98,9 +129,10 @@ def client_for_token(settings: Settings, token: str) -> Any:
             if client is not None:
                 return client
             from supabase import create_client
+            from supabase.lib.client_options import SyncClientOptions
 
             url, key = settings.require_publishable()
-            client = create_client(url, key)
+            client = create_client(url, key, options=SyncClientOptions(httpx_client=_transport()))
             client.postgrest.auth(token)
             now = time.monotonic()
             with _lock:

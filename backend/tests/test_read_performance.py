@@ -90,13 +90,16 @@ def _clean_cache(monkeypatch):
 
 def _patch_factory(monkeypatch, make):
     monkeypatch.setattr(supabase_clients, "create_client", make, raising=False)
+    # The fake ignores `options`, so building a real pooled httpx client for it
+    # is pure cost (a few hundred ms per fake, and a socket pool nothing closes).
+    monkeypatch.setattr(supabase_clients, "_transport", lambda: None)
     import supabase
 
     monkeypatch.setattr(supabase, "create_client", make)
 
 
 def test_same_token_reuses_one_client(monkeypatch):
-    _patch_factory(monkeypatch, lambda url, key: _Client())
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
     first = SupabaseReadRepository(SETTINGS, "token-a")
     second = SupabaseReadRepository(SETTINGS, "token-a")
     assert first.client is second.client
@@ -104,7 +107,7 @@ def test_same_token_reuses_one_client(monkeypatch):
 
 
 def test_a_different_token_never_borrows_another_callers_client(monkeypatch):
-    _patch_factory(monkeypatch, lambda url, key: _Client())
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
     a = SupabaseReadRepository(SETTINGS, "token-a")
     b = SupabaseReadRepository(SETTINGS, "token-b")
     assert a.client is not b.client
@@ -113,7 +116,7 @@ def test_a_different_token_never_borrows_another_callers_client(monkeypatch):
 
 
 def test_a_cached_client_is_never_rebound_to_a_second_token(monkeypatch):
-    _patch_factory(monkeypatch, lambda url, key: _Client())
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
     SupabaseReadRepository(SETTINGS, "token-a")
     reused = SupabaseReadRepository(SETTINGS, "token-a")
     # Re-authenticating a reused client is what would let one caller's pool
@@ -122,7 +125,7 @@ def test_a_cached_client_is_never_rebound_to_a_second_token(monkeypatch):
 
 
 def test_client_cache_is_bounded(monkeypatch):
-    _patch_factory(monkeypatch, lambda url, key: _Client())
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
     for i in range(supabase_clients.MAX_CLIENTS + 5):
         SupabaseReadRepository(SETTINGS, f"token-{i}")
     assert len(supabase_clients._clients) <= supabase_clients.MAX_CLIENTS
@@ -131,7 +134,7 @@ def test_client_cache_is_bounded(monkeypatch):
 def test_dropped_connection_is_retried_once_on_a_fresh_client(monkeypatch):
     clients: list[_Client] = []
 
-    def make(url, key):
+    def make(url, key, **_kw):
         client = _Client(rows={"farms": [{"id": "f1"}]}, fail_times=1 if not clients else 0)
         clients.append(client)
         return client
@@ -152,7 +155,7 @@ def test_retry_is_not_applied_to_an_injected_client(monkeypatch):
 
 
 def test_profiler_counts_every_round_trip_including_concurrent_ones(monkeypatch):
-    _patch_factory(monkeypatch, lambda url, key: _Client(rows={"farms": [], "plots": [], "crop_seasons": []}))
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client(rows={"farms": [], "plots": [], "crop_seasons": []}))
     profile = profiling.start()
     SupabaseReadRepository(SETTINGS, "token-a").farmer_scope()
     assert profile.calls == 3, "reads issued from worker threads must still be attributed"
@@ -162,7 +165,7 @@ def test_profiler_counts_every_round_trip_including_concurrent_ones(monkeypatch)
 
 
 def test_profiler_is_inert_outside_a_request(monkeypatch):
-    _patch_factory(monkeypatch, lambda url, key: _Client())
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
     profiling._current.set(None)
     SupabaseReadRepository(SETTINGS, "token-a")._many("farms")  # must not raise
 
@@ -176,7 +179,7 @@ def test_concurrent_first_reads_of_one_token_build_a_single_client(monkeypatch):
 
     started = threading.Barrier(3)
 
-    def make(url, key):
+    def make(url, key, **_kw):
         time.sleep(0.05)  # long enough for a racing thread to slip through
         return _Client()
 
@@ -202,7 +205,7 @@ def test_concurrent_first_reads_of_one_token_build_a_single_client(monkeypatch):
 def test_eviction_never_closes_a_client_a_request_may_still_be_using(monkeypatch):
     """Closing on eviction closed sockets out from under live requests
     (`RuntimeError: Cannot send a request, as the client has been closed`)."""
-    _patch_factory(monkeypatch, lambda url, key: _Client())
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
     in_use = SupabaseReadRepository(SETTINGS, "token-a").client
     for i in range(supabase_clients.MAX_CLIENTS + 2):
         SupabaseReadRepository(SETTINGS, f"other-{i}")
@@ -216,7 +219,7 @@ def test_access_checker_never_runs_one_callers_query_with_another_callers_token(
     `auth(A) -> auth(B) -> execute(A)` on one shared client."""
     from infrastructure.auth import SupabaseCropAccessChecker
 
-    _patch_factory(monkeypatch, lambda url, key: _Client(rows={"crop_seasons": [{"id": "s1"}]}))
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client(rows={"crop_seasons": [{"id": "s1"}]}))
     checker = SupabaseCropAccessChecker(SETTINGS)
     checker.assert_can_access("token-a", "s1")
     checker.assert_can_access("token-b", "s1")
@@ -224,3 +227,30 @@ def test_access_checker_never_runs_one_callers_query_with_another_callers_token(
     bound = {client.bound_token for _, client in supabase_clients._clients.values()}
     assert bound == {"token-a", "token-b"}, "each caller must get its own bound client"
     assert len(supabase_clients._clients) == 2
+
+
+def test_pooled_clients_avoid_http2_multiplexing_and_keep_a_real_timeout():
+    """These clients are shared by all of one caller's in-flight requests.
+
+    Over HTTP/2 httpx would put every one of them on a single multiplexed
+    connection: `httpcore`'s sync HTTP/2 connection then lost track of a stream
+    and raised `KeyError: <stream id>` out of `_response_closed`, and one
+    server-side close took down every read on it at once. Plain keep-alive
+    HTTP/1.1 gives each concurrent read its own connection and still skips the
+    TLS handshake, which is where the time was.
+
+    The timeout is asserted too: supplying a custom httpx client replaces
+    postgrest-py's 120s default with httpx's 5s one, and hosted rollup reads
+    legitimately take longer than that.
+    """
+    transport = supabase_clients._transport()
+    try:
+        assert getattr(transport, "_transport", None) is not None
+        assert transport.timeout.read == supabase_clients.REQUEST_TIMEOUT_SECONDS
+        assert transport.timeout.connect == supabase_clients.REQUEST_TIMEOUT_SECONDS
+        # http2 off -> httpcore opens one connection per concurrent request
+        pool = transport._transport._pool
+        assert pool._http2 is False
+        assert pool._max_connections == supabase_clients.MAX_CONNECTIONS
+    finally:
+        transport.close()
