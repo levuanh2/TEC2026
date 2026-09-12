@@ -248,6 +248,52 @@ integration-level fake-cursor test đã đủ chứng minh SQL đúng cột/bả
 xem `test_activity_writes_expansion.py::test_postgres_repository_inserts_into_the_correct_detail_table`).
 Không đụng M05/M03/Carbon methodology/Management Web.
 
+## Round 15 (2026-09-12) — Farmer Web V2: full redesign + loading architecture (Claude)
+
+User feedback sau round 14 là UX acceptance feedback, không phải bug report:
+Farmer Web "nhìn gần như không đổi", navbar/icon xấu, vẫn thấy chậm.
+Không tính round trước là PASS.
+
+Đo BEFORE bằng `git worktree` tại `5fbebc5` (không stash đè cây đang dirty),
+junction `node_modules`, build + `vite preview` cả hai bản, chạy cùng một
+script screenshot/perf → so sánh thật, không ước lượng.
+
+Phát hiện ngoài dự kiến: sau khi bỏ hết waterfall, thứ chặn first paint lớn
+nhất còn lại là stylesheet Google Fonts render-blocking (~200ms mỗi cold
+load). Sửa bằng `media="print"`/`onload` + noscript, không bỏ font.
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/api.py`, `backend/schemas.py`, `backend/infrastructure/read_repo.py`, `backend/tests/test_read_repository.py`, `docs/API_CATALOG.md`, `docs/openapi.json` | — (released) | `/v1/farmer/scope` read-composition (gộp farms+plots+crop_seasons cho đúng RLS scope). Composition thuần: không business logic mới, không công thức Carbon/resource. | **DONE**: backend 263 passed (258+5). Verified trên hosted: own scope 200 chỉ trả DEMO-FARM-01, unauth 401. |
+| `web-dashboard/src/farmer/**`, `src/App.tsx`, `src/api/{farms,me,auth}.ts`, `src/styles.css`, `index.html`, `tests/e2e/*` | — (released) | Farmer V2: shell/nav/icon system (Lucide), recompose toàn bộ page, SWR read-cache + dedupe + bounded prefetch, viewer hint, webfont non-blocking. Không đổi API contract/payload/auth/RLS. | **DONE**: vitest 117 (từ 90), tsc sạch, build sạch, mock Playwright 2/2, real Farmer E2E 1/1. |
+
+Kết quả đo thật (local backend :8010 → hosted Supabase, production preview,
+identity `qa-farmer-fw1`, scope DEMO-FARM-01):
+
+| | BEFORE | AFTER |
+|---|---|---|
+| login → shell | 7866ms | 2884ms |
+| login → complete | 22377ms | 12653ms |
+| Home shell paint | 2389ms | 154ms |
+| Home useful content | 2405ms | 170ms |
+| Farm detail useful | 9365ms | 2009ms |
+| API request Home/Farms/Farm | 13/9/11 | 7/2/2 |
+| Duplicate API call mỗi màn | 4–6 | **0** |
+
+StrictMode: dev cũng dupApi=0 — in-flight dedupe nuốt double-effect, nên
+không đổ lỗi cho StrictMode nữa (đúng như §31 yêu cầu chứng minh).
+
+Management: 5/5 screenshot **pixel-identical** (sha256) trước/sau — chỉ xoá
+rule `.farmer-*` chết khỏi `styles.css`, không đụng style Management.
+Các class `.farmer-farm-card`/`.farmer-plot-card`/`.cv-*`/`.recommendation-card`
+GIỮ LẠI trong JSX vì là selector hook của real E2E spec, dù không còn style.
+
+Security regression (hosted, token thật): own scope 200, cross-scope
+DEMO-FARM-02/03 → 404 (không phải 403, không lộ tồn tại), unauth → 401.
+
+Không tạo QA user mới (user chỉ định dùng identity đã verify sẵn). Không
+chạy write E2E round này — không sinh thêm rác QA trên hosted.
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
