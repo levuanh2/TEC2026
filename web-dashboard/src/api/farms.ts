@@ -15,6 +15,16 @@ export async function getPlot(id: string): Promise<Plot | undefined> { return us
 // --- Farm-level rollups (brief §7 "hiệu suất riêng 1 farm", §22 no client math) ---
 const farmSeason = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, status: x.status })
 
+export interface FarmerScope { farms: Farm[]; plots: Plot[]; seasons: CropSeason[] }
+
+/** Whole visible farm -> plot -> season hierarchy in one request (replaces the
+ * farms -> plots-per-farm -> seasons-per-plot waterfall). */
+export async function getFarmerScope(): Promise<FarmerScope> {
+  if (usingMockData) return { farms, plots, seasons: cropSeasons }
+  const x = await apiRequest<{ farms: any[]; plots: any[]; crop_seasons: any[] }>('/v1/farmer/scope')
+  return { farms: x.farms.map(farm), plots: x.plots.map(plot), seasons: x.crop_seasons.map(farmSeason) }
+}
+
 export async function getFarmCropSeasons(farmId: string): Promise<CropSeason[]> {
   if (usingMockData) { const ids = plots.filter((p) => p.farmId === farmId).map((p) => p.id); return cropSeasons.filter((s) => ids.includes(s.plotId)) }
   return (await apiRequest<{ items: any[] }>(`/v1/farms/${farmId}/crop-seasons`)).items.map(farmSeason)
