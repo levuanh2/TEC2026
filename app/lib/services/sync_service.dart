@@ -136,8 +136,16 @@ class SyncService {
         final serverActivityId = await _gateway.upsertActivity({
           'production_batch_id': batchId,
           'activity_type': activity.type,
-          'occurred_at': activity.occurredAt.toIso8601String(),
-          'recorded_at': activity.createdAt.toIso8601String(),
+          // `activities.occurred_at` / `recorded_at` là `timestamptz` — mốc
+          // thời gian THẬT, không phải ngày lịch. `DateTime` ở đây là giờ máy
+          // (giờ VN), và `toIso8601String()` trên một DateTime local sinh chuỗi
+          // KHÔNG có `Z` cũng không có offset; Postgres đọc chuỗi trần đó theo
+          // giờ phiên (UTC), nên 23:00 ICT bị lưu thành 23:00Z và đọc lại thành
+          // 06:00 hôm sau — lệch NGÀY canh tác của nông dân.
+          // `.toUtc()` gửi đúng mốc (23:00 ICT → 16:00Z); tầng hiển thị đã gọi
+          // `.toLocal()` (AppFormat) nên vòng đọc–ghi trả lại đúng giờ đã nhập.
+          'occurred_at': activity.occurredAt.toUtc().toIso8601String(),
+          'recorded_at': activity.createdAt.toUtc().toIso8601String(),
           'source': 'mobile_offline',
           'device_id': deviceId,
           'client_event_id': activity.clientEventId,
