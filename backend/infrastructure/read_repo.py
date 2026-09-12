@@ -6,10 +6,12 @@ service-role key and never accepts a user id supplied by the frontend.
 """
 from __future__ import annotations
 
+import contextvars
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from . import profiling, supabase_clients
 from .config import Settings
 
 DETAIL_TABLES = {
@@ -32,33 +34,68 @@ _COST_FIELD_BY_ACTIVITY = {
     "harvest": "total_cost_vnd",
 }
 
+try:  # httpx ships with supabase; a fake-client test never needs it
+    import httpx
+    _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (httpx.TransportError,)
+except Exception:  # noqa: BLE001 - absence just disables the retry below
+    _TRANSPORT_ERRORS = ()
+
+
 class ReadNotFoundError(Exception): pass
 
 class SupabaseReadRepository:
     def __init__(self, settings: Settings, token: str, client: Any | None = None):
+        self._settings = settings
+        self._pooled = client is None
         if client is None:
-            from supabase import create_client
-            url, key = settings.require_publishable()
-            client = create_client(url, key)
-        self.client = client
-        self.client.postgrest.auth(token)
+            # Reused per caller token (see supabase_clients): already bound to
+            # this exact JWT, so it must not be re-authenticated here.
+            self.client = supabase_clients.client_for_token(settings, token)
+        else:
+            self.client = client
+            self.client.postgrest.auth(token)
         self.token = token
 
+    def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
+        """Run one PostgREST read, retrying once on a dead connection.
+
+        Reusing a client means reusing its keep-alive connections, and Supabase
+        closes an idle one whenever it likes; httpx then raises
+        `RemoteProtocolError: Server disconnected` on the next read that
+        happens to pick it. These reads are idempotent, so the right answer is
+        to throw the stale pool away and ask again — not to fail a whole page
+        section (and, before the retry existed, take a Farmer screen's `/me` or
+        `/scope` down with it).
+        """
+        with profiling.observe(label):
+            try:
+                return build(self.client).execute().data or []
+            except _TRANSPORT_ERRORS:
+                if not self._pooled:
+                    raise
+                self.client = supabase_clients.renew(self._settings, self.token)
+                return build(self.client).execute().data or []
+
     def _many(self, table: str, **filters: str) -> list[dict[str, Any]]:
-        query = self.client.table(table).select("*")
-        for key, value in filters.items(): query = query.eq(key, value)
-        return query.execute().data or []
+        def build(client: Any) -> Any:
+            query = client.table(table).select("*")
+            for key, value in filters.items(): query = query.eq(key, value)
+            return query
+        return self._select(f"select {table}", build)
 
     def _many_in(self, table: str, column: str, values: list[str]) -> list[dict[str, Any]]:
         """Same as `_many` but for `column IN (values)` — one hosted-Supabase
         round trip for many parent ids instead of one round trip per id.  The
         per-id loop this replaces is the actual measured cause of the
         multi-second/minute organization rollup latency (see
-        docs/PERFORMANCE_INVESTIGATION.md) — RLS still applies identically,
+        docs/FARMER_PERFORMANCE_ROUND4.md) — RLS still applies identically,
         this only changes how many requests fetch the same allowed rows.
         """
         if not values: return []
-        return self.client.table(table).select("*").in_(column, values).execute().data or []
+        return self._select(
+            f"select {table} in",
+            lambda client: client.table(table).select("*").in_(column, values),
+        )
 
     def _one(self, table: str, id: str) -> dict[str, Any]:
         rows = self._many(table, id=id)
@@ -71,7 +108,7 @@ class SupabaseReadRepository:
         request through this same caller-bound client, so RLS/auth are
         unaffected; this only overlaps otherwise-sequential network latency
         (the measured cause of multi-second rollups, see
-        docs/PERFORMANCE_INVESTIGATION.md round 3). Results come back in the
+        docs/FARMER_PERFORMANCE_ROUND4.md). Results come back in the
         same order as `thunks`; if any raised, that exception propagates
         (after every thread has finished) instead of a value at that index —
         callers that must gate on one result before trusting another (e.g.
@@ -79,12 +116,25 @@ class SupabaseReadRepository:
         same order they matter, since `.result()` re-raises at that point.
         """
         if len(thunks) == 1: return (thunks[0](),)
+        # ThreadPoolExecutor does not carry the caller's context into its
+        # workers, so each thunk runs inside its own copy of it — that is what
+        # keeps request-scoped state (the read profiler) attributed to the
+        # request that issued these reads instead of silently dropped. One
+        # copy per thunk, not one shared copy: a `Context` cannot be entered
+        # by two threads at once.
         with ThreadPoolExecutor(max_workers=len(thunks)) as pool:
-            futures = [pool.submit(t) for t in thunks]
+            futures = [pool.submit(contextvars.copy_context().run, t) for t in thunks]
             return tuple(f.result() for f in futures)
 
     def user_id(self) -> str:
-        user = self.client.auth.get_user(self.token).user
+        with profiling.observe("auth get_user"):
+            try:
+                user = self.client.auth.get_user(self.token).user
+            except _TRANSPORT_ERRORS:
+                if not self._pooled:
+                    raise
+                self.client = supabase_clients.renew(self._settings, self.token)
+                user = self.client.auth.get_user(self.token).user
         if user is None: raise ReadNotFoundError("user")
         return str(user.id)
 
