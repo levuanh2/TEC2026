@@ -1,0 +1,94 @@
+/* Hallmark · route: custom (tuned) · macrostructure: Stat-Led (+ Index-First for lists)
+ * genre: editorial · vibe: "grounded, field-worked, almanac-precise, warm"
+ * anchor: AgriCarbon forest #1d5a40 = oklch(42.1% 0.077 162) — hue kept, chroma
+ *         lifted to the 0.12 signal floor so the accent can carry state.
+ * paper: oklch(95.8% 0.014 88) · accent: oklch(45% 0.13 160)
+ * display: Fraunces · body: Be Vietnam Pro
+ * axes: light paper / classical-serif display / chromatic-other (forest-green)
+ *
+ * The composition language is a FIELD LEDGER, not a dashboard: one paper
+ * surface, hairline rules instead of card borders, a date rail in the left
+ * margin, tabular figures throughout. There is exactly ONE raised surface in
+ * the whole Farmer app (overlays) — everything else sits on the sheet.
+ * Scoped to `.fw` so Management (styles.css) is untouched.
+ */
+.fw {
+  /* paper — warm oat, never grey-sage ------------------------------------ */
+  --fw-paper: oklch(95.8% 0.014 88);
+  --fw-paper-2: oklch(93.2% 0.017 88);
+  --fw-paper-3: oklch(90% 0.02 86);
+  --fw-raise: oklch(98.4% 0.008 90);
+
+  /* ink — botanical, warm near-black green ------------------------------- */
+  --fw-ink: oklch(22% 0.035 160);
+  --fw-ink-2: oklch(34% 0.03 160);
+  --fw-muted: oklch(50% 0.024 158);
+
+  /* rules — the ledger lines. Three weights carry all the structure. ------ */
+  --fw-rule: oklch(88% 0.012 105);
+  --fw-rule-2: oklch(78% 0.018 125);
+  --fw-rule-3: oklch(62% 0.03 140);
+
+  /* accent — AgriCarbon forest, hue held at 160-163 ---------------------- */
+  --fw-accent: oklch(45% 0.13 160);
+  --fw-accent-deep: oklch(33% 0.1 163);
+  --fw-accent-soft: oklch(92% 0.035 150);
+  --fw-accent-ink: oklch(98.4% 0.008 90);
+  --fw-focus: oklch(48% 0.19 160);
+
+  /* field hues — activity identity lives in INK, never in a filled tile --- */
+  --fw-leaf: oklch(48% 0.12 140);
+  --fw-soil: oklch(44% 0.055 70);
+  --fw-water: oklch(46% 0.09 232);
+  --fw-terracotta: oklch(48% 0.12 40);
+  --fw-straw: oklch(48% 0.09 85);
+  --fw-grain: oklch(46% 0.1 60);
+
+  /* state ---------------------------------------------------------------- */
+  --fw-amber: oklch(47% 0.115 65);
+  --fw-amber-soft: oklch(93% 0.045 82);
+  --fw-danger: oklch(46% 0.15 32);
+  --fw-danger-deep: oklch(38% 0.15 32);
+  --fw-danger-soft: oklch(93% 0.035 40);
+
+  /* type ----------------------------------------------------------------- */
+  --fw-display: Fraunces, "Be Vietnam Pro", ui-serif, Georgia, serif;
+  --fw-body: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --fw-text-xs: 12px;
+  --fw-text-sm: 13px;
+  --fw-text-base: 15px;
+  --fw-text-md: 17px;
+  --fw-text-lg: 21px;
+  --fw-text-xl: 27px;
+  --fw-text-2xl: 34px;
+  --fw-figure: clamp(56px, 9vw, 86px);
+
+  /* 4pt space scale ------------------------------------------------------ */
+  --fw-space-2: 2px;
+  --fw-space-4: 4px;
+  --fw-space-6: 6px;
+  --fw-space-8: 8px;
+  --fw-space-12: 12px;
+  --fw-space-16: 16px;
+  --fw-space-20: 20px;
+  --fw-space-24: 24px;
+  --fw-space-32: 32px;
+  --fw-space-40: 40px;
+  --fw-space-56: 56px;
+
+  /* structure ------------------------------------------------------------ */
+  --fw-rail: 104px;        /* the date rail in the left margin */
+  --fw-top: 56px;
+  --fw-measure: 68ch;
+  --fw-radius: 3px;        /* controls only — the sheet itself is square */
+  --fw-radius-lg: 4px;
+
+  /* motion — one primitive, no decoration -------------------------------- */
+  --fw-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --fw-dur: 140ms;
+
+  /* the single raised surface in the app, and the scrim behind it */
+  --fw-lift: 0 24px 48px -28px oklch(22% 0.035 160 / 0.5);
+  --fw-scrim: oklch(22% 0.035 160 / 0.38);
+}
