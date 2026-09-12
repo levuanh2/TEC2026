@@ -6,6 +6,7 @@ import '../models/crop_season.dart';
 import '../models/farm.dart';
 import '../models/plot.dart';
 import '../models/sync_queue_item.dart';
+import '../services/sync_errors.dart';
 
 /// SQLite cục bộ — nguồn sự thật khi nhập liệu offline (NFR-01).
 ///
@@ -23,6 +24,23 @@ import '../models/sync_queue_item.dart';
 ///
 /// Đối tượng này là một *facade ổn định*: các màn giữ tham chiếu `services.db`
 /// cố định, còn `Database` bên trong bị đóng/mở lại khi đổi user.
+/// Mệnh đề chọn bản ghi hàng đợi CÒN đáng gửi lại.
+///
+/// `pending` luôn được chọn. `failed` chỉ được chọn lại khi lỗi lần trước là
+/// TẠM THỜI **và** chưa vượt trần số lần thử. Trước đây mệnh đề là
+/// `sync_state in ('pending','failed')`, nên một bản ghi bị RLS từ chối hoặc
+/// sai dữ liệu bị chọn lại ở MỌI vòng đồng bộ, mãi mãi — bộ phân loại lỗi đã
+/// có sẵn và đúng, nó chỉ chưa được dùng làm cổng chặn.
+String _retryableWhere(
+    {String prefix = '', String errorColumn = 'sync_error_code'}) {
+  final p = prefix.isEmpty ? '' : '$prefix.';
+  final codes = kTransientErrorCodes.map((c) => "'$c'").join(', ');
+  return "(${p}sync_state = 'pending' "
+      "or (${p}sync_state = 'failed' "
+      "and coalesce($p$errorColumn, 'unknown') in ($codes) "
+      "and ${p}retry_count < $kMaxSyncAttempts))";
+}
+
 class LocalDatabase {
   LocalDatabase({DatabaseFactory? factory, String? directoryOverride})
       : _factory = factory,
@@ -426,7 +444,7 @@ class LocalDatabase {
   Future<List<Plot>> listPendingPlots() async {
     final rows = await _require.query(
       'plots',
-      where: "sync_state in ('pending', 'failed')",
+      where: _retryableWhere(),
       orderBy: 'created_at',
     );
     return rows.map(Plot.fromRow).toList();
@@ -630,7 +648,7 @@ class LocalDatabase {
   Future<List<CropSeason>> listPendingCropSeasons() async {
     final rows = await _require.query(
       'crop_seasons',
-      where: "sync_state in ('pending', 'failed')",
+      where: _retryableWhere(),
       orderBy: 'created_at',
     );
     return rows.map(CropSeason.fromRow).toList();
@@ -731,7 +749,7 @@ class LocalDatabase {
   Future<List<Activity>> listPendingActivities() async {
     final rows = await _require.query(
       'activities',
-      where: "sync_state in ('pending', 'failed')",
+      where: _retryableWhere(errorColumn: 'sync_error'),
       orderBy: 'created_at',
     );
     return rows.map(Activity.fromLocalMap).toList();
@@ -794,7 +812,7 @@ class LocalDatabase {
 
     final plots = await _require.query(
       'plots',
-      where: "sync_state in ('pending','failed')",
+      where: _retryableWhere(),
       orderBy: 'created_at',
     );
     out.addAll(plots.map(SyncQueueItem.fromPlotRow));

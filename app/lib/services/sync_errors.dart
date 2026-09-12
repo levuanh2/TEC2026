@@ -52,6 +52,38 @@ SyncErrorKind classifySyncError(Object error) {
 
 String syncErrorCode(Object error) => classifySyncError(error).name;
 
+/// Số lần thử lại tối đa cho một lỗi TẠM THỜI trước khi hàng đợi thôi tự chọn
+/// lại bản ghi đó. Nông dân vẫn gửi tay được từ màn hình Đồng bộ.
+const int kMaxSyncAttempts = 5;
+
+extension SyncErrorKindRetry on SyncErrorKind {
+  /// Thử lại có cơ hội thành công mà KHÔNG cần ai sửa gì.
+  ///
+  /// `notConfirmed` nằm ở đây vì idempotency `(device_id, client_event_id)` bảo
+  /// vệ: lần thử lại tìm thấy bản ghi cũ thay vì tạo bản trùng.
+  /// `unknown` cũng thử lại — nhưng có trần, nên một lỗi lạ không thành bão
+  /// request.
+  bool get isTransient => switch (this) {
+        SyncErrorKind.network => true,
+        SyncErrorKind.notConfirmed => true,
+        SyncErrorKind.unknown => true,
+        SyncErrorKind.rlsDenied => false,
+        SyncErrorKind.auth => false,
+        SyncErrorKind.duplicate => false,
+        SyncErrorKind.validation => false,
+      };
+
+  /// Thử lại y nguyên payload/phiên hiện tại sẽ luôn hỏng như cũ — phải có ai
+  /// đó can thiệp (cấp quyền, đăng nhập lại, sửa dữ liệu).
+  bool get isPermanent => !isTransient;
+}
+
+/// Tên các lỗi TẠM THỜI, dạng chuỗi để ghép thẳng vào mệnh đề SQL của hàng đợi.
+final List<String> kTransientErrorCodes = [
+  for (final k in SyncErrorKind.values)
+    if (k.isTransient) k.name,
+];
+
 /// Thông báo tiếng Việt cho nông dân — KHÔNG kèm exception thô.
 String syncErrorMessage(SyncErrorKind kind) {
   switch (kind) {
