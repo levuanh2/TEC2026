@@ -1,51 +1,52 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
-test('Farmer shell navigation and Quick Entry write UI render correctly (mock data)', async ({ page }) => {
+const noHorizontalOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+
+test('Farmer V2 shell, navigation, pages and activity forms render correctly (mock data)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/farmer')
   await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
   await expect(page.getByText('Vụ đang canh tác', { exact: true })).toBeVisible()
 
-  // FW-2 Part 3: seeding/pesticide/straw_management are no longer "Sắp có" —
-  // all six Quick Entry types are enabled buttons.
-  await expect(page.getByRole('button', { name: 'Gieo sạ', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Bón phân', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Tưới nước', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Thuốc BVTV', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Rơm rạ', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Thu hoạch', exact: true })).toBeEnabled()
-  await page.screenshot({ path: 'test-results/farmer-home-1440.png', fullPage: true })
+  // V2 shell: grouped desktop nav with one icon family (SVG, no emoji glyphs).
+  const nav = page.getByRole('navigation', { name: 'Điều hướng nông hộ', exact: true })
+  for (const label of ['Tổng quan', 'Nhật ký', 'Ruộng', 'Hiệu suất', 'Tôi']) {
+    await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible()
+  }
+  await expect(nav.getByRole('link', { name: 'Tổng quan', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(nav.locator('svg')).toHaveCount(5)
+  await expect(page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })).toBeHidden()
+
+  for (const label of ['Gieo sạ', 'Bón phân', 'Tưới nước', 'Thuốc BVTV', 'Rơm rạ', 'Thu hoạch']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toBeEnabled()
+  }
+  await page.screenshot({ path: 'test-results/farmer-v2-home-1440.png', fullPage: true })
 
   await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Bón phân' })).toBeVisible()
-  // Required fields carry a visible "*" (brief Part A §12 — required/optional distinction).
-  await expect(page.getByRole('dialog', { name: 'Bón phân' }).locator('.form-field__required').first()).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-fertilizer-form-1440.png', fullPage: true })
+  const fertilizer = page.getByRole('dialog', { name: 'Bón phân' })
+  await expect(fertilizer).toBeVisible()
+  await expect(fertilizer.locator('.form-field__required').first()).toBeVisible()
+  await expect(fertilizer.getByText('Không bắt buộc').first()).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()
-  await expect(page.getByRole('dialog', { name: 'Bón phân' })).toHaveCount(0)
+  await expect(fertilizer).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Tưới nước', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-irrigation-form-1440.png', fullPage: true })
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Thu hoạch', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-harvest-form-1440.png', fullPage: true })
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toHaveCount(0)
 
-  // FW-2 Part 3: seeding / pesticide / straw_management forms.
   await page.getByRole('button', { name: 'Gieo sạ', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Gieo sạ' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-seeding-form-1440.png', fullPage: true })
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Gieo sạ' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Thuốc BVTV', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Thuốc BVTV' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-pesticide-form-1440.png', fullPage: true })
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Thuốc BVTV' })).toHaveCount(0)
 
@@ -54,86 +55,88 @@ test('Farmer shell navigation and Quick Entry write UI render correctly (mock da
   // Selecting "Đốt" (burned) shows a neutral factual notice, never a fake CO2e number.
   await page.getByLabel('Cách xử lý rơm rạ').selectOption('burned')
   await expect(page.getByText('sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng')).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-straw-form-1440.png', fullPage: true })
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toHaveCount(0)
 
-  // M03 CV entry point (brief FW M03 §19) — opens, shows the picker, closes
-  // cleanly. No file is chosen: usingMockData guards uploadAndInferLeaf from
-  // ever hitting the real API in mock mode.
+  // CV: picker opens, analyze stays disabled with no file, disclaimer always visible.
   await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Phân tích ảnh' })).toBeDisabled()
-  await page.screenshot({ path: 'test-results/farmer-cv-check-1440.png', fullPage: true })
+  await expect(page.getByText('Kết quả chỉ mang tính hỗ trợ, chưa được xác nhận thực địa.')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toHaveCount(0)
 
-  await page.getByRole('link', { name: /Ruộng/ }).first().click()
+  await nav.getByRole('link', { name: 'Nhật ký', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Nhật ký canh tác', level: 1 })).toBeVisible()
+  await expect(nav.getByRole('link', { name: 'Nhật ký', exact: true })).toHaveAttribute('aria-current', 'page')
+
+  await nav.getByRole('link', { name: 'Ruộng', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Các ruộng trong phạm vi của bạn', level: 1 })).toBeVisible()
-  // Farm card now surfaces plot count/area/active-season count (brief Part A §2).
   await expect(page.getByText(/thửa$/).first()).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-farms-1440.png', fullPage: true })
   await page.getByRole('link', { name: 'Xem ruộng' }).first().click()
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-  // Farm detail is a real Hero (h1) with a breadcrumb back to the farm list.
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Ruộng của tôi' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-farm-detail-1440.png', fullPage: true })
-  await page.getByRole('link', { name: 'Thửa A-01' }).click()
+  // Scoped to the plot card: the topbar season chip and the season card also carry the plot name.
+  await page.locator('.fw-plot', { hasText: 'Thửa A-01' }).click()
   await expect(page.getByRole('heading', { name: 'Thửa A-01', level: 1 })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-plot-1440.png', fullPage: true })
-  // .last() disambiguates from the Hero's own "Vụ đang canh tác: Hè Thu 2026 →"
-  // shortcut link above the season list — both match the loose substring name.
+  // .last(): the topbar season chip and the "current season" card also carry the name.
   await page.getByRole('link', { name: 'Hè Thu 2026' }).last().click()
   await expect(page.getByRole('tab', { name: 'Nhật ký' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-season-1440.png', fullPage: true })
+  await expect(page.getByRole('tab', { name: 'Tổng quan' })).toHaveAttribute('aria-current', 'page')
+  // Season pages keep the "Ruộng" nav destination active.
+  await expect(nav.getByRole('link', { name: 'Ruộng', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Mức đầy đủ dữ liệu' })).toBeVisible()
 
   await page.getByRole('tab', { name: 'Nhật ký' }).click()
   await expect(page.getByRole('heading', { name: 'Nhật ký của vụ này' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '+ Ghi hoạt động' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-journal-1440.png', fullPage: true })
-
-  // Journal row detail drawer -> supported-type Edit/Delete affordances (FW-2 §19/§22).
-  await page.getByRole('button', { name: /Tưới nước|irrigation/i }).click()
+  await expect(page.getByRole('button', { name: 'Ghi hoạt động' }).first()).toBeVisible()
+  await page.locator('.fw-entry__open').first().click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-journal-detail-1440.png', fullPage: true })
   await expect(page.getByRole('button', { name: 'Chỉnh sửa' })).toBeVisible()
   await page.getByRole('button', { name: 'Xóa hoạt động' }).click()
   await expect(page.getByRole('alertdialog')).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-delete-confirm-1440.png', fullPage: true })
   await page.getByRole('alertdialog').getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await page.getByRole('button', { name: 'Đóng' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await page.getByRole('tab', { name: 'Hiệu suất' }).click()
   await expect(page.getByRole('heading', { name: 'Hiệu suất vụ này' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-performance-1440.png', fullPage: true })
+  // Mock metrics are all null: every card must say so, never show a fabricated 0.
+  await expect(page.locator('.fw-metric__empty')).toHaveCount(4)
 
   await page.getByRole('tab', { name: 'Carbon' }).click()
   await expect(page.getByText('Chưa có kết quả phát thải hợp lệ cho vụ này')).toBeVisible()
   await expect(page.getByRole('button', { name: /Tính lại/i })).toHaveCount(0)
-  await page.screenshot({ path: 'test-results/farmer-carbon-1440.png', fullPage: true })
+
+  await nav.getByRole('link', { name: 'Hiệu suất', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Hiệu suất vụ của tôi', level: 1 })).toBeVisible()
+  await nav.getByRole('link', { name: 'Tôi', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Phạm vi truy cập' })).toBeVisible()
+
   for (const width of [1024, 768, 390]) {
     await page.setViewportSize({ width, height: 844 })
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
   }
-  await page.screenshot({ path: 'test-results/farmer-carbon-390.png', fullPage: true })
 
+  // 390: real bottom navigation, no squeezed sidebar.
   await page.goto('/farmer')
-  await page.screenshot({ path: 'test-results/farmer-home-390.png', fullPage: true })
+  const bottom = page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })
+  await expect(bottom).toBeVisible()
+  await expect(nav).toBeHidden()
+  await expect(bottom.getByRole('link')).toHaveCount(5)
+  await expect(bottom.getByRole('link', { name: 'Tổng quan' })).toHaveAttribute('aria-current', 'page')
+  await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
+  await page.screenshot({ path: 'test-results/farmer-v2-home-390.png', fullPage: true })
+
   await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Bón phân' })).toBeVisible()
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: 'test-results/farmer-fertilizer-form-390.png', fullPage: true })
+  await expect(page.getByRole('button', { name: 'Lưu hoạt động' })).toBeInViewport()
+  await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
   await page.keyboard.press('Escape')
 
-  await page.getByRole('button', { name: 'Thu hoạch', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/farmer-harvest-form-390.png', fullPage: true })
-  await page.keyboard.press('Escape')
-
-  await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
-  await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: 'test-results/farmer-cv-check-390.png', fullPage: true })
+  await bottom.getByRole('link', { name: 'Nhật ký' }).click()
+  await expect(page.getByRole('heading', { name: 'Nhật ký canh tác', level: 1 })).toBeVisible()
+  await expect(bottom.getByRole('link', { name: 'Nhật ký' })).toHaveAttribute('aria-current', 'page')
+  await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
 })

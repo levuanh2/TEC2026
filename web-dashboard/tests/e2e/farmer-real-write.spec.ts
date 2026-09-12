@@ -8,29 +8,17 @@ const email = process.env.FARMER_REAL_E2E_EMAIL
 const password = process.env.FARMER_REAL_E2E_PASSWORD
 const enabled = process.env.REAL_E2E === 'true' && process.env.FARMER_REAL_E2E === 'true' && process.env.FARMER_REAL_WRITE_E2E === 'true' && Boolean(email && password)
 
-/** Timeline rows don't render `note`, only the type-specific summary — so a
- * journal-wide text marker only works for fertilizer (whose summary shows the
- * farmer's free-text fertilizer name). Irrigation/harvest are located by
- * being the chronologically-last row in their group (brief FW-2 journal is a
- * date-sorted farmer log; a "today"-dated QA entry sorts last), then
- * confirmed by opening the drawer and reading the `Ghi chú` marker. */
-function lastRowIn(page: Page, groupLabel: string) {
-  return page.locator('.timeline__group').filter({ has: page.locator('.timeline__label', { hasText: groupLabel }) }).locator('.act').last()
+/** Farmer V2 timeline cards render the free-text note, so every QA row is
+ * located by its unique marker rather than by list position. */
+function markedRow(page: Page, text: string) {
+  return page.locator('.fw-entry', { hasText: text })
 }
 
 /**
- * React StrictMode (dev server) double-invokes effects, so every
- * `useAsync().reload()` fires two real network requests to the same
- * endpoint — only the second updates app state, but both hit the backend
- * and both land in `log`. Racing a single `waitForResponse` against that is
- * unreliable (an earlier step's orphaned duplicate can be mistaken for a
- * later step's reload).
- *
- * `afterCount` is `log.length` captured right before the action that should
- * trigger a new reload — the function first waits for growth PAST that
- * count (so it never returns stale data if the new request just hasn't
- * landed yet), then waits for growth to stop for a quiet window (so it
- * absorbs the duplicate and any trailing reload before reading the tail).
+ * React StrictMode (dev server) double-invokes effects, so a reload can fire
+ * two real network requests to the same endpoint. `afterCount` is
+ * `log.length` captured right before the action that should trigger a new
+ * reload — first wait for growth past it, then for a quiet window.
  */
 async function waitForNewMetrics(page: Page, log: any[], afterCount: number, quietMs = 2500, timeoutMs = 90_000): Promise<any> {
   const deadline = Date.now() + timeoutMs
@@ -85,11 +73,12 @@ test.describe('authenticated Farmer real write flows', () => {
     await page.getByRole('link', { name: 'Xem vụ' }).click()
     await expect(page.getByRole('tab', { name: 'Nhật ký' })).toBeVisible({ timeout: 60_000 })
     await page.getByRole('tab', { name: 'Nhật ký' }).click()
-    await expect(page.getByRole('heading', { name: 'Nhật ký canh tác' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '+ Ghi hoạt động' })).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('heading', { name: 'Nhật ký của vụ này' })).toBeVisible()
+    const addActivity = page.getByRole('button', { name: 'Ghi hoạt động' }).first()
+    await expect(addActivity).toBeVisible({ timeout: 60_000 })
 
     /* ------------------------------------------------------------- fertilizer */
-    await page.getByRole('button', { name: '+ Ghi hoạt động' }).click()
+    await addActivity.click()
     await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Bón phân' })).toBeVisible()
     await page.getByLabel('Loại phân').fill(`QA Urê ${marker}`)
@@ -99,9 +88,9 @@ test.describe('authenticated Farmer real write flows', () => {
     await expect(page.getByRole('dialog', { name: 'Bón phân' })).toHaveCount(0, { timeout: 30_000 })
     await expect(page.getByText('Đã lưu hoạt động.')).toBeVisible()
 
-    let row = page.locator('.act', { hasText: `QA Urê ${marker}` })
+    let row = markedRow(page, `QA Urê ${marker}`)
     await expect(row).toBeVisible({ timeout: 30_000 })
-    await row.click()
+    await row.locator('.fw-entry__open').click()
     await expect(page.getByRole('dialog')).toContainText(marker)
     await expect(page.getByRole('dialog')).toContainText('12')
     await page.getByRole('button', { name: 'Chỉnh sửa' }).click()
@@ -111,18 +100,18 @@ test.describe('authenticated Farmer real write flows', () => {
     await expect(page.getByRole('dialog', { name: 'Chỉnh sửa bón phân' })).toHaveCount(0, { timeout: 30_000 })
     await expect(page.getByText('Đã lưu thay đổi.')).toBeVisible()
 
-    row = page.locator('.act', { hasText: `QA Urê ${marker}` })
-    await row.click()
+    row = markedRow(page, `QA Urê ${marker}`)
+    await row.locator('.fw-entry__open').click()
     await expect(page.getByRole('dialog')).toContainText('18')
     await page.getByRole('button', { name: 'Xóa hoạt động' }).click()
     await expect(page.getByRole('alertdialog')).toBeVisible()
     await page.getByRole('alertdialog').getByRole('button', { name: 'Xóa' }).click()
     await expect(page.getByRole('alertdialog')).toHaveCount(0, { timeout: 30_000 })
     await expect(page.getByText('Đã xóa hoạt động.')).toBeVisible()
-    await expect(page.locator('.act', { hasText: `QA Urê ${marker}` })).toHaveCount(0)
+    await expect(markedRow(page, `QA Urê ${marker}`)).toHaveCount(0)
 
     /* ------------------------------------------------------------- irrigation */
-    await page.getByRole('button', { name: '+ Ghi hoạt động' }).click()
+    await addActivity.click()
     await page.getByRole('button', { name: 'Tưới nước', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toBeVisible()
     await page.getByLabel('Hình thức tưới').selectOption('awd')
@@ -131,9 +120,9 @@ test.describe('authenticated Farmer real write flows', () => {
     await page.getByRole('button', { name: 'Lưu hoạt động' }).click()
     await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toHaveCount(0, { timeout: 30_000 })
 
-    row = lastRowIn(page, 'Nước')
+    row = markedRow(page, marker)
     await expect(row).toBeVisible({ timeout: 30_000 })
-    await row.click()
+    await row.locator('.fw-entry__open').click()
     await expect(page.getByRole('dialog')).toContainText(marker)
     await expect(page.getByRole('dialog').getByText('Lượng nước (m³)')).toBeVisible()
     await expect(page.getByRole('dialog').locator('dd', { hasText: '—' }).first()).toBeVisible()
@@ -143,25 +132,23 @@ test.describe('authenticated Farmer real write flows', () => {
     await page.getByRole('button', { name: 'Lưu thay đổi' }).click()
     await expect(page.getByRole('dialog', { name: 'Chỉnh sửa tưới nước' })).toHaveCount(0, { timeout: 30_000 })
 
-    row = lastRowIn(page, 'Nước')
-    await row.click()
+    row = markedRow(page, marker)
+    await row.locator('.fw-entry__open').click()
     // An explicit 0 persists as 0, distinct from the earlier blank/unknown state.
     await expect(page.getByRole('dialog')).toContainText(marker)
     const irrigationSnapshot = await page.getByRole('dialog').innerText()
     expect(irrigationSnapshot).toMatch(/\b0\b/)
-    // Deleting the irrigation row also triggers a metrics reload (FarmerSeason
-    // wires onMutated to both activities.reload() and metrics.reload()) — use
-    // its settled value as the harvest section's "before" baseline instead of
-    // a tab click, which reads cached state and triggers no new fetch at all.
+    // A delete invalidates that season's cached metrics, so its settled reload
+    // is the harvest section's "before" baseline.
     let beforeCount = metricsLog.length
     await page.getByRole('button', { name: 'Xóa hoạt động' }).click()
     await page.getByRole('alertdialog').getByRole('button', { name: 'Xóa' }).click()
     await expect(page.getByRole('alertdialog')).toHaveCount(0, { timeout: 30_000 })
-    await expect(page.locator('.act', { hasText: marker })).toHaveCount(0)
+    await expect(markedRow(page, marker)).toHaveCount(0)
     const metricsBefore = await waitForNewMetrics(page, metricsLog, beforeCount)
 
     /* --------------------------------------------------------------- harvest */
-    await page.getByRole('button', { name: '+ Ghi hoạt động' }).click()
+    await addActivity.click()
     await page.getByRole('button', { name: 'Thu hoạch', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toBeVisible()
     await page.getByLabel(/^Sản lượng thu hoạch/).fill('5')
@@ -174,9 +161,9 @@ test.describe('authenticated Farmer real write flows', () => {
     const metricsAfterCreate = await waitForNewMetrics(page, metricsLog, beforeCount)
     expect(metricsAfterCreate.yield_kg - metricsBefore.yield_kg).toBeCloseTo(5, 5)
 
-    row = lastRowIn(page, 'Thu hoạch')
+    row = markedRow(page, marker)
     await expect(row).toBeVisible({ timeout: 30_000 })
-    await row.click()
+    await row.locator('.fw-entry__open').click()
     await expect(page.getByRole('dialog')).toContainText(marker)
     await expect(page.getByRole('dialog')).toContainText('5')
     await page.getByRole('button', { name: 'Chỉnh sửa' }).click()
@@ -186,12 +173,11 @@ test.describe('authenticated Farmer real write flows', () => {
     await page.getByRole('button', { name: 'Lưu thay đổi' }).click()
     await expect(page.getByRole('dialog', { name: 'Chỉnh sửa thu hoạch' })).toHaveCount(0, { timeout: 30_000 })
     const metricsAfterEdit = await waitForNewMetrics(page, metricsLog, beforeCount)
-    // Performance changes according to the backend response only (brief §21) —
-    // no ratio is recomputed client-side; this compares two raw backend replies.
+    // Performance changes according to the backend response only (brief §21).
     expect(metricsAfterEdit.yield_kg - metricsBefore.yield_kg).toBeCloseTo(8, 5)
 
-    row = lastRowIn(page, 'Thu hoạch')
-    await row.click()
+    row = markedRow(page, marker)
+    await row.locator('.fw-entry__open').click()
     await expect(page.getByRole('dialog')).toContainText(marker)
     await expect(page.getByRole('dialog')).toContainText('8')
     await page.getByRole('button', { name: 'Xóa hoạt động' }).click()
@@ -201,7 +187,7 @@ test.describe('authenticated Farmer real write flows', () => {
     await expect(page.getByRole('alertdialog')).toHaveCount(0, { timeout: 30_000 })
     const metricsAfterDelete = await waitForNewMetrics(page, metricsLog, beforeCount)
     expect(metricsAfterDelete.yield_kg ?? 0).toBeCloseTo(metricsBefore.yield_kg ?? 0, 5)
-    await expect(page.locator('.act', { hasText: marker })).toHaveCount(0)
+    await expect(markedRow(page, marker)).toHaveCount(0)
 
     /* ------------------------------------------------------------ regression */
     expect(activityPosts.length).toBeGreaterThanOrEqual(3) // fertilizer + irrigation + harvest, one POST per Save click
