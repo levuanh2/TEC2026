@@ -13,3 +13,7 @@ httpx>=0.27          # fastapi.testclient
 
 # scripts/validate_supabase_schema.py (khong bat buoc cho backend chay)
 psycopg[binary]>=3.2
+# Pool cho cac repository psycopg (CV/write/recommendation). Mot ket noi moi toi
+# hosted Supabase Postgres ton ~700ms, lon hon han ban than cau lenh. Khong bat
+# buoc: thieu package thi infrastructure/pg_pool tu dong quay ve connect-per-statement.
+psycopg_pool>=3.2
