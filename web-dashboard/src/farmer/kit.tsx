@@ -56,18 +56,22 @@ export function Crumbs({ items }: { items: { label: string; to?: string }[] }) {
   )
 }
 
-export function Section({ title, icon, tone = 'forest', description, action, children, className = '', labelledBy }: {
+/** A ruled section head: heading, optional inline note, optional action.
+ *
+ * Deliberately has no icon tile. Every section carrying `icon + heading +
+ * description` is the most repeated block in generated UI, and on the old Home
+ * it fired five times on one screen. The rule under the head is the divider;
+ * the heading carries the section on its own. `icon`/`tone` stay in the type so
+ * callers keep compiling, but nothing renders them. */
+export function Section({ title, description, action, children, className = '', labelledBy }: {
   title: string; icon?: IconName; tone?: Tone; description?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; labelledBy?: string
 }) {
   return (
-    <section className={`fw-section section ${className}`} aria-labelledby={labelledBy}>
+    <section className={`fw-section ${className}`} aria-labelledby={labelledBy}>
       <div className="fw-section__head">
         <div className="fw-section__title">
-          {icon && <IconTile name={icon} tone={tone} size="sm" />}
-          <div>
-            <h2 id={labelledBy}>{title}</h2>
-            {description && <p>{description}</p>}
-          </div>
+          <h2 id={labelledBy}>{title}</h2>
+          {description && <p>{description}</p>}
         </div>
         {action}
       </div>

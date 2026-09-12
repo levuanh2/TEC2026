@@ -43,8 +43,7 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
     <div className="fw fw-shell">
       <aside className="fw-side">
         <Link to="/farmer" className="fw-brand">
-          <span className="fw-brand__mark" aria-hidden="true"><Ico name="seeding" /></span>
-          <span><b>AgriCarbon</b><small>Nông hộ</small></span>
+          <b>AgriCarbon</b><small>Nông hộ</small>
         </Link>
         <nav className="fw-nav" aria-label="Điều hướng nông hộ">
           {NAV.map((group) => (
@@ -60,23 +59,25 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
         </nav>
         <div className="fw-profile">
           <span className="fw-avatar" aria-hidden="true">{avatar}</span>
-          <span className="fw-profile__id"><b title={name}>{name}</b><small>Nông hộ</small></span>
-          <button type="button" className="fw-iconbtn" aria-label="Đăng xuất" title="Đăng xuất" onClick={() => void signOut().then(() => go('/login'))}><Ico name="logout" /></button>
+          <span className="fw-profile__id">
+            <b title={name}>{name}</b>
+            {/* Logout is a written action, not an icon button that reads like a
+              * form control sitting next to the farmer's own name. */}
+            <button type="button" className="fw-signout" onClick={() => void signOut().then(() => go('/login'))}>Đăng xuất</button>
+          </span>
         </div>
       </aside>
 
       <div className="fw-main">
         <header className="fw-topbar">
-          <Link to="/farmer" className="fw-topbar__brand" aria-label="AgriCarbon — Tổng quan">
-            <span className="fw-brand__mark" aria-hidden="true"><Ico name="seeding" /></span><span>AgriCarbon</span>
-          </Link>
+          <Link to="/farmer" className="fw-topbar__brand" aria-label="AgriCarbon — Tổng quan">AgriCarbon</Link>
           {primary ? (
             <Link to={`/farmer/crop-seasons/${primary.season.id}`} className="fw-ctx" onMouseEnter={() => prefetchSeason(primary.season.id)} aria-label={`Vụ đang canh tác: ${primary.season.name}${primary.plot ? `, ${primary.plot.name}` : ''}`}>
               <IconTile name="seeding" tone="leaf" size="sm" />
               <span className="fw-ctx__text">{primary.season.name}{primary.plot && <small> · {primary.plot.name}</small>}</span>
             </Link>
           ) : scope.loading ? (
-            <span className="fw-ctx fw-ctx--sk" aria-hidden="true"><Sk w={28} h={28} r={14} /><Sk w={140} h={12} /></span>
+            <span className="fw-ctx fw-ctx--sk" aria-hidden="true"><Sk w={140} h={12} /></span>
           ) : null}
           <span className="fw-topbar__meta"><Ico name="pin" />{primary?.farm ? primary.farm.name : 'Khu vực nông hộ'}</span>
           <Link to="/farmer/account" className="fw-avatar" aria-label="Tài khoản của bạn">{avatar}</Link>

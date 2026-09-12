@@ -50,25 +50,38 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
 
       <HomeHero scope={scope} primary={primary} />
 
-      <Section title="Ghi nhanh" icon="plus" description="Chọn việc bạn vừa làm để ghi vào nhật ký của vụ đang canh tác.">
+      <Section title="Ghi nhanh" description="Chọn việc bạn vừa làm để ghi vào nhật ký của vụ đang canh tác.">
         <QuickActions seasons={writable} mutations={mutations} loading={scope.loading} />
       </Section>
 
+      {/* Reading order is the farmer's, not the database's: what is running
+        * (ledger, above) → what to record (quick, above) → is the data sound
+        * → anything to notice → what I did lately. The DOM order below is that
+        * order, so phones get it verbatim and the grid only rearranges it on
+        * desktop. */}
+      {/* Two real columns, so each one flows continuously instead of leaving
+        * holes where a grid row was sized by the other column's content. On
+        * phones the wrappers become `display: contents` and `order` restores the
+        * farmer's reading order: data soundness → attention → what I did. */}
       <div className="fw-home-grid">
-        <Section className="fw-area-attn" title="Cần chú ý" icon="warning" tone="amber" description="Chỉ từ dữ liệu thực tế của vụ.">
-          <AttentionList metrics={pending(metrics, scope.loading)} recs={recs.data} season={primaryCtx} mutations={mutations} hasSeason={Boolean(sid)} />
-        </Section>
-        <Section className="fw-area-perf" title="Hiệu suất vụ này" icon="performance" action={sid ? <MoreLink to="/farmer/performance">Chi tiết</MoreLink> : undefined}>
-          <PerformanceSnapshot state={pending(metrics, scope.loading)} hasSeason={Boolean(sid)} />
-        </Section>
-        <div className="fw-area-recs">
-          <RecommendationsSection seasonId={scope.loading ? null : sid} limit={2} moreTo={sid ? `/farmer/crop-seasons/${sid}` : undefined} />
+        <div className="fw-home-col">
+          <Section className="fw-area-perf" title="Hiệu suất vụ này" action={sid ? <MoreLink to="/farmer/performance">Chi tiết</MoreLink> : undefined}>
+            <PerformanceSnapshot state={pending(metrics, scope.loading)} hasSeason={Boolean(sid)} />
+          </Section>
+          <Section className="fw-area-journal" title="Nhật ký gần đây" action={sid ? <MoreLink to="/farmer/journal">Xem nhật ký</MoreLink> : undefined}>
+            <MiniTimeline state={pending(activities, scope.loading)} limit={5} />
+          </Section>
         </div>
-        <Section className="fw-area-journal" title="Nhật ký gần đây" icon="journal" tone="leaf" action={sid ? <MoreLink to="/farmer/journal">Xem nhật ký</MoreLink> : undefined}>
-          <MiniTimeline state={pending(activities, scope.loading)} limit={5} />
-        </Section>
-        <div className="fw-area-cv">
-          <CvPreviewCard season={primaryCtx} seasonId={sid} />
+        <div className="fw-home-col">
+          <Section className="fw-area-attn" title="Cần chú ý" description="Chỉ từ dữ liệu thực tế của vụ.">
+            <AttentionList metrics={pending(metrics, scope.loading)} recs={recs.data} season={primaryCtx} mutations={mutations} hasSeason={Boolean(sid)} />
+          </Section>
+          <div className="fw-area-recs">
+            <RecommendationsSection seasonId={scope.loading ? null : sid} limit={2} moreTo={sid ? `/farmer/crop-seasons/${sid}` : undefined} />
+          </div>
+          <div className="fw-area-cv">
+            <CvPreviewCard season={primaryCtx} seasonId={sid} />
+          </div>
         </div>
       </div>
       {mutations.node}
@@ -88,41 +101,52 @@ function HomeHero({ scope, primary }: { scope: QueryState<{ farms: unknown[] }>;
 
 export function HeroSkeleton() {
   return (
-    <SkBlock label="Đang tải vụ đang canh tác" className="fw-hero fw-hero--sk">
-      <div className="fw-hero__main"><Sk w={150} h={26} r={999} /><Sk w="55%" h={34} /><Sk w="42%" h={15} /><Sk w="50%" h={26} r={999} /></div>
-      <div className="fw-hero__side"><Sk w={130} h={46} /><Sk w="100%" h={14} /><Sk w="100%" h={14} /></div>
+    <SkBlock label="Đang tải vụ đang canh tác" className="fw-ledger">
+      <div className="fw-ledger__top">
+        <div className="fw-ledger__title"><Sk w={180} h={62} /><Sk w="55%" h={26} /><Sk w="42%" h={15} /></div>
+        <div className="fw-ledger__dates"><Sk w={200} h={16} /><Sk w={200} h={16} /></div>
+      </div>
     </SkBlock>
   )
 }
 
+/** The season ledger — the Stat-Led head of the Farmer app.
+ *
+ * The figure is the one number a farmer already keeps in their head: how many
+ * days this season has been in the ground. It is real (derived from the planting
+ * date we hold) and it is never shown alone — the words beside it say what it
+ * counts, and the season identity sits directly under it. When there is no
+ * planting date there is no figure: the slot states that plainly rather than
+ * inventing a number to fill the shape. */
 export function SeasonHero({ ctx }: { ctx: SeasonCtx }) {
   const { season, plot, farm } = ctx
   const days = season.harvestDate ? null : daysSince(season.plantingDate)
   return (
-    <section className="fw-hero" aria-labelledby="fw-hero-title">
-      <div className="fw-hero__main">
-        <span className="fw-hero__eyebrow"><Ico name="seeding" />Vụ đang canh tác</span>
-        <h2 id="fw-hero-title" className="fw-hero__title">{season.name}</h2>
-        <p className="fw-hero__place">
-          <span><Ico name="plot" />{plot?.name ?? 'Thửa ruộng'}</span>
-          {farm && <span><Ico name="farm" />{farm.name} · {farm.code}</span>}
-        </p>
-        <div className="fw-hero__chips">
-          <span className="fw-chip fw-chip--live fw-chip--dot">{seasonStatusLabel(season.status)}</span>
-          {plot?.areaHa != null && <span className="fw-chip"><Ico name="area" />{ha(plot.areaHa)}</span>}
-          {season.variety && <span className="fw-chip"><Ico name="seeding" />Giống {season.variety}</span>}
+    <section className="fw-ledger" aria-labelledby="fw-hero-title">
+      <div className="fw-ledger__top">
+        <div className="fw-ledger__title">
+          <p className="fw-ledger__figure">
+            {days != null
+              ? <><b>{days}</b><span>ngày kể từ gieo sạ</span></>
+              : <span className="is-empty">{season.harvestDate ? 'Vụ đã thu hoạch' : 'Chưa ghi nhận ngày gieo sạ'}</span>}
+          </p>
+          <h2 id="fw-hero-title">{season.name}</h2>
+          <p className="fw-ledger__place">
+            <span><Ico name="plot" />{plot?.name ?? 'Thửa ruộng'}</span>
+            {farm && <span><Ico name="farm" />{farm.name} · {farm.code}</span>}
+          </p>
+          <p className="fw-ledger__meta">
+            <span className="fw-chip fw-chip--dot">{seasonStatusLabel(season.status)}</span>
+            {plot?.areaHa != null && <span className="fw-chip"><Ico name="area" />{ha(plot.areaHa)}</span>}
+            {season.variety && <span className="fw-chip"><Ico name="seeding" />Giống {season.variety}</span>}
+          </p>
+          <p className="fw-ledger__actions">
+            <Link className="fw-btn" to={`/farmer/crop-seasons/${season.id}`} onMouseEnter={() => prefetchSeason(season.id)} onFocus={() => prefetchSeason(season.id)}>Xem vụ<Ico name="arrow" /></Link>
+          </p>
         </div>
-        <div className="fw-hero__actions">
-          <Link className="fw-btn" to={`/farmer/crop-seasons/${season.id}`} onMouseEnter={() => prefetchSeason(season.id)} onFocus={() => prefetchSeason(season.id)}>Xem vụ<Ico name="arrow" /></Link>
-        </div>
-      </div>
-      <div className="fw-hero__side">
-        {days != null
-          ? <div className="fw-hero__days"><b>{days}</b><span>ngày<br />kể từ gieo sạ</span></div>
-          : <div className="fw-hero__days"><span>{season.harvestDate ? 'Vụ đã có ngày thu hoạch' : 'Chưa ghi nhận ngày gieo sạ'}</span></div>}
-        <div className="fw-hero__dates">
-          <div className="fw-hero__date"><span><Ico name="calendar" />Gieo sạ</span><b className={season.plantingDate ? undefined : 'is-empty'}>{season.plantingDate ? date(season.plantingDate) : 'Chưa ghi nhận'}</b></div>
-          <div className="fw-hero__date"><span><Ico name="harvest" />Thu hoạch</span><b className={season.harvestDate ? undefined : 'is-empty'}>{season.harvestDate ? date(season.harvestDate) : 'Chưa ghi nhận'}</b></div>
+        <div className="fw-ledger__dates">
+          <p className="fw-ledger__date"><span><Ico name="calendar" />Gieo sạ</span><b className={season.plantingDate ? undefined : 'is-empty'}>{season.plantingDate ? date(season.plantingDate) : 'Chưa ghi nhận'}</b></p>
+          <p className="fw-ledger__date"><span><Ico name="harvest" />Thu hoạch</span><b className={season.harvestDate ? undefined : 'is-empty'}>{season.harvestDate ? date(season.harvestDate) : 'Chưa ghi nhận'}</b></p>
         </div>
       </div>
     </section>
