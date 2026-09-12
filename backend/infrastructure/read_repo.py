@@ -100,12 +100,42 @@ class SupabaseReadRepository:
         )
         return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms})}
 
+    @staticmethod
+    def _farm_view(row: dict[str, Any], plot_count: int) -> dict[str, Any]:
+        return {"id": row["id"], "farm_code": row["farm_code"], "farm_name": row["farm_name"], "province_name": row.get("province_name"), "district_name": row.get("district_name"), "commune_name": row.get("commune_name"), "plot_count": plot_count}
+
     def farms(self) -> list[dict[str, Any]]:
         rows = self._many("farms")
         plots = self._many("plots")
         counts: dict[str, int] = defaultdict(int)
         for plot in plots: counts[str(plot["farm_id"])] += 1
-        return [{"id": row["id"], "farm_code": row["farm_code"], "farm_name": row["farm_name"], "province_name": row.get("province_name"), "district_name": row.get("district_name"), "commune_name": row.get("commune_name"), "plot_count": counts[str(row["id"])]} for row in rows]
+        return [self._farm_view(row, counts[str(row["id"])]) for row in rows]
+
+    def farmer_scope(self) -> dict[str, Any]:
+        """Every farm, plot and crop season the caller can read, in ONE client
+        round trip instead of the farms -> plots-per-farm -> seasons-per-plot
+        waterfall the Farmer app used to issue (measured: 7-15s to first
+        content). Pure read composition of existing views — no new business
+        rule. The three reads are independent and RLS-scoped, so they run
+        concurrently; rows are then chained season -> visible plot -> visible
+        farm so a partially visible hierarchy never returns an orphan id.
+        """
+        farm_rows, plot_rows, season_rows = self._concurrent(
+            lambda: self._many("farms"),
+            lambda: self._many("plots"),
+            lambda: self._many("crop_seasons"),
+        )
+        farm_ids = {str(f["id"]) for f in farm_rows}
+        plots = [p for p in plot_rows if str(p["farm_id"]) in farm_ids]
+        plot_ids = {str(p["id"]) for p in plots}
+        seasons = [s for s in season_rows if str(s["plot_id"]) in plot_ids]
+        counts: dict[str, int] = defaultdict(int)
+        for plot in plots: counts[str(plot["farm_id"])] += 1
+        return {
+            "farms": [self._farm_view(row, counts[str(row["id"])]) for row in farm_rows],
+            "plots": [self.plot_view(p) for p in plots],
+            "crop_seasons": [self.season_view(s) for s in seasons],
+        }
 
     def farm(self, farm_id: str) -> dict[str, Any]:
         row = next((x for x in self.farms() if str(x["id"]) == farm_id), None)

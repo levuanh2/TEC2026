@@ -234,6 +234,61 @@
         ]
       }
     },
+    "/v1/farmer/scope": {
+      "get": {
+        "tags": [
+          "Farms"
+        ],
+        "summary": "Get Farmer Scope",
+        "description": "Farm -> plot -> crop season hierarchy the caller can read (RLS), in one call.\nSame items as /farms + /farms/{id}/plots + /plots/{id}/crop-seasons.",
+        "operationId": "get_farmer_scope_v1_farmer_scope_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmerScopeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/v1/farms": {
       "get": {
         "tags": [
@@ -3462,6 +3517,39 @@
           "plot_count"
         ],
         "title": "FarmResponse"
+      },
+      "FarmerScopeResponse": {
+        "properties": {
+          "farms": {
+            "items": {
+              "$ref": "#/components/schemas/FarmResponse"
+            },
+            "type": "array",
+            "title": "Farms"
+          },
+          "plots": {
+            "items": {
+              "$ref": "#/components/schemas/PlotResponse"
+            },
+            "type": "array",
+            "title": "Plots"
+          },
+          "crop_seasons": {
+            "items": {
+              "$ref": "#/components/schemas/CropSeasonResponse"
+            },
+            "type": "array",
+            "title": "Crop Seasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "farms",
+          "plots",
+          "crop_seasons"
+        ],
+        "title": "FarmerScopeResponse",
+        "description": "Read composition of /farms, /farms/{id}/plots and /plots/{id}/crop-seasons\nfor the caller's RLS scope — same item shapes, one request."
       },
       "HTTPValidationError": {
         "properties": {

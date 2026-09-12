@@ -21,6 +21,10 @@ routes/transaction/idempotency — only `schemas.ActivityType`'s enum and
 count and write-gap note below predate FW-2; `docs/openapi.json` remains the
 authoritative operation inventory.
 
+## Farmer Web V2 supersession
+
+Also added: `GET /v1/farmer/scope` — read composition of `/v1/farms`, `/v1/farms/{farm_id}/plots` and `/v1/plots/{plot_id}/crop-seasons` for the caller's RLS scope (same item shapes, one request). No new business rule; it replaces the Farmer app's farms → plots → seasons request waterfall.
+
 ## M05 supersession
 
 Also added: `GET /v1/crop-seasons/{crop_season_id}/recommendations` (list),
@@ -59,6 +63,7 @@ baseline model (MobileNetV2, not field-validated) — see
 | GET | `/v1/emission-factor-sets` | Emission Factors | yes |
 | GET | `/v1/emission-factor-sets/{emission_factor_set_id}` | Emission Factors | yes |
 | GET | `/v1/emission-factor-sets/{emission_factor_set_id}/factors` | Emission Factors | yes |
+| GET | `/v1/farmer/scope` | Farms | yes |
 | GET | `/v1/farms` | Farms | yes |
 | GET | `/v1/farms/{farm_id}` | Farms | yes |
 | GET | `/v1/farms/{farm_id}/crop-seasons` | Crop Seasons | yes |

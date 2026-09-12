@@ -90,6 +90,14 @@ class CropSeasonResponse(BaseModel):
     status: str
 
 
+class FarmerScopeResponse(BaseModel):
+    """Read composition of /farms, /farms/{id}/plots and /plots/{id}/crop-seasons
+    for the caller's RLS scope — same item shapes, one request."""
+    farms: list[FarmResponse]
+    plots: list[PlotResponse]
+    crop_seasons: list[CropSeasonResponse]
+
+
 class ProductionBatchResponse(BaseModel):
     id: str
     crop_season_id: str

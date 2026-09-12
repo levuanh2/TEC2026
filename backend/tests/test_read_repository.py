@@ -517,3 +517,63 @@ def test_cors_rejects_unlisted_origin():
     # Starlette CORSMiddleware trả 200 nhưng KHÔNG có access-control-allow-origin
     # cho origin lạ -> browser tự chặn ở phía client, không phải backend từ chối.
     assert "access-control-allow-origin" not in response.headers
+
+
+# ---------------------------------------------------------------------------
+# Farmer scope composition (Farmer Web V2) — one call, same RLS boundary.
+# ---------------------------------------------------------------------------
+
+def test_farmer_scope_returns_only_callers_hierarchy(repo_a):
+    scope = repo_a.farmer_scope()
+    assert [f["id"] for f in scope["farms"]] == [FARM_A]
+    assert scope["farms"][0]["plot_count"] == 1
+    assert [p["id"] for p in scope["plots"]] == [PLOT_A]
+    assert [s["id"] for s in scope["crop_seasons"]] == [SEASON_A]
+    visible = {x["id"] for group in scope.values() for x in group}
+    assert not visible & {FARM_B, PLOT_B, SEASON_B}
+
+
+def test_farmer_scope_drops_rows_outside_the_visible_hierarchy():
+    rows = _rows_for(FARM_A, PLOT_A, SEASON_A, ORG_A, "user-a")
+    rows["plots"].append({"id": "plot-orphan", "farm_id": FARM_B, "plot_code": "x", "name": "x", "area_ha": 1.0})
+    rows["crop_seasons"].append({"id": "season-orphan", "plot_id": "plot-orphan", "season_code": "x", "crop_type": "rice", "status": "active"})
+    repo = SupabaseReadRepository(DUMMY_SETTINGS, "token-a", client=FakeSupabaseClient(rows, "user-a"))
+    scope = repo.farmer_scope()
+    assert "plot-orphan" not in {p["id"] for p in scope["plots"]}
+    assert "season-orphan" not in {s["id"] for s in scope["crop_seasons"]}
+
+
+def test_farmer_scope_items_match_existing_list_endpoint_views(repo_a):
+    scope = repo_a.farmer_scope()
+    assert scope["farms"] == repo_a.farms()
+    assert scope["plots"] == repo_a.plots_for_farm(FARM_A)
+    assert scope["crop_seasons"] == repo_a.seasons_for_plot(PLOT_A)
+
+
+def test_farmer_scope_route_requires_authentication():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    response = TestClient(app).get("/v1/farmer/scope")
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"]["code"] == "unauthenticated"
+
+
+def test_farmer_scope_route_serializes_repository_view(repo_a):
+    from fastapi.testclient import TestClient
+    import api
+    from main import app
+
+    previous = app.dependency_overrides.get(api._read_repo)
+    app.dependency_overrides[api._read_repo] = lambda: repo_a
+    try:
+        response = TestClient(app).get("/v1/farmer/scope", headers={"Authorization": "Bearer token-a"})
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(api._read_repo, None)
+        else:
+            app.dependency_overrides[api._read_repo] = previous
+    assert response.status_code == 200
+    body = response.json()
+    assert [f["farm_code"] for f in body["farms"]] == [FARM_A]
+    assert [s["season_code"] for s in body["crop_seasons"]] == [SEASON_A]

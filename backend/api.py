@@ -247,6 +247,13 @@ def get_me(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]
     return _read_or_404(repo.me)
 
 
+@router.get("/farmer/scope", tags=['Farms'], response_model=schemas.FarmerScopeResponse)
+def get_farmer_scope(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Farm -> plot -> crop season hierarchy the caller can read (RLS), in one call.
+    Same items as /farms + /farms/{id}/plots + /plots/{id}/crop-seasons."""
+    return repo.farmer_scope()
+
+
 @router.get("/farms", tags=['Farms'], response_model=schemas.PaginatedResponse[schemas.FarmResponse])
 def list_farms(
     page: int = 1, page_size: int = 20, repo: SupabaseReadRepository = Depends(_read_repo)
