@@ -1,0 +1,71 @@
+/* =========================================================================
+   AgriCarbon — shared colour system
+   One brand family, two surface compositions.
+
+   The ground used to be warm oat (#f5f1e7 / #f5f6f1). Measured, that paper was
+   r245 g241 b231 — red fourteen points above blue, which is a real yellow cast,
+   and it is what made the app read as "premium SaaS cream". The ground is now a
+   mineral paper: hue held in the brand's green family (165) at chroma 0.005–0.018,
+   so red and blue come out within a couple of points of each other and only the
+   green channel sits fractionally high. It reads as clean paper, not sage, and
+   not beige.
+
+   Farmer and Management share this file and diverge only in how they compose it:
+   Farmer works on the paper itself (a ledger — one surface, ruled), Management
+   lifts content onto a brighter sheet over a slightly deeper ground (a console —
+   panes over a desk).
+
+   Every colour in either app resolves through a token defined here. No app
+   stylesheet declares a raw colour.
+   ========================================================================= */
+:root {
+  /* --- ground & surfaces ------------------------------------------------ */
+  --ac-paper: oklch(97.2% 0.005 165);      /* Farmer's sheet — the lightest ground */
+  --ac-ground: oklch(96.2% 0.006 165);     /* Management's desk */
+  --ac-subtle: oklch(94.5% 0.007 165);     /* recessed band, table zebra, inert fill */
+  --ac-band: oklch(92.5% 0.008 165);       /* hover / pressed / deeper band */
+  --ac-elevated: oklch(99.5% 0.003 165);   /* the sheet content sits on */
+
+  /* --- rules. Three weights carry all structure; shadows carry none. ---- */
+  --ac-rule: oklch(88.5% 0.01 165);        /* hairline between rows */
+  --ac-rule-2: oklch(80% 0.014 165);       /* section rule */
+  --ac-rule-3: oklch(68% 0.018 165);       /* heavy rule, table head underline */
+
+  /* --- ink -------------------------------------------------------------- */
+  --ac-ink: oklch(24% 0.03 165);           /* headings, figures */
+  --ac-ink-2: oklch(36% 0.026 165);        /* body */
+  --ac-muted: oklch(52% 0.02 165);         /* captions, units, labels */
+
+  /* --- brand. Hue held at AgriCarbon forest; chroma at the signal floor. - */
+  --ac-accent: oklch(45% 0.13 160);
+  --ac-accent-hover: oklch(38% 0.12 161);
+  --ac-accent-deep: oklch(31% 0.095 163);
+  --ac-accent-soft: oklch(93% 0.03 155);   /* selected row, active nav wash */
+  --ac-accent-ink: oklch(99.5% 0.003 165); /* text on an accent fill */
+  --ac-focus: oklch(48% 0.19 160);
+
+  /* --- semantic state. Deliberately unsaturated: these annotate rows in a
+         dense table, they do not decorate. ---------------------------------- */
+  --ac-success: oklch(45% 0.11 155);
+  --ac-warning: oklch(47% 0.115 65);
+  --ac-warning-soft: oklch(94% 0.04 82);
+  --ac-danger: oklch(46% 0.15 32);
+  --ac-danger-soft: oklch(94% 0.03 40);
+
+  /* --- domain accents. Used as ink on an icon or a figure, never as a fill.
+         One hue per real-world resource so a reader learns them once. ------- */
+  --ac-water: oklch(46% 0.09 232);
+  --ac-soil: oklch(44% 0.055 70);
+  --ac-straw: oklch(48% 0.09 85);
+  --ac-leaf: oklch(48% 0.12 140);
+  --ac-carbon: oklch(42% 0.05 195);
+
+  /* --- type ------------------------------------------------------------- */
+  --ac-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ac-serif: Fraunces, "Be Vietnam Pro", ui-serif, Georgia, serif;
+  --ac-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, monospace;
+
+  /* --- motion ----------------------------------------------------------- */
+  --ac-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ac-dur: 140ms;
+}
