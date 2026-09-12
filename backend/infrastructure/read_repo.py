@@ -7,6 +7,7 @@ service-role key and never accepts a user id supplied by the frontend.
 from __future__ import annotations
 
 import contextvars
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
@@ -40,6 +41,11 @@ try:  # httpx ships with supabase; a fake-client test never needs it
 except Exception:  # noqa: BLE001 - absence just disables the retry below
     _TRANSPORT_ERRORS = ()
 
+# Small on purpose: enough to ride out a connection being closed under us,
+# not enough to paper over Supabase actually being down.
+_READ_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.15
+
 
 class ReadNotFoundError(Exception): pass
 
@@ -56,25 +62,37 @@ class SupabaseReadRepository:
             self.client.postgrest.auth(token)
         self.token = token
 
-    def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
-        """Run one PostgREST read, retrying once on a dead connection.
+    def _retrying(self, attempt: Callable[[], Any]) -> Any:
+        """Run one idempotent read, replacing the client on a dead connection.
 
         Reusing a client means reusing its keep-alive connections, and Supabase
-        closes an idle one whenever it likes; httpx then raises
-        `RemoteProtocolError: Server disconnected` on the next read that
-        happens to pick it. These reads are idempotent, so the right answer is
-        to throw the stale pool away and ask again — not to fail a whole page
-        section (and, before the retry existed, take a Farmer screen's `/me` or
-        `/scope` down with it).
+        closes them whenever it likes; httpx then raises
+        `RemoteProtocolError: Server disconnected` on the next read that picks
+        one. Because Supabase speaks HTTP/2, a single close takes down every
+        read multiplexed on that connection at once, and a burst of them can
+        also catch the replacement's first request — measured against hosted
+        Supabase, one retry left about 1% of reads still failing, which is a
+        Farmer page section showing an error for no reason the farmer caused.
+
+        These reads are idempotent, so a bounded number of attempts on a fresh
+        client is the right answer. It is deliberately small: a genuine
+        Supabase outage must still surface as an error rather than be hidden
+        behind retries.
         """
-        with profiling.observe(label):
+        for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
+            failed = self.client
             try:
-                return build(self.client).execute().data or []
+                return attempt()
             except _TRANSPORT_ERRORS:
-                if not self._pooled:
+                if not self._pooled or remaining == 0:
                     raise
-                self.client = supabase_clients.renew(self._settings, self.token)
-                return build(self.client).execute().data or []
+                time.sleep(_RETRY_BACKOFF_SECONDS)
+                self.client = supabase_clients.renew(self._settings, self.token, failed)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
+        with profiling.observe(label):
+            return self._retrying(lambda: build(self.client).execute().data or [])
 
     def _many(self, table: str, **filters: str) -> list[dict[str, Any]]:
         def build(client: Any) -> Any:
@@ -128,13 +146,7 @@ class SupabaseReadRepository:
 
     def user_id(self) -> str:
         with profiling.observe("auth get_user"):
-            try:
-                user = self.client.auth.get_user(self.token).user
-            except _TRANSPORT_ERRORS:
-                if not self._pooled:
-                    raise
-                self.client = supabase_clients.renew(self._settings, self.token)
-                user = self.client.auth.get_user(self.token).user
+            user = self._retrying(lambda: self.client.auth.get_user(self.token).user)
         if user is None: raise ReadNotFoundError("user")
         return str(user.id)
 

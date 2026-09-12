@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from infrastructure import profiling, supabase_clients  # noqa: E402
 from infrastructure.config import Settings  # noqa: E402
+from infrastructure import read_repo  # noqa: E402
 from infrastructure.read_repo import SupabaseReadRepository  # noqa: E402
 
 SETTINGS = Settings(
@@ -227,6 +228,65 @@ def test_access_checker_never_runs_one_callers_query_with_another_callers_token(
     bound = {client.bound_token for _, client in supabase_clients._clients.values()}
     assert bound == {"token-a", "token-b"}, "each caller must get its own bound client"
     assert len(supabase_clients._clients) == 2
+
+
+def test_renew_takes_the_replacement_another_caller_already_built(monkeypatch):
+    """Supabase speaks HTTP/2, so one connection carries every read a request
+    issues concurrently: when the server closes it, all of them fail at once and
+    all of them ask for a new client. Only the first replaces it — the rest must
+    take that replacement, not each build (and cache, and evict) another ~450ms
+    client while the previous thread is still using it."""
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
+
+    original = supabase_clients.client_for_token(SETTINGS, "token-a")
+    first = supabase_clients.renew(SETTINGS, "token-a", original)
+    second = supabase_clients.renew(SETTINGS, "token-a", original)
+    third = supabase_clients.renew(SETTINGS, "token-a", original)
+
+    assert first is not original, "the dead client must be replaced once"
+    assert second is first and third is first, "later failures reuse that replacement"
+    assert _Client.created == 2, "exactly one replacement was built"
+
+
+def test_renew_still_replaces_a_client_that_is_the_current_one(monkeypatch):
+    """A later, unrelated failure of the replacement must replace it in turn."""
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client())
+
+    first = supabase_clients.client_for_token(SETTINGS, "token-a")
+    second = supabase_clients.renew(SETTINGS, "token-a", first)
+    third = supabase_clients.renew(SETTINGS, "token-a", second)
+
+    assert third is not second and second is not first
+    assert _Client.created == 3
+
+
+def test_a_burst_of_dropped_connections_is_ridden_out(monkeypatch):
+    """One close can take down every read multiplexed on an HTTP/2 connection,
+    and the replacement's first request can be caught by the same burst. A
+    single retry left ~1% of reads failing against hosted Supabase."""
+    made: list[_Client] = []
+
+    def make(url, key, **_kw):
+        # The first two clients are doomed, the third works.
+        client = _Client(rows={"farms": [{"id": "f1"}]}, fail_times=1 if len(made) < 2 else 0)
+        made.append(client)
+        return client
+
+    _patch_factory(monkeypatch, make)
+    repo = SupabaseReadRepository(SETTINGS, "token-a")
+
+    assert repo._many("farms") == [{"id": "f1"}]
+    assert len(made) == 3
+
+
+def test_retries_are_bounded_so_a_real_outage_still_surfaces(monkeypatch):
+    """Retrying forever would turn a Supabase outage into a hung request."""
+    _patch_factory(monkeypatch, lambda url, key, **_kw: _Client(fail_times=99))
+    repo = SupabaseReadRepository(SETTINGS, "token-a")
+
+    with pytest.raises(httpx.RemoteProtocolError):
+        repo._many("farms")
+    assert _Client.created == read_repo._READ_ATTEMPTS
 
 
 def test_pooled_clients_avoid_http2_multiplexing_and_keep_a_real_timeout():

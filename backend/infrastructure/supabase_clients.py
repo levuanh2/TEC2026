@@ -146,13 +146,22 @@ def client_for_token(settings: Settings, token: str) -> Any:
             _building.pop(token, None)
 
 
-def renew(settings: Settings, token: str) -> Any:
-    """Drop the cached client for `token` and build a fresh one.
+def renew(settings: Settings, token: str, failed: Any = None) -> Any:
+    """Replace the cached client for `token` after one of its connections died.
 
-    Used when a pooled keep-alive connection turns out to have been closed by
-    Supabase: the dead pool is discarded rather than handed to the next reader.
+    `failed` is the client that just raised. Supabase speaks HTTP/2, so one
+    connection carries every concurrent read a request issues: when the server
+    closes it, all of them fail at once and all of them come here. Only the
+    thread whose client is still the cached one replaces it; the rest take the
+    replacement it already built, instead of each constructing another ~450ms
+    client and evicting the previous thread's in flight.
     """
     with _lock:
+        cached = _clients.get(token)
+        if failed is not None and cached is not None and cached[1] is not failed:
+            # Someone already replaced it — theirs is fresh, use it.
+            _clients.move_to_end(token)
+            return cached[1]
         _clients.pop(token, None)  # dropped, not closed — see `_evict_locked`
     return client_for_token(settings, token)
 
