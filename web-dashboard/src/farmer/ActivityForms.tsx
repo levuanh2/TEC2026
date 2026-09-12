@@ -12,7 +12,7 @@ import { mapActivityError, type ActivityErrorPresentation } from './activityErro
 import { nextIdempotencyKey } from './idempotency'
 import { ACTIVITY_TITLE, longDay } from './activityView'
 import { markSeasonDataChanged } from './data'
-import { Ico, type IconName } from './icons'
+import { Ico } from './icons'
 import { ACTIVITY_ICON, FarmerConfirm, FarmerSheet, IconTile } from './kit'
 
 /* ---------------------------------------------------------------- shared */
@@ -65,10 +65,10 @@ export const numOrUndef = (v: unknown): number | undefined => {
 
 const OPTIONAL = 'Không bắt buộc'
 
-function LabelText({ label, unit, required, hint }: { label: string; unit?: string; required?: boolean; hint?: string }) {
+function LabelText({ label, required, hint }: { label: string; required?: boolean; hint?: string }) {
   return (
     <>
-      {label}{unit && ` (${unit})`}
+      {label}
       {required && <span className="form-field__required" aria-hidden="true"> *</span>}
       {hint === OPTIONAL ? <span className="form-field__opt">{OPTIONAL}</span> : hint ? <span className="form-field__hint"> · {hint}</span> : null}
     </>
@@ -91,16 +91,50 @@ function TextField({ label, value, onChange, type = 'text', required, error, hin
   )
 }
 
-function NumberField({ label, value, onChange, unit, required, error, hint }: {
-  label: string; value: string; onChange: (v: string) => void; unit?: string; required?: boolean; error?: string; hint?: string
+/** A measurement, not a database column.
+ *
+ * The unit sits beside the value the way it does on a feed sack or a meter —
+ * not folded into the label as "Lượng bón (kg)". `integer` switches the mobile
+ * keypad to the numeric pad and the step to 1 for the fields the backend types
+ * as `int`; everything else keeps the decimal pad. Blank is preserved as blank
+ * all the way to `blankToNumber`, so unknown never becomes zero. */
+function NumberField({ label, value, onChange, unit, required, error, hint, integer, big }: {
+  label: string; value: string; onChange: (v: string) => void; unit?: string; required?: boolean
+  error?: string; hint?: string; integer?: boolean; big?: boolean
 }) {
   const id = useId()
   const errId = `${id}-err`
+  const unitId = `${id}-unit`
+  const described = [error ? errId : null, unit ? unitId : null].filter(Boolean).join(' ') || undefined
+  return (
+    <div className={`form-field fw-num${big ? ' fw-num--big' : ''}`} aria-invalid={error ? 'true' : undefined}>
+      <label htmlFor={id}><LabelText label={label} required={required} hint={hint} /></label>
+      <span className="fw-num__box">
+        <input id={id} type="number" inputMode={integer ? 'numeric' : 'decimal'} step={integer ? '1' : 'any'}
+          value={value} aria-describedby={described} onChange={(e) => onChange(e.target.value)} />
+        {unit && <span className="fw-num__unit" id={unitId}>{unit}</span>}
+      </span>
+      {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
+    </div>
+  )
+}
+
+/** Free text with suggestions. The backend types these as plain strings, so a
+ * hard select would break the moment a farmer edits a record holding a value
+ * outside the list. A datalist speeds up the common case and keeps the rest. */
+function SuggestField({ label, value, onChange, options, required, error, hint }: {
+  label: string; value: string; onChange: (v: string) => void; options: string[]
+  required?: boolean; error?: string; hint?: string
+}) {
+  const id = useId()
+  const listId = `${id}-list`
+  const errId = `${id}-err`
   return (
     <div className="form-field" aria-invalid={error ? 'true' : undefined}>
-      <label htmlFor={id}><LabelText label={label} unit={unit} required={required} hint={hint} /></label>
-      <input id={id} type="number" inputMode="decimal" step="any" value={value}
-        aria-describedby={error ? errId : undefined} onChange={(e) => onChange(e.target.value)} />
+      <label htmlFor={id}><LabelText label={label} required={required} hint={hint} /></label>
+      <input id={id} list={listId} value={value} aria-describedby={error ? errId : undefined}
+        onChange={(e) => onChange(e.target.value)} />
+      <datalist id={listId}>{options.map((o) => <option key={o} value={o} />)}</datalist>
       {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
     </div>
   )
@@ -143,9 +177,23 @@ function CheckboxField({ label, checked, onChange }: { label: string; checked: b
   )
 }
 
-function FormSection({ title, icon, children }: { title: string; icon: IconName; children: ReactNode }) {
-  return <div className="fw-form__section"><h4><Ico name={icon} />{title}</h4>{children}</div>
+const MORE_LABEL = 'Thông tin bổ sung'
+
+/** The one disclosure every form uses. Collapsed on a new entry so the default
+ * screen is only what a farmer typically records; opened automatically when
+ * editing a record that already carries any of these values, so nothing the
+ * farmer entered before is hidden from them on the way back in. */
+function MoreDetails({ open, onToggle, children }: { open: boolean; onToggle: (v: boolean) => void; children: ReactNode }) {
+  return (
+    <details className="fw-more" open={open} onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}>
+      <summary>{MORE_LABEL}</summary>
+      <div className="fw-more__body">{children}</div>
+    </details>
+  )
 }
+
+const SEEDING_METHODS = ['Sạ hàng', 'Sạ lan', 'Cấy tay', 'Cấy máy']
+const PESTICIDE_UNITS = ['kg', 'lít', 'ml', 'gam', 'gói']
 
 const IRRIGATION_METHOD_OPTIONS: { value: IrrigationMethod; label: string }[] = [
   { value: 'awd', label: 'Ướt khô xen kẽ (AWD)' },
@@ -238,6 +286,23 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
   const [wMethod, setWMethod] = useState(typeof detail.method === 'string' ? detail.method : '')
   const [wMass, setWMass] = useState(numOrUndef(detail.straw_mass_kg)?.toString() ?? '')
   const [wCost, setWCost] = useState(numOrUndef(detail.total_cost_vnd)?.toString() ?? '')
+  const [wDays, setWDays] = useState(numOrUndef(detail.days_before_cultivation)?.toString() ?? '')
+  const [wDry, setWDry] = useState(numOrUndef(detail.dry_matter_fraction)?.toString() ?? '')
+  const [wReturned, setWReturned] = useState<boolean | null>(
+    typeof detail.returned_to_field === 'boolean' ? detail.returned_to_field : null,
+  )
+
+  // One disclosure for every form. Open it on the way in when the record being
+  // edited already carries something that lives inside it — otherwise a farmer
+  // would have to guess that their own earlier entry is behind a closed summary.
+  const [moreOpen, setMoreOpen] = useState(() => mode === 'edit' && [
+    detail.nitrogen_percent, detail.phosphorus_percent, detail.potassium_percent,
+    detail.duration_minutes, detail.water_level_cm, detail.pump_energy_kwh,
+    detail.harvested_area_ha, detail.moisture_percent,
+    detail.active_ingredient, detail.variety_name,
+    detail.days_before_cultivation, detail.dry_matter_fraction, detail.returned_to_field,
+    detail.total_cost_vnd, detail.cost_vnd, detail.note,
+  ].some((v) => v != null && v !== ''))
 
   let input: ActivityInput
   let errors: FieldErrors
@@ -262,9 +327,17 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
     errors = validatePesticide(draft)
     input = { activityType: 'pesticide', data: { productName: draft.productName, activeIngredient: pTarget.trim() || null, amount: draft.amount ?? 0, unit: draft.unit, totalCostVnd: draft.totalCostVnd } }
   } else {
-    const draft = { method: wMethod, strawMassKg: blankToNumber(wMass), totalCostVnd: blankToNumber(wCost) }
+    const draft = {
+      method: wMethod, strawMassKg: blankToNumber(wMass), totalCostVnd: blankToNumber(wCost),
+      daysBeforeCultivation: blankToNumber(wDays), dryMatterFraction: blankToNumber(wDry),
+    }
     errors = validateStrawManagement(draft)
-    input = { activityType: 'straw_management', data: { method: (draft.method || 'other') as StrawManagementMethod, strawMassKg: draft.strawMassKg, totalCostVnd: draft.totalCostVnd } }
+    input = { activityType: 'straw_management', data: {
+      method: (draft.method || 'other') as StrawManagementMethod,
+      strawMassKg: draft.strawMassKg, totalCostVnd: draft.totalCostVnd,
+      daysBeforeCultivation: draft.daysBeforeCultivation, dryMatterFraction: draft.dryMatterFraction,
+      returnedToField: wReturned,
+    } }
   }
   const hasErrors = Object.keys(errors).length > 0
   const err = (key: string) => (touched ? errors[key] : undefined)
@@ -304,91 +377,110 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
   const saveLabel = pending ? 'Đang lưu…' : mode === 'edit' ? 'Lưu thay đổi' : activityType === 'harvest' ? 'Lưu thu hoạch' : 'Lưu hoạt động'
   const look = ACTIVITY_ICON[activityType]
 
+  // Primary = what a farmer records standing in the field. Optional = everything
+  // that belongs to methodology, accounting or afterthought. Nothing that is
+  // merely *supported* by the backend gets to sit on the primary screen.
   let main: ReactNode
-  let cost: ReactNode
+  let extra: ReactNode
+  let costField: ReactNode
   if (activityType === 'fertilizer') {
     main = <>
-      <TextField label="Loại phân" value={fName} onChange={setFName} error={err('fertilizerName')} required />
-      <div className="form-grid">
-        <NumberField label="Lượng bón" unit="kg" value={fAmount} onChange={setFAmount} error={err('amountKg')} required />
-        <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} hint={OPTIONAL} />
-      </div>
-      <details className="activity-form__disclosure" open={fMore} onToggle={(e) => setFMore((e.target as HTMLDetailsElement).open)}>
-        <summary>Thông tin dinh dưỡng khác</summary>
-        <div className="form-grid">
-          <NumberField label="Hàm lượng lân" unit="%" value={fP} onChange={setFP} error={err('phosphorusPercent')} />
-          <NumberField label="Hàm lượng kali" unit="%" value={fK} onChange={setFK} error={err('potassiumPercent')} />
-        </div>
-      </details>
+      <TextField label="Loại phân" value={fName} onChange={setFName} error={err('fertilizerName')} required autoFocus />
+      <NumberField label="Lượng bón" unit="kg" value={fAmount} onChange={setFAmount} error={err('amountKg')} required big />
     </>
-    cost = <NumberField label="Chi phí vật tư" unit="đ" value={fCost} onChange={setFCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+    // N is a methodology input, not the farmer's action — the backend types it
+    // optional, so it does not get equal billing with the amount actually spread.
+    extra = <>
+      <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} hint={OPTIONAL} />
+      <div className="form-grid">
+        <NumberField label="Hàm lượng lân" unit="%" value={fP} onChange={setFP} error={err('phosphorusPercent')} hint={OPTIONAL} />
+        <NumberField label="Hàm lượng kali" unit="%" value={fK} onChange={setFK} error={err('potassiumPercent')} hint={OPTIONAL} />
+      </div>
+    </>
+    costField = <NumberField label="Chi phí vật tư" unit="đ" value={fCost} onChange={setFCost} hint={OPTIONAL} error={err('totalCostVnd')} integer />
   } else if (activityType === 'irrigation') {
     main = <>
       <SelectField label="Hình thức tưới" value={iMethod} onChange={setIMethod} options={IRRIGATION_METHOD_OPTIONS} error={err('method')} />
-      <NumberField label="Lượng nước" unit="m³" value={iWater} onChange={setIWater} hint={OPTIONAL} error={err('waterVolumeM3')} />
-      <CheckboxField label="Sử dụng máy bơm" checked={iPump} onChange={setIPump} />
-      {iPump && <NumberField label="Năng lượng bơm" unit="kWh" value={iPumpEnergy} onChange={setIPumpEnergy} error={err('pumpEnergyKwh')} />}
-      <details className="activity-form__disclosure" open={iMore} onToggle={(e) => setIMore((e.target as HTMLDetailsElement).open)}>
-        <summary>Thông tin khác</summary>
-        <div className="form-grid">
-          <NumberField label="Thời gian tưới" unit="phút" value={iDuration} onChange={setIDuration} error={err('durationMinutes')} />
-          <NumberField label="Mực nước ruộng" unit="cm" value={iLevel} onChange={setILevel} />
-        </div>
-      </details>
+      <NumberField label="Lượng nước" unit="m³" value={iWater} onChange={setIWater} hint="Để trống nếu không đo được" error={err('waterVolumeM3')} big />
     </>
-    cost = <NumberField label="Chi phí vật tư" unit="đ" value={iCost} onChange={setICost} hint={OPTIONAL} error={err('totalCostVnd')} />
-  } else if (activityType === 'harvest') {
-    main = <>
-      <NumberField label="Sản lượng thu hoạch" unit="kg" value={hYield} onChange={setHYield} error={err('yieldKg')} required />
+    extra = <>
       <div className="form-grid">
-        <NumberField label="Diện tích thu hoạch" unit="ha" value={hArea} onChange={setHArea} hint={OPTIONAL} error={err('harvestedAreaHa')} />
-        <NumberField label="Độ ẩm" unit="%" value={hMoisture} onChange={setHMoisture} hint={OPTIONAL} error={err('moisturePercent')} />
+        <NumberField label="Thời gian tưới" unit="phút" value={iDuration} onChange={setIDuration} error={err('durationMinutes')} hint={OPTIONAL} integer />
+        <NumberField label="Mực nước ruộng" unit="cm" value={iLevel} onChange={setILevel} hint={OPTIONAL} />
       </div>
+      <CheckboxField label="Có dùng máy bơm" checked={iPump} onChange={setIPump} />
+      {iPump && <NumberField label="Năng lượng bơm" unit="kWh" value={iPumpEnergy} onChange={setIPumpEnergy} error={err('pumpEnergyKwh')} hint={OPTIONAL} />}
     </>
-    cost = <NumberField label="Chi phí" unit="đ" value={hCost} onChange={setHCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+    costField = <NumberField label="Chi phí" unit="đ" value={iCost} onChange={setICost} hint={OPTIONAL} error={err('totalCostVnd')} integer />
+  } else if (activityType === 'harvest') {
+    // Yield is the denominator of every per-kg metric on the Performance page,
+    // so it is the one field on the screen and it is set large.
+    main = <NumberField label="Sản lượng thu hoạch" unit="kg" value={hYield} onChange={setHYield} error={err('yieldKg')} required big />
+    extra = <div className="form-grid">
+      <NumberField label="Diện tích thu hoạch" unit="ha" value={hArea} onChange={setHArea} hint={OPTIONAL} error={err('harvestedAreaHa')} />
+      <NumberField label="Độ ẩm" unit="%" value={hMoisture} onChange={setHMoisture} hint={OPTIONAL} error={err('moisturePercent')} />
+    </div>
+    costField = <NumberField label="Chi phí" unit="đ" value={hCost} onChange={setHCost} hint={OPTIONAL} error={err('totalCostVnd')} integer />
   } else if (activityType === 'seeding') {
     main = <>
-      <TextField label="Giống" value={sVariety} onChange={setSVariety} hint={OPTIONAL} />
-      <div className="form-grid">
-        <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} required />
-        <TextField label="Phương pháp gieo" value={sMethod} onChange={setSMethod} hint={OPTIONAL} />
-      </div>
+      <TextField label="Giống" value={sVariety} onChange={setSVariety} hint={OPTIONAL} autoFocus />
+      <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} required big />
+      <SuggestField label="Phương pháp gieo" value={sMethod} onChange={setSMethod} options={SEEDING_METHODS} hint={OPTIONAL} />
     </>
-    cost = <NumberField label="Chi phí vật tư" unit="đ" value={sCost} onChange={setSCost} hint={OPTIONAL} error={err('costVnd')} />
+    extra = null
+    costField = <NumberField label="Chi phí vật tư" unit="đ" value={sCost} onChange={setSCost} hint={OPTIONAL} error={err('costVnd')} integer />
   } else if (activityType === 'pesticide') {
     main = <>
-      <TextField label="Tên thuốc" value={pName} onChange={setPName} error={err('productName')} required />
+      <TextField label="Tên thuốc" value={pName} onChange={setPName} error={err('productName')} required autoFocus />
       <div className="form-grid">
         <NumberField label="Lượng sử dụng" value={pAmount} onChange={setPAmount} error={err('amount')} required />
-        <TextField label="Đơn vị" value={pUnit} onChange={setPUnit} hint="ví dụ: kg, lít, gói" error={err('unit')} required />
+        <SuggestField label="Đơn vị" value={pUnit} onChange={setPUnit} options={PESTICIDE_UNITS} error={err('unit')} required />
       </div>
-      <TextField label="Mục đích / đối tượng" value={pTarget} onChange={setPTarget} hint={OPTIONAL} />
     </>
-    cost = <NumberField label="Chi phí vật tư" unit="đ" value={pCost} onChange={setPCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+    extra = <TextField label="Hoạt chất / đối tượng phòng trừ" value={pTarget} onChange={setPTarget} hint={OPTIONAL} />
+    costField = <NumberField label="Chi phí vật tư" unit="đ" value={pCost} onChange={setPCost} hint={OPTIONAL} error={err('totalCostVnd')} integer />
   } else {
     main = <>
       <SelectField label="Cách xử lý rơm rạ" value={wMethod} onChange={setWMethod} options={STRAW_METHOD_OPTIONS} error={err('method')} />
       {wMethod === 'burned' && (
         <p className="fw-disclaimer"><Ico name="info" />Hình thức xử lý này sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng.</p>
       )}
-      <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint={OPTIONAL} error={err('strawMassKg')} />
+      <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint={OPTIONAL} error={err('strawMassKg')} big />
     </>
-    cost = <NumberField label="Chi phí" unit="đ" value={wCost} onChange={setWCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+    // Carbon-methodology inputs, stated the way a farmer would say them. Blank
+    // stays blank: the Carbon Engine still fails closed rather than guessing.
+    extra = <>
+      <NumberField label="Số ngày trước khi làm đất" unit="ngày" value={wDays} onChange={setWDays} hint={OPTIONAL} error={err('daysBeforeCultivation')} integer />
+      <NumberField label="Tỷ lệ chất khô của rơm" value={wDry} onChange={setWDry} hint="Không bắt buộc · từ 0 đến 1, ví dụ 0,85" error={err('dryMatterFraction')} />
+      <CheckboxField label="Rơm được vùi trả lại ruộng" checked={wReturned === true} onChange={(v) => setWReturned(v ? true : null)} />
+    </>
+    costField = <NumberField label="Chi phí" unit="đ" value={wCost} onChange={setWCost} hint={OPTIONAL} error={err('totalCostVnd')} integer />
   }
 
   return (
     <FarmerSheet title={TITLES[activityType][mode]} subtitle={season.label} icon={look.icon} tone={look.tone} onClose={onClose} busy={pending}>
       <form className="activity-form" ref={formRef} onSubmit={handleSubmit} noValidate>
-        <p className="fw-form__ctx"><Ico name="plot" /><span>Vụ <b>{season.label}</b></span></p>
-        <p className="fw-form__legend">Trường có dấu <span className="form-field__required" aria-hidden="true">*</span> là bắt buộc.</p>
-        <FormSection title="Thời gian" icon="calendar">
-          <TextField label={DATE_LABEL[activityType]} type="date" value={date} onChange={setDate} required autoFocus />
-        </FormSection>
-        <FormSection title="Thông tin chính" icon={look.icon}>{main}</FormSection>
-        <FormSection title="Chi phí" icon="money">{cost}</FormSection>
-        <FormSection title="Ghi chú" icon="journal">
-          <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint={OPTIONAL} />
-        </FormSection>
+        {/* The field note's head: which season this is written to, and when it
+          * happened. No farmer should have to wonder about the target, and the
+          * date is a first-class row rather than a section of its own. */}
+        <div className="fw-fn">
+          <p className="fw-fn__target"><Ico name="plot" /><span>Ghi vào vụ <b>{season.label}</b></span></p>
+          <TextField label={DATE_LABEL[activityType]} type="date" value={date} onChange={setDate} required />
+        </div>
+
+        {main}
+
+        <MoreDetails open={moreOpen} onToggle={setMoreOpen}>
+          {extra}
+          {costField}
+        </MoreDetails>
+
+        {/* The note stays on the primary screen. Cost and methodology are things
+          * the system wants; the note is the farmer's own remark about what
+          * happened in the field — and this product is called Nhật ký. Burying
+          * it behind a summary is the one optional field that would cost more
+          * than it saves. */}
+        <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint={OPTIONAL} />
 
         {error && (
           <div className="fw-form__error" role="alert">
@@ -581,12 +673,18 @@ export function AddActivityCta({ season, mutations }: { season: SeasonContext; m
 
 /* ------------------------------------------------------ journal row actions */
 
+/** Edit is the action; delete is the exception.
+ *
+ * They used to sit side by side as two filled buttons of equal weight, which
+ * makes destroying a record as easy to hit as correcting one. Delete now reads
+ * as a written action set apart and below, and still routes through the same
+ * confirmation dialog. */
 export function ActivityDetailActions({ activity, season, mutations }: { activity: Activity; season: SeasonContext; mutations: ActivityMutations }) {
   if (!isSupportedActivityType(activity.type)) return null
   return (
     <>
       <button type="button" className="fw-btn fw-btn--soft" onClick={() => mutations.openEdit(activity, season)}><Ico name="edit" />Chỉnh sửa</button>
-      <button type="button" className="fw-btn fw-btn--danger" onClick={() => mutations.openDelete(activity, season)}><Ico name="delete" />Xóa hoạt động</button>
+      <button type="button" className="fw-destroy" onClick={() => mutations.openDelete(activity, season)}>Xóa hoạt động này</button>
     </>
   )
 }

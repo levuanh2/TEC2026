@@ -55,6 +55,13 @@ export interface StrawManagementActivityInput {
   method: StrawManagementMethod
   strawMassKg?: number | null
   totalCostVnd?: number | null
+  // Carbon-methodology inputs the backend has always accepted. They stay
+  // optional and null by default; the form now offers them behind a collapsed
+  // disclosure in plain language so a farmer who knows the answer has a way to
+  // record it, instead of the Carbon Engine failing closed with no route back.
+  daysBeforeCultivation?: number | null
+  dryMatterFraction?: number | null
+  returnedToField?: boolean | null
 }
 
 export type ActivityInput =
@@ -133,15 +140,18 @@ function pesticidePayload(input: PesticideActivityInput): Record<string, unknown
 
 function strawManagementPayload(input: StrawManagementActivityInput): Record<string, unknown> {
   // days_before_cultivation / dry_matter_fraction / returned_to_field are
-  // deliberately never submitted from the Farmer Web form (brief FW-2 Part 3
-  // §25 — no SFo/CFOA jargon in the UI). They stay unset/null; the Carbon
-  // Engine raises a fail-closed methodology gap at calculation time if a
-  // method that needs them is missing one, rather than this form inventing
-  // or requiring a value.
+  // Carbon-methodology inputs (backend/schemas.py::StrawManagementActivityData).
+  // They are never *required* and are never invented here — blank stays null and
+  // the Carbon Engine still fails closed at calculation time. What changed is
+  // that the form can now carry them when the farmer actually knows them; the
+  // UI states them in plain language and never shows SFo/CFOA jargon.
   return {
     method: input.method,
     straw_mass_kg: input.strawMassKg ?? null,
     total_cost_vnd: input.totalCostVnd ?? null,
+    days_before_cultivation: input.daysBeforeCultivation ?? null,
+    dry_matter_fraction: input.dryMatterFraction ?? null,
+    returned_to_field: input.returnedToField ?? null,
   }
 }
 

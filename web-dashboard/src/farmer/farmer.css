@@ -632,14 +632,38 @@
 .fw-pick--list button { padding-left: 0; padding-right: 0; border-left: 0; }
 
 .fw .activity-form, .fw-overlay .activity-form { display: grid; gap: var(--fw-space-20); }
-.fw-form__ctx { display: flex; align-items: baseline; gap: var(--fw-space-8); padding-bottom: var(--fw-space-12); border-bottom: 1px solid var(--fw-rule); font-size: 14px; color: var(--fw-muted); }
-.fw-form__ctx svg { width: 16px; height: 16px; color: var(--fw-accent); }
-.fw-form__ctx b { color: var(--fw-ink); }
-.fw-form__legend { font-size: var(--fw-text-xs); color: var(--fw-muted); }
-/* Groups are ruled bands, not nested boxes. */
-.fw-form__section { display: grid; gap: var(--fw-space-12); padding-top: var(--fw-space-12); border-top: 1px solid var(--fw-rule-2); }
-.fw-form__section > h4 { display: flex; align-items: center; gap: var(--fw-space-6); font-size: var(--fw-text-xs); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--fw-muted); }
-.fw-form__section > h4 svg { width: 14px; height: 14px; }
+
+/* The field note's head — where this is written and when it happened. Two rows,
+ * no section heading, no icon tile: the form opens on the first real question. */
+.fw-fn { display: grid; gap: var(--fw-space-12); padding-bottom: var(--fw-space-16); border-bottom: 1px solid var(--fw-rule-2); }
+.fw-fn__target { display: flex; align-items: baseline; gap: var(--fw-space-8); font-size: 14px; color: var(--fw-muted); }
+.fw-fn__target svg { width: 16px; height: 16px; color: var(--fw-accent); }
+.fw-fn__target b { color: var(--fw-ink); font-weight: 650; }
+
+/* A measurement reads value-then-unit, the way it does on a sack or a meter. */
+.fw-num__box { display: flex; align-items: stretch; gap: 0; border-bottom: 1px solid var(--fw-rule-2); background: var(--fw-paper-2); }
+.fw-num__box:focus-within { border-bottom: 2px solid var(--fw-accent); }
+.fw-overlay .fw-num .fw-num__box input { border-bottom: 0; background: transparent; flex: 1; min-width: 0; }
+.fw-overlay .fw-num .fw-num__box input:focus { border-bottom: 0; }
+/* The browser's number spinners sit between the value and its unit and are
+ * useless for a measurement you type — hide them and let the unit own that edge. */
+.fw-overlay .fw-num input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.fw-overlay .fw-num input[type="number"]::-webkit-outer-spin-button,
+.fw-overlay .fw-num input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.fw-num__unit { display: grid; place-items: center; flex: none; padding: 0 var(--fw-space-12); font-size: var(--fw-text-sm); font-weight: 650; color: var(--fw-muted); border-left: 1px solid var(--fw-rule); }
+.fw-overlay .fw-num[aria-invalid="true"] .fw-num__box { border-bottom: 2px solid var(--fw-danger); }
+.fw-overlay .fw-num[aria-invalid="true"] input { border-bottom: 0; }
+/* The reading the whole record exists for — yield, water, the amount spread. */
+.fw-num--big .fw-num__box input { font-family: var(--fw-display); font-size: var(--fw-text-xl); font-weight: 600; min-height: 56px; }
+
+/* One disclosure, same in all six forms. Collapsed by default so the fast path
+ * is the default path; a ruled summary, never a boxed panel. */
+.fw-more { border-top: 1px solid var(--fw-rule-2); }
+.fw-more > summary { display: flex; align-items: center; gap: var(--fw-space-8); min-height: 48px; cursor: pointer; list-style: none; font-weight: 650; font-size: 14px; color: var(--fw-accent-deep); }
+.fw-more > summary::-webkit-details-marker { display: none; }
+.fw-more > summary::after { content: "+"; margin-left: auto; font-size: var(--fw-text-md); font-weight: 500; color: var(--fw-muted); }
+.fw-more[open] > summary::after { content: "−"; }
+.fw-more__body { display: grid; gap: var(--fw-space-16); padding-bottom: var(--fw-space-16); }
 .fw-overlay .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--fw-space-16); }
 .fw-overlay .form-field { display: grid; gap: var(--fw-space-6); font-size: 14px; font-weight: 650; color: var(--fw-ink); }
 .fw-overlay .form-field--full { grid-column: 1 / -1; }
@@ -766,13 +790,23 @@
   .fw-bottom a[aria-current="page"] .fw-bottom__ico { border-bottom: 2px solid var(--fw-accent); }
   .fw-overlay { padding: 0; align-items: flex-end; }
   .fw-sheet, .fw-sheet--wide { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
-  .fw-form__footer { margin-bottom: calc((var(--fw-space-24) + env(safe-area-inset-bottom)) * -1); padding-bottom: calc(var(--fw-space-16) + env(safe-area-inset-bottom)); }
+  /* A short form must still put Save at the bottom of the sheet, not floating
+   * halfway up with paper beneath it. The body becomes a column, the form takes
+   * the slack, and the footer is pushed down — it still sticks once the content
+   * is long enough to scroll. */
+  .fw-sheet__body { flex: 1; display: flex; flex-direction: column; }
+  /* flex, not grid: `margin-top: auto` on the footer is inert inside a grid
+   * whose rows are packed with `align-content: start`. */
+  .fw-overlay .activity-form { flex: 1; display: flex; flex-direction: column; gap: var(--fw-space-20); }
+  .fw-form__footer { margin-top: auto; margin-bottom: calc((var(--fw-space-24) + env(safe-area-inset-bottom)) * -1); padding-bottom: calc(var(--fw-space-16) + env(safe-area-inset-bottom)); }
   .fw-form__footer .fw-btn { flex: 1; }
   .fw-drawer { width: 100%; }
   .fw-ledger__figure b { font-size: 64px; }
 }
-@media (max-width: 480px) {
+@media (max-width: 767px) {
   .fw-overlay .form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
   .fw-head__actions, .fw-head__actions .fw-btn { width: 100%; }
   .fw-pick { grid-template-columns: minmax(0, 1fr); }
   .fw-pick button:nth-child(even) { padding-left: 0; border-left: 0; }
@@ -793,3 +827,8 @@
  * than being squeezed into the three-column row it uses on its own page. */
 .fw-area-cv .fw-cvcard { grid-template-columns: auto minmax(0, 1fr); }
 .fw-area-cv .fw-cvcard > .fw-btn { grid-column: 1 / -1; justify-self: start; margin-top: var(--fw-space-8); }
+
+/* Destructive, but not a primary action competing with Save/Edit. */
+.fw-destroy { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; justify-self: start; }
+.fw-destroy:hover { color: var(--fw-danger); }
+.fw-detail__actions { align-items: center; }

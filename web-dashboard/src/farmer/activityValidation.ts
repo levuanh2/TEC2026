@@ -97,6 +97,8 @@ export interface StrawManagementDraft {
   method: string
   strawMassKg: number | null
   totalCostVnd: number | null
+  daysBeforeCultivation?: number | null
+  dryMatterFraction?: number | null
 }
 
 const STRAW_METHODS = new Set(['incorporated', 'removed', 'burned', 'composted', 'other'])
@@ -106,6 +108,13 @@ export function validateStrawManagement(draft: StrawManagementDraft): FieldError
   if (!STRAW_METHODS.has(draft.method)) errors.method = 'Vui lòng chọn cách xử lý rơm rạ.'
   if (draft.strawMassKg != null && draft.strawMassKg < 0) errors.strawMassKg = 'Lượng rơm rạ không thể là số âm.'
   if (draft.totalCostVnd != null && draft.totalCostVnd < 0) errors.totalCostVnd = 'Chi phí không thể là số âm.'
+  // Mirrors StrawManagementActivityData: ge=0 and gt=0/le=1 respectively.
+  if (draft.daysBeforeCultivation != null && draft.daysBeforeCultivation < 0) {
+    errors.daysBeforeCultivation = 'Số ngày không thể là số âm.'
+  }
+  if (draft.dryMatterFraction != null && (draft.dryMatterFraction <= 0 || draft.dryMatterFraction > 1)) {
+    errors.dryMatterFraction = 'Tỷ lệ chất khô phải lớn hơn 0 và không quá 1.'
+  }
   return errors
 }
 
