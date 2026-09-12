@@ -12,9 +12,16 @@ của nông hộ khác. Cả hai trường hợp đều trả CropAccessError ->
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+import contextlib
+from typing import Any, Iterator, Protocol
 
 from .config import Settings
+
+try:  # gotrue ships with supabase; a fake-client test never needs it
+    from supabase_auth.errors import AuthApiError, AuthInvalidJwtError
+    _AUTH_REJECTION_ERRORS: tuple[type[BaseException], ...] = (AuthApiError, AuthInvalidJwtError)
+except Exception:  # noqa: BLE001 - absence only disables the mapping below
+    _AUTH_REJECTION_ERRORS = ()
 
 
 class CropAccessError(Exception):
@@ -24,6 +31,48 @@ class CropAccessError(Exception):
 
 class MissingAuthError(Exception):
     """Thiếu hoặc sai định dạng header Authorization."""
+
+
+class InvalidTokenError(Exception):
+    """Supabase đã từ chối JWT của người gọi — sai định dạng, sai chữ ký, hoặc hết hạn.
+
+    Khác `MissingAuthError` ở chỗ header ĐÚNG dạng `Bearer <...>`, nên chỉ biết
+    token hỏng sau khi Supabase thực sự soi nó. Cả hai đều là 401; tách ra để
+    chỗ nào ném lỗi vẫn đọc được ý nghĩa.
+    """
+
+
+# PostgREST gói mọi phán quyết "JWT này không dùng được" vào đúng một mã:
+# PGRST301 (thiếu 3 phần, sai chữ ký, hoặc hết hạn). Các mã khác — PGRST116
+# không có hàng nào, lỗi schema... — KHÔNG phải phán quyết xác thực.
+_JWT_REJECTED_POSTGREST_CODE = "PGRST301"
+
+
+def _is_rejected_jwt(exc: BaseException) -> bool:
+    """Đúng KHI VÀ CHỈ KHI Supabase nói token của người gọi không dùng được.
+
+    Cố ý hẹp. Mất kết nối, Supabase sập, hay lỗi lập trình phải nổi lên thành
+    5xx thật: biến chúng thành 401 sẽ đá người dùng về màn hình đăng nhập vì
+    một sự cố chẳng liên quan gì tới token của họ, và giấu luôn sự cố thật.
+    """
+    if getattr(exc, "code", None) == _JWT_REJECTED_POSTGREST_CODE:
+        return True
+    if _AUTH_REJECTION_ERRORS and isinstance(exc, _AUTH_REJECTION_ERRORS):
+        # AuthApiError mang đúng status máy chủ Auth trả về; chỉ 401/403 mới là
+        # "token hỏng". AuthRetryableError (mạng) là lớp khác nên không lọt vào.
+        return getattr(exc, "status", None) in (401, 403)
+    return False
+
+
+@contextlib.contextmanager
+def jwt_rejection_as_invalid_token() -> Iterator[None]:
+    """Dịch lời từ chối JWT của Supabase thành `InvalidTokenError`, giữ nguyên mọi lỗi khác."""
+    try:
+        yield
+    except Exception as exc:  # noqa: BLE001 - lọc ngay bên dưới, phần còn lại ném tiếp
+        if _is_rejected_jwt(exc):
+            raise InvalidTokenError("Token không hợp lệ hoặc đã hết hạn.") from exc
+        raise
 
 
 class CropAccessChecker(Protocol):
@@ -64,15 +113,16 @@ class SupabaseCropAccessChecker:
         # JWT gắn vào client PostgREST — PostgREST đọc claim `sub`/`role` từ token
         # đó, tức RLS chạy đúng như thể chính người dùng gọi thẳng Supabase.
         # Không dùng session/refresh — chỉ cần access token hiện có.
-        rows = (
-            self._client_for(token)
-            .table("crop_seasons")
-            .select("id")
-            .eq("id", crop_season_id)
-            .execute()
-            .data
-            or []
-        )
+        with jwt_rejection_as_invalid_token():
+            rows = (
+                self._client_for(token)
+                .table("crop_seasons")
+                .select("id")
+                .eq("id", crop_season_id)
+                .execute()
+                .data
+                or []
+            )
         if not rows:
             raise CropAccessError(
                 f"'{crop_season_id}' không tồn tại hoặc không thuộc phạm vi truy cập "

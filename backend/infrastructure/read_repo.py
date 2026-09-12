@@ -12,7 +12,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from . import profiling, supabase_clients
+from . import auth, profiling, supabase_clients
 from .config import Settings
 
 DETAIL_TABLES = {
@@ -79,15 +79,19 @@ class SupabaseReadRepository:
         Supabase outage must still surface as an error rather than be hidden
         behind retries.
         """
-        for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
-            failed = self.client
-            try:
-                return attempt()
-            except _TRANSPORT_ERRORS:
-                if not self._pooled or remaining == 0:
-                    raise
-                time.sleep(_RETRY_BACKOFF_SECONDS)
-                self.client = supabase_clients.renew(self._settings, self.token, failed)
+        # A rejected JWT is a verdict, not a transport hiccup: it is the same on
+        # every attempt, so it must leave this loop as `InvalidTokenError` (-> 401)
+        # instead of escaping raw and becoming a 500.
+        with auth.jwt_rejection_as_invalid_token():
+            for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
+                failed = self.client
+                try:
+                    return attempt()
+                except _TRANSPORT_ERRORS:
+                    if not self._pooled or remaining == 0:
+                        raise
+                    time.sleep(_RETRY_BACKOFF_SECONDS)
+                    self.client = supabase_clients.renew(self._settings, self.token, failed)
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:

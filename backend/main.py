@@ -33,7 +33,7 @@ from infrastructure.read_repo import SupabaseReadRepository
 from infrastructure.write_repo import PostgresActivityWriteRepository
 from infrastructure.recommendation_repo import PostgresRecommendationRepository
 from infrastructure.cv_repo import PostgresCvRepository
-from infrastructure.auth import MissingAuthError, extract_bearer_token
+from infrastructure.auth import InvalidTokenError, MissingAuthError, extract_bearer_token
 from infrastructure.request_context import RequestIdMiddleware
 from service import ActivityWriteService, CarbonService, CvService, RecommendationService
 
@@ -216,6 +216,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": error_detail(
             "validation_error", "Dữ liệu request không hợp lệ.", errors=exc.errors(),
         )},
+    )
+
+
+@app.exception_handler(InvalidTokenError)
+async def invalid_token_exception_handler(request: Request, exc: InvalidTokenError) -> JSONResponse:
+    """Token sai định dạng/hết hạn phải là 401, không phải 500.
+
+    Header đúng dạng `Bearer <...>` nên dependency cho qua; chỉ tới lúc gọi
+    Supabase thật mới biết token hỏng, và lỗi đó nằm sâu trong repository. Bắt
+    ở tầng app để MỌI route dùng JWT trả cùng một 401 `unauthenticated`, thay
+    vì phải nhớ bọc try/except ở từng route. Chỉ lời từ chối JWT mới tới được
+    đây (xem `_is_rejected_jwt`) — lỗi hạ tầng vẫn nổi lên thành 5xx thật.
+    """
+    return JSONResponse(
+        status_code=401,
+        content={"detail": error_detail("unauthenticated", str(exc))},
     )
 
 

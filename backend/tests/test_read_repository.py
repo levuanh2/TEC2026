@@ -478,6 +478,104 @@ def test_missing_authorization_uses_unified_401_error_contract():
     assert response.json()["detail"]["error"]["code"] == "unauthenticated"
 
 
+@pytest.mark.parametrize("token", ["garbage", "malformed.jwt.token", "a.b.c"])
+@pytest.mark.parametrize("path", ["/v1/me", "/v1/farmer/scope", "/v1/farms"])
+def test_malformed_bearer_returns_401_not_500(path, token, monkeypatch):
+    """A syntactically valid header carrying a junk JWT must be 401, never 500.
+
+    The header shape passes `extract_bearer_token`, so the token is only found
+    to be junk once Supabase looks at it — deep inside the read repository.
+    Before the fix that raised `AuthApiError`/PostgREST `PGRST301` straight
+    through FastAPI and every one of these was a 500.
+    """
+    from fastapi.testclient import TestClient
+    from main import app
+
+    response = TestClient(app).get(path, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"]["code"] == "unauthenticated"
+
+
+def test_me_malformed_bearer_returns_401():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    response = TestClient(app).get("/v1/me", headers={"Authorization": "Bearer garbage"})
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"]["code"] == "unauthenticated"
+
+
+def test_farmer_scope_malformed_bearer_returns_401():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    response = TestClient(app).get("/v1/farmer/scope", headers={"Authorization": "Bearer garbage"})
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"]["code"] == "unauthenticated"
+
+
+# ---------------------------------------------------------------------------
+# The 401 mapping must stay narrow (brief §5): only Supabase's own "this JWT is
+# unusable" verdict becomes 401. A dropped connection, an outage or a bug here
+# must keep surfacing as a real 5xx instead of bouncing the user to a login
+# screen for a failure that has nothing to do with their token.
+# ---------------------------------------------------------------------------
+
+def test_only_supabase_jwt_rejection_is_translated():
+    from postgrest.exceptions import APIError
+    from supabase_auth.errors import AuthApiError, AuthRetryableError
+    from infrastructure.auth import InvalidTokenError, jwt_rejection_as_invalid_token
+
+    rejected = [
+        APIError({"message": "Expected 3 parts in JWT; got 1", "code": "PGRST301"}),
+        APIError({"message": "JWT cryptographic operation failed", "code": "PGRST301"}),
+        AuthApiError("invalid JWT", 401, None),
+        AuthApiError("forbidden", 403, None),
+    ]
+    for exc in rejected:
+        with pytest.raises(InvalidTokenError):
+            with jwt_rejection_as_invalid_token():
+                raise exc
+
+    untouched: list[Exception] = [
+        APIError({"message": "no rows", "code": "PGRST116"}),
+        AuthApiError("upstream is unwell", 500, None),
+        AuthRetryableError("connection reset", 0),
+        ConnectionError("server disconnected"),
+        ValueError("a plain programming error"),
+    ]
+    for exc in untouched:
+        with pytest.raises(type(exc)):
+            with jwt_rejection_as_invalid_token():
+                raise exc
+
+
+def test_scope_denial_with_a_valid_token_is_still_404_not_401(repo_a):
+    """The fix must not turn an authorization verdict into an authentication one.
+
+    Farmer A holds a perfectly good token and asks for Farmer B's farm: that is
+    a scope denial, and it must stay a 404 (never 403, never 401) so the reply
+    does not reveal that `farm-b` exists.
+    """
+    from fastapi.testclient import TestClient
+    import api
+    from main import app
+
+    previous = app.dependency_overrides.get(api._read_repo)
+    app.dependency_overrides[api._read_repo] = lambda: repo_a
+    try:
+        response = TestClient(app).get(
+            f"/v1/farms/{FARM_B}", headers={"Authorization": "Bearer token-a"}
+        )
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(api._read_repo, None)
+        else:
+            app.dependency_overrides[api._read_repo] = previous
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"]["code"] == "not_found"
+
+
 # ---------------------------------------------------------------------------
 # CORS — không có middleware này thì browser thật chặn MỌI fetch từ React
 # trước khi request rời đi (khác 401/403). Bug thật phát hiện qua browser QA
