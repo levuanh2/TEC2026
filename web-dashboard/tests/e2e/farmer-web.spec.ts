@@ -2,6 +2,17 @@ import { expect, test, type Page } from '@playwright/test'
 
 const noHorizontalOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
 
+/** Quick Entry from Home, where the fixture has two active seasons (like the
+ * real QA farmer): the picker appears first and the chosen season is the one
+ * the form is opened for. */
+async function quickEntry(page: Page, label: string, season = 'Hè Thu 2026') {
+  await page.getByRole('button', { name: label, exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Chọn vụ cần ghi' })
+  await expect(picker).toBeVisible()
+  await picker.getByRole('button', { name: new RegExp(season) }).click()
+  await expect(picker).toHaveCount(0)
+}
+
 test('Farmer V2 shell, navigation, pages and activity forms render correctly (mock data)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/farmer')
@@ -22,7 +33,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   }
   await page.screenshot({ path: 'test-results/farmer-v2-home-1440.png', fullPage: true })
 
-  await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
+  await quickEntry(page, 'Bón phân')
   const fertilizer = page.getByRole('dialog', { name: 'Bón phân' })
   await expect(fertilizer).toBeVisible()
   await expect(fertilizer.locator('.form-field__required').first()).toBeVisible()
@@ -30,27 +41,27 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(fertilizer).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Tưới nước', exact: true }).click()
+  await quickEntry(page, 'Tưới nước')
   await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Thu hoạch', exact: true }).click()
+  await quickEntry(page, 'Thu hoạch')
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Gieo sạ', exact: true }).click()
+  await quickEntry(page, 'Gieo sạ')
   await expect(page.getByRole('dialog', { name: 'Gieo sạ' })).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Gieo sạ' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Thuốc BVTV', exact: true }).click()
+  await quickEntry(page, 'Thuốc BVTV')
   await expect(page.getByRole('dialog', { name: 'Thuốc BVTV' })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Thuốc BVTV' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Rơm rạ', exact: true }).click()
+  await quickEntry(page, 'Rơm rạ')
   await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toBeVisible()
   // Selecting "Đốt" (burned) shows a neutral factual notice, never a fake CO2e number.
   await page.getByLabel('Cách xử lý rơm rạ').selectOption('burned')
@@ -65,6 +76,21 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByText('Kết quả chỉ mang tính hỗ trợ, chưa được xác nhận thực địa.')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toHaveCount(0)
+
+  // Two active seasons: Quick Entry must ask which one, and open the form for
+  // the season actually chosen — not silently assume the primary one.
+  await page.getByRole('button', { name: 'Tưới nước', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Chọn vụ cần ghi' })
+  await expect(picker).toBeVisible()
+  await expect(picker.getByRole('button')).toHaveCount(3)  // 2 seasons + close
+  await picker.getByRole('button', { name: /Thu Đông 2026/ }).click()
+  const forSecondSeason = page.getByRole('dialog', { name: 'Ghi tưới nước' })
+  await expect(forSecondSeason).toBeVisible()
+  // The form's own context line, not the sheet subtitle: it is what tells the
+  // farmer which season this entry will be written to.
+  await expect(forSecondSeason.locator('.fw-form__ctx')).toHaveText(/Thu Đông 2026 · Thửa A-02/)
+  await page.getByRole('button', { name: 'Hủy' }).click()
+  await expect(forSecondSeason).toHaveCount(0)
 
   await nav.getByRole('link', { name: 'Nhật ký', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Nhật ký canh tác', level: 1 })).toBeVisible()
@@ -129,7 +155,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
   await page.screenshot({ path: 'test-results/farmer-v2-home-390.png', fullPage: true })
 
-  await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
+  await quickEntry(page, 'Bón phân')
   await expect(page.getByRole('dialog', { name: 'Bón phân' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Lưu hoạt động' })).toBeInViewport()
   await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
