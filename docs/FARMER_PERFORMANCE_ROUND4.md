@@ -137,13 +137,41 @@ re-authenticated with a different token. The cache is bounded (32) and
 time-limited (10 min), and construction is single-flight per token so the
 several reads a page fires at once do not each build their own.
 
-Three follow-on correctness fixes came out of this:
+Sharing a client also means sharing its connections, which turned out to
+matter more than the reuse itself. Four follow-on correctness fixes came out of
+it:
 
-* **Dropped keep-alive connections are retried once.** Supabase closes idle
+* **HTTP/2 is deliberately off on these clients.** Supabase offers it and httpx
+  will then multiplex every concurrent request onto ONE connection. That is
+  fine for a client used by one request at a time; it is not fine for a client
+  shared by all of a caller's in-flight requests. Observed against hosted
+  Supabase under five parallel E2E workers: `httpcore`'s sync HTTP/2 connection
+  lost track of a stream and raised `KeyError: <stream id>` out of
+  `_response_closed`, 500ing a request, and a single server-side close took
+  down every read multiplexed on that connection at once. Plain keep-alive
+  HTTP/1.1 with a real pool gives each concurrent read its own connection,
+  keeps the entire point of reuse (no TLS handshake per request — ~187ms warm
+  against ~390ms cold), and confines a dropped connection to the one read using
+  it. It also made latency *more* consistent: Home's full-content median went
+  from 1 639ms (HTTP/2, with a 14s outlier) to 1 031ms with none.
+  Supplying a custom httpx client also replaces postgrest-py's 120s timeout
+  with httpx's 5s default, so the timeout is set explicitly — hosted rollup
+  reads legitimately take longer than 5s.
+
+
+* **Dropped connections are retried, boundedly.** Supabase closes idle
   connections; httpx then raises `RemoteProtocolError` on the next read that
-  picks one. These reads are idempotent, so the stale pool is discarded and the
-  read reissued — rather than failing a page section. (This failure was present
-  before pooling too, just rarer.)
+  picks one. These reads are idempotent, so the client is replaced and the read
+  reissued — rather than failing a page section. One retry was not enough while
+  HTTP/2 was still in use: a burst could also catch the replacement's first
+  request, and about 1% of reads still 500ed. Three attempts with a short
+  backoff, deliberately small so a genuine Supabase outage still surfaces as an
+  error instead of hiding behind retries. (This failure predates client reuse —
+  the very first baseline run had a `/v1/farmer/scope` fail this way.)
+* **A burst of failures shares one replacement.** All the reads on a dead
+  connection fail together and all of them ask for a new client; only the first
+  replaces it, and the rest take that replacement instead of each building
+  another ~450ms client and evicting the previous thread's in flight.
 * **Eviction no longer closes clients.** Closing on eviction closed sockets out
   from under live requests (`RuntimeError: Cannot send a request, as the client
   has been closed`). The reference is dropped instead; the last request holding
@@ -318,7 +346,7 @@ a client a request may still hold.
 
 | Suite | Result |
 |---|---|
-| backend pytest | **284 passed** (was 263; +21) |
+| backend pytest | **289 passed** (was 263; +26) |
 | web vitest | **132 passed** (was 117; +15) |
 | `tsc -b` | clean |
 | `vite build` | pass |
@@ -339,6 +367,14 @@ season" is exercised (the gap flagged in the previous round).
 No QA rows were left on hosted Supabase: verified zero `QA-` marked activities
 after the write E2E.
 
+### Known remaining gap
+
+`infrastructure/supabase_repo.py` — the Carbon Engine's own reads — has no
+equivalent retry. It uses a long-lived service-role client, so `renew` (which
+is keyed on a caller token) does not apply to it as written. No failure was
+observed there in this round's runs, and the Carbon path was out of scope, so
+it is recorded rather than changed.
+
 ### Red/green verification
 
 Where a test claims to be a regression test, it was checked against the broken
@@ -347,6 +383,7 @@ code:
 | Regression | Red on the old code? |
 |---|---|
 | journal drawer showing a stale snapshot | **yes** — both drawer tests fail against the `useState<Activity>` version |
+| every failed read building its own replacement client | **yes** — the renew test fails against the per-caller version |
 | pooled connection not returned after a failure | **yes** — four pool tests fail against a deliberately leaking `connection()` |
 | `useQuery` losing a pre-mount update | **no — not reproducible in jsdom** (see below) |
 
@@ -365,19 +402,33 @@ login in five before, and 6/6 logins were clean after.
 
 ## 13. Confirmation benchmark after stabilization
 
-Re-measured after the review changes (shutdown hook, simplified pool
-acquisition, extra tests), same protocol, 7 runs:
+Re-measured twice. First after the review changes (shutdown hook, simplified
+pool acquisition, extra tests), still on HTTP/2 — 7 runs:
 
 | Screen | Median | Min | Max |
 |---|---|---|---|
 | Home — full content | 1 639 ms | 1 027 ms | 14 235 ms |
 | Season — full content | 1 458 ms | 1 195 ms | 4 078 ms |
 
-Requests (6) and Supabase round trips (34) were **identical in every run** —
-the code-level invariant did not move. The 14 s outlier was upstream: in that
-run every request's handler time tracked its Supabase wait almost exactly
-(`/metrics` 8 609 ms handler for 12 calls totalling 18 188 ms of DB wall), with
-the same call counts as the fast runs. A control measurement taken at the same
-time — a single `select` issued straight to PostgREST with no backend in the
-path — ranged 0.30–0.90 s across six samples, confirming the upstream was
-jittery rather than the backend regressing.
+Requests (6) and Supabase round trips (34) were identical in every run, so the
+code-level invariant had not moved; the 14s outlier was upstream (every
+handler's time tracked its Supabase wait almost exactly, and a control `select`
+straight to PostgREST ranged 0.30–0.90s at the same moment).
+
+Then again after turning HTTP/2 off on the pooled clients — 5 runs:
+
+| Screen | Median | Min | Max |
+|---|---|---|---|
+| **Home — full content** | **1 031 ms** | 802 ms | 1 245 ms |
+| **Season — full content** | **695 ms** | 584 ms | 714 ms |
+
+Faster *and* far more consistent: no outliers at all, because one caller's
+concurrent reads no longer queue behind each other on a single multiplexed
+connection. Requests (6) and Supabase round trips (34) unchanged.
+
+### Concurrency soak
+
+Five full parallel real-E2E sweeps (6 specs, 5 workers) after the change:
+**1 086 backend requests, zero 5xx, zero `KeyError`, zero
+`RemoteProtocolError`, zero unhandled exceptions.** Before it, the same sweep
+produced 4 × 500 out of ~434 requests (~1%) and two spec failures.
