@@ -548,3 +548,17 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .page-head h1 { font-size: 22px; }
   .hero__stats { gap: 20px; }
 }
+
+/* ------------------------------------------------------------- Attention */
+/* The dashboard's first section. Ruled rows, an inked mark per condition, the
+ * route that resolves it on the right — no cards and no coloured boxes, so a
+ * problem reads as a line in the register rather than an alert banner. */
+.attn { list-style: none; margin: 0; padding: 0; display: grid; }
+.attn__item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.attn__item > svg { color: var(--warning); align-self: start; }
+.attn__item b { display: block; font-size: var(--fs-body); font-weight: 650; color: var(--text-primary); }
+.attn__item p { font-size: var(--fs-sm); color: var(--text-muted); max-width: 78ch; }
+@media (max-width: 768px) {
+  .attn__item { grid-template-columns: auto minmax(0, 1fr); }
+  .attn__item .section__cta { grid-column: 2; justify-self: start; }
+}
