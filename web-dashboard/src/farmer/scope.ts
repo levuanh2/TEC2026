@@ -1,12 +1,13 @@
+import { useEffect, useState } from 'react'
 import type { CropSeason, Farm, Plot } from '../types'
 import { ApiError } from '../api/client'
 import { getFarmerScope, usingMockData, type FarmerScope } from '../api/farms'
 import { getActivities } from '../api/crops'
 import { getResourceMetrics } from '../api/metrics'
-import { generateRecommendations, getRecommendations } from '../api/recommendations'
+import { generateRecommendations, getRecommendations, type Recommendation } from '../api/recommendations'
 import { getCvInferences } from '../api/cv'
 import { getCarbon, type CarbonResult } from '../api/carbon'
-import { keys, peekQuery, prefetchQuery, setQueryData, STABLE_MS, useQuery } from './data'
+import { clearSeasonDataChanged, fetchQuery, keys, peekQuery, prefetchQuery, seasonDataChanged, setQueryData, STABLE_MS, useQuery, type QueryState } from './data'
 
 export type SeasonCtx = { season: CropSeason; plot?: Plot; farm?: Farm }
 
@@ -59,14 +60,69 @@ export const useMetrics = (id: string | null) => useQuery(id ? keys.metrics(id) 
 export const useActivities = (id: string | null) => useQuery(id ? keys.activities(id) : null, () => getActivities(id!))
 export const useCvHistory = (id: string | null) => useQuery(id ? keys.cv(id) : null, () => getCvInferences(id!))
 
-export function useRecommendations(id: string | null) {
+/* M05 generation is a deliberate non-blocker.
+ *
+ * `POST .../recommendations/generate` re-runs the rule engine and the Carbon
+ * Engine: measured 7.3-9.5s and 33 Supabase round trips against hosted
+ * Supabase, which alone accounted for ~7s of Home's and Season's time to full
+ * content. A page therefore only ever GETs what is already stored; generation
+ * runs when the farmer asks for it, or on its own AFTER the page is usable and
+ * only when the stored set is actually out of date. It never blocks, and a
+ * failure leaves the stored recommendations on screen (never a page error). */
+
+/** A stored set older than this is refreshed once, in the background. */
+export const RECS_STALE_AFTER_MS = 6 * 60 * 60_000
+/** How long after the section renders the background refresh may start. */
+const RECS_DEFER_MS = 1_200
+
+/** Whether a stored set should be regenerated at all (§ deferred generation):
+ *  the season's records changed in this session, nothing is stored yet, or what
+ *  is stored has aged past `RECS_STALE_AFTER_MS`. Anything else renders as-is —
+ *  a page load must not pay for generation just because it happened. */
+export function recommendationsOutOfDate(seasonId: string, items: Recommendation[]): boolean {
+  if (seasonDataChanged(seasonId)) return true
+  if (!items.length) return true
+  const newest = items.reduce((max, r) => (r.generatedAt > max ? r.generatedAt : max), '')
+  const at = Date.parse(newest)
+  return Number.isNaN(at) || Date.now() - at > RECS_STALE_AFTER_MS
+}
+
+export interface RecommendationsState extends QueryState<Recommendation[]> {
+  /** A generation run is in flight (stored items stay visible meanwhile). */
+  generating: boolean
+  /** The last run failed; stored items, if any, are still valid. */
+  generateError?: string
+  /** Explicit "Cập nhật khuyến nghị" — always runs, even if not out of date. */
+  regenerate: () => void
+}
+
+export function useRecommendations(id: string | null): RecommendationsState {
   const list = useQuery(id ? keys.recs(id) : null, () => getRecommendations(id!))
-  const gen = useQuery(id ? keys.recsGen(id) : null, async () => {
+
+  const run = async () => {
     const items = await generateRecommendations(id!)
+    clearSeasonDataChanged(id!)
     setQueryData(keys.recs(id!), items)
     return items.length
-  }, STABLE_MS)
-  return { ...list, generating: gen.loading, generateError: gen.error }
+  }
+
+  // Armed only after the section has rendered its stored data and the deferral
+  // has elapsed, so generation can never be part of first load.
+  const due = Boolean(id) && list.data !== undefined && recommendationsOutOfDate(id!, list.data ?? [])
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!due) { setArmed(false); return }
+    const timer = setTimeout(() => setArmed(true), RECS_DEFER_MS)
+    return () => clearTimeout(timer)
+  }, [due, id])
+
+  const gen = useQuery(id ? keys.recsGen(id) : null, run, STABLE_MS, armed)
+  return {
+    ...list,
+    generating: Boolean(id) && (gen.loading || gen.refreshing),
+    generateError: gen.error,
+    regenerate: () => { if (id) fetchQuery(keys.recsGen(id), run, { force: true }).catch(() => undefined) },
+  }
 }
 
 export type CarbonState = { kind: 'result'; result: CarbonResult } | { kind: 'none'; reason: 'no_calculation' | null }
@@ -82,6 +138,20 @@ export const useCarbon = (id: string | null) => useQuery<CarbonState>(id ? keys.
 })
 
 /* ---------------------------------------------------------- prefetch */
+
+/** Start the Farmer scope read as soon as a session exists, in parallel with
+ * `/v1/me` instead of after it.
+ *
+ * Measured on login: `/v1/me` took 1686ms because it was the first read on a
+ * brand-new token and therefore paid for building that caller's Supabase
+ * client (~800ms) on its own, and only then did `/v1/farmer/scope` start. Both
+ * reads need nothing but the token, so overlapping them both shares that
+ * one-time cost and puts the scope in cache before the Farmer shell mounts.
+ * Routing is untouched: the role still comes from `/v1/me`, never from here. */
+export function prefetchFarmerScope(): void {
+  if (usingMockData) return
+  prefetchQuery(keys.scope, getFarmerScope, STABLE_MS)
+}
 
 /** Bounded warm-up on nav hover/focus: at most scope + one season read per target. */
 export function prefetchNav(to: string): void {

@@ -36,13 +36,30 @@ export function RecommendationsSection({ seasonId, limit, moreTo }: { seasonId: 
 
   const open = (recs.data ?? []).filter((r) => r.status === 'generated')
   const shown = limit ? open.slice(0, limit) : open
+
+  /* Generation is never part of loading this page (see scope.useRecommendations):
+   * stored recommendations render immediately and a refresh — the farmer's, or
+   * the deferred background one — only ever adds this quiet status line. */
+  const action = recs.generating
+    ? <Refreshing show />
+    : seasonId
+      ? (
+        <div className="fw-section__actions">
+          {moreTo && open.length > shown.length && <MoreLink to={moreTo}>Xem tất cả</MoreLink>}
+          <button type="button" className="fw-btn fw-btn--ghost fw-btn--sm" onClick={recs.regenerate} disabled={recs.loading}>
+            Cập nhật khuyến nghị
+          </button>
+        </div>
+      )
+      : undefined
+
   return (
     <Section
       title="Khuyến nghị"
       icon="recommendation"
       tone="leaf"
       description="Chỉ hiển thị khi có đủ dữ liệu để ước tính tác động; không đoán."
-      action={recs.generating && recs.data ? <Refreshing show /> : moreTo && open.length > shown.length ? <MoreLink to={moreTo}>Xem tất cả</MoreLink> : undefined}
+      action={action}
     >
       {!seasonId ? (
         <Empty icon="recommendation" title="Chưa có vụ đang canh tác" body="Khuyến nghị gắn với một vụ canh tác cụ thể." />
@@ -56,7 +73,7 @@ export function RecommendationsSection({ seasonId, limit, moreTo }: { seasonId: 
         <Empty
           icon="recommendation"
           title="Chưa có khuyến nghị định lượng"
-          body={recs.generating ? 'Đang kiểm tra dữ liệu mới nhất của vụ…' : 'Hệ thống sẽ hiển thị khuyến nghị khi có đủ dữ liệu vụ này và có thể ước tính tác động.'}
+          body={recs.generating ? 'Đang cập nhật khuyến nghị…' : 'Hệ thống sẽ hiển thị khuyến nghị khi có đủ dữ liệu vụ này và có thể ước tính tác động.'}
         />
       ) : (
         <div className="fw-recs farmer-recommendations">
@@ -65,8 +82,17 @@ export function RecommendationsSection({ seasonId, limit, moreTo }: { seasonId: 
           ))}
         </div>
       )}
+      {recs.generating && shown.length > 0 && <p className="fw-note" aria-live="polite">Đang cập nhật khuyến nghị…</p>}
       {actError && <p className="fw-form__error" role="alert">{actError}</p>}
-      {recs.generateError && recs.data && <p className="fw-note">Chưa cập nhật được khuyến nghị mới; đang hiển thị các khuyến nghị đã lưu.</p>}
+      {/* A failed/slow generation is scoped to this section: whatever is stored
+        * stays on screen, and the rest of the page never sees an error. */}
+      {recs.generateError && !recs.generating && (
+        <p className="fw-note" role="status">
+          Không thể cập nhật khuyến nghị lúc này.
+          {recs.data?.length ? ' Đang hiển thị các khuyến nghị đã lưu.' : ''}{' '}
+          <button type="button" className="fw-link-btn" onClick={recs.regenerate}>Thử lại</button>
+        </p>
+      )}
     </Section>
   )
 }

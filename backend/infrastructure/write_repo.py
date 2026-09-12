@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from . import pg_pool
 from .config import Settings
 
 
@@ -44,9 +45,9 @@ class PostgresActivityWriteRepository:
     def _connection(self):
         if self._connect is not None:
             return self._connect()
-        import psycopg
-        from psycopg.rows import dict_row
-        return psycopg.connect(self._settings.require_db(), row_factory=dict_row)
+        # Pooled: a fresh hosted-Postgres connection costs ~700ms, which
+        # dwarfed the statements themselves (see infrastructure/pg_pool).
+        return pg_pool.connection(self._settings.require_db())
 
     @staticmethod
     def _detail_spec(activity_type: str) -> tuple[str, tuple[str, ...]]:

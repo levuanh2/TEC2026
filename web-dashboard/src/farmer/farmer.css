@@ -176,6 +176,7 @@
 
 .fw-section { display: grid; gap: 14px; margin: 0; }
 .fw-section__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.fw-section__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .fw-section__title { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .fw-section__title h2 { font-size: 19px; line-height: 1.3; font-weight: 700; letter-spacing: -.012em; }
 .fw-section__title p { font-size: 13.5px; color: var(--fw-ink-3); }
@@ -470,6 +471,9 @@
 .fw-metric__empty .fw-btn { justify-self: start; }
 .fw-basis { display: flex; flex-wrap: wrap; gap: 10px; }
 .fw-note { color: var(--fw-ink-3); font-size: 13.5px; }
+/* Inline retry inside a note — a text button, not a second CTA weight. */
+.fw-link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--fw-forest-2, var(--fw-ink)); text-decoration: underline; cursor: pointer; }
+.fw-link-btn:hover { text-decoration: none; }
 
 /* carbon ------------------------------------------------------------- */
 .fw-carbon-empty { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); align-items: center; gap: 28px; padding: 28px; border-radius: 24px; background: var(--fw-surface); border: 1px solid var(--fw-line); box-shadow: var(--fw-shadow); }

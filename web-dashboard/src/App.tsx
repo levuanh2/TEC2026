@@ -13,6 +13,7 @@ import { PerformancePage } from './pages/performance'
 import { SeasonHub, type SeasonTab } from './pages/season'
 import { MrvPage } from './pages/mrv'
 import { FarmerExperience } from './farmer/FarmerExperience'
+import { prefetchFarmerScope } from './farmer/scope'
 
 const ROLE_LABEL: Record<string, string> = {
   farmer: 'Nông hộ',
@@ -284,6 +285,11 @@ export default function App() {
     } else {
       setViewerReady(false)
     }
+    // Overlap the Farmer scope read with /v1/me rather than waiting for the
+    // role to come back first (see prefetchFarmerScope). Skipped once we
+    // already know this user is not a farmer, so a manager's session costs
+    // nothing extra.
+    if (!hint || hint.role === 'farmer') prefetchFarmerScope()
     void getMe()
       .then((v) => {
         if (!alive) return

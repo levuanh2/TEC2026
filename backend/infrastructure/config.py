@@ -47,6 +47,10 @@ class Settings:
     # Trusted backend-only Postgres connection. Required by the Farmer Web
     # write repository because one logical activity spans base + detail rows.
     supabase_db_url: str | None = None
+    # Diagnostic only: expose per-request timing + Supabase round-trip counts
+    # as a `Server-Timing` response header so a perf claim can be measured from
+    # the browser. Numbers only, never payload/identity. Off by default.
+    server_timing: bool = False
 
     @property
     def supabase_configured(self) -> bool:
@@ -99,4 +103,5 @@ def load_settings(dotenv_path: Path | None = None) -> Settings:
             if origin.strip()
         ],
         supabase_db_url=os.environ.get("SUPABASE_DB_URL") or None,
+        server_timing=os.environ.get("AGRICARBON_SERVER_TIMING", "0") not in ("0", "", "false", "False"),
     )

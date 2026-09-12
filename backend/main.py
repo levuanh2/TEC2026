@@ -14,6 +14,7 @@ Luồng:
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -26,6 +27,7 @@ from carbon import ENGINE_VERSION, ParameterSet
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import SupabaseCropAccessChecker
 from infrastructure.config import load_settings
+from infrastructure import pg_pool, supabase_clients
 from infrastructure.supabase_repo import SupabaseCarbonRepository
 from infrastructure.read_repo import SupabaseReadRepository
 from infrastructure.write_repo import PostgresActivityWriteRepository
@@ -56,8 +58,22 @@ OPENAPI_TAGS = [
     {"name": "Health", "description": "Trạng thái vận hành backend."},
 ]
 
-app = FastAPI(title="AgriCarbon API", version="0.2.0", openapi_tags=OPENAPI_TAGS)
-app.add_middleware(RequestIdMiddleware)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Release pooled connections on shutdown.
+
+    Both pools are opened lazily on first use, so there is nothing to do on
+    startup; what matters is that a stopping process hands its hosted-Postgres
+    connections and its Supabase HTTP sockets back instead of leaving them for
+    a server-side timeout to reap.
+    """
+    yield
+    pg_pool.close_all()
+    supabase_clients.clear()
+
+
+app = FastAPI(title="AgriCarbon API", version="0.2.0", openapi_tags=OPENAPI_TAGS, lifespan=lifespan)
+app.add_middleware(RequestIdMiddleware, server_timing=settings.server_timing)
 # Không có CORS thì browser chặn MỌI fetch từ React trước khi request rời đi —
 # khác 401/403 (đó là backend từ chối; đây là trình duyệt không cho gọi).
 # Chỉ liệt kê origin cụ thể (mặc định Vite dev) — không dùng "*" vì client gửi
@@ -71,6 +87,10 @@ app.add_middleware(
     # request ever reached the backend, so backend pytest never caught it).
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
+    # Diagnostic headers a browser-side profiler needs to read; both are
+    # numbers/ids, not data. `Server-Timing` is only ever set when
+    # AGRICARBON_SERVER_TIMING is on.
+    expose_headers=["X-Request-ID", "Server-Timing"],
 )
 
 

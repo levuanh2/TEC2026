@@ -294,6 +294,60 @@ DEMO-FARM-02/03 → 404 (không phải 403, không lộ tồn tại), unauth →
 Không tạo QA user mới (user chỉ định dùng identity đã verify sẵn). Không
 chạy write E2E round này — không sinh thêm rác QA trên hosted.
 
+## Round Farmer Performance 4 (2026-09-12) — full-content latency
+
+Báo cáo đầy đủ: `docs/FARMER_PERFORMANCE_ROUND4.md`. Chỉ sửa orchestration /
+read-path. KHÔNG đụng resource-metric math, Carbon math, Recommendation rule
+logic, CV inference, activity write semantics, và không redesign gì.
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/infrastructure/{profiling,supabase_clients,pg_pool}.py` (new), `backend/infrastructure/{read_repo,recommendation_repo,cv_repo,write_repo,supabase_repo,auth,request_context,config}.py`, `backend/{main,service,requirements.txt}`, `backend/tests/test_read_performance.py` (new), `backend/tests/test_recommendation_api.py` | — (released) | Profiling (`Server-Timing`, mặc định TẮT), reuse Supabase client theo token, pool psycopg, gộp 1 transaction cho generate, giảm fan-out read. | **DONE**: backend 275 passed (263 → 275). |
+| `web-dashboard/src/farmer/{data,scope,Recommendations,journal,farmer.css}`, `src/App.tsx`, `src/mocks/data.ts`, `tests/e2e/{farmer-web,farmer-real-recommendations,farmer-real-write}.spec.ts`, `docs/FARMER_PERFORMANCE_ROUND4.md` (new) | — (released) | Bỏ generate khỏi page load (staleness + nút thủ công), fix lost-update trong `useQuery`, fix drawer nhật ký giữ snapshot cũ, prefetch scope song song `/v1/me`, fixture 2 vụ. | **DONE**: vitest 126 (117 → 126), tsc sạch, build sạch, mock Playwright 2/2, real E2E 6/6. |
+
+Kết quả đo thật (local backend :8010 → hosted Supabase, production preview,
+identity `qa-farmer-fw1`, cùng máy — 5 lần chạy):
+
+| | BEFORE | AFTER |
+|---|---|---|
+| Home full content | 11379ms | **960ms** |
+| Season full content | 9051ms | **1237ms** |
+| Home useful content | 2040ms | 427ms |
+| login → shell | 3928ms | 2430ms |
+| login → complete | 15109ms | 2963ms |
+| Supabase round trip / màn | 64 | **34** |
+| API request / màn | 7 | 6 |
+| Duplicate API call / màn | 0 | 0 |
+
+Nguyên nhân số 1 đo được: mỗi lần mở Home/Season đều chạy
+`POST .../recommendations/generate` (31 round trip, 7.2–9.5s). Giờ page chỉ
+GET bản đã lưu; generate chạy khi user bấm "Cập nhật khuyến nghị" hoặc nền sau
+khi page đã dùng được, và chỉ khi dữ liệu thật sự cũ. Nguyên nhân số 2: mỗi
+request tự dựng lại Supabase client (~800ms) và mỗi câu lệnh psycopg tự mở
+connection mới (~700ms).
+
+Hai bug thật phát hiện khi đo (không phải bug hiệu năng):
+1. `useQuery` subscribe trong effect → mất notification nếu prefetch resolve
+   trước khi component mount (Home hero kẹt skeleton ~1/5 lần login). Đã
+   chuyển sang `useSyncExternalStore`.
+2. Drawer chi tiết nhật ký giữ snapshot activity → sửa xong vẫn hiện giá trị
+   cũ vĩnh viễn. Đã đổi sang resolve theo id từ list hiện tại.
+
+Thêm một fix an toàn có sẵn từ trước (không do round này gây ra):
+`SupabaseCropAccessChecker` là singleton gọi `.auth(token)` trên MỘT client
+dùng chung ngay trước mỗi query → hai request song song có thể interleave
+`auth(A) → auth(B) → execute(A)`. Đã chuyển sang client theo từng token.
+
+Security (hosted, token thật): own scope 200, cross-scope DEMO-FARM-02/03 →
+404, unauth → 401, và 40 request `/v1/farmer/scope` xen kẽ farmer/manager chạy
+song song (12 luồng) — mỗi identity chỉ thấy đúng scope của mình.
+
+Composition endpoint `/v1/farmer/home` + `/crop-seasons/{id}/overview`: đã
+đánh giá bằng số đo, **KHÔNG thêm** — không chứng minh được lợi ích latency khi
+Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
+
+Đã dọn sạch rác QA trên hosted (0 activity có note `QA-`).
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash

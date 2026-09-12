@@ -6,10 +6,13 @@ service-role key and never accepts a user id supplied by the frontend.
 """
 from __future__ import annotations
 
+import contextvars
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from . import profiling, supabase_clients
 from .config import Settings
 
 DETAIL_TABLES = {
@@ -32,33 +35,85 @@ _COST_FIELD_BY_ACTIVITY = {
     "harvest": "total_cost_vnd",
 }
 
+try:  # httpx ships with supabase; a fake-client test never needs it
+    import httpx
+    _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (httpx.TransportError,)
+except Exception:  # noqa: BLE001 - absence just disables the retry below
+    _TRANSPORT_ERRORS = ()
+
+# Small on purpose: enough to ride out a connection being closed under us,
+# not enough to paper over Supabase actually being down.
+_READ_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.15
+
+
 class ReadNotFoundError(Exception): pass
 
 class SupabaseReadRepository:
     def __init__(self, settings: Settings, token: str, client: Any | None = None):
+        self._settings = settings
+        self._pooled = client is None
         if client is None:
-            from supabase import create_client
-            url, key = settings.require_publishable()
-            client = create_client(url, key)
-        self.client = client
-        self.client.postgrest.auth(token)
+            # Reused per caller token (see supabase_clients): already bound to
+            # this exact JWT, so it must not be re-authenticated here.
+            self.client = supabase_clients.client_for_token(settings, token)
+        else:
+            self.client = client
+            self.client.postgrest.auth(token)
         self.token = token
 
+    def _retrying(self, attempt: Callable[[], Any]) -> Any:
+        """Run one idempotent read, replacing the client on a dead connection.
+
+        Reusing a client means reusing its keep-alive connections, and Supabase
+        closes them whenever it likes; httpx then raises
+        `RemoteProtocolError: Server disconnected` on the next read that picks
+        one. Because Supabase speaks HTTP/2, a single close takes down every
+        read multiplexed on that connection at once, and a burst of them can
+        also catch the replacement's first request — measured against hosted
+        Supabase, one retry left about 1% of reads still failing, which is a
+        Farmer page section showing an error for no reason the farmer caused.
+
+        These reads are idempotent, so a bounded number of attempts on a fresh
+        client is the right answer. It is deliberately small: a genuine
+        Supabase outage must still surface as an error rather than be hidden
+        behind retries.
+        """
+        for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
+            failed = self.client
+            try:
+                return attempt()
+            except _TRANSPORT_ERRORS:
+                if not self._pooled or remaining == 0:
+                    raise
+                time.sleep(_RETRY_BACKOFF_SECONDS)
+                self.client = supabase_clients.renew(self._settings, self.token, failed)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
+        with profiling.observe(label):
+            return self._retrying(lambda: build(self.client).execute().data or [])
+
     def _many(self, table: str, **filters: str) -> list[dict[str, Any]]:
-        query = self.client.table(table).select("*")
-        for key, value in filters.items(): query = query.eq(key, value)
-        return query.execute().data or []
+        def build(client: Any) -> Any:
+            query = client.table(table).select("*")
+            for key, value in filters.items(): query = query.eq(key, value)
+            return query
+        return self._select(f"select {table}", build)
 
     def _many_in(self, table: str, column: str, values: list[str]) -> list[dict[str, Any]]:
         """Same as `_many` but for `column IN (values)` — one hosted-Supabase
         round trip for many parent ids instead of one round trip per id.  The
         per-id loop this replaces is the actual measured cause of the
         multi-second/minute organization rollup latency (see
-        docs/PERFORMANCE_INVESTIGATION.md) — RLS still applies identically,
+        docs/FARMER_PERFORMANCE_ROUND4.md) — RLS still applies identically,
         this only changes how many requests fetch the same allowed rows.
         """
         if not values: return []
-        return self.client.table(table).select("*").in_(column, values).execute().data or []
+        return self._select(
+            f"select {table} in",
+            lambda client: client.table(table).select("*").in_(column, values),
+        )
 
     def _one(self, table: str, id: str) -> dict[str, Any]:
         rows = self._many(table, id=id)
@@ -71,7 +126,7 @@ class SupabaseReadRepository:
         request through this same caller-bound client, so RLS/auth are
         unaffected; this only overlaps otherwise-sequential network latency
         (the measured cause of multi-second rollups, see
-        docs/PERFORMANCE_INVESTIGATION.md round 3). Results come back in the
+        docs/FARMER_PERFORMANCE_ROUND4.md). Results come back in the
         same order as `thunks`; if any raised, that exception propagates
         (after every thread has finished) instead of a value at that index —
         callers that must gate on one result before trusting another (e.g.
@@ -79,12 +134,19 @@ class SupabaseReadRepository:
         same order they matter, since `.result()` re-raises at that point.
         """
         if len(thunks) == 1: return (thunks[0](),)
+        # ThreadPoolExecutor does not carry the caller's context into its
+        # workers, so each thunk runs inside its own copy of it — that is what
+        # keeps request-scoped state (the read profiler) attributed to the
+        # request that issued these reads instead of silently dropped. One
+        # copy per thunk, not one shared copy: a `Context` cannot be entered
+        # by two threads at once.
         with ThreadPoolExecutor(max_workers=len(thunks)) as pool:
-            futures = [pool.submit(t) for t in thunks]
+            futures = [pool.submit(contextvars.copy_context().run, t) for t in thunks]
             return tuple(f.result() for f in futures)
 
     def user_id(self) -> str:
-        user = self.client.auth.get_user(self.token).user
+        with profiling.observe("auth get_user"):
+            user = self._retrying(lambda: self.client.auth.get_user(self.token).user)
         if user is None: raise ReadNotFoundError("user")
         return str(user.id)
 
@@ -160,10 +222,18 @@ class SupabaseReadRepository:
         self._one("plots", plot_id); return [self.season_view(x) for x in self._many("crop_seasons", plot_id=plot_id)]
 
     def _activities(self, season_id: str) -> list[dict[str, Any]]:
-        self._one("crop_seasons", season_id)
-        batch_ids = [str(x["id"]) for x in self._many("production_batches", crop_season_id=season_id)]
-        rows: list[dict[str, Any]] = []
-        for batch_id in batch_ids: rows.extend(self._many("activities", production_batch_id=batch_id))
+        # The season read is the 404/RLS gate and `production_batches` does not
+        # depend on its *value*, so the two overlap; the gate's result is still
+        # read first, so an invisible season raises before any batch row is
+        # returned (same ordering rule as `_organization_farms`).
+        season, batches = self._concurrent(
+            lambda: self._one("crop_seasons", season_id),
+            lambda: self._many("production_batches", crop_season_id=season_id),
+        )
+        del season
+        batch_ids = [str(x["id"]) for x in batches]
+        # One `IN` query for every batch instead of one query per batch.
+        rows = self._many_in("activities", "production_batch_id", batch_ids)
         return [x for x in rows if x.get("deleted_at") is None]
 
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
@@ -199,8 +269,13 @@ class SupabaseReadRepository:
 
     def activities(self, season_id: str) -> list[dict[str, Any]]:
         rows = self._activities(season_id)
-        details = self._details_by_activity_id(rows)
-        users = {str(x["id"]): x.get("full_name") for x in self._many("profiles")}
+        # `profiles` is an unfiltered read that depends on nothing here, so it
+        # overlaps the per-type detail reads instead of following them.
+        details, users_rows = self._concurrent(
+            lambda: self._details_by_activity_id(rows),
+            lambda: self._many("profiles"),
+        )
+        users = {str(x["id"]): x.get("full_name") for x in users_rows}
         return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in rows]
 
     def _bulk_activities_by_season(self, season_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -276,8 +351,12 @@ class SupabaseReadRepository:
 
     def _metric_totals(self, season_id: str) -> dict[str, Any]:
         """Compute season numerators once; underscore keys are internal only."""
-        activities = self.activities(season_id)
-        carbon = self._many("carbon_calculations", crop_season_id=season_id)
+        # Independent: activities come from production_batches/activities/detail
+        # tables, carbon_calculations is its own table filtered by season id.
+        activities, carbon = self._concurrent(
+            lambda: self.activities(season_id),
+            lambda: self._many("carbon_calculations", crop_season_id=season_id),
+        )
         return self._compute_metric_totals(activities, carbon)
 
     @staticmethod

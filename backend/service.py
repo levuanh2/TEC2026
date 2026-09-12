@@ -231,11 +231,10 @@ class RecommendationService:
             raise RecommendationAccessError() from exc
 
         candidates = generate_recommendations(crop_season_id, carbon=self._carbon, metrics=metrics)
-        rows = [self._write_repository.upsert(crop_season_id=crop_season_id, rec=rec) for rec in candidates]
-        self._write_repository.prune_missing(
-            crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in candidates],
-        )
-        return rows
+        # One transaction for the whole run: same rows as upserting each rule
+        # then pruning, but a single DB connection and no window in which a
+        # reader could see half of this run applied.
+        return self._write_repository.save_generated(crop_season_id=crop_season_id, recs=candidates)
 
     def set_status(
         self, *, read_repository: SupabaseReadRepository, recommendation_id: str, status: str,

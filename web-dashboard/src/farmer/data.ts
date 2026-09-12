@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 /**
  * Farmer Web read cache: stale-while-revalidate with in-flight dedupe.
@@ -17,12 +17,27 @@ type Entry = { data?: unknown; error?: string; at: number; promise?: Promise<unk
 
 const store = new Map<string, Entry>()
 const listeners = new Map<string, Set<() => void>>()
+/** Monotonic per key, bumped on every change. Kept outside `store` so it also
+ * survives `clearFarmerCache`, and so a reader can tell "nothing changed" from
+ * "changed back to the same value". */
+const seqs = new Map<string, number>()
 
 export const STABLE_MS = 5 * 60_000
 export const LIVE_MS = 20_000
 
 function notify(key: string) {
+  seqs.set(key, (seqs.get(key) ?? 0) + 1)
   listeners.get(key)?.forEach((fn) => fn())
+}
+
+/** How many times `key` has changed. The snapshot `useQuery` subscribes with. */
+export const querySeq = (key: string): number => seqs.get(key) ?? 0
+
+export function subscribeQuery(key: string, onChange: () => void): () => void {
+  let set = listeners.get(key)
+  if (!set) { set = new Set(); listeners.set(key, set) }
+  set.add(onChange)
+  return () => { set!.delete(onChange) }
 }
 
 function entry(key: string): Entry {
@@ -90,8 +105,17 @@ export function setQueryData<T>(key: string, data: T): void {
   notify(key)
 }
 
+/** Seasons whose records changed in this session. Read by
+ * `scope.useRecommendations` to decide that a stored recommendation set is out
+ * of date regardless of its age — a farmer who has just recorded something
+ * should not wait 6h for the advice to catch up. */
+const changedSeasons = new Set<string>()
+export const seasonDataChanged = (seasonId: string) => changedSeasons.has(seasonId)
+export const clearSeasonDataChanged = (seasonId: string) => { changedSeasons.delete(seasonId) }
+
 export function clearFarmerCache(): void {
   store.clear()
+  changedSeasons.clear()
   for (const key of listeners.keys()) notify(key)
 }
 
@@ -105,30 +129,39 @@ export interface QueryState<T> {
   reload: () => void
 }
 
-export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, staleMs = LIVE_MS): QueryState<T> {
-  const [, rerender] = useReducer((n: number) => n + 1, 0)
+/**
+ * `enabled: false` reads the cache but never starts a request — used for work
+ * that must not run as part of a page load (recommendation generation) and is
+ * armed explicitly once the page is usable.
+ */
+export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, staleMs = LIVE_MS, enabled = true): QueryState<T> {
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
 
-  useEffect(() => {
-    if (!key) return
-    let set = listeners.get(key)
-    if (!set) { set = new Set(); listeners.set(key, set) }
-    set.add(rerender)
-    return () => { set!.delete(rerender) }
-  }, [key])
+  /* `useSyncExternalStore`, not a subscribe-in-an-effect: a request started
+   * before this component mounted (a prefetch, or another page's read of the
+   * same key) can resolve between this render and an effect, and a hand-rolled
+   * subscription drops that notification — which left the Home hero in its
+   * skeleton forever, roughly one login in five, once the scope read began at
+   * login instead of at mount. React re-reads the snapshot right after
+   * subscribing, so that update cannot be missed. */
+  const subscribe = useCallback(
+    (onChange: () => void) => (key ? subscribeQuery(key, onChange) : () => undefined),
+    [key],
+  )
+  useSyncExternalStore(subscribe, () => (key ? querySeq(key) : 0), () => 0)
 
   const e = key ? store.get(key) : undefined
   const version = e?.version ?? 0
   useEffect(() => {
-    if (!key) return
+    if (!key || !enabled) return
     fetchQuery(key, () => fetcherRef.current(), { staleMs }).catch(() => undefined)
-  }, [key, version, staleMs])
+  }, [key, version, staleMs, enabled])
 
   return {
     data: e?.data as T | undefined,
     error: e?.data === undefined ? e?.error : undefined,
-    loading: Boolean(key) && e?.data === undefined && !e?.error,
+    loading: Boolean(key) && enabled && e?.data === undefined && !e?.error,
     refreshing: Boolean(e?.promise) && e?.data !== undefined,
     reload: () => { if (key) fetchQuery(key, () => fetcherRef.current(), { force: true }).catch(() => undefined) },
   }
@@ -140,17 +173,21 @@ export const keys = {
   metrics: (seasonId: string) => `metrics:${seasonId}`,
   recs: (seasonId: string) => `recs:${seasonId}`,
   /* Recommendation generation is an idempotent but expensive POST (rule
-   * engine + Carbon Engine evidence, ~7s measured). Persisted items are read
-   * with the cheap GET first; generation is cached under its own key so it
-   * runs at most once per STABLE window per season, and again right after
-   * that season's data changes. */
+   * engine + Carbon Engine evidence, measured 7-9.5s and 33 Supabase round
+   * trips). It is never part of a page load: pages read the persisted items
+   * with the cheap GET, and generation runs only when explicitly asked for or
+   * when `scope.useRecommendations` arms it after the page is usable. Its own
+   * cache key keeps concurrent sections (Home + Season) sharing one run. */
   recsGen: (seasonId: string) => `recsgen:${seasonId}`,
   cv: (seasonId: string) => `cv:${seasonId}`,
   carbon: (seasonId: string) => `carbon:${seasonId}`,
   org: (organizationId: string) => `org:${organizationId}`,
 }
 
-/** After a create/edit/delete: everything derived from that season's records. */
+/** After a create/edit/delete: everything derived from that season's records —
+ * and nothing that cannot have changed (viewer identity, farm/plot/season
+ * hierarchy, organization), so one write does not cause a refetch storm. */
 export function markSeasonDataChanged(seasonId: string): void {
+  changedSeasons.add(seasonId)
   invalidateQueries(keys.activities(seasonId), keys.metrics(seasonId), keys.recs(seasonId), keys.recsGen(seasonId))
 }

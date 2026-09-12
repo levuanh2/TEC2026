@@ -16,8 +16,15 @@ export function Timeline({ activities, renderCardActions, renderDetailActions, r
   renderDetailActions?: (activity: Activity) => ReactNode
   resetSignal?: number
 }) {
-  const [open, setOpen] = useState<Activity | null>(null)
-  useEffect(() => setOpen(null), [resetSignal])
+  /* The open row is tracked by id and re-resolved from `activities` on every
+   * render, never kept as a snapshot: an edit invalidates this season's read,
+   * and the refreshed values have to reach a drawer that is already open (a
+   * snapshot showed the pre-edit amount indefinitely). Resolving by id also
+   * closes the drawer by itself if the row is gone. */
+  const [openId, setOpenId] = useState<string | null>(null)
+  useEffect(() => setOpenId(null), [resetSignal])
+  const open = openId ? activities.find((a) => a.id === openId) ?? null : null
+  const setOpen = (activity: Activity | null) => setOpenId(activity?.id ?? null)
   const detail = open ? viewActivity(open) : null
 
   return (

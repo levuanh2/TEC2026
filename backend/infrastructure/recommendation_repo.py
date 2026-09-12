@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from . import pg_pool, profiling
 from .config import Settings
 
 
@@ -47,9 +48,24 @@ class PostgresRecommendationRepository:
     def _connection(self):
         if self._connect is not None:
             return self._connect()
-        import psycopg
-        from psycopg.rows import dict_row
-        return psycopg.connect(self._settings.require_db(), row_factory=dict_row)
+        # Pooled: a fresh hosted-Postgres connection costs ~700ms, which
+        # dwarfed the statements themselves (see infrastructure/pg_pool).
+        return pg_pool.connection(self._settings.require_db())
+
+    def save_generated(self, *, crop_season_id: str, recs: list[Any]) -> list[dict[str, Any]]:
+        """Persist one whole generation run in a single transaction.
+
+        Same rows as upserting each rule then pruning, with two differences
+        that both matter: it opens ONE connection instead of one per rule
+        (a fresh hosted-Postgres connection measured ~740ms, which made
+        generation's cost scale with the number of rules that fired), and the
+        run is atomic — a concurrent reader sees the previous run or this one,
+        never a half-applied mix of the two.
+        """
+        with profiling.observe("recommendation save_generated"), self._connection() as conn, conn.cursor() as cur:
+            rows = [self._upsert(cur, crop_season_id=crop_season_id, rec=rec) for rec in recs]
+            self._prune(cur, crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in recs])
+            return rows
 
     def upsert(self, *, crop_season_id: str, rec: Any) -> dict[str, Any]:
         """Insert or refresh one rule's row for a season.
@@ -59,41 +75,49 @@ class PostgresRecommendationRepository:
         and `generated_at` are refreshed; `status`/`accepted_at`/`dismissed_at`
         are untouched.
         """
-        with self._connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"""
-                insert into public.season_recommendations
-                  (crop_season_id, rule_code, {', '.join(_UPSERT_COLUMNS)})
-                values (%s, %s, {', '.join(['%s'] * len(_UPSERT_COLUMNS))})
-                on conflict (crop_season_id, rule_code) do update set
-                  {', '.join(f'{c} = excluded.{c}' for c in _UPSERT_COLUMNS)},
-                  generated_at = now(), updated_at = now()
-                returning *
-                """,  # noqa: S608 -- _UPSERT_COLUMNS is a static tuple above, not request input
-                [
-                    crop_season_id, rec.rule_code, rec.rule_version, rec.engine_version, rec.type,
-                    rec.title, rec.reason, rec.compared_to, rec.co2e_total_kg_before, rec.co2e_total_kg_after,
-                    rec.co2e_total_kg_delta, rec.co2e_percent_delta, rec.impact_status,
-                    rec.impact_unavailable_reason, json.dumps(rec.evidence), rec.input_hash,
-                ],
-            )
-            return _normalize(cur.fetchone())
+        with profiling.observe("recommendation upsert"), self._connection() as conn, conn.cursor() as cur:
+            return self._upsert(cur, crop_season_id=crop_season_id, rec=rec)
+
+    @staticmethod
+    def _upsert(cur: Any, *, crop_season_id: str, rec: Any) -> dict[str, Any]:
+        cur.execute(
+            f"""
+            insert into public.season_recommendations
+              (crop_season_id, rule_code, {', '.join(_UPSERT_COLUMNS)})
+            values (%s, %s, {', '.join(['%s'] * len(_UPSERT_COLUMNS))})
+            on conflict (crop_season_id, rule_code) do update set
+              {', '.join(f'{c} = excluded.{c}' for c in _UPSERT_COLUMNS)},
+              generated_at = now(), updated_at = now()
+            returning *
+            """,  # noqa: S608 -- _UPSERT_COLUMNS is a static tuple above, not request input
+            [
+                crop_season_id, rec.rule_code, rec.rule_version, rec.engine_version, rec.type,
+                rec.title, rec.reason, rec.compared_to, rec.co2e_total_kg_before, rec.co2e_total_kg_after,
+                rec.co2e_total_kg_delta, rec.co2e_percent_delta, rec.impact_status,
+                rec.impact_unavailable_reason, json.dumps(rec.evidence), rec.input_hash,
+            ],
+        )
+        return _normalize(cur.fetchone())
 
     def prune_missing(self, *, crop_season_id: str, keep_rule_codes: list[str]) -> None:
         """Remove a still-`generated` (never accepted/dismissed) row whose rule
         no longer applies this run — keeps the list honest as data changes.
         A farmer's own accept/dismiss decision is never pruned.
         """
-        with self._connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """delete from public.season_recommendations
-                   where crop_season_id = %s and status = 'generated'
-                     and not (rule_code = any(%s))""",
-                [crop_season_id, keep_rule_codes],
-            )
+        with profiling.observe("recommendation prune"), self._connection() as conn, conn.cursor() as cur:
+            self._prune(cur, crop_season_id=crop_season_id, keep_rule_codes=keep_rule_codes)
+
+    @staticmethod
+    def _prune(cur: Any, *, crop_season_id: str, keep_rule_codes: list[str]) -> None:
+        cur.execute(
+            """delete from public.season_recommendations
+               where crop_season_id = %s and status = 'generated'
+                 and not (rule_code = any(%s))""",
+            [crop_season_id, keep_rule_codes],
+        )
 
     def get(self, recommendation_id: str) -> dict[str, Any]:
-        with self._connection() as conn, conn.cursor() as cur:
+        with profiling.observe("recommendation get"), self._connection() as conn, conn.cursor() as cur:
             cur.execute("select * from public.season_recommendations where id = %s", [recommendation_id])
             row = cur.fetchone()
             if row is None:
@@ -102,7 +126,7 @@ class PostgresRecommendationRepository:
 
     def set_status(self, recommendation_id: str, status: str) -> dict[str, Any]:
         column = "accepted_at" if status == "accepted" else "dismissed_at"
-        with self._connection() as conn, conn.cursor() as cur:
+        with profiling.observe("recommendation set_status"), self._connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""update public.season_recommendations
                     set status = %s, {column} = now(), updated_at = now()

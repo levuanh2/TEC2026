@@ -17,6 +17,7 @@ from typing import Any
 
 from carbon import SCENARIO_TO_DB
 
+from . import profiling
 from .config import Settings
 from .mapping import RawCropBundle
 from .repository import CropNotFoundError, FactorSetNotFoundError
@@ -88,9 +89,10 @@ class SupabaseCarbonRepository:
             table = DETAIL_TABLES.get(activity_type)
             if not table or not ids:
                 continue
-            rows = (
-                self.client.table(table).select("*").in_("activity_id", ids).execute().data or []
-            )
+            with profiling.observe(f"carbon select {table} in"):
+                rows = (
+                    self.client.table(table).select("*").in_("activity_id", ids).execute().data or []
+                )
             for row in rows:
                 detail_by_activity[row["activity_id"]] = row
 
@@ -100,14 +102,15 @@ class SupabaseCarbonRepository:
     # -- bộ hệ số ----------------------------------------------------------
 
     def resolve_factor_set_id(self, version_code: str) -> str:
-        rows = (
-            self.client.table("emission_factor_sets")
-            .select("id,status")
-            .eq("version_code", version_code)
-            .execute()
-            .data
-            or []
-        )
+        with profiling.observe("carbon select emission_factor_sets"):
+            rows = (
+                self.client.table("emission_factor_sets")
+                .select("id,status")
+                .eq("version_code", version_code)
+                .execute()
+                .data
+                or []
+            )
         published = [r for r in rows if r.get("status") == "published"]
         if not published:
             raise FactorSetNotFoundError(
@@ -119,14 +122,15 @@ class SupabaseCarbonRepository:
         return published[0]["id"]
 
     def factor_ids_by_code(self, factor_set_id: str) -> dict[str, str]:
-        rows = (
-            self.client.table("emission_factors")
-            .select("id,factor_code")
-            .eq("factor_set_id", factor_set_id)
-            .execute()
-            .data
-            or []
-        )
+        with profiling.observe("carbon select emission_factors"):
+            rows = (
+                self.client.table("emission_factors")
+                .select("id,factor_code")
+                .eq("factor_set_id", factor_set_id)
+                .execute()
+                .data
+                or []
+            )
         return {r["factor_code"]: r["id"] for r in rows}
 
     # -- ghi ---------------------------------------------------------------
@@ -134,12 +138,14 @@ class SupabaseCarbonRepository:
     def save_calculation(
         self, calculation: dict[str, Any], breakdowns: list[dict[str, Any]]
     ) -> str:
-        inserted = self.client.table("carbon_calculations").insert(calculation).execute().data
+        with profiling.observe("carbon insert carbon_calculations"):
+            inserted = self.client.table("carbon_calculations").insert(calculation).execute().data
         calc_id = inserted[0]["id"]
         if breakdowns:
-            self.client.table("carbon_breakdowns").insert(
-                [{**b, "calculation_id": calc_id} for b in breakdowns]
-            ).execute()
+            with profiling.observe("carbon insert carbon_breakdowns"):
+                self.client.table("carbon_breakdowns").insert(
+                    [{**b, "calculation_id": calc_id} for b in breakdowns]
+                ).execute()
         return calc_id
 
     def latest_calculation(
@@ -155,19 +161,21 @@ class SupabaseCarbonRepository:
         )
         if scenario:
             query = query.eq("scenario", SCENARIO_TO_DB.get(scenario, scenario))
-        rows = query.execute().data or []
+        with profiling.observe("carbon select carbon_calculations"):
+            rows = query.execute().data or []
         if not rows:
             return None
 
         latest = rows[0]
-        latest["breakdown"] = (
-            self.client.table("carbon_breakdowns")
-            .select("*")
-            .eq("calculation_id", latest["id"])
-            .execute()
-            .data
-            or []
-        )
+        with profiling.observe("carbon select carbon_breakdowns"):
+            latest["breakdown"] = (
+                self.client.table("carbon_breakdowns")
+                .select("*")
+                .eq("calculation_id", latest["id"])
+                .execute()
+                .data
+                or []
+            )
         return latest
 
     # -- tiện ích ----------------------------------------------------------
@@ -180,4 +188,5 @@ class SupabaseCarbonRepository:
         query = self.client.table(table).select("*")
         for column, value in filters.items():
             query = query.eq(column, value)
-        return query.execute().data or []
+        with profiling.observe(f"carbon select {table}"):
+            return query.execute().data or []

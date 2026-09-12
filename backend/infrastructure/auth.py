@@ -43,22 +43,30 @@ class SupabaseCropAccessChecker:
         self._settings = settings
         self._client = client
 
-    @property
-    def client(self) -> Any:
-        if self._client is None:
-            from supabase import create_client
+    def _client_for(self, token: str) -> Any:
+        """Một client GẮN SẴN đúng token này.
 
-            url, key = self._settings.require_publishable()
-            self._client = create_client(url, key)
-        return self._client
+        Trước đây checker là singleton và gọi `.auth(token)` trên MỘT client dùng
+        chung ngay trước mỗi lần `.execute()`. Hai request song song của hai người
+        dùng khác nhau có thể xen kẽ `auth(A) -> auth(B) -> execute(A)`, khiến
+        request của A chạy bằng JWT của B — đúng loại rò rỉ chéo tenant mà cả
+        module này tồn tại để ngăn. `client_for_token` trả về client theo từng
+        token nên không có cửa sổ nào để chuyện đó xảy ra.
+        """
+        if self._client is not None:  # client do test tiêm vào
+            self._client.postgrest.auth(token)
+            return self._client
+        from .supabase_clients import client_for_token
+
+        return client_for_token(self._settings, token)
 
     def assert_can_access(self, token: str, crop_season_id: str) -> None:
-        # `.auth(token)` gắn JWT vào request PostgREST tiếp theo — PostgREST đọc claim
-        # `sub`/`role` từ token đó, tức RLS chạy đúng như thể chính người dùng gọi thẳng
-        # Supabase. Không dùng session/refresh — chỉ cần access token hiện có.
-        self.client.postgrest.auth(token)
+        # JWT gắn vào client PostgREST — PostgREST đọc claim `sub`/`role` từ token
+        # đó, tức RLS chạy đúng như thể chính người dùng gọi thẳng Supabase.
+        # Không dùng session/refresh — chỉ cần access token hiện có.
         rows = (
-            self.client.table("crop_seasons")
+            self._client_for(token)
+            .table("crop_seasons")
             .select("id")
             .eq("id", crop_season_id)
             .execute()

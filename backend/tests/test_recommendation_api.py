@@ -11,6 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
+import uuid
 
 import pytest
 from fastapi import FastAPI
@@ -23,7 +24,13 @@ from carbon import MissingActivityDataError  # noqa: E402
 from infrastructure.read_repo import ReadNotFoundError  # noqa: E402
 from infrastructure.recommendation_repo import RecommendationNotFoundError  # noqa: E402
 from recommendation import GeneratedRecommendation  # noqa: E402
+from infrastructure.config import Settings  # noqa: E402
 from service import RecommendationAccessError, RecommendationService  # noqa: E402
+
+DUMMY_SETTINGS = Settings(
+    supabase_url=None, supabase_service_role_key=None, supabase_publishable_key=None,
+    ef_config_path=Path("unused"), require_factor_set_in_db=False, cors_origins=[],
+)
 
 
 ACTOR, SEASON = "farmer-a", "season-a"
@@ -88,6 +95,11 @@ class FakeRecommendationRepository:
         self.rows[row_id] = row
         self.by_key[key] = row_id
         return deepcopy(row)
+
+    def save_generated(self, *, crop_season_id, recs):
+        rows = [self.upsert(crop_season_id=crop_season_id, rec=rec) for rec in recs]
+        self.prune_missing(crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in recs])
+        return rows
 
     def prune_missing(self, *, crop_season_id, keep_rule_codes):
         keep = set(keep_rule_codes)
@@ -271,3 +283,58 @@ def test_patch_status_rejects_unknown_status_value():
     client = write_client()
     response = client.patch("/v1/recommendations/rec-1", json={"status": "not_a_real_status"}, headers={"Authorization": "Bearer t"})
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Persistence shape: one generation run is one transaction
+# ---------------------------------------------------------------------------
+
+
+class _Cursor:
+    def __init__(self, log: list[str]):
+        self._log = log
+
+    def __enter__(self): return self
+    def __exit__(self, *_exc): return False
+
+    def execute(self, sql, params=None):
+        self._log.append("insert" if "insert into" in sql else "delete")
+
+    def fetchone(self):
+        return {"id": uuid.uuid4(), "crop_season_id": uuid.uuid4()}
+
+
+class _Connection:
+    def __init__(self, log: list[str]):
+        self._log = log
+        log.append("connect")
+
+    def __enter__(self): return self
+    def __exit__(self, *_exc): return False
+    def cursor(self): return _Cursor(self._log)
+
+
+def test_one_generation_run_opens_one_connection_for_every_rule():
+    """A fresh hosted-Postgres connection costs ~740ms, so a run that opened
+    one per rule made generation scale with the number of rules that fired.
+    Persisting a run must take exactly one connection — which also makes the
+    upserts and the prune atomic."""
+    from infrastructure.recommendation_repo import PostgresRecommendationRepository
+
+    log: list[str] = []
+    repo = PostgresRecommendationRepository(DUMMY_SETTINGS, connect=lambda: _Connection(log))
+    recs = [
+        GeneratedRecommendation(
+            rule_code=f"rule.{i}", rule_version="1", type="data_task", title="t", reason="r",
+            compared_to=None, impact_status="unavailable", impact_unavailable_reason=None,
+            co2e_total_kg_before=None, co2e_total_kg_after=None, co2e_total_kg_delta=None,
+            co2e_percent_delta=None,
+        )
+        for i in range(3)
+    ]
+
+    rows = repo.save_generated(crop_season_id=str(uuid.uuid4()), recs=recs)
+
+    assert len(rows) == 3
+    assert log.count("connect") == 1
+    assert log == ["connect", "insert", "insert", "insert", "delete"]
