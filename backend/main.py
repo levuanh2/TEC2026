@@ -57,7 +57,7 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(title="AgriCarbon API", version="0.2.0", openapi_tags=OPENAPI_TAGS)
-app.add_middleware(RequestIdMiddleware)
+app.add_middleware(RequestIdMiddleware, server_timing=settings.server_timing)
 # Không có CORS thì browser chặn MỌI fetch từ React trước khi request rời đi —
 # khác 401/403 (đó là backend từ chối; đây là trình duyệt không cho gọi).
 # Chỉ liệt kê origin cụ thể (mặc định Vite dev) — không dùng "*" vì client gửi
@@ -71,6 +71,10 @@ app.add_middleware(
     # request ever reached the backend, so backend pytest never caught it).
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
+    # Diagnostic headers a browser-side profiler needs to read; both are
+    # numbers/ids, not data. `Server-Timing` is only ever set when
+    # AGRICARBON_SERVER_TIMING is on.
+    expose_headers=["X-Request-ID", "Server-Timing"],
 )
 
 
