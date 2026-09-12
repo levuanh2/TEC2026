@@ -167,7 +167,6 @@ def test_profiler_is_inert_outside_a_request(monkeypatch):
     SupabaseReadRepository(SETTINGS, "token-a")._many("farms")  # must not raise
 
 
-
 def test_concurrent_first_reads_of_one_token_build_a_single_client(monkeypatch):
     """A Farmer page load fires /me and /farmer/scope at the same instant. On a
     brand-new token both would otherwise build their own ~450ms client and all
@@ -210,3 +209,18 @@ def test_eviction_never_closes_a_client_a_request_may_still_be_using(monkeypatch
 
     assert "token-a" not in supabase_clients._clients, "it should be evicted"
     assert not in_use.closed, "but never closed while a request could hold it"
+
+
+def test_access_checker_never_runs_one_callers_query_with_another_callers_token(monkeypatch):
+    """Two concurrent callers must not be able to interleave
+    `auth(A) -> auth(B) -> execute(A)` on one shared client."""
+    from infrastructure.auth import SupabaseCropAccessChecker
+
+    _patch_factory(monkeypatch, lambda url, key: _Client(rows={"crop_seasons": [{"id": "s1"}]}))
+    checker = SupabaseCropAccessChecker(SETTINGS)
+    checker.assert_can_access("token-a", "s1")
+    checker.assert_can_access("token-b", "s1")
+
+    bound = {client.bound_token for _, client in supabase_clients._clients.values()}
+    assert bound == {"token-a", "token-b"}, "each caller must get its own bound client"
+    assert len(supabase_clients._clients) == 2
