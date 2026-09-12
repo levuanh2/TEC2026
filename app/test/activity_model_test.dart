@@ -30,7 +30,9 @@ void main() {
     expect(restored.syncState, SyncState.pending);
   });
 
-  test('clientEventId ổn định qua copyWith khi đổi sync state — khác serverActivityId', () {
+  test(
+      'clientEventId ổn định qua copyWith khi đổi sync state — khác serverActivityId',
+      () {
     final a = Activity(
       clientEventId: 'stable-client-id',
       cropSeasonId: 's1',
@@ -41,7 +43,8 @@ void main() {
     );
     expect(a.serverActivityId, isNull); // chưa đồng bộ -> chưa có id thật
 
-    final synced = a.copyWith(syncState: SyncState.synced, serverActivityId: 'server-uuid-1');
+    final synced = a.copyWith(
+        syncState: SyncState.synced, serverActivityId: 'server-uuid-1');
 
     // clientEventId KHÔNG đổi qua trạng thái đồng bộ - đây là client_event_id gửi
     // lên server, đổi nó sẽ phá idempotency khi retry.
