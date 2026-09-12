@@ -44,8 +44,18 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await quickEntry(page, 'Bón phân')
   const fertilizer = page.getByRole('dialog', { name: 'Bón phân' })
   await expect(fertilizer).toBeVisible()
+  // V2: the form opens on the field operation, not on the schema. Only the two
+  // required facts are on the primary screen; everything optional — cost, note
+  // and the N/P/K methodology inputs — waits behind one collapsed disclosure.
   await expect(fertilizer.locator('.form-field__required').first()).toBeVisible()
+  await expect(fertilizer.getByLabel(/Loại phân/)).toBeVisible()
+  await expect(fertilizer.getByLabel(/Lượng bón/)).toBeVisible()
+  await expect(fertilizer.getByText('Không bắt buộc').first()).toBeHidden()
+  await fertilizer.getByText('Thông tin bổ sung').click()
+  await expect(fertilizer.getByLabel(/Hàm lượng đạm/)).toBeVisible()
   await expect(fertilizer.getByText('Không bắt buộc').first()).toBeVisible()
+  // The unit sits beside the value rather than inside the label.
+  await expect(fertilizer.locator('.fw-num__unit', { hasText: 'kg' }).first()).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(fertilizer).toHaveCount(0)
 
@@ -96,7 +106,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(forSecondSeason).toBeVisible()
   // The form's own context line, not the sheet subtitle: it is what tells the
   // farmer which season this entry will be written to.
-  await expect(forSecondSeason.locator('.fw-form__ctx')).toHaveText(/Thu Đông 2026 · Thửa A-02/)
+  await expect(forSecondSeason.locator('.fw-fn__target')).toHaveText(/Thu Đông 2026 · Thửa A-02/)
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(forSecondSeason).toHaveCount(0)
 

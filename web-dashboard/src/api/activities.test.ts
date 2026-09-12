@@ -73,16 +73,34 @@ describe('activityDataPayload (exact runtime field names, backend/schemas.py)', 
     })
   })
 
-  it('builds the straw_management payload and never sends the methodology-only fields from the form', () => {
+  // The methodology fields used to be unreachable from the form, so the Carbon
+  // Engine failed closed with no route back for the farmer. They are now
+  // offered behind the collapsed disclosure in plain language. What has NOT
+  // changed is the rule that matters: the form never invents one — untouched
+  // means null on the wire, and the engine still fails closed.
+  it('sends the straw_management methodology fields as null when the farmer left them blank', () => {
     const input: ActivityInput = {
       activityType: 'straw_management',
       data: { method: 'burned', strawMassKg: 4000, totalCostVnd: null },
     }
-    const payload = activityDataPayload(input)
-    expect(payload).toEqual({ method: 'burned', straw_mass_kg: 4000, total_cost_vnd: null })
-    expect(payload.days_before_cultivation).toBeUndefined()
-    expect(payload.dry_matter_fraction).toBeUndefined()
-    expect(payload.returned_to_field).toBeUndefined()
+    expect(activityDataPayload(input)).toEqual({
+      method: 'burned', straw_mass_kg: 4000, total_cost_vnd: null,
+      days_before_cultivation: null, dry_matter_fraction: null, returned_to_field: null,
+    })
+  })
+
+  it('carries the straw_management methodology fields when the farmer did supply them', () => {
+    const input: ActivityInput = {
+      activityType: 'straw_management',
+      data: {
+        method: 'incorporated', strawMassKg: 4000, totalCostVnd: null,
+        daysBeforeCultivation: 30, dryMatterFraction: 0.85, returnedToField: true,
+      },
+    }
+    expect(activityDataPayload(input)).toEqual({
+      method: 'incorporated', straw_mass_kg: 4000, total_cost_vnd: null,
+      days_before_cultivation: 30, dry_matter_fraction: 0.85, returned_to_field: true,
+    })
   })
 
   it('builds the straw_management payload preserving null (blank) mass, not 0', () => {
