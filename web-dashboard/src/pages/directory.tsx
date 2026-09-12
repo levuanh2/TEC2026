@@ -1,3 +1,4 @@
+import { Ico } from '../icons'
 import { useState } from 'react'
 import {
   listOrganizations,
@@ -31,7 +32,7 @@ export function OrganizationsPage() {
   return (
     <>
       <PageHead eyebrow="Quản lý" title="Tổ chức / HTX" meta={[<>Phạm vi quản trị — chọn một tổ chức để xem các nông hộ trực thuộc</>]} />
-      <Async state={state} isEmpty={(o) => o.length === 0} empty={<EmptyState icon="⬡" title="Chưa có tổ chức nào trong phạm vi truy cập" />}>
+      <Async state={state} isEmpty={(o) => o.length === 0} empty={<EmptyState icon="organization" title="Chưa có tổ chức nào trong phạm vi truy cập" />}>
         {(orgs) => <OrgDetail ids={orgs.map((o) => ({ id: o.id, name: o.name }))} />}
       </Async>
     </>
@@ -97,7 +98,7 @@ export function FarmsPage() {
   return (
     <>
       <PageHead eyebrow="Quản lý" title="Nông hộ" meta={[<>Tất cả nông hộ trong phạm vi truy cập của bạn</>]} />
-      <Async state={state} isEmpty={(f) => f.length === 0} empty={<EmptyState icon="⌂" title="Chưa có nông hộ nào" />}>
+      <Async state={state} isEmpty={(f) => f.length === 0} empty={<EmptyState icon="farms" title="Chưa có nông hộ nào" />}>
         {(farms) => (
           <DataTable
             rows={farms}
@@ -126,9 +127,9 @@ export function FarmPage({ id }: { id: string }) {
   const seasons = useAsync(() => getFarmCropSeasons(id), [id])
 
   return (
-    <Async state={head} isEmpty={(f) => !f} empty={<EmptyState icon="🔍" title="Không tìm thấy nông hộ" />}>
+    <Async state={head} isEmpty={(f) => !f} empty={<EmptyState icon="search" title="Không tìm thấy nông hộ" />}>
       {(farm) => {
-        if (!farm) return <EmptyState icon="🔍" title="Không tìm thấy nông hộ" />
+        if (!farm) return <EmptyState icon="search" title="Không tìm thấy nông hộ" />
         return (
           <>
             <Breadcrumb items={[{ label: 'Nông hộ', to: '/farms' }, { label: farm.name }]} />
@@ -167,7 +168,7 @@ export function FarmPage({ id }: { id: string }) {
             </div>
 
             <Section title="Thửa ruộng">
-              <Async state={plots} skeleton="table" isEmpty={(r) => r.length === 0} empty={<EmptyState icon="🗺️" title="Nông hộ chưa khai báo thửa ruộng" />}>
+              <Async state={plots} skeleton="table" isEmpty={(r) => r.length === 0} empty={<EmptyState icon="plot" title="Nông hộ chưa khai báo thửa ruộng" />}>
                 {(rows) => (
                   <DataTable
                     rows={rows}
@@ -185,7 +186,7 @@ export function FarmPage({ id }: { id: string }) {
             </Section>
 
             <Section title="Vụ canh tác" description="Toàn bộ vụ trên các thửa của nông hộ này">
-              <Async state={seasons} skeleton="table" isEmpty={(r) => r.length === 0} empty={<EmptyState icon="🌱" title="Nông hộ chưa có vụ canh tác nào" />}>
+              <Async state={seasons} skeleton="table" isEmpty={(r) => r.length === 0} empty={<EmptyState icon="seeding" title="Nông hộ chưa có vụ canh tác nào" />}>
                 {(rows) => (
                   <DataTable
                     rows={rows}
@@ -219,7 +220,7 @@ export function PlotPage({ id }: { id: string }) {
   return (
     <Async state={state} isEmpty={(d) => !d.plot}>
       {({ plot, seasons }) => {
-        if (!plot) return <EmptyState icon="🔍" title="Không tìm thấy thửa ruộng" />
+        if (!plot) return <EmptyState icon="search" title="Không tìm thấy thửa ruộng" />
         const active = seasons.find((s) => (s.status ?? '').toLowerCase().includes('active') || (s.status ?? '').includes('canh tác'))
         return (
           <>
@@ -238,14 +239,14 @@ export function PlotPage({ id }: { id: string }) {
               stats={[{ label: 'Diện tích', value: plot.areaHa == null ? '—' : ha(plot.areaHa) }]}
               actions={active ? (
                 <button className="btn btn--ghost" onClick={() => go(`/crop-seasons/${active.id}`)}>
-                  Vụ đang canh tác: {active.name} →
+                  Vụ đang canh tác: {active.name} <Ico name="arrow" size={14} />
                 </button>
               ) : undefined}
             />
 
             <Section title="Vụ canh tác" description={active ? undefined : 'Chưa có vụ nào đang hoạt động trên thửa này'}>
               {seasons.length === 0 ? (
-                <EmptyState icon="🌱" title="Thửa này chưa có vụ canh tác nào" />
+                <EmptyState icon="seeding" title="Thửa này chưa có vụ canh tác nào" />
               ) : (
                 <DataTable
                   rows={seasons}

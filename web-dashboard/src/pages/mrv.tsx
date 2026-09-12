@@ -1,3 +1,4 @@
+import { Ico } from '../icons'
 import { listMrvCases, getMrvCase, listMrvEvidence, type MrvCase, type MrvEvidence } from '../api/mrv'
 import { usingMockData } from '../api/farms'
 import { date, shortHash } from '../format'
@@ -37,7 +38,7 @@ export function MrvPage() {
       <Async
         state={state}
         isEmpty={(d) => !usingMockData && !d.mrvCase}
-        empty={<EmptyState icon="📋" title="Chưa có hồ sơ MRV nào trong phạm vi" />}
+        empty={<EmptyState icon="task" title="Chưa có hồ sơ MRV nào trong phạm vi" />}
       >
         {({ mrvCase, evidence }) => {
           const steps: MrvStep[] = mrvCase?.steps?.length ? (mrvCase.steps as MrvStep[]) : MOCK_STEPS
@@ -69,7 +70,7 @@ export function MrvPage() {
                     return (
                       <li key={s.stepNo} className={`step ${cls}`}>
                         <span className="step__marker" aria-hidden="true">
-                          {s.status === 'completed' ? '✓' : s.stepNo}
+                          {s.status === 'completed' ? <Ico name="tick" size={12} /> : s.stepNo}
                         </span>
                         <div className="step__body">
                           <b>{s.name}</b>

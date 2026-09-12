@@ -12,7 +12,7 @@ const cell = (v: number | null | undefined, fmt: (n: number) => string) =>
  */
 export function FarmPerformanceTable({ items }: { items: FarmPerformance[] }) {
   if (items.length === 0) {
-    return <EmptyState icon="🌾" title="Chưa có dữ liệu hiệu suất nông hộ" body="Khi các hộ trong HTX ghi nhận hoạt động và thu hoạch, bảng so sánh sẽ xuất hiện ở đây." />
+    return <EmptyState icon="straw" title="Chưa có dữ liệu hiệu suất nông hộ" body="Khi các hộ trong HTX ghi nhận hoạt động và thu hoạch, bảng so sánh sẽ xuất hiện ở đây." />
   }
   return (
     <div className="table-wrap">

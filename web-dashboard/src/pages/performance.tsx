@@ -15,7 +15,7 @@ export function PerformancePage({ organizationId }: { organizationId: string | n
         meta={[<>Bốn chỉ số trên mỗi kg thóc, tổng hợp toàn HTX và so sánh giữa các nông hộ</>]}
       />
       {!organizationId ? (
-        <EmptyState icon="◈" title="Tài khoản chưa gắn với tổ chức" body="Cần một phạm vi HTX để tổng hợp hiệu suất vùng." />
+        <EmptyState icon="analytics" title="Tài khoản chưa gắn với tổ chức" body="Cần một phạm vi HTX để tổng hợp hiệu suất vùng." />
       ) : (
         <PerformanceBody organizationId={organizationId} />
       )}

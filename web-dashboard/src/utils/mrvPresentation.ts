@@ -1,9 +1,11 @@
+import type { IconName } from '../icons'
+
 export type MrvStatus = 'not_started' | 'in_progress' | 'completed' | 'blocked'
 
 const labels: Record<MrvStatus, string> = { not_started: 'Chưa bắt đầu', in_progress: 'Đang thực hiện', completed: 'Hoàn thành', blocked: 'Bị chặn' }
-const icons: Record<MrvStatus, string> = { not_started: '○', in_progress: '◐', completed: '✓', blocked: '!' }
+const icons: Record<MrvStatus, IconName> = { not_started: 'pending', in_progress: 'clock', completed: 'check', blocked: 'blocked' }
 
-export function presentMrvStatus(status: string): { label: string; icon: string; tone: MrvStatus } {
+export function presentMrvStatus(status: string): { label: string; icon: IconName; tone: MrvStatus } {
   const tone: MrvStatus = status in labels ? status as MrvStatus : 'not_started'
   return { label: labels[tone], icon: icons[tone], tone }
 }

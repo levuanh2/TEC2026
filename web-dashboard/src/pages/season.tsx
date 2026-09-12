@@ -1,3 +1,4 @@
+import { Ico } from '../icons'
 import { getCropSeason, getActivities, getProductionBatches } from '../api/crops'
 import { getPlot } from '../api/farms'
 import { getResourceMetrics } from '../api/metrics'
@@ -53,9 +54,9 @@ export function SeasonHub({ id, tab }: { id: string; tab: SeasonTab }) {
   ]
 
   return (
-    <Async state={frame} isEmpty={(d) => !d.season} empty={<EmptyState icon="🔍" title="Không tìm thấy vụ canh tác" />}>
+    <Async state={frame} isEmpty={(d) => !d.season} empty={<EmptyState icon="search" title="Không tìm thấy vụ canh tác" />}>
       {({ season, plot }) => {
-        if (!season) return <EmptyState icon="🔍" title="Không tìm thấy vụ canh tác" />
+        if (!season) return <EmptyState icon="search" title="Không tìm thấy vụ canh tác" />
         return (
           <>
             <Breadcrumb
@@ -169,7 +170,7 @@ function Overview({
             <MiniMetric label="Chi phí/kg" value={m?.costPerKg == null ? '—' : perKg(m.costPerKg, '₫')} />
           </div>
           <button className="btn btn--link" onClick={() => go(`${base}/performance`)}>
-            Xem chi tiết hiệu suất →
+            Xem chi tiết hiệu suất <Ico name="arrow" size={14} />
           </button>
         </div>
 
@@ -181,7 +182,7 @@ function Overview({
               : 'Đã đủ dữ liệu vụ. Chạy Carbon Engine để xem phát thải và chuẩn bị hồ sơ MRV.'}
           </p>
           <button className="btn btn--ghost" onClick={() => go(`${base}/carbon`)}>
-            Mở màn hình Carbon →
+            Mở màn hình Carbon <Ico name="arrow" size={14} />
           </button>
         </div>
       </div>
@@ -235,7 +236,7 @@ function SeasonMrv({ batches }: { batches: Batches }) {
   return (
     <Section title="MRV" description="Vụ này tham gia hồ sơ MRV của tổ chức thông qua các lô sản xuất bên dưới" cta={{ label: 'Mở hồ sơ MRV', to: '/mrv' }}>
       {batches.length === 0 ? (
-        <EmptyState icon="📋" title="Vụ chưa gắn lô sản xuất nào vào hồ sơ MRV" />
+        <EmptyState icon="task" title="Vụ chưa gắn lô sản xuất nào vào hồ sơ MRV" />
       ) : (
         <DataTable
           rows={batches}

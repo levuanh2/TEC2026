@@ -238,7 +238,7 @@ function MrvPanel({ mrv }: { mrv: NonNullable<Awaited<ReturnType<typeof getMrvCa
         {mrv.name} · {p.inProgress} bước đang thực hiện · {mrv.evidenceCount} minh chứng
       </p>
       <Link to="/mrv" className="section__cta">
-        Xem hồ sơ MRV →
+        Xem hồ sơ MRV <Ico name="arrow" size={14} />
       </Link>
     </>
   )

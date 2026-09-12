@@ -4,6 +4,7 @@ import { restoreSession, signIn, signOut } from './api/auth'
 import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
+import { Ico } from './icons'
 import { routeName, routeParam } from './routes'
 import { buildNav, type ContextLink } from './nav'
 import { go, Link, Notice } from './ui'
@@ -125,7 +126,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
                     aria-current={active ? 'page' : undefined}
                     onClick={() => setOpen(false)}
                   >
-                    {!isCtx && <span className="nav__ico" aria-hidden="true">{it.icon}</span>}
+                    {!isCtx && <span className="nav__ico"><Ico name={it.icon} size={15} /></span>}
                     {it.label}
                   </Link>
                 )
@@ -153,7 +154,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
         <header className="topbar">
           <div className="topbar__ctx">
             <button className="menu-btn" aria-label="Mở menu" onClick={() => setOpen((o) => !o)}>
-              ☰
+              <Ico name="menu" size={20} />
             </button>
             <span className="org-chip">
               {orgName ?? 'Chưa gán tổ chức'}
@@ -202,8 +203,8 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'notFound':
       return (
         <div className="state">
-          <div className="state__icon" aria-hidden="true">
-            🔍
+          <div className="state__icon">
+            <Ico name="search" size={18} />
           </div>
           <p className="state__title">Không tìm thấy trang</p>
           <p className="state__body">Đường dẫn không tồn tại trong hệ thống.</p>

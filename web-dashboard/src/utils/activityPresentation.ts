@@ -1,3 +1,4 @@
+import type { IconName } from '../icons'
 type Payload = Record<string, unknown>
 
 export interface ActivityPresentation { label: string; summary: string; detail?: string }
@@ -34,17 +35,17 @@ export function presentActivity(type: string, detail: string): ActivityPresentat
 // --- Grouping + iconography for the redesigned activity timeline (brief §10) ---
 
 /** Canonical group order farmers read a season in. */
-export const ACTIVITY_GROUPS: { type: string; label: string; icon: string }[] = [
-  { type: 'seeding', label: 'Giống', icon: '🌱' },
-  { type: 'fertilizer', label: 'Phân bón', icon: '🧪' },
-  { type: 'irrigation', label: 'Nước', icon: '💧' },
-  { type: 'pesticide', label: 'Thuốc BVTV', icon: '🛡️' },
-  { type: 'fuel', label: 'Nhiên liệu', icon: '⛽' },
-  { type: 'straw_management', label: 'Rơm rạ', icon: '🌾' },
-  { type: 'harvest', label: 'Thu hoạch', icon: '🚜' },
+export const ACTIVITY_GROUPS: { type: string; label: string; icon: IconName }[] = [
+  { type: 'seeding', label: 'Giống', icon: 'seeding' },
+  { type: 'fertilizer', label: 'Phân bón', icon: 'fertilizer' },
+  { type: 'irrigation', label: 'Nước', icon: 'irrigation' },
+  { type: 'pesticide', label: 'Thuốc BVTV', icon: 'pesticide' },
+  { type: 'fuel', label: 'Nhiên liệu', icon: 'fuel' },
+  { type: 'straw_management', label: 'Rơm rạ', icon: 'straw' },
+  { type: 'harvest', label: 'Thu hoạch', icon: 'harvest' },
 ]
 
-export const activityIcon = (type: string): string => ACTIVITY_GROUPS.find((g) => g.type === type)?.icon ?? '📝'
+export const activityIcon = (type: string): string => ACTIVITY_GROUPS.find((g) => g.type === type)?.icon ?? 'journal'
 
 export function groupActivities<T extends { type: string; occurredAt: string }>(items: T[]) {
   return ACTIVITY_GROUPS

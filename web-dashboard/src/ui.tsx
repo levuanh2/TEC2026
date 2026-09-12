@@ -1,3 +1,4 @@
+import { Ico, type IconName } from './icons'
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
 /* ---------------------------------------------------------------- routing */
@@ -218,7 +219,7 @@ export function Section({
         </div>
         {cta && (
           <Link to={cta.to} className="section__cta">
-            {cta.label} <span aria-hidden="true">→</span>
+            {cta.label} <Ico name="arrow" size={14} />
           </Link>
         )}
       </div>
@@ -406,11 +407,11 @@ export function LoadingSkeleton({ variant = 'page' }: { variant?: 'page' | 'kpis
   )
 }
 
-export function EmptyState({ title, body, icon = '🗒️', action }: { title: string; body?: string; icon?: string; action?: ReactNode }) {
+export function EmptyState({ title, body, icon = 'task', action }: { title: string; body?: string; icon?: IconName; action?: ReactNode }) {
   return (
     <div className="state">
-      <div className="state__icon" aria-hidden="true">
-        {icon}
+      <div className="state__icon">
+        <Ico name={icon} size={18} />
       </div>
       <p className="state__title">{title}</p>
       {body && <p className="state__body">{body}</p>}
@@ -424,8 +425,8 @@ export function ErrorState({ error, onRetry, kind = 'error' }: { error: string; 
   const denied = /quyền|unauthor|forbidden|401|403/i.test(error)
   return (
     <div className={`state state--${kind}`}>
-      <div className="state__icon" aria-hidden="true">
-        {notFound ? '🔍' : denied ? '🔒' : '⚠️'}
+      <div className="state__icon">
+        <Ico name={notFound ? 'search' : denied ? 'denied' : 'warning'} size={18} />
       </div>
       <p className="state__title">{notFound ? 'Không tìm thấy' : denied ? 'Không có quyền truy cập' : 'Không tải được dữ liệu'}</p>
       <p className="state__body">{error}</p>
@@ -481,7 +482,7 @@ export function Drawer({ title, subtitle, onClose, children }: { title: string; 
             {subtitle && <small>{subtitle}</small>}
           </div>
           <button className="drawer__close" onClick={onClose} aria-label="Đóng">
-            ✕
+            <Ico name="close" size={16} />
           </button>
         </div>
         <div className="drawer__body">{children}</div>
@@ -515,7 +516,7 @@ export function Sheet({ title, subtitle, onClose, busy, children }: { title: str
             {subtitle && <small>{subtitle}</small>}
           </div>
           <button className="sheet__close" onClick={onClose} disabled={busy} aria-label="Đóng">
-            ✕
+            <Ico name="close" size={16} />
           </button>
         </div>
         <div className="sheet__body">{children}</div>

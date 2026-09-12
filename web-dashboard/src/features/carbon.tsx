@@ -1,3 +1,4 @@
+import { Ico } from '../icons'
 import { useState } from 'react'
 import { ApiError } from '../api/client'
 import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '../api/carbon'
@@ -83,7 +84,7 @@ export function CarbonPanel({ id, seasonLabel }: { id: string; seasonLabel?: str
 
 const NoCalcState = (
   <EmptyState
-    icon="🧮"
+    icon="calculator"
     title="Chưa có bản tính CO₂e cho vụ này"
     body="Nhấn “Tính lại theo kịch bản” để chạy Carbon Engine với dữ liệu hoạt động hiện có."
   />
@@ -167,7 +168,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
 
       {(r.warnings ?? []).map((w) => (
         <Notice key={w} kind="warning">
-          ⚠ {w}
+          <Ico name="warning" size={14} /> {w}
         </Notice>
       ))}
 
@@ -201,7 +202,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
           <div className="prov-chain">
             {['CO₂e/kg', 'Công thức', 'Hệ số', 'Nguồn trích dẫn', 'Phiên bản'].map((n, i) => (
               <span key={n} style={{ display: 'contents' }}>
-                {i > 0 && <span className="prov-chain__arr" aria-hidden="true">→</span>}
+                {i > 0 && <span className="prov-chain__arr"><Ico name="chevron" size={12} /></span>}
                 <span className="prov-chain__node">{n}</span>
               </span>
             ))}

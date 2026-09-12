@@ -1,3 +1,4 @@
+import { Ico } from '../icons'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Activity } from '../types'
 import { presentActivity, groupActivities, activityFields, ACTIVITY_GROUPS } from '../utils/activityPresentation'
@@ -19,7 +20,7 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
   const groups = groupActivities(activities)
 
   if (activities.length === 0) {
-    return <EmptyState icon="🌾" title="Chưa ghi nhận hoạt động nào" body="Hoạt động canh tác được nhập từ ứng dụng offline của nông hộ sẽ hiện ở đây theo nhóm." />
+    return <EmptyState icon="straw" title="Chưa ghi nhận hoạt động nào" body="Hoạt động canh tác được nhập từ ứng dụng offline của nông hộ sẽ hiện ở đây theo nhóm." />
   }
 
   return (
@@ -28,7 +29,7 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
         {groups.map((g) => (
           <div key={g.type} className="timeline__group">
             <div className="timeline__label">
-              <span aria-hidden="true">{g.icon}</span>
+              <Ico name={g.icon} size={15} />
               {g.label}
               <span className="count">{g.items.length}</span>
             </div>
@@ -37,7 +38,7 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
               return (
                 <button key={a.id} className="act" onClick={() => setOpen(a)}>
                   <span className="act__icon" aria-hidden="true">
-                    {g.icon}
+                    <Ico name={g.icon} size={15} />
                   </span>
                   <span className="act__main">
                     <span className="act__name">{p.label}</span>
@@ -90,7 +91,7 @@ export function ActivityCoverage({ activities }: { activities: Activity[] }) {
         return (
           <div key={g.type} className="chip" style={{ justifyContent: 'space-between' }}>
             <span>
-              <span aria-hidden="true">{g.icon}</span> {g.label}
+              <Ico name={g.icon} size={14} /> {g.label}
             </span>
             <b style={{ color: n ? 'var(--brand-strong)' : 'var(--ink-faint)' }}>{n}</b>
           </div>

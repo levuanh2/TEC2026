@@ -1,28 +1,29 @@
+import type { IconName } from './icons'
 import type { Role } from './types'
 import { visibleNav } from './roles'
 
 // Information architecture for the sidebar. Groups reflect the product domain
 // (Tổng quan → Quản lý → Hiệu suất → MRV), not the raw DB hierarchy (brief §3).
 
-export interface NavItem { to: string; label: string; icon: string }
+export interface NavItem { to: string; label: string; icon: IconName }
 export interface NavGroup { label?: string; items: NavItem[] }
 
 const STATIC: NavGroup[] = [
-  { items: [{ to: '/dashboard', label: 'Tổng quan', icon: '◧' }] },
+  { items: [{ to: '/dashboard', label: 'Tổng quan', icon: 'overview' }] },
   {
     label: 'Quản lý',
     items: [
-      { to: '/organizations', label: 'Tổ chức / HTX', icon: '⬡' },
-      { to: '/farms', label: 'Nông hộ', icon: '⌂' },
+      { to: '/organizations', label: 'Tổ chức / HTX', icon: 'organization' },
+      { to: '/farms', label: 'Nông hộ', icon: 'farms' },
     ],
   },
   {
     label: 'Hiệu suất',
-    items: [{ to: '/performance', label: 'Hiệu suất vùng', icon: '◈' }],
+    items: [{ to: '/performance', label: 'Hiệu suất vùng', icon: 'analytics' }],
   },
   {
     label: 'MRV',
-    items: [{ to: '/mrv', label: 'Hồ sơ MRV', icon: '✓' }],
+    items: [{ to: '/mrv', label: 'Hồ sơ MRV', icon: 'mrv' }],
   },
 ]
 
@@ -36,7 +37,7 @@ export function buildNav(role: Role, context: ContextLink[]): NavGroup[] {
     const ctx = context.filter((c) => c.group === g.label)
     return {
       ...g,
-      items: [...items, ...ctx.map((c) => ({ to: c.to, label: c.label, icon: '·', context: true } as NavItem & { context?: boolean }))],
+      items: [...items, ...ctx.map((c) => ({ to: c.to, label: c.label, icon: 'chevron', context: true } as NavItem & { context?: boolean }))],
     }
   }).filter((g) => g.items.length > 0)
 }
