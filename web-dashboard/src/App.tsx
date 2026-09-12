@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { restoreSession, signIn, signOut } from './api/auth'
-import { getMe, type CurrentUser } from './api/me'
+import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
 import { routeName, routeParam } from './routes'
@@ -274,11 +274,21 @@ export default function App() {
       return
     }
     let alive = true
-    setViewerReady(false)
+    // A cached role hint for this same user lets a refresh/deep link paint
+    // its shell immediately; /v1/me still revalidates below and its result
+    // (not the hint) drives the redirect, exactly as before.
+    const hint = usingMockData ? null : readViewerHint(session.user.id)
+    if (hint) {
+      setViewer(hint)
+      setViewerReady(true)
+    } else {
+      setViewerReady(false)
+    }
     void getMe()
       .then((v) => {
         if (!alive) return
         setViewer(v)
+        writeViewerHint(session.user.id, v)
         if (!usingMockData) applyRoleRedirect(v.role, location.pathname)
       })
       .catch(() => {
@@ -317,7 +327,7 @@ export default function App() {
   if (session && !viewerReady) return <main className="login">Đang tải phạm vi tài khoản…</main>
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
-    return <FarmerExperience session={session} path={path.startsWith('/farmer') ? path : '/farmer'} />
+    return <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
   }
 
   return (

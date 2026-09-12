@@ -1,80 +1,156 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Activity } from '../types'
-import { activityFields, activityIcon, presentActivity } from '../utils/activityPresentation'
-import { date } from '../format'
-import { Drawer, EmptyState } from '../ui'
+import { activityFields } from '../utils/activityPresentation'
+import { ACTIVITY_TITLE, dayLabel, groupByDay, longDay, viewActivity } from './activityView'
+import type { QueryState } from './data'
+import { Ico } from './icons'
+import { ACTIVITY_ICON, ActivityTile, Chip, Empty, ErrorPanel, FarmerDrawer, Sk, SkBlock } from './kit'
 
-/**
- * Farmer-facing activity timeline, grouped by DATE (not by activity type
- * like the Management read-only ActivityTimeline in features/activities.tsx)
- * — a farmer thinks "what did I do on the 11th", not "show me every
- * fertilizer application ever". Kept as its own component rather than
- * reworking the shared one so Management's already-reviewed presentation
- * is untouched.
- *
- * `renderActions`/`resetSignal` mirror ActivityTimeline's API so the two
- * are drop-in compatible for callers that already wire edit/delete.
- */
-export function FarmerJournalTimeline({
-  activities,
-  renderActions,
-  resetSignal,
-}: {
+/* Farmer farming log: day-grouped vertical timeline. Management keeps its own
+ * type-grouped ActivityTimeline. Only a date is recorded, so no clock time
+ * is ever shown. */
+
+export function Timeline({ activities, renderCardActions, renderDetailActions, resetSignal }: {
   activities: Activity[]
-  renderActions?: (activity: Activity) => ReactNode
+  renderCardActions?: (activity: Activity) => ReactNode
+  renderDetailActions?: (activity: Activity) => ReactNode
   resetSignal?: number
 }) {
   const [open, setOpen] = useState<Activity | null>(null)
   useEffect(() => setOpen(null), [resetSignal])
-
-  if (activities.length === 0) {
-    return <EmptyState icon="🌾" title="Chưa có hoạt động nào trong vụ này." body="Ghi nhanh một hoạt động để bắt đầu nhật ký." />
-  }
-
-  const byDate = new Map<string, Activity[]>()
-  for (const a of [...activities].sort((x, y) => y.occurredAt.localeCompare(x.occurredAt))) {
-    const key = a.occurredAt.slice(0, 10)
-    if (!byDate.has(key)) byDate.set(key, [])
-    byDate.get(key)!.push(a)
-  }
+  const detail = open ? viewActivity(open) : null
 
   return (
     <>
-      <div className="f-journal">
-        {[...byDate.entries()].map(([day, items]) => (
-          <div key={day} className="f-journal__day">
-            <div className="f-journal__date">{date(day)}</div>
-            <div className="f-journal__rows">
-              {items.map((a) => {
-                const p = presentActivity(a.type, a.detail)
+      <ol className="fw-tl" aria-label="Nhật ký theo ngày">
+        {groupByDay(activities).map((group) => (
+          <li key={group.day} className="fw-tl__day">
+            <div className="fw-tl__daylabel">
+              <b>{dayLabel(group.day)}</b>
+              <small>{group.items.length} hoạt động</small>
+            </div>
+            <ul className="fw-tl__items">
+              {group.items.map((a) => {
+                const v = viewActivity(a)
                 return (
-                  <button key={a.id} type="button" className="f-journal__row" onClick={() => setOpen(a)}>
-                    <span className="f-journal__icon" aria-hidden="true">{activityIcon(a.type)}</span>
-                    <span className="f-journal__body">
-                      <span className="f-journal__title">{p.label}</span>
-                      <span className="f-journal__value">{p.summary}</span>
-                      {p.detail && <span className="f-journal__meta">{p.detail}</span>}
-                    </span>
-                    <span className="f-journal__chev" aria-hidden="true">›</span>
-                  </button>
+                  <li key={a.id} className={`fw-tl__item tone-${ACTIVITY_ICON[a.type]?.tone ?? 'sage'}`}>
+                    <div className="fw-entry">
+                      <button type="button" className="fw-entry__open" onClick={() => setOpen(a)}>
+                        <ActivityTile type={a.type} />
+                        <span className="fw-entry__text">
+                          <span className="fw-entry__head">
+                            <b>{v.title}</b>
+                            <span className={`fw-entry__value${v.value ? '' : ' is-empty'}`}>{v.value ?? 'Chưa ghi lượng'}</span>
+                          </span>
+                          {v.meta.length > 0 && <span className="fw-entry__meta">{v.meta.join(' · ')}</span>}
+                          {v.note && <span className="fw-entry__note">“{v.note}”</span>}
+                        </span>
+                      </button>
+                      {renderCardActions && <div className="fw-entry__actions">{renderCardActions(a)}</div>}
+                    </div>
+                  </li>
                 )
               })}
-            </div>
-          </div>
+            </ul>
+          </li>
         ))}
-      </div>
-
-      {open && (
-        <Drawer title={presentActivity(open.type, open.detail).label} subtitle={date(open.occurredAt)} onClose={() => setOpen(null)}>
-          <dl className="dl" style={{ gridTemplateColumns: '1fr' }}>
-            {activityFields(open.detail).map((f, i) => (
-              <div key={i}><dt>{f.label}</dt><dd>{f.value}</dd></div>
-            ))}
+      </ol>
+      {open && detail && (
+        <FarmerDrawer title={detail.title} subtitle={longDay(open.occurredAt.slice(0, 10))} icon={<ActivityTile type={open.type} />} onClose={() => setOpen(null)}>
+          <div className="fw-drawer__hero">
+            <span className={`fw-drawer__value${detail.value ? '' : ' is-empty'}`}>{detail.value ?? 'Chưa ghi lượng'}</span>
+            {detail.meta.length > 0 && <div className="fw-drawer__chips">{detail.meta.map((m) => <Chip key={m}>{m}</Chip>)}</div>}
+          </div>
+          <dl className="fw-detail">
+            {activityFields(open.detail).map((f, i) => <div key={i}><dt>{f.label}</dt><dd>{f.value}</dd></div>)}
             <div><dt>Người ghi</dt><dd>{open.recorder}</dd></div>
           </dl>
-          {renderActions?.(open)}
-        </Drawer>
+          {renderDetailActions && <div className="fw-detail__actions">{renderDetailActions(open)}</div>}
+        </FarmerDrawer>
       )}
     </>
+  )
+}
+
+export function TimelineSkeleton() {
+  return (
+    <SkBlock label="Đang tải nhật ký" className="fw-tl">
+      {[0, 1].map((d) => (
+        <div key={d} className="fw-tl__day">
+          <div className="fw-tl__daylabel"><Sk w={96} h={14} /><Sk w={64} h={11} /></div>
+          <div className="fw-tl__items">
+            {[0, 1].map((r) => (
+              <div key={r} className="fw-entry fw-entry--sk"><Sk w={44} h={44} r={13} /><span className="fw-sk-lines"><Sk w="38%" h={14} /><Sk w="62%" h={12} /></span></div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </SkBlock>
+  )
+}
+
+/** Filters + summary + timeline for one season's activities. */
+export function JournalView({ state, renderCardActions, renderDetailActions, resetSignal, emptyAction }: {
+  state: QueryState<Activity[]>
+  renderCardActions?: (activity: Activity) => ReactNode
+  renderDetailActions?: (activity: Activity) => ReactNode
+  resetSignal?: number
+  emptyAction?: ReactNode
+}) {
+  const [type, setType] = useState('all')
+  if (state.loading) return <TimelineSkeleton />
+  if (state.error) return <ErrorPanel error={state.error} onRetry={state.reload} />
+  const items = state.data ?? []
+  if (!items.length) return <Empty icon="journal" tone="leaf" title="Chưa có hoạt động nào trong vụ này." body="Ghi hoạt động đầu tiên để bắt đầu nhật ký canh tác." action={emptyAction} />
+  const types = [...new Set(items.map((a) => a.type))]
+  const current = types.includes(type) ? type : 'all'
+  const shown = current === 'all' ? items : items.filter((a) => a.type === current)
+  const latest = items.reduce((max, a) => (a.occurredAt > max ? a.occurredAt : max), items[0].occurredAt)
+  return (
+    <div className="fw-journal">
+      <div className="fw-toolbar">
+        <div className="fw-pills" role="group" aria-label="Lọc theo loại hoạt động">
+          <button type="button" className="fw-pill" aria-pressed={current === 'all'} onClick={() => setType('all')}>Tất cả <small>{items.length}</small></button>
+          {types.map((t) => (
+            <button key={t} type="button" className="fw-pill" aria-pressed={current === t} onClick={() => setType(t)}>
+              <Ico name={ACTIVITY_ICON[t]?.icon ?? 'journal'} />{ACTIVITY_TITLE[t] ?? t} <small>{items.filter((a) => a.type === t).length}</small>
+            </button>
+          ))}
+        </div>
+        <p className="fw-note">Lần ghi gần nhất: <b>{dayLabel(latest.slice(0, 10))}</b></p>
+      </div>
+      <Timeline activities={shown} renderCardActions={renderCardActions} renderDetailActions={renderDetailActions} resetSignal={resetSignal} />
+    </div>
+  )
+}
+
+/** Compact recent-activity list (Home, season overview). */
+export function MiniTimeline({ state, limit = 4 }: { state: QueryState<Activity[]>; limit?: number }) {
+  if (state.loading) {
+    return (
+      <SkBlock label="Đang tải hoạt động" className="fw-mini">
+        {Array.from({ length: limit }).map((_, i) => <div key={i} className="fw-mini__row"><Sk w={34} h={34} r={10} /><span className="fw-sk-lines"><Sk w="40%" h={13} /><Sk w="60%" h={11} /></span><Sk w={60} h={11} /></div>)}
+      </SkBlock>
+    )
+  }
+  if (state.error) return <ErrorPanel error={state.error} onRetry={state.reload} />
+  const rows = [...(state.data ?? [])].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, limit)
+  if (!rows.length) return <Empty icon="journal" tone="leaf" title="Chưa có hoạt động nào được ghi nhận cho vụ này." body="Dùng Ghi nhanh ở trên để thêm hoạt động đầu tiên." />
+  return (
+    <ul className="fw-mini">
+      {rows.map((a) => {
+        const v = viewActivity(a)
+        return (
+          <li key={a.id} className="fw-mini__row">
+            <ActivityTile type={a.type} size="sm" />
+            <div>
+              <b>{v.title}</b>
+              <span>{v.value && <span className="fw-mini__value">{v.value}</span>}{v.value && v.meta[0] ? ' · ' : ''}{v.meta[0] ?? (v.value ? '' : 'Chưa ghi lượng')}</span>
+            </div>
+            <time dateTime={a.occurredAt.slice(0, 10)}>{dayLabel(a.occurredAt.slice(0, 10))}</time>
+          </li>
+        )
+      })}
+    </ul>
   )
 }

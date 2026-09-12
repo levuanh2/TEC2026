@@ -10,7 +10,10 @@ import {
 } from './activityValidation'
 import { mapActivityError, type ActivityErrorPresentation } from './activityErrors'
 import { nextIdempotencyKey } from './idempotency'
-import { ConfirmDialog, Notice, Sheet } from '../ui'
+import { ACTIVITY_TITLE, longDay } from './activityView'
+import { markSeasonDataChanged } from './data'
+import { Ico, type IconName } from './icons'
+import { ACTIVITY_ICON, FarmerConfirm, FarmerSheet, IconTile } from './kit'
 
 /* ---------------------------------------------------------------- shared */
 
@@ -25,15 +28,14 @@ export function isSupportedActivityType(type: string): type is SupportedActivity
     || type === 'seeding' || type === 'pesticide' || type === 'straw_management'
 }
 
-export const QUICK_ENTRY_ACTIVE: { type: SupportedActivityType; label: string }[] = [
-  { type: 'seeding', label: 'Gieo sạ' },
-  { type: 'fertilizer', label: 'Bón phân' },
-  { type: 'irrigation', label: 'Tưới nước' },
-  { type: 'pesticide', label: 'Thuốc BVTV' },
-  { type: 'straw_management', label: 'Rơm rạ' },
-  { type: 'harvest', label: 'Thu hoạch' },
+export const QUICK_ENTRY_ACTIVE: { type: SupportedActivityType; label: string; hint: string }[] = [
+  { type: 'seeding', label: 'Gieo sạ', hint: 'Giống, lượng giống' },
+  { type: 'fertilizer', label: 'Bón phân', hint: 'Loại và lượng phân' },
+  { type: 'irrigation', label: 'Tưới nước', hint: 'Hình thức, lượng nước' },
+  { type: 'pesticide', label: 'Thuốc BVTV', hint: 'Tên thuốc, liều dùng' },
+  { type: 'straw_management', label: 'Rơm rạ', hint: 'Cách xử lý rơm' },
+  { type: 'harvest', label: 'Thu hoạch', hint: 'Sản lượng thóc' },
 ]
-export const QUICK_ENTRY_DISABLED: string[] = []
 
 function parseDetail(activity?: Activity): Record<string, unknown> {
   if (!activity) return {}
@@ -61,8 +63,16 @@ export const numOrUndef = (v: unknown): number | undefined => {
 
 /* --------------------------------------------------------------- fields */
 
-function RequiredMark() {
-  return <span className="form-field__required" aria-hidden="true"> *</span>
+const OPTIONAL = 'Không bắt buộc'
+
+function LabelText({ label, unit, required, hint }: { label: string; unit?: string; required?: boolean; hint?: string }) {
+  return (
+    <>
+      {label}{unit && ` (${unit})`}
+      {required && <span className="form-field__required" aria-hidden="true"> *</span>}
+      {hint === OPTIONAL ? <span className="form-field__opt">{OPTIONAL}</span> : hint ? <span className="form-field__hint"> · {hint}</span> : null}
+    </>
+  )
 }
 
 function TextField({ label, value, onChange, type = 'text', required, error, hint, autoFocus }: {
@@ -73,7 +83,7 @@ function TextField({ label, value, onChange, type = 'text', required, error, hin
   const errId = `${id}-err`
   return (
     <div className="form-field" aria-invalid={error ? 'true' : undefined}>
-      <label htmlFor={id}>{label}{required && <RequiredMark />}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
+      <label htmlFor={id}><LabelText label={label} required={required} hint={hint} /></label>
       <input id={id} type={type} value={value} required={required} autoFocus={autoFocus}
         aria-describedby={error ? errId : undefined} onChange={(e) => onChange(e.target.value)} />
       {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
@@ -88,7 +98,7 @@ function NumberField({ label, value, onChange, unit, required, error, hint }: {
   const errId = `${id}-err`
   return (
     <div className="form-field" aria-invalid={error ? 'true' : undefined}>
-      <label htmlFor={id}>{label}{unit && ` (${unit})`}{required && <RequiredMark />}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
+      <label htmlFor={id}><LabelText label={label} unit={unit} required={required} hint={hint} /></label>
       <input id={id} type="number" inputMode="decimal" step="any" value={value}
         aria-describedby={error ? errId : undefined} onChange={(e) => onChange(e.target.value)} />
       {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
@@ -100,7 +110,7 @@ function TextAreaField({ label, value, onChange, hint }: { label: string; value:
   const id = useId()
   return (
     <div className="form-field form-field--full">
-      <label htmlFor={id}>{label}{hint && <span className="form-field__hint"> · {hint}</span>}</label>
+      <label htmlFor={id}><LabelText label={label} hint={hint} /></label>
       <textarea id={id} value={value} onChange={(e) => onChange(e.target.value)} rows={2} />
     </div>
   )
@@ -126,11 +136,15 @@ function SelectField({ label, value, onChange, options, error }: {
 function CheckboxField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   const id = useId()
   return (
-    <div className="form-field form-field--full" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <input id={id} type="checkbox" checked={checked} style={{ width: 'auto' }} onChange={(e) => onChange(e.target.checked)} />
-      <label htmlFor={id} style={{ fontWeight: 500 }}>{label}</label>
+    <div className="form-check">
+      <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <label htmlFor={id}>{label}</label>
     </div>
   )
+}
+
+function FormSection({ title, icon, children }: { title: string; icon: IconName; children: ReactNode }) {
+  return <div className="fw-form__section"><h4><Ico name={icon} />{title}</h4>{children}</div>
 }
 
 const IRRIGATION_METHOD_OPTIONS: { value: IrrigationMethod; label: string }[] = [
@@ -155,6 +169,11 @@ const TITLES: Record<SupportedActivityType, { create: string; edit: string }> = 
   seeding: { create: 'Gieo sạ', edit: 'Chỉnh sửa gieo sạ' },
   pesticide: { create: 'Thuốc BVTV', edit: 'Chỉnh sửa thuốc BVTV' },
   straw_management: { create: 'Rơm rạ', edit: 'Chỉnh sửa rơm rạ' },
+}
+
+const DATE_LABEL: Record<SupportedActivityType, string> = {
+  harvest: 'Ngày thu hoạch', irrigation: 'Ngày thực hiện', seeding: 'Ngày gieo sạ',
+  pesticide: 'Ngày phun', straw_management: 'Ngày xử lý', fertilizer: 'Ngày bón',
 }
 
 /* --------------------------------------------------------- the form sheet */
@@ -283,119 +302,107 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
   }
 
   const saveLabel = pending ? 'Đang lưu…' : mode === 'edit' ? 'Lưu thay đổi' : activityType === 'harvest' ? 'Lưu thu hoạch' : 'Lưu hoạt động'
+  const look = ACTIVITY_ICON[activityType]
+
+  let main: ReactNode
+  let cost: ReactNode
+  if (activityType === 'fertilizer') {
+    main = <>
+      <TextField label="Loại phân" value={fName} onChange={setFName} error={err('fertilizerName')} required />
+      <div className="form-grid">
+        <NumberField label="Lượng bón" unit="kg" value={fAmount} onChange={setFAmount} error={err('amountKg')} required />
+        <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} hint={OPTIONAL} />
+      </div>
+      <details className="activity-form__disclosure" open={fMore} onToggle={(e) => setFMore((e.target as HTMLDetailsElement).open)}>
+        <summary>Thông tin dinh dưỡng khác</summary>
+        <div className="form-grid">
+          <NumberField label="Hàm lượng lân" unit="%" value={fP} onChange={setFP} error={err('phosphorusPercent')} />
+          <NumberField label="Hàm lượng kali" unit="%" value={fK} onChange={setFK} error={err('potassiumPercent')} />
+        </div>
+      </details>
+    </>
+    cost = <NumberField label="Chi phí vật tư" unit="đ" value={fCost} onChange={setFCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+  } else if (activityType === 'irrigation') {
+    main = <>
+      <SelectField label="Hình thức tưới" value={iMethod} onChange={setIMethod} options={IRRIGATION_METHOD_OPTIONS} error={err('method')} />
+      <NumberField label="Lượng nước" unit="m³" value={iWater} onChange={setIWater} hint={OPTIONAL} error={err('waterVolumeM3')} />
+      <CheckboxField label="Sử dụng máy bơm" checked={iPump} onChange={setIPump} />
+      {iPump && <NumberField label="Năng lượng bơm" unit="kWh" value={iPumpEnergy} onChange={setIPumpEnergy} error={err('pumpEnergyKwh')} />}
+      <details className="activity-form__disclosure" open={iMore} onToggle={(e) => setIMore((e.target as HTMLDetailsElement).open)}>
+        <summary>Thông tin khác</summary>
+        <div className="form-grid">
+          <NumberField label="Thời gian tưới" unit="phút" value={iDuration} onChange={setIDuration} error={err('durationMinutes')} />
+          <NumberField label="Mực nước ruộng" unit="cm" value={iLevel} onChange={setILevel} />
+        </div>
+      </details>
+    </>
+    cost = <NumberField label="Chi phí vật tư" unit="đ" value={iCost} onChange={setICost} hint={OPTIONAL} error={err('totalCostVnd')} />
+  } else if (activityType === 'harvest') {
+    main = <>
+      <NumberField label="Sản lượng thu hoạch" unit="kg" value={hYield} onChange={setHYield} error={err('yieldKg')} required />
+      <div className="form-grid">
+        <NumberField label="Diện tích thu hoạch" unit="ha" value={hArea} onChange={setHArea} hint={OPTIONAL} error={err('harvestedAreaHa')} />
+        <NumberField label="Độ ẩm" unit="%" value={hMoisture} onChange={setHMoisture} hint={OPTIONAL} error={err('moisturePercent')} />
+      </div>
+    </>
+    cost = <NumberField label="Chi phí" unit="đ" value={hCost} onChange={setHCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+  } else if (activityType === 'seeding') {
+    main = <>
+      <TextField label="Giống" value={sVariety} onChange={setSVariety} hint={OPTIONAL} />
+      <div className="form-grid">
+        <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} required />
+        <TextField label="Phương pháp gieo" value={sMethod} onChange={setSMethod} hint={OPTIONAL} />
+      </div>
+    </>
+    cost = <NumberField label="Chi phí vật tư" unit="đ" value={sCost} onChange={setSCost} hint={OPTIONAL} error={err('costVnd')} />
+  } else if (activityType === 'pesticide') {
+    main = <>
+      <TextField label="Tên thuốc" value={pName} onChange={setPName} error={err('productName')} required />
+      <div className="form-grid">
+        <NumberField label="Lượng sử dụng" value={pAmount} onChange={setPAmount} error={err('amount')} required />
+        <TextField label="Đơn vị" value={pUnit} onChange={setPUnit} hint="ví dụ: kg, lít, gói" error={err('unit')} required />
+      </div>
+      <TextField label="Mục đích / đối tượng" value={pTarget} onChange={setPTarget} hint={OPTIONAL} />
+    </>
+    cost = <NumberField label="Chi phí vật tư" unit="đ" value={pCost} onChange={setPCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+  } else {
+    main = <>
+      <SelectField label="Cách xử lý rơm rạ" value={wMethod} onChange={setWMethod} options={STRAW_METHOD_OPTIONS} error={err('method')} />
+      {wMethod === 'burned' && (
+        <p className="fw-disclaimer"><Ico name="info" />Hình thức xử lý này sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng.</p>
+      )}
+      <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint={OPTIONAL} error={err('strawMassKg')} />
+    </>
+    cost = <NumberField label="Chi phí" unit="đ" value={wCost} onChange={setWCost} hint={OPTIONAL} error={err('totalCostVnd')} />
+  }
 
   return (
-    <Sheet title={TITLES[activityType][mode]} subtitle={season.label} onClose={onClose} busy={pending}>
+    <FarmerSheet title={TITLES[activityType][mode]} subtitle={season.label} icon={look.icon} tone={look.tone} onClose={onClose} busy={pending}>
       <form className="activity-form" ref={formRef} onSubmit={handleSubmit} noValidate>
-        <div className="activity-form__context">Vụ <b>{season.label}</b></div>
-
-        <TextField
-          label={
-            activityType === 'harvest' ? 'Ngày thu hoạch'
-              : activityType === 'irrigation' ? 'Ngày thực hiện'
-              : activityType === 'seeding' ? 'Ngày gieo sạ'
-              : activityType === 'pesticide' ? 'Ngày phun'
-              : activityType === 'straw_management' ? 'Ngày xử lý'
-              : 'Ngày bón'
-          }
-          type="date" value={date} onChange={setDate} required autoFocus
-        />
-
-        {activityType === 'fertilizer' && (
-          <>
-            <TextField label="Loại phân" value={fName} onChange={setFName} error={err('fertilizerName')} required />
-            <div className="form-grid">
-              <NumberField label="Lượng bón" unit="kg" value={fAmount} onChange={setFAmount} error={err('amountKg')} required />
-              <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} />
-            </div>
-            <details className="activity-form__disclosure" open={fMore} onToggle={(e) => setFMore((e.target as HTMLDetailsElement).open)}>
-              <summary>Thông tin dinh dưỡng khác</summary>
-              <div className="form-grid">
-                <NumberField label="Hàm lượng lân" unit="%" value={fP} onChange={setFP} error={err('phosphorusPercent')} />
-                <NumberField label="Hàm lượng kali" unit="%" value={fK} onChange={setFK} error={err('potassiumPercent')} />
-              </div>
-            </details>
-            <NumberField label="Chi phí vật tư" unit="đ" value={fCost} onChange={setFCost} hint="Không bắt buộc" error={err('totalCostVnd')} />
-          </>
-        )}
-
-        {activityType === 'irrigation' && (
-          <>
-            <SelectField label="Hình thức tưới" value={iMethod} onChange={setIMethod} options={IRRIGATION_METHOD_OPTIONS} error={err('method')} />
-            <NumberField label="Lượng nước" unit="m³" value={iWater} onChange={setIWater} hint="Không bắt buộc" error={err('waterVolumeM3')} />
-            <CheckboxField label="Sử dụng máy bơm" checked={iPump} onChange={setIPump} />
-            {iPump && <NumberField label="Năng lượng bơm" unit="kWh" value={iPumpEnergy} onChange={setIPumpEnergy} error={err('pumpEnergyKwh')} />}
-            <details className="activity-form__disclosure" open={iMore} onToggle={(e) => setIMore((e.target as HTMLDetailsElement).open)}>
-              <summary>Thông tin khác</summary>
-              <div className="form-grid">
-                <NumberField label="Thời gian tưới" unit="phút" value={iDuration} onChange={setIDuration} error={err('durationMinutes')} />
-                <NumberField label="Mực nước ruộng" unit="cm" value={iLevel} onChange={setILevel} />
-              </div>
-            </details>
-            <NumberField label="Chi phí vật tư" unit="đ" value={iCost} onChange={setICost} hint="Không bắt buộc" error={err('totalCostVnd')} />
-          </>
-        )}
-
-        {activityType === 'harvest' && (
-          <>
-            <NumberField label="Sản lượng thu hoạch" unit="kg" value={hYield} onChange={setHYield} error={err('yieldKg')} required />
-            <div className="form-grid">
-              <NumberField label="Diện tích thu hoạch" unit="ha" value={hArea} onChange={setHArea} hint="Không bắt buộc" error={err('harvestedAreaHa')} />
-              <NumberField label="Độ ẩm" unit="%" value={hMoisture} onChange={setHMoisture} hint="Không bắt buộc" error={err('moisturePercent')} />
-            </div>
-            <NumberField label="Chi phí" unit="đ" value={hCost} onChange={setHCost} hint="Không bắt buộc" error={err('totalCostVnd')} />
-          </>
-        )}
-
-        {activityType === 'seeding' && (
-          <>
-            <TextField label="Giống" value={sVariety} onChange={setSVariety} hint="Không bắt buộc" />
-            <div className="form-grid">
-              <NumberField label="Lượng giống" unit="kg" value={sSeedKg} onChange={setSSeedKg} error={err('seedKg')} required />
-              <TextField label="Phương pháp gieo" value={sMethod} onChange={setSMethod} hint="Không bắt buộc" />
-            </div>
-            <NumberField label="Chi phí vật tư" unit="đ" value={sCost} onChange={setSCost} hint="Không bắt buộc" error={err('costVnd')} />
-          </>
-        )}
-
-        {activityType === 'pesticide' && (
-          <>
-            <TextField label="Tên thuốc" value={pName} onChange={setPName} error={err('productName')} required />
-            <div className="form-grid">
-              <NumberField label="Lượng sử dụng" value={pAmount} onChange={setPAmount} error={err('amount')} required />
-              <TextField label="Đơn vị" value={pUnit} onChange={setPUnit} hint="ví dụ: kg, lít, gói" error={err('unit')} required />
-            </div>
-            <TextField label="Mục đích / đối tượng" value={pTarget} onChange={setPTarget} hint="Không bắt buộc" />
-            <NumberField label="Chi phí vật tư" unit="đ" value={pCost} onChange={setPCost} hint="Không bắt buộc" error={err('totalCostVnd')} />
-          </>
-        )}
-
-        {activityType === 'straw_management' && (
-          <>
-            <SelectField label="Cách xử lý rơm rạ" value={wMethod} onChange={setWMethod} options={STRAW_METHOD_OPTIONS} error={err('method')} />
-            {wMethod === 'burned' && (
-              <Notice kind="info">Hình thức xử lý này sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng.</Notice>
-            )}
-            <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint="Không bắt buộc" error={err('strawMassKg')} />
-            <NumberField label="Chi phí" unit="đ" value={wCost} onChange={setWCost} hint="Không bắt buộc" error={err('totalCostVnd')} />
-          </>
-        )}
-
-        <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint="Không bắt buộc" />
+        <p className="fw-form__ctx"><Ico name="plot" /><span>Vụ <b>{season.label}</b></span></p>
+        <p className="fw-form__legend">Trường có dấu <span className="form-field__required" aria-hidden="true">*</span> là bắt buộc.</p>
+        <FormSection title="Thời gian" icon="calendar">
+          <TextField label={DATE_LABEL[activityType]} type="date" value={date} onChange={setDate} required autoFocus />
+        </FormSection>
+        <FormSection title="Thông tin chính" icon={look.icon}>{main}</FormSection>
+        <FormSection title="Chi phí" icon="money">{cost}</FormSection>
+        <FormSection title="Ghi chú" icon="journal">
+          <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint={OPTIONAL} />
+        </FormSection>
 
         {error && (
-          <Notice kind="error">
+          <div className="fw-form__error" role="alert">
             {error.message}
-            {error.retryable && <> <button type="button" className="btn--link" onClick={() => void submit()}>Thử lại</button></>}
-          </Notice>
+            {error.retryable && <button type="button" className="fw-btn fw-btn--ghost fw-btn--sm" onClick={() => void submit()}>Thử lại</button>}
+          </div>
         )}
 
-        <div className="activity-form__actions">
-          <button type="button" className="btn btn--ghost" onClick={onClose} disabled={pending}>Hủy</button>
-          <button type="submit" className="btn" disabled={pending}>{saveLabel}</button>
+        <div className="fw-form__footer">
+          <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose} disabled={pending}>Hủy</button>
+          <button type="submit" className="fw-btn" disabled={pending}>{saveLabel}</button>
         </div>
       </form>
-    </Sheet>
+    </FarmerSheet>
   )
 }
 
@@ -429,11 +436,10 @@ function DeleteActivityDialog({ activity, onCancel, onDeleted }: { activity: Act
   }
 
   return (
-    <ConfirmDialog
+    <FarmerConfirm
       title={copy.title}
-      body={<>{copy.body}{error && <><br /><br /><b style={{ color: 'var(--error-fg)' }}>{error.message}</b></>}</>}
+      body={<>{copy.body}{error && <><br /><br /><b style={{ color: 'var(--fw-danger)' }}>{error.message}</b></>}</>}
       confirmLabel="Xóa"
-      tone="danger"
       busy={pending}
       onConfirm={() => void confirm()}
       onCancel={onCancel}
@@ -452,9 +458,7 @@ function successMessage(mode: 'create' | 'edit', type: SupportedActivityType, re
   return mode === 'edit' ? 'Đã lưu thay đổi.' : 'Đã lưu hoạt động.'
 }
 
-function deletedMessage(type: SupportedActivityType): string {
-  return type === 'harvest' ? 'Đã xóa bản ghi thu hoạch.' : 'Đã xóa hoạt động.'
-}
+const deletedMessage = (type: SupportedActivityType) => (type === 'harvest' ? 'Đã xóa bản ghi thu hoạch.' : 'Đã xóa hoạt động.')
 
 type FlowState =
   | { kind: 'create'; type: SupportedActivityType; season: SeasonContext }
@@ -464,9 +468,10 @@ type FlowState =
 
 /**
  * Owns the currently-open create/edit/delete surface plus the post-mutation
- * toast; pages instantiate one per data scope and render `.node`/`.flash`.
+ * message. A page renders `.node` exactly once; after a write, every cached
+ * read derived from that season is invalidated.
  */
-export function useActivityMutations(onMutated: () => void) {
+export function useActivityMutations() {
   const [state, setState] = useState<FlowState>(null)
   const [flash, setFlash] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
@@ -481,17 +486,17 @@ export function useActivityMutations(onMutated: () => void) {
   const openEdit = (activity: Activity, season: SeasonContext) => setState({ kind: 'edit', activity, season })
   const openDelete = (activity: Activity, season: SeasonContext) => setState({ kind: 'delete', activity, season })
   const close = () => setState(null)
+  const done = (seasonId: string, message: string) => {
+    setState(null)
+    setFlash(message)
+    setVersion((v) => v + 1)
+    markSeasonDataChanged(seasonId)
+  }
 
   let node: ReactNode = null
   if (state?.kind === 'delete') {
     const type = isSupportedActivityType(state.activity.type) ? state.activity.type : 'fertilizer'
-    node = (
-      <DeleteActivityDialog
-        activity={state.activity}
-        onCancel={close}
-        onDeleted={() => { setState(null); setFlash(deletedMessage(type)); setVersion((v) => v + 1); onMutated() }}
-      />
-    )
+    node = <DeleteActivityDialog activity={state.activity} onCancel={close} onDeleted={() => done(state.season.id, deletedMessage(type))} />
   } else if (state) {
     const type = state.kind === 'create' ? state.type : (isSupportedActivityType(state.activity.type) ? state.activity.type : 'fertilizer')
     node = (
@@ -501,7 +506,7 @@ export function useActivityMutations(onMutated: () => void) {
         season={state.season}
         activity={state.kind === 'edit' ? state.activity : undefined}
         onClose={close}
-        onSaved={(result) => { setState(null); setFlash(successMessage(state.kind, type, result)); setVersion((v) => v + 1); onMutated() }}
+        onSaved={(result) => done(state.season.id, successMessage(state.kind, type, result))}
       />
     )
   }
@@ -509,69 +514,66 @@ export function useActivityMutations(onMutated: () => void) {
   return { openCreate, openEdit, openDelete, flash, node, version }
 }
 
-/* ------------------------------------------------------- Home quick entry */
+export type ActivityMutations = ReturnType<typeof useActivityMutations>
 
-export function QuickEntryPanel({ activeSeasons, mutations }: { activeSeasons: SeasonContext[]; mutations: ReturnType<typeof useActivityMutations> }) {
+/* --------------------------------------------------------- quick actions */
+
+export function QuickActions({ seasons, mutations, compact, loading }: { seasons: SeasonContext[]; mutations: ActivityMutations; compact?: boolean; loading?: boolean }) {
   const [picking, setPicking] = useState<SupportedActivityType | null>(null)
-  const disabled = activeSeasons.length === 0
+  const none = !loading && seasons.length === 0
 
   function click(type: SupportedActivityType) {
-    if (disabled) return
-    if (activeSeasons.length === 1) { mutations.openCreate(type, activeSeasons[0]); return }
+    if (!seasons.length) return
+    if (seasons.length === 1) { mutations.openCreate(type, seasons[0]); return }
     setPicking(type)
   }
 
   return (
-    <section className="farmer-quick">
-      <div>
-        <h2>Ghi nhanh</h2>
-        <p>{disabled ? 'Chưa có vụ đang canh tác để ghi hoạt động.' : 'Chọn việc bạn vừa làm để ghi vào nhật ký.'}</p>
+    <>
+      <div className={`fw-quick${compact ? ' fw-quick--compact' : ''}`}>
+        {QUICK_ENTRY_ACTIVE.map(({ type, label, hint }) => {
+          const look = ACTIVITY_ICON[type]
+          return (
+            <button key={type} type="button" className={`fw-qa tone-${look.tone}`} aria-label={label} disabled={loading || none} onClick={() => click(type)}>
+              <IconTile name={look.icon} tone={look.tone} size={compact ? 'sm' : 'md'} />
+              <span className="fw-qa__label"><b>{label}</b><small>{hint}</small></span>
+            </button>
+          )
+        })}
       </div>
-      <div>
-        {QUICK_ENTRY_ACTIVE.map(({ type, label }) => (
-          <button key={type} type="button" className="farmer-quick__button farmer-quick__button--active" disabled={disabled} onClick={() => click(type)}>
-            {label}
-          </button>
-        ))}
-        {QUICK_ENTRY_DISABLED.map((label) => (
-          <button key={label} className="farmer-quick__button" type="button" disabled aria-label={`${label} — sắp có`}>{label}<small>Sắp có</small></button>
-        ))}
-      </div>
+      {none && <p className="fw-note">Chưa có vụ đang canh tác để ghi hoạt động.</p>}
       {picking && (
-        <Sheet title="Chọn vụ cần ghi" onClose={() => setPicking(null)}>
-          <div className="stack">
-            {activeSeasons.map((s) => (
-              <button key={s.id} type="button" className="btn btn--ghost" style={{ justifyContent: 'flex-start', width: '100%' }}
-                onClick={() => { const t = picking; setPicking(null); mutations.openCreate(t, s) }}>
-                {s.label}
+        <FarmerSheet title="Chọn vụ cần ghi" subtitle={ACTIVITY_TITLE[picking]} icon={ACTIVITY_ICON[picking].icon} tone={ACTIVITY_ICON[picking].tone} onClose={() => setPicking(null)}>
+          <div className="fw-pick fw-pick--list">
+            {seasons.map((s) => (
+              <button key={s.id} type="button" onClick={() => { const t = picking; setPicking(null); mutations.openCreate(t, s) }}>
+                <IconTile name="seeding" tone="leaf" size="sm" />{s.label}
               </button>
             ))}
           </div>
-        </Sheet>
+        </FarmerSheet>
       )}
-      {mutations.node}
-    </section>
+    </>
   )
 }
 
-/* --------------------------------------------------- Journal "+ Ghi hoạt động" */
+/* --------------------------------------------------- Journal "Ghi hoạt động" */
 
-export function AddActivityCta({ season, mutations }: { season: SeasonContext; mutations: ReturnType<typeof useActivityMutations> }) {
+export function AddActivityCta({ season, mutations }: { season: SeasonContext; mutations: ActivityMutations }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   return (
     <>
-      <button type="button" className="btn btn--ghost" onClick={() => setPickerOpen(true)}>+ Ghi hoạt động</button>
+      <button type="button" className="fw-btn" onClick={() => setPickerOpen(true)}><Ico name="plus" />Ghi hoạt động</button>
       {pickerOpen && (
-        <Sheet title="Ghi hoạt động" subtitle={season.label} onClose={() => setPickerOpen(false)}>
-          <div className="stack">
+        <FarmerSheet title="Ghi hoạt động" subtitle={season.label} icon="journal" tone="leaf" onClose={() => setPickerOpen(false)}>
+          <div className="fw-pick">
             {QUICK_ENTRY_ACTIVE.map(({ type, label }) => (
-              <button key={type} type="button" className="btn btn--ghost" style={{ justifyContent: 'flex-start', width: '100%' }}
-                onClick={() => { setPickerOpen(false); mutations.openCreate(type, season) }}>
-                {label}
+              <button key={type} type="button" onClick={() => { setPickerOpen(false); mutations.openCreate(type, season) }}>
+                <IconTile name={ACTIVITY_ICON[type].icon} tone={ACTIVITY_ICON[type].tone} size="sm" />{label}
               </button>
             ))}
           </div>
-        </Sheet>
+        </FarmerSheet>
       )}
     </>
   )
@@ -579,12 +581,23 @@ export function AddActivityCta({ season, mutations }: { season: SeasonContext; m
 
 /* ------------------------------------------------------ journal row actions */
 
-export function ActivityRowActions({ activity, season, mutations }: { activity: Activity; season: SeasonContext; mutations: ReturnType<typeof useActivityMutations> }) {
+export function ActivityDetailActions({ activity, season, mutations }: { activity: Activity; season: SeasonContext; mutations: ActivityMutations }) {
   if (!isSupportedActivityType(activity.type)) return null
   return (
-    <div className="drawer__actions">
-      <button type="button" className="btn btn--ghost" onClick={() => mutations.openEdit(activity, season)}>Chỉnh sửa</button>
-      <button type="button" className="btn btn--danger" onClick={() => mutations.openDelete(activity, season)}>Xóa hoạt động</button>
-    </div>
+    <>
+      <button type="button" className="fw-btn fw-btn--soft" onClick={() => mutations.openEdit(activity, season)}><Ico name="edit" />Chỉnh sửa</button>
+      <button type="button" className="fw-btn fw-btn--danger" onClick={() => mutations.openDelete(activity, season)}><Ico name="delete" />Xóa hoạt động</button>
+    </>
+  )
+}
+
+export function ActivityCardActions({ activity, season, mutations }: { activity: Activity; season: SeasonContext; mutations: ActivityMutations }) {
+  if (!isSupportedActivityType(activity.type)) return null
+  const what = `${ACTIVITY_TITLE[activity.type] ?? activity.type} ${longDay(activity.occurredAt.slice(0, 10))}`
+  return (
+    <>
+      <button type="button" className="fw-iconbtn" aria-label={`Sửa bản ghi ${what}`} title="Sửa" onClick={() => mutations.openEdit(activity, season)}><Ico name="edit" /></button>
+      <button type="button" className="fw-iconbtn fw-iconbtn--danger" aria-label={`Xóa bản ghi ${what}`} title="Xóa" onClick={() => mutations.openDelete(activity, season)}><Ico name="delete" /></button>
+    </>
   )
 }
