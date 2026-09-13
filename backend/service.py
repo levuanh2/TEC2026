@@ -32,6 +32,7 @@ from infrastructure.mrv_export_repo import (
 )
 from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository
 from mrv import manifest as mrv_manifest
+from mrv import report_pdf as mrv_report_pdf
 from mrv import workbook as mrv_workbook
 from recommendation import generate_recommendations
 import schemas
@@ -432,12 +433,14 @@ class MrvExportService:
     connection is touched, exactly like the activity write path.
     """
 
-    SUPPORTED_FORMATS = ("json", "xlsx")
+    SUPPORTED_FORMATS = ("json", "xlsx", "pdf")
 
     JSON_MEDIA_TYPE = "application/json; charset=utf-8"
     XLSX_MEDIA_TYPE = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    PDF_MEDIA_TYPE = mrv_report_pdf.PDF_MEDIA_TYPE
+    ARTIFACT_MEDIA_TYPES = {"xlsx": XLSX_MEDIA_TYPE, "pdf": PDF_MEDIA_TYPE}
 
     # A full-case evidence package is a Management capability, not a field one.
     # This is the same role `private.user_is_org_manager` keys on, and the same
@@ -502,9 +505,9 @@ class MrvExportService:
     ) -> dict[str, Any]:
         """Produce an export of `fmt` for this case.
 
-        There is exactly ONE assembly path. `xlsx` does not assemble anything of
-        its own: it takes the canonical snapshot this call just produced and
-        renders it, so the workbook and the manifest can never disagree.
+        There is exactly ONE assembly path. `xlsx` and `pdf` assemble nothing of
+        their own: they take the canonical snapshot this call just produced and
+        render it, so a rendering and its manifest can never disagree.
         """
         if fmt not in self.SUPPORTED_FORMATS:
             raise UnsupportedExportFormatError(fmt)
@@ -678,8 +681,10 @@ class MrvExportService:
             ).get("manifest_sha256")
             actual = mrv_manifest.manifest_checksum(payload)
         else:
+            media_type = self.ARTIFACT_MEDIA_TYPES.get(str(row["format"]))
+            if media_type is None:
+                raise UnsupportedExportFormatError(row["format"])
             data = self._exports.get_artifact(row["storage_object_path"])
-            media_type = self.XLSX_MEDIA_TYPE
             recorded = row.get("file_sha256")
             actual = hashlib.sha256(data).hexdigest()
 
@@ -706,17 +711,47 @@ class MrvExportService:
 
         export_id = mrv_manifest.new_export_id()
         rendered_at = datetime.now(timezone.utc)
-        data = mrv_workbook.render_workbook(manifest, rendered_at=rendered_at)
+        # Rendering happens entirely in memory before anything is written, so a
+        # renderer failure leaves no object, no row, and the snapshot untouched.
+        if fmt == "pdf":
+            data = mrv_report_pdf.render_pdf(manifest, export_id=export_id, rendered_at=rendered_at)
+            filename = mrv_report_pdf.report_filename(case_code, manifest.get("generated_at"), export_id)
+        else:
+            data = mrv_workbook.render_workbook(manifest, rendered_at=rendered_at)
+            filename = mrv_workbook.workbook_filename(
+                case_code, manifest.get("generated_at"), export_id
+            )
         artifact_sha256 = hashlib.sha256(data).hexdigest()
-        filename = mrv_workbook.workbook_filename(
-            case_code, manifest.get("generated_at"), export_id
-        )
         object_path = f"{organization_id}/{mrv_case_id}/{filename}"
 
         # Object first: a metadata row pointing at nothing is worse than an
         # orphaned object, because the row promises a retrievable artifact.
-        self._exports.put_artifact(object_path, data, self.XLSX_MEDIA_TYPE)
-        row = self._exports.create(
+        self._exports.put_artifact(object_path, data, self.ARTIFACT_MEDIA_TYPES[fmt])
+        try:
+            row = self._create_rendered_row(
+                export_id=export_id, mrv_case_id=mrv_case_id, organization_id=organization_id,
+                fmt=fmt, snapshot_row=snapshot_row, object_path=object_path,
+                artifact_sha256=artifact_sha256, manifest=manifest, payload_sha256=payload_sha256,
+                snapshot_id=snapshot_id, actor=actor, rendered_at=rendered_at,
+            )
+        except Exception:
+            # Best effort: do not leave an object no row points at. If this delete
+            # also fails, the orphan is still found by the documented cleanup,
+            # which enumerates storage.objects by the case prefix.
+            try:
+                self._exports.delete_artifact(object_path)
+            except Exception:  # noqa: BLE001 - the original failure is the one to report
+                pass
+            raise
+        return {**self._export_view(row), "byte_size": len(data)}
+
+    def _create_rendered_row(
+        self, *, export_id: str, mrv_case_id: str, organization_id: str, fmt: str,
+        snapshot_row: dict[str, Any], object_path: str, artifact_sha256: str,
+        manifest: dict[str, Any], payload_sha256: str | None, snapshot_id: str,
+        actor: dict[str, Any], rendered_at: datetime,
+    ) -> dict[str, Any]:
+        return self._exports.create(
             export_id=export_id,
             mrv_case_id=mrv_case_id,
             organization_id=organization_id,

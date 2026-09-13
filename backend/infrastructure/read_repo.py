@@ -623,13 +623,16 @@ class SupabaseReadRepository:
         # storage_bucket/storage_object_path are NOT returned: since M07 part 2 an
         # XLSX row names a real private object. Clients get the filename only;
         # the bytes come from the authorized download route.
-        view = {key: row.get(key) for key in ("id", "mrv_case_id", "format", "factor_set_id", "scope_description", "data_as_of_at", "contains_sample_data", "is_finalized", "warning_text", "file_sha256", "payload_sha256", "source_snapshot_export_id", "generated_at")}
+        view = {key: row.get(key) for key in ("id", "mrv_case_id", "format", "factor_set_id", "scope_description", "data_as_of_at", "contains_sample_data", "is_finalized", "warning_text", "file_sha256", "payload_sha256", "source_snapshot_export_id", "generated_at", "generated_by")}
         view["file_name"] = str(row.get("storage_object_path") or "").rsplit("/", 1)[-1]
         return view
 
     def mrv_exports(self, case_id: str) -> list[dict[str, Any]]:
         self._one("mrv_cases", case_id)
-        return [self._export_view(x) for x in self._many("mrv_exports", mrv_case_id=case_id)]
+        rows = self._many("mrv_exports", mrv_case_id=case_id)
+        # Newest first, decided here rather than by whatever order the API returns.
+        rows.sort(key=lambda x: (str(x.get("generated_at") or ""), str(x.get("id") or "")), reverse=True)
+        return [self._export_view(x) for x in rows]
 
     def mrv_export(self, export_id: str) -> dict[str, Any]:
         # Không lọc theo case trước — mrv_exports không phải resource lồng duy nhất

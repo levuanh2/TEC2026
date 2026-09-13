@@ -200,6 +200,9 @@ class FakeExportStore:
             raise MrvArtifactMissingError(object_path)
         return data
 
+    def delete_artifact(self, object_path):
+        self.objects.pop(object_path, None)
+
 
 SUCCEEDED_CARBON = {
     "id": "calc-1", "status": "succeeded", "calculated_at": AT,
@@ -705,7 +708,7 @@ def test_unauthenticated_export_is_401():
 
 def test_unsupported_format_is_rejected_with_the_shared_error_envelope(client_for):
     client, _ = client_for(FakeRead())
-    response = client.post(f"/v1/mrv/cases/{CASE}/exports", json={"format": "pdf"})
+    response = client.post(f"/v1/mrv/cases/{CASE}/exports", json={"format": "docx"})
     assert response.status_code == 422
     assert "error" in response.json()["detail"]
 

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Ico } from '../icons'
-import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, createMrvXlsxExport, downloadMrvExport, type MrvCase, type MrvEvidence } from '../api/mrv'
+import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, createMrvXlsxExport, createMrvPdfExport, downloadMrvExport, listMrvExports, type MrvCase, type MrvEvidence, type MrvExportFormat, type MrvExportHistoryItem, type MrvExportResult } from '../api/mrv'
 import { usingMockData } from '../api/farms'
-import { date, shortHash } from '../format'
+import { date, dateTime, shortHash } from '../format'
 import { presentMrvStatus, mrvBadgeTone, mrvProgress, MRV_STEP_NAMES } from '../utils/mrvPresentation'
 import { Async, Badge, EmptyState, Hero, Notice, PageHead, Progress, Section, useAsync } from '../ui'
 import type { Role } from '../types'
@@ -90,29 +90,19 @@ export function MrvPage({ role }: { role?: Role } = {}) {
                 </ol>
               </Section>
 
-              <Section title="Xuất dữ liệu" description="Gói dữ liệu MRV gồm dữ liệu, bằng chứng và nguồn gốc hệ số hiện có">
+              <Section title="Xuất dữ liệu" description="Snapshot dữ liệu MRV và các bản kết xuất từ đúng snapshot đó">
                 {/* Only offered for a real case the viewer may actually export:
                     nothing to package in the mock-data view, and the server
                     restricts full-case packages to cooperative_manager, so an
                     enterprise/regulator viewer would only get a 404. The button
                     mirrors that rule; it does not create it. */}
-                {mrvCase && role === 'cooperative_manager' && (
-                  <>
-                    <MrvJsonExport caseId={mrvCase.caseId} />
-                    <div style={{ marginTop: 12 }}>
-                      <MrvXlsxExport caseId={mrvCase.caseId} />
-                    </div>
-                  </>
+                {mrvCase && role === 'cooperative_manager' ? (
+                  <MrvExportPanel caseId={mrvCase.caseId} />
+                ) : (
+                  <p className="muted" style={{ fontSize: 'var(--fs-caption)' }}>
+                    Chỉ quản lý hợp tác xã mới xuất được gói dữ liệu và báo cáo MRV của một hồ sơ thật.
+                  </p>
                 )}
-                <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
-                  <div>
-                    <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất hồ sơ MRV (PDF)</b>
-                    <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
-                      Bản PDF đang được phát triển — chưa có.
-                    </p>
-                  </div>
-                  <button className="btn btn--ghost" disabled aria-disabled="true">Sắp có</button>
-                </div>
               </Section>
             </div>
           )
@@ -141,118 +131,142 @@ function StepEvidence({ items }: { items: MrvEvidence[] }) {
 }
 
 
-/** Generate the JSON evidence package for this case.
- *
- * Deliberately plain: this is a data export, not a report. The copy says what
- * the package is and what it is not, and it never implies certification or that
- * PDF/Excel exist. Warnings returned by the backend are surfaced as a count so
- * an incomplete package is visibly incomplete rather than quietly partial. */
-function MrvJsonExport({ caseId }: { caseId: string }) {
-  const [state, setState] = useState<
-    { kind: 'idle' } | { kind: 'working' } | { kind: 'done'; warnings: number; sha: string } | { kind: 'error'; message: string }
-  >({ kind: 'idle' })
+const EXPORT_ACTIONS: { format: MrvExportFormat; label: string; working: string; primary?: boolean }[] = [
+  { format: 'pdf', label: 'Xuất PDF', working: 'Đang tạo PDF…', primary: true },
+  { format: 'xlsx', label: 'Xuất Excel (.xlsx)', working: 'Đang tạo Excel…' },
+  { format: 'json', label: 'Xuất JSON', working: 'Đang tạo JSON…' },
+]
 
-  async function run() {
-    setState({ kind: 'working' })
-    try {
-      const result = await createMrvJsonExport(caseId)
-      const blob = new Blob([JSON.stringify(result.manifest, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `agricarbon-mrv-${caseId.slice(0, 8)}-${result.exportId.slice(0, 8)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-      setState({ kind: 'done', warnings: result.warningCount, sha: result.fileSha256 })
-    } catch (error) {
-      setState({ kind: 'error', message: error instanceof Error ? error.message : 'Không tạo được gói dữ liệu.' })
-    }
-  }
-
-  return (
-    <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-      <div>
-        <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất gói dữ liệu MRV (JSON)</b>
-        <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
-          Bao gồm dữ liệu, bằng chứng và provenance hiện có. Đây không phải chứng nhận
-          hay kết quả thẩm định; gói dữ liệu có thể chứa cảnh báo về bằng chứng hoặc
-          hệ số chưa đầy đủ.
-        </p>
-        {state.kind === 'done' && (
-          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }}>
-            Đã tạo gói dữ liệu · SHA-256 {shortHash(state.sha)}
-            {state.warnings > 0 ? ` · ${state.warnings} cảnh báo về dữ liệu chưa đầy đủ` : ' · không có cảnh báo'}
-          </p>
-        )}
-        {state.kind === 'error' && (
-          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }} role="alert">
-            {state.message}
-          </p>
-        )}
-      </div>
-      <button className="btn" onClick={run} disabled={state.kind === 'working'} aria-busy={state.kind === 'working'}>
-        {state.kind === 'working' ? 'Đang tạo…' : 'Xuất JSON'}
-      </button>
-    </div>
-  )
+const CREATE_EXPORT: Record<MrvExportFormat, (caseId: string) => Promise<MrvExportResult>> = {
+  json: createMrvJsonExport,
+  xlsx: createMrvXlsxExport,
+  pdf: createMrvPdfExport,
 }
 
+const FORMAT_LABEL: Record<string, string> = { json: 'JSON', xlsx: 'Excel (.xlsx)', pdf: 'PDF' }
+const HISTORY_LIMIT = 10
 
-/** Generate the canonical snapshot and download it rendered as a workbook.
+function saveBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** One export area for the case: generate, download, and see what was made.
  *
- * One backend call does both from ONE snapshot, so the spreadsheet and the JSON
- * package can never disagree. The copy says what the file is and is not, and
- * shows the artifact digest plus the warning count so an incomplete package
- * stays visibly incomplete. */
-function MrvXlsxExport({ caseId }: { caseId: string }) {
-  const [state, setState] = useState<
-    | { kind: 'idle' }
-    | { kind: 'working' }
-    | { kind: 'done'; warnings: number; sha: string }
-    | { kind: 'error'; message: string }
-  >({ kind: 'idle' })
+ * Every action creates one canonical JSON snapshot on the server; Excel and PDF
+ * are rendered from exactly that snapshot, so the three can never disagree.
+ * Downloads always go through the verified download route (the server checks
+ * the recorded SHA-256 first). The copy says what the files are and are not:
+ * support documents, not certification, with evidence binaries not included.
+ * History shows metadata only — the API returns no bucket, object path or
+ * signed URL to show. */
+function MrvExportPanel({ caseId }: { caseId: string }) {
+  const [working, setWorking] = useState<MrvExportFormat | null>(null)
+  const [status, setStatus] = useState<{ kind: 'done' | 'error'; text: string } | null>(null)
+  const history = useAsync(() => listMrvExports(caseId), [caseId])
 
-  async function run() {
-    setState({ kind: 'working' })
+  async function run(format: MrvExportFormat) {
+    setWorking(format)
+    setStatus(null)
     try {
-      const result = await createMrvXlsxExport(caseId)
-      const blob = await downloadMrvExport(result.exportId)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = result.fileName
-      a.click()
-      URL.revokeObjectURL(url)
-      setState({ kind: 'done', warnings: result.warningCount, sha: result.fileSha256 })
+      const result = await CREATE_EXPORT[format](caseId)
+      saveBlob(await downloadMrvExport(result.exportId), result.fileName)
+      const warnings = result.warningCount > 0 ? ` · ${result.warningCount} cảnh báo về dữ liệu chưa đầy đủ` : ''
+      setStatus({ kind: 'done', text: `Đã tạo ${FORMAT_LABEL[format]} · SHA-256 tệp ${shortHash(result.fileSha256)}${warnings}` })
+      history.reload()
     } catch (error) {
-      setState({ kind: 'error', message: error instanceof Error ? error.message : 'Không tạo được bảng tính.' })
+      setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Không tạo được bản xuất.' })
+    } finally {
+      setWorking(null)
+    }
+  }
+
+  async function download(item: MrvExportHistoryItem) {
+    setStatus(null)
+    try {
+      saveBlob(await downloadMrvExport(item.exportId), item.fileName)
+    } catch (error) {
+      setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Không tải được tệp.' })
     }
   }
 
   return (
-    <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-      <div>
-        <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất bảng tính MRV (.xlsx)</b>
-        <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
-          Kết xuất từ chính gói dữ liệu JSON — không tính lại CO2e hay chỉ số tài nguyên.
-          Đây không phải chứng nhận hay kết quả thẩm định; bảng tính có thể chứa cảnh báo
-          về bằng chứng hoặc hệ số chưa đầy đủ. Tệp bằng chứng gốc KHÔNG kèm trong bảng tính.
-        </p>
-        {state.kind === 'done' && (
-          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }}>
-            Đã tạo bảng tính · SHA-256 tệp {shortHash(state.sha)}
-            {state.warnings > 0 ? ` · ${state.warnings} cảnh báo về dữ liệu chưa đầy đủ` : ''}
-          </p>
-        )}
-        {state.kind === 'error' && (
-          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }} role="alert">
-            {state.message}
-          </p>
-        )}
+    <div className="card card--pad">
+      <p className="muted" style={{ fontSize: 'var(--fs-caption)' }}>
+        Mỗi lần xuất tạo một snapshot dữ liệu gốc (JSON); Excel và PDF được kết xuất từ đúng snapshot đó,
+        không tính lại CO₂e hay chỉ số tài nguyên. Đây là tài liệu hỗ trợ, không phải chứng nhận hay kết quả
+        thẩm định, và có thể chứa cảnh báo về dữ liệu chưa đầy đủ. Tệp bằng chứng gốc không kèm theo.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+        {EXPORT_ACTIONS.map((action) => (
+          <button
+            key={action.format}
+            className={action.primary ? 'btn' : 'btn btn--ghost'}
+            onClick={() => run(action.format)}
+            disabled={working !== null}
+            aria-busy={working === action.format}
+          >
+            {working === action.format ? action.working : action.label}
+          </button>
+        ))}
       </div>
-      <button className="btn" onClick={run} disabled={state.kind === 'working'} aria-busy={state.kind === 'working'}>
-        {state.kind === 'working' ? 'Đang tạo…' : 'Xuất Excel'}
-      </button>
+      {status && (
+        <p className="muted" role={status.kind === 'error' ? 'alert' : 'status'} style={{ fontSize: 'var(--fs-caption)', marginTop: 8 }}>
+          {status.text}
+        </p>
+      )}
+
+      <h3 style={{ fontSize: 'var(--fs-sm)', margin: '20px 0 8px' }}>Lịch sử xuất</h3>
+      <Async
+        state={history}
+        skeleton="table"
+        isEmpty={(items) => items.length === 0}
+        empty={<p className="muted" style={{ fontSize: 'var(--fs-caption)' }}>Chưa có bản xuất nào cho hồ sơ này.</p>}
+      >
+        {(items) => (
+          <>
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Định dạng</th>
+                    <th>Tạo lúc</th>
+                    <th>Người tạo</th>
+                    <th>Trạng thái</th>
+                    <th>Nguồn dữ liệu</th>
+                    <th aria-label="Tải về" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.slice(0, HISTORY_LIMIT).map((item) => (
+                    <tr key={item.exportId}>
+                      <td className="col-key">{FORMAT_LABEL[item.format] ?? item.format}</td>
+                      <td>{dateTime(item.generatedAt)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{item.generatedBy ? item.generatedBy.slice(0, 8) : '—'}</td>
+                      <td><Badge tone="neutral">Đã tạo</Badge></td>
+                      <td className="muted">
+                        {item.sourceSnapshotExportId ? `Từ snapshot ${item.sourceSnapshotExportId.slice(0, 8)}` : `Snapshot gốc ${item.exportId.slice(0, 8)}`}
+                      </td>
+                      <td>
+                        <button className="btn btn--ghost" onClick={() => download(item)} aria-label={`Tải về ${item.fileName}`}>
+                          Tải về
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {items.length > HISTORY_LIMIT && (
+              <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }}>Hiển thị {HISTORY_LIMIT} bản xuất gần nhất.</p>
+            )}
+          </>
+        )}
+      </Async>
     </div>
   )
 }
