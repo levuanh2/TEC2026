@@ -2,6 +2,9 @@
 
 Chạy: python backend/scripts/seed_demo_data.py
 Cần backend/.env đầy đủ (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY).
+Chỉ khi tạo MỚI demo user mới cần MANAGER_PASSWORD / ENTERPRISE_PASSWORD trong biến
+môi trường tiến trình — DEMO/QA ONLY, không bao giờ ghi vào file, log hay commit, và
+script không in mật khẩu ra màn hình.
 
 Mọi record thuộc tenant demo có prefix `DEMO-` trong code/tên — nhận diện và
 cleanup được bằng `backend/scripts/cleanup_demo_data.py`. KHÔNG bao giờ ghi
@@ -16,8 +19,8 @@ org thật) thì dừng lại — không tự ý ghi đè.
 """
 from __future__ import annotations
 
+import os
 import sys
-import uuid
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -172,7 +175,15 @@ def main() -> int:
         existing_user = next((u for u in users if u.email == email), None)
         if existing_user:
             return email, "(đã tồn tại — mật khẩu không đổi, không in lại)"
-        password = f"Demo-{uuid.uuid4().hex[:12]}!Aa1"
+        # Never generated-and-printed: a password on stdout ends up in terminal
+        # scrollback and CI logs. The operator supplies it through the process env.
+        password_env = f"{label.upper()}_PASSWORD"
+        password = os.environ.get(password_env)
+        if not password:
+            raise RuntimeError(
+                f"{password_env} is required to create {email} (DEMO/QA only; "
+                "set it in the process environment, never in a file)."
+            )
         user = admin.auth.admin.create_user({"email": email, "password": password, "email_confirm": True}).user
         admin.table("organization_memberships").insert({
             "organization_id": org["id"], "user_id": user.id, "role": role,
@@ -181,14 +192,14 @@ def main() -> int:
             admin.table("farm_members").insert({
                 "farm_id": farms[0]["id"], "user_id": user.id, "farm_role": farm_role,
             }).execute()
-        return email, password
+        return email, f"(vừa tạo — mật khẩu lấy từ {password_env}, không in ra)"
 
-    manager_email, manager_password = ensure_demo_user("manager", "cooperative_manager", "owner")
-    enterprise_email, enterprise_password = ensure_demo_user("enterprise", "enterprise_viewer", None)
+    manager_email, manager_status = ensure_demo_user("manager", "cooperative_manager", "owner")
+    enterprise_email, enterprise_status = ensure_demo_user("enterprise", "enterprise_viewer", None)
 
-    print("\n=== DEMO CREDENTIALS (không ghi vào file/README — chỉ in ra đây) ===")
-    print(f"cooperative_manager: {manager_email} / {manager_password}")
-    print(f"enterprise_viewer:   {enterprise_email} / {enterprise_password}")
+    print("\n=== DEMO/QA ACCOUNTS (không in mật khẩu) ===")
+    print(f"cooperative_manager: {manager_email} {manager_status}")
+    print(f"enterprise_viewer:   {enterprise_email} {enterprise_status}")
     print(f"\nOrganization ID: {org['id']}")
     print("Seed xong. Carbon page các crop season demo sẽ hiện 'chưa có dữ liệu tính toán'")
     print("(cố ý không seed carbon_calculations — không bịa CO2e).")

@@ -153,7 +153,26 @@ phải contract, để task riêng. Claude KHÔNG đụng backend (task = web-da
 ## Round 9 (2026-09-10) — Progressive loading + authenticated real-data E2E (Claude)
 
 User: "kết nối supabase, vẫn tk demo trên CSDL thật" → user cấp phép (qua `!` bash)
-reset mật khẩu demo user `demo-manager@agricarbon-demo.local` = `DemoQA-2026!Aa1`.
+reset mật khẩu demo user `demo-manager@agricarbon-demo.local`. Mật khẩu KHÔNG ghi ở đây — cung cấp qua biến môi trường (xem khối "QA credentials" ngay dưới).
+
+> **QA credentials — DEMO/QA ONLY. DO NOT reuse these credentials for production.**
+>
+> Mật khẩu không bao giờ được ghi vào file tracked, script, log, screenshot, trace hay commit;
+> luôn truyền qua biến môi trường của tiến trình. Script real-data phải báo lỗi rõ ràng khi
+> thiếu biến, không có giá trị fallback.
+>
+> | Tài khoản | Email | Mật khẩu |
+> |---|---|---|
+> | Manager QA — `cooperative_manager`, org demo | `demo-manager@agricarbon-demo.local` (`MANAGER_EMAIL`) | supplied through `MANAGER_PASSWORD` |
+> | Farmer QA — `farmer`, `DEMO-FARM-01` | `qa-farmer-fw1@agricarbon-demo.local` (`QA_EMAIL`) | supplied through `QA_PASSWORD` |
+>
+> Playwright real specs dùng tên riêng: Management `REAL_E2E_EMAIL` / `REAL_E2E_PASSWORD`,
+> Farmer `FARMER_REAL_E2E_EMAIL` / `FARMER_REAL_E2E_PASSWORD`. Chạy real spec với trace và
+> screenshot tắt — trace giữ lại giá trị của `fill()`.
+>
+> Lịch sử Git cũ vẫn chứa mật khẩu demo trước đây: chấp nhận được vì đây là tài khoản demo,
+> không phải production, và không rewrite history. Nếu tài khoản này từng được dùng ngoài
+> demo/QA thì PHẢI đổi mật khẩu trước.
 
 | Files | Owner | Task | Trạng thái |
 |---|---|---|---|
