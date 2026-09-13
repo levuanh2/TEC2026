@@ -199,7 +199,7 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'carbon':
       return <SeasonHub id={id} tab={'carbon' as SeasonTab} />
     case 'mrv':
-      return <MrvPage />
+      return <MrvPage role={viewer.role} />
     case 'notFound':
       return (
         <div className="state">

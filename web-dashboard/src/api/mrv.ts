@@ -21,3 +21,30 @@ export async function listMrvBatches(caseId: string): Promise<MrvBatch[]> {
   const r = await apiRequest<{ items: any[] }>(`/v1/mrv/cases/${caseId}/batches`)
   return r.items.map((x) => ({ productionBatchId: x.production_batch_id, batchCode: x.batch_code, cropSeasonId: x.crop_season_id, farmId: x.farm_id, plotId: x.plot_id }))
 }
+
+export interface MrvExportResult {
+  exportId: string
+  schemaVersion: string
+  fileSha256: string
+  generatedAt: string
+  warningCount: number
+  manifest: unknown
+}
+
+/** Generate the JSON evidence package for one case.
+ *
+ * JSON only — XLSX and PDF do not exist yet, and the UI must not offer them. */
+export async function createMrvJsonExport(caseId: string): Promise<MrvExportResult> {
+  const r = await apiRequest<any>(`/v1/mrv/cases/${caseId}/exports`, {
+    method: 'POST',
+    body: JSON.stringify({ format: 'json' }),
+  })
+  return {
+    exportId: r.export_id,
+    schemaVersion: r.schema_version,
+    fileSha256: r.file_sha256,
+    generatedAt: r.generated_at,
+    warningCount: Array.isArray(r.manifest?.warnings) ? r.manifest.warnings.length : 0,
+    manifest: r.manifest,
+  }
+}

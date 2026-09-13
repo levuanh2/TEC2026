@@ -17,7 +17,7 @@ import time
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from carbon import SCENARIOS
@@ -43,9 +43,13 @@ from service import (
     CvService,
     InvalidCropSeasonStateError,
     InvalidImageError,
+    MrvExportAccessError,
+    MrvExportService,
     RecommendationAccessError,
     RecommendationService,
+    UnsupportedExportFormatError,
 )
+from mrv import canonical_bytes
 from infrastructure.write_repo import IdempotencyConflictError
 
 router = APIRouter(prefix="/v1")
@@ -502,6 +506,74 @@ def mrv_case_exports(mrv_case_id: str, repo: SupabaseReadRepository = Depends(_r
 @router.get("/mrv/exports/{mrv_export_id}", tags=['MRV'], response_model=schemas.MrvExportResponse)
 def mrv_export(mrv_export_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.mrv_export(mrv_export_id))
+
+
+def _mrv_export_service() -> MrvExportService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "MRV export service is not configured."))
+
+
+def _mrv_export_or_http(callback):
+    """One error contract, shared with the rest of the API.
+
+    Not being allowed to see a case and the case not existing both become 404:
+    an export must not be a way to discover that some organization has a case
+    with a given id.
+    """
+    try:
+        return callback()
+    except MrvExportAccessError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=error_detail("not_found", "Không tìm thấy hồ sơ MRV hoặc hồ sơ không thuộc phạm vi truy cập."),
+        ) from exc
+    except UnsupportedExportFormatError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail(
+                "unsupported_export_format",
+                "Hiện chỉ tạo được gói dữ liệu định dạng 'json'. Bản xuất XLSX/PDF chưa có.",
+            ),
+        ) from exc
+
+
+@router.post("/mrv/cases/{mrv_case_id}/exports", tags=['MRV'], status_code=201, response_model=schemas.MrvExportCreatedResponse)
+def create_mrv_export(
+    mrv_case_id: str,
+    payload: schemas.MrvExportRequest | None = None,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: MrvExportService = Depends(_mrv_export_service),
+) -> dict[str, Any]:
+    """Generate an MRV evidence package (JSON) for one case.
+
+    The package is a snapshot of current data and its provenance. It is not a
+    certification, a verification or a compliance statement, and it carries its
+    own disclaimer plus machine-readable warnings for whatever is incomplete.
+    """
+    fmt = (payload.format if payload else "json")
+    return _mrv_export_or_http(
+        lambda: service.create(read_repository=repo, mrv_case_id=mrv_case_id, fmt=fmt)
+    )
+
+
+@router.get("/mrv/exports/{mrv_export_id}/download", tags=['MRV'], response_model=None)
+def download_mrv_export(
+    mrv_export_id: str,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: MrvExportService = Depends(_mrv_export_service),
+) -> Response:
+    """Re-serve the stored snapshot byte-for-byte.
+
+    Never rebuilt from live data: an export is evidence of what the system held
+    when it was generated, so a later change to the case must not change it.
+    """
+    manifest, filename = _mrv_export_or_http(
+        lambda: service.download(read_repository=repo, export_id=mrv_export_id)
+    )
+    return Response(
+        content=canonical_bytes(manifest),
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/emission-factor-sets", tags=['Emission Factors'], response_model=schemas.ItemsResponse[schemas.EmissionFactorSetResponse])

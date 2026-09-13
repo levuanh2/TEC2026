@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { Ico } from '../icons'
-import { listMrvCases, getMrvCase, listMrvEvidence, type MrvCase, type MrvEvidence } from '../api/mrv'
+import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, type MrvCase, type MrvEvidence } from '../api/mrv'
 import { usingMockData } from '../api/farms'
 import { date, shortHash } from '../format'
 import { presentMrvStatus, mrvBadgeTone, mrvProgress, MRV_STEP_NAMES } from '../utils/mrvPresentation'
 import { Async, Badge, EmptyState, Hero, Notice, PageHead, Progress, Section, useAsync } from '../ui'
+import type { Role } from '../types'
 
 type MrvStep = { stepNo: number; name: string; status: string; startedAt: string | null; completedAt: string | null; notes: string | null }
 
@@ -16,7 +18,7 @@ const MOCK_STEPS: MrvStep[] = MRV_STEP_NAMES.map((name, i) => ({
   notes: null,
 }))
 
-export function MrvPage() {
+export function MrvPage({ role }: { role?: Role } = {}) {
   const state = useAsync<{ mrvCase: MrvCase | null; evidence: MrvEvidence[] }>(async () => {
     if (usingMockData) return { mrvCase: null, evidence: [] }
     const cases = await listMrvCases()
@@ -88,8 +90,14 @@ export function MrvPage() {
                 </ol>
               </Section>
 
-              <Section title="Xuất báo cáo" description="Tạo tài liệu PDF/Excel theo 6 bước MRV để nộp cho đơn vị thẩm định">
-                <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+              <Section title="Xuất dữ liệu" description="Gói dữ liệu MRV gồm dữ liệu, bằng chứng và nguồn gốc hệ số hiện có">
+                {/* Only offered for a real case the viewer may actually export:
+                    nothing to package in the mock-data view, and the server
+                    restricts full-case packages to cooperative_manager, so an
+                    enterprise/regulator viewer would only get a 404. The button
+                    mirrors that rule; it does not create it. */}
+                {mrvCase && role === 'cooperative_manager' && <MrvJsonExport caseId={mrvCase.caseId} />}
+                <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
                   <div>
                     <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất hồ sơ MRV (PDF/Excel)</b>
                     <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
@@ -122,5 +130,62 @@ function StepEvidence({ items }: { items: MrvEvidence[] }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+
+/** Generate the JSON evidence package for this case.
+ *
+ * Deliberately plain: this is a data export, not a report. The copy says what
+ * the package is and what it is not, and it never implies certification or that
+ * PDF/Excel exist. Warnings returned by the backend are surfaced as a count so
+ * an incomplete package is visibly incomplete rather than quietly partial. */
+function MrvJsonExport({ caseId }: { caseId: string }) {
+  const [state, setState] = useState<
+    { kind: 'idle' } | { kind: 'working' } | { kind: 'done'; warnings: number; sha: string } | { kind: 'error'; message: string }
+  >({ kind: 'idle' })
+
+  async function run() {
+    setState({ kind: 'working' })
+    try {
+      const result = await createMrvJsonExport(caseId)
+      const blob = new Blob([JSON.stringify(result.manifest, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `agricarbon-mrv-${caseId.slice(0, 8)}-${result.exportId.slice(0, 8)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      setState({ kind: 'done', warnings: result.warningCount, sha: result.fileSha256 })
+    } catch (error) {
+      setState({ kind: 'error', message: error instanceof Error ? error.message : 'Không tạo được gói dữ liệu.' })
+    }
+  }
+
+  return (
+    <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+      <div>
+        <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất gói dữ liệu MRV (JSON)</b>
+        <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
+          Bao gồm dữ liệu, bằng chứng và provenance hiện có. Đây không phải chứng nhận
+          hay kết quả thẩm định; gói dữ liệu có thể chứa cảnh báo về bằng chứng hoặc
+          hệ số chưa đầy đủ.
+        </p>
+        {state.kind === 'done' && (
+          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }}>
+            Đã tạo gói dữ liệu · SHA-256 {shortHash(state.sha)}
+            {state.warnings > 0 ? ` · ${state.warnings} cảnh báo về dữ liệu chưa đầy đủ` : ' · không có cảnh báo'}
+          </p>
+        )}
+        {state.kind === 'error' && (
+          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }} role="alert">
+            {state.message}
+          </p>
+        )}
+      </div>
+      <button className="btn" onClick={run} disabled={state.kind === 'working'} aria-busy={state.kind === 'working'}>
+        {state.kind === 'working' ? 'Đang tạo…' : 'Xuất JSON'}
+      </button>
+    </div>
   )
 }

@@ -10,6 +10,7 @@ import hashlib
 import io
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,9 @@ from infrastructure.repository import CarbonRepository
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.cv_repo import CvNotFoundError, DuplicateImageError, PostgresCvRepository
 from infrastructure.recommendation_repo import PostgresRecommendationRepository, RecommendationNotFoundError
+from infrastructure.mrv_export_repo import MrvExportNotFoundError, PostgresMrvExportRepository
 from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository
+from mrv import manifest as mrv_manifest
 from recommendation import generate_recommendations
 import schemas
 
@@ -399,4 +402,219 @@ class CvService:
             "confidence": float(row["confidence"]), "uncertain": bool(row["is_uncertain"]),
             "threshold_used": float(row["threshold_used"]), "model_version": row["version_code"],
             "created_at": row["inferred_at"],
+        }
+
+
+class MrvExportAccessError(Exception):
+    """Normalized to 404 so an export cannot enumerate other organizations' cases."""
+
+
+class UnsupportedExportFormatError(Exception):
+    """Asked for a format this part does not produce yet."""
+
+
+class MrvExportService:
+    """Assemble and persist an MRV evidence package.
+
+    Everything it exports comes from a service or repository that already owns
+    that data: scope and evidence from the RLS-bound read repository, resource
+    metrics from `metrics()`, CO2e from `CarbonService.latest()`. No formula and
+    no domain query is reimplemented here -- this class orders the reads,
+    delegates shaping to `mrv.manifest`, and stores the result.
+
+    Access is decided by an RLS-bound read of the case before any privileged
+    connection is touched, exactly like the activity write path.
+    """
+
+    SUPPORTED_FORMATS = ("json",)
+
+    # A full-case evidence package is a Management capability, not a field one.
+    # This is the same role `private.user_is_org_manager` keys on, and the same
+    # authority `mrv_cases_insert`/`mrv_cases_update` already require: whoever
+    # may create or change an MRV case may package it.
+    #
+    # `enterprise_viewer` and `regulator` are deliberately NOT included. They can
+    # read a case through an `organization_data_grants` share, but letting a
+    # grantee mint a persisted artifact attributed to themselves is a product
+    # decision nobody has made; see docs/MRV_EXPORT_PACKAGE.md.
+    MANAGEMENT_ROLE = "cooperative_manager"
+
+    def __init__(self, export_repository: PostgresMrvExportRepository, carbon_service: CarbonService):
+        self._exports = export_repository
+        self._carbon = carbon_service
+
+    @classmethod
+    def _manages(cls, actor: dict[str, Any], organization_id: str) -> bool:
+        """Python mirror of `private.user_is_org_manager`, including `ended_at`.
+
+        Reads the membership rows `me()` already returned, so this costs no extra
+        round trip. A lapsed membership is not management authority, which is why
+        `ended_at` is honoured here exactly as the SQL helper honours it.
+        """
+        now = datetime.now(timezone.utc)
+        for membership in actor.get("organization_memberships") or []:
+            if str(membership.get("organization_id")) != str(organization_id):
+                continue
+            if str(membership.get("role")) != cls.MANAGEMENT_ROLE:
+                continue
+            ended = membership.get("ended_at")
+            if ended is None:
+                return True
+            if isinstance(ended, str):
+                ended = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+            if ended.tzinfo is None:
+                ended = ended.replace(tzinfo=timezone.utc)
+            if ended > now:
+                return True
+        return False
+
+    def _authorized_case(
+        self, read_repository: SupabaseReadRepository, mrv_case_id: str, actor: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Readable AND managed by the caller, or it does not exist as far as they know.
+
+        Both misses raise the same error and become the same 404. A farmer who can
+        read the case must not be able to tell the difference between "no such
+        case" and "you may not export this one" -- that distinction is itself a
+        disclosure, and 404-for-both is this API's existing convention.
+        """
+        try:
+            case = read_repository.mrv_case_row(mrv_case_id)
+        except ReadNotFoundError as exc:
+            raise MrvExportAccessError() from exc
+        if not self._manages(actor, str(case["organization_id"])):
+            raise MrvExportAccessError()
+        return case
+
+    def create(
+        self, *, read_repository: SupabaseReadRepository, mrv_case_id: str, fmt: str = "json",
+    ) -> dict[str, Any]:
+        if fmt not in self.SUPPORTED_FORMATS:
+            raise UnsupportedExportFormatError(fmt)
+
+        actor = read_repository.me()
+        case = self._authorized_case(read_repository, mrv_case_id, actor)
+        organization_id = str(case["organization_id"])
+
+        # Reads that do not depend on each other, but kept sequential and small:
+        # each is already batched internally, and an export is not on a
+        # latency-critical path.
+        steps = read_repository.mrv_steps(mrv_case_id)
+        evidence_rows = read_repository.mrv_evidence_rows(mrv_case_id)
+        scope_entries = read_repository.mrv_scope(mrv_case_id)
+        try:
+            organization = read_repository.organization(organization_id)
+        except ReadNotFoundError:
+            organization = None
+
+        season_ids = sorted({
+            str(e["crop_season_id"]) for e in scope_entries if e.get("crop_season_id")
+        })
+        activities = read_repository.export_activities(season_ids)
+
+        # Batched: one pass for every season on the case, not a request chain
+        # per season. Same computation the dashboards use.
+        metrics_by_season = read_repository.metrics_for_seasons(season_ids)
+        carbon_by_season: dict[str, dict[str, Any] | None] = {}
+        for sid in season_ids:
+            try:
+                carbon_by_season[sid] = self._carbon.latest(sid)
+            except Exception:  # noqa: BLE001 - carbon being unreadable is a warning, not a failed export
+                carbon_by_season[sid] = None
+
+        factor_set_ids = [
+            row.get("factor_set_id") for row in carbon_by_season.values() if row
+        ]
+        factor_sets, factors_by_set = read_repository.emission_factor_provenance(
+            [str(x) for x in factor_set_ids if x]
+        )
+
+        export_id = mrv_manifest.new_export_id()
+        generated_at = datetime.now(timezone.utc)
+        manifest = mrv_manifest.build_manifest(mrv_manifest.ManifestInputs(
+            export_id=export_id,
+            generated_at=generated_at,
+            generated_by=self._actor_metadata(actor),
+            case=case,
+            organization=organization,
+            scope_entries=scope_entries,
+            steps=steps,
+            evidence=evidence_rows,
+            activities=activities,
+            metrics_by_season=metrics_by_season,
+            carbon_by_season=carbon_by_season,
+            factor_sets=factor_sets,
+            factors_by_set=factors_by_set,
+        ))
+
+        checksum = manifest["package_integrity"]["manifest_sha256"]
+        filename = mrv_manifest.export_filename(str(case["case_code"]), generated_at, export_id)
+        row = self._exports.create(
+            export_id=export_id,
+            mrv_case_id=mrv_case_id,
+            organization_id=organization_id,
+            fmt=fmt,
+            factor_set_id=next((str(x) for x in factor_set_ids if x), None),
+            scope_description=self._scope_description(case, scope_entries),
+            data_as_of_at=generated_at,
+            warning_text=mrv_manifest.DISCLAIMER,
+            storage_object_path=f"{organization_id}/{mrv_case_id}/{filename}",
+            file_sha256=checksum,
+            payload=manifest,
+            generated_by=str(actor["user_id"]),
+            generated_at=generated_at,
+            calculation_ids=[
+                str(row["id"]) for row in carbon_by_season.values()
+                if row and row.get("id")
+            ],
+        )
+        return {**self._export_view(row), "manifest": manifest}
+
+    def download(
+        self, *, read_repository: SupabaseReadRepository, export_id: str,
+    ) -> tuple[dict[str, Any], str]:
+        """Return the stored snapshot and its filename. Never rebuilds.
+
+        Scoped to cases the caller MANAGES, not merely ones they can read, so a
+        known export id is not a way around the generation restriction.
+        """
+        actor = read_repository.me()
+        managed = [
+            str(scope["id"]) for scope in read_repository.mrv_case_scopes()
+            if self._manages(actor, str(scope["organization_id"]))
+        ]
+        try:
+            row = self._exports.payload(export_id, authorized_case_ids=managed)
+        except MrvExportNotFoundError as exc:
+            raise MrvExportAccessError() from exc
+        filename = str(row["storage_object_path"]).rsplit("/", 1)[-1]
+        return row["export_payload"], filename
+
+    @staticmethod
+    def _actor_metadata(actor: dict[str, Any]) -> dict[str, Any]:
+        """Only the identity and roles. Never a token, a claim set or a session."""
+        return {
+            "user_id": str(actor["user_id"]),
+            "roles": sorted(actor.get("roles") or []),
+        }
+
+    @staticmethod
+    def _scope_description(case: dict[str, Any], entries: list[dict[str, Any]]) -> str:
+        seasons = sorted({str(e.get("season_code")) for e in entries if e.get("season_code")})
+        suffix = ", ".join(seasons) if seasons else "chưa gắn vụ canh tác"
+        return f"Hồ sơ {case.get('case_code')} — {suffix}"
+
+    @staticmethod
+    def _export_view(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "export_id": row["id"], "mrv_case_id": row["mrv_case_id"],
+            "format": row["format"], "schema_version": mrv_manifest.MANIFEST_SCHEMA_VERSION,
+            "status": "generated",
+            "generated_at": mrv_manifest.iso_utc(row["generated_at"]),
+            "generated_by": row["generated_by"],
+            "file_sha256": row["file_sha256"],
+            "storage_object_path": row["storage_object_path"],
+            "scope_description": row["scope_description"],
+            "warning_text": row["warning_text"],
+            "is_finalized": row["is_finalized"],
         }

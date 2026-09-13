@@ -459,7 +459,9 @@ class MrvExportResponse(BaseModel):
     id: str
     mrv_case_id: str
     format: str
-    factor_set_id: str
+    # Null when the package was generated with no carbon calculation behind it;
+    # the manifest then records carbon.status = unavailable plus a warning.
+    factor_set_id: str | None = None
     scope_description: str
     data_as_of_at: str
     contains_sample_data: bool
@@ -469,6 +471,68 @@ class MrvExportResponse(BaseModel):
     storage_object_path: str
     file_sha256: str | None = None
     generated_at: str
+
+
+# -- MRV evidence package (M07 part 1) ----------------------------------
+
+
+class MrvExportWarning(BaseModel):
+    """A gap in the package, stated in machine-readable form.
+
+    Severity is `info` or `warning` only. Missing optional data is not an error
+    and must not be presented as one.
+    """
+    code: str = Field(..., description="Stable machine-readable warning code.")
+    severity: str = Field(..., description="info | warning")
+    message: str
+    related: dict[str, Any] | None = Field(
+        default=None, description="Ids the warning refers to, when it refers to one."
+    )
+
+
+class MrvPackageIntegrity(BaseModel):
+    algorithm: str = Field(..., description="sha256")
+    canonical_over: str = Field(
+        ..., description="Which bytes the digest covers, e.g. manifest-without-package_integrity."
+    )
+    canonical_form: str = Field(..., description="How those bytes are produced.")
+    manifest_sha256: str
+
+
+class MrvExportCreatedResponse(BaseModel):
+    """The generated package's identity and audit metadata, plus the manifest.
+
+    `manifest` is the stored snapshot verbatim -- the same object a later
+    download returns. It is typed as a mapping rather than a fully nested model
+    on purpose: the manifest's own contract is versioned by `schema_version` and
+    documented in docs/MRV_EXPORT_PACKAGE.md, and re-declaring every nested
+    shape here would create a second contract to keep in step.
+    """
+    export_id: str
+    mrv_case_id: str
+    format: str
+    schema_version: str
+    status: str = Field(..., description="generated")
+    generated_at: str
+    generated_by: str
+    file_sha256: str
+    storage_object_path: str
+    scope_description: str
+    warning_text: str | None = None
+    is_finalized: bool
+    manifest: dict[str, Any]
+
+
+class MrvExportRequest(BaseModel):
+    """Deliberately not a `Literal`.
+
+    An unsupported format is a domain answer ("that export does not exist yet"),
+    and routing it through the service keeps it in the shared error envelope
+    rather than FastAPI's raw request-validation shape.
+    """
+    format: str = Field(
+        "json", description="Only 'json' is produced in this part; xlsx/pdf come later."
+    )
 
 
 # -- Health -------------------------------------------------------------
