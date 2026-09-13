@@ -28,7 +28,9 @@ class _NoopGateway implements SyncGateway {
   @override
   Future<void> upsertActivityDetail(String t, Map<String, dynamic> r) => _no();
   @override
-  Future<int?> softDeleteActivity(String id, DateTime at) => _no();
+  Future<void> softDeleteActivity(String id) => _no();
+  @override
+  String? currentUserId() => _user;
   @override
   Future<String?> currentCooperativeId() async => null;
   @override

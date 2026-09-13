@@ -83,11 +83,12 @@ class _FakeGateway implements SyncGateway {
   }
 
   @override
-  Future<int?> softDeleteActivity(String serverActivityId, DateTime at) async {
-    final had = serverActivities.containsValue(serverActivityId);
+  Future<void> softDeleteActivity(String serverActivityId) async {
     serverActivities.removeWhere((_, v) => v == serverActivityId);
-    return had ? 1 : 0;
   }
+
+  @override
+  String? currentUserId() => 'cccc0000-0000-0000-0000-000000000000';
 
   @override
   Future<String?> currentCooperativeId() async => 'org';

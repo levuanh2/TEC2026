@@ -114,11 +114,26 @@ class SyncService {
     if (pending.isEmpty) return;
     final deviceId = await _devices.ensureServerDeviceId();
 
+    // Danh tính người ghi, lấy MỘT lần cho cả lượt. Không có phiên thì KHÔNG
+    // đoán và KHÔNG gửi `null`: mọi bản ghi trong lượt này hỏng thật (auth),
+    // giữ nguyên trên máy và chờ đăng nhập lại.
+    final recorderId = _gateway.currentUserId();
+
     for (final activity in pending) {
-      // Tombstone: bản ghi đã đồng bộ bị xoá → đẩy `deleted_at`, CHỈ xoá hẳn
-      // local khi server XÁC NHẬN đúng dòng. RLS/mạng/0-dòng → giữ nguyên hàng.
+      // Tombstone: bản ghi đã đồng bộ bị xoá → gọi RPC xoá mềm, CHỈ dọn hàng
+      // local khi server XÁC NHẬN. Mạng/chưa xác nhận → giữ nguyên hàng.
       if (activity.deletedLocally) {
         await _pushDelete(activity, summary);
+        continue;
+      }
+
+      if (recorderId == null) {
+        await _db.updateActivitySyncState(
+          activity.clientEventId,
+          state: SyncState.failed,
+          error: SyncErrorKind.auth.name,
+        );
+        summary.record('Hoạt động ${activity.type}', SyncErrorKind.auth);
         continue;
       }
 
@@ -147,6 +162,13 @@ class SyncService {
           'occurred_at': activity.occurredAt.toUtc().toIso8601String(),
           'recorded_at': activity.createdAt.toUtc().toIso8601String(),
           'source': 'mobile_offline',
+          // AI ghi bản này. Lấy từ PHIÊN ĐĂNG NHẬP đang hoạt động — không phải
+          // từ form, không phải hằng số. `activities_insert` chỉ nhận `null`
+          // hoặc chính `auth.uid()`, và policy xoá + `soft_delete_activity`
+          // dựa vào đúng cột này để biết ai được xoá; để trống thì chủ sở hữu
+          // không tự xoá được bản ghi của mình, và cả backend cũng không
+          // (`write_repo.soft_delete` lọc `recorded_by = actor`).
+          'recorded_by': recorderId,
           'device_id': deviceId,
           'client_event_id': activity.clientEventId,
           // LUÔN gửi `note`, kể cả `null` → xoá ghi chú cũ trên server khi sửa.
@@ -207,29 +229,14 @@ class SyncService {
     try {
       await _db.updateActivitySyncState(id, state: SyncState.syncing);
 
-      // XÁC NHẬN bằng SỐ DÒNG UPDATE TÁC ĐỘNG, KHÔNG bằng SELECT visibility
-      // (RLS `activities_select` ẩn row đã `deleted_at` — không phân biệt được
-      // "đã xoá" với "RLS thu hồi quyền, row còn sống"; TOCTOU không an toàn).
-      final affected =
-          await _gateway.softDeleteActivity(serverId, DateTime.now());
+      // RPC trả về bình thường ⇒ dòng đó ĐANG ở trạng thái xoá mềm trên server,
+      // dù lượt này hay lượt trước ghi. Đó là XÁC NHẬN đủ mạnh để dọn tombstone
+      // local: lần gọi thứ hai cũng trả về như vậy nên retry là idempotent, và
+      // trường hợp "không có quyền" KHÔNG đi vào nhánh này — nó ném 42501.
+      await _gateway.softDeleteActivity(serverId);
 
-      if (affected == 1) {
-        // Server ĐÃ ghi `deleted_at` cho đúng 1 row (id = serverId). Ack chắc
-        // chắn (count tính trước RLS select) → dọn tombstone local, idempotent.
-        await _db.hardDeleteActivity(id);
-        summary.activitiesDeleted++;
-        return;
-      }
-
-      // affected == 0  → RLS `activities_update USING` chặn / row không tồn tại.
-      // affected == null → không đọc được count.
-      // Cả hai đều KHÔNG xác nhận server nhận `deleted_at` → BẢO TOÀN DỮ LIỆU:
-      // giữ tombstone `failed`, lượt sau thử lại. KHÔNG mất row, KHÔNG tạo lại
-      // Activity (nhánh này không bao giờ gọi `upsertActivity`).
-      await _db.updateActivitySyncState(id,
-          state: SyncState.failed, error: SyncErrorKind.notConfirmed.name);
-      summary.record(
-          'Xoá hoạt động ${activity.type}', SyncErrorKind.notConfirmed);
+      await _db.hardDeleteActivity(id);
+      summary.activitiesDeleted++;
     } catch (error) {
       final kind = classifySyncError(error);
       // KHÔNG mất hàng: giữ tombstone, đánh dấu failed để thử lại.

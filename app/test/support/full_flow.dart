@@ -23,6 +23,8 @@ import 'package:agricarbon_app/services/sync_gateway.dart';
 import 'package:agricarbon_app/services/sync_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'
+    show PostgrestException;
 
 const _userA = 'aaaa1111-0000-0000-0000-000000000000';
 const _userB = 'bbbb2222-0000-0000-0000-000000000000';
@@ -31,6 +33,12 @@ const _userB = 'bbbb2222-0000-0000-0000-000000000000';
 /// server (idempotent như partial unique index thật).
 class FakeSyncGateway implements SyncGateway {
   final Set<String> visible = {};
+
+  /// Dòng đã `deleted_at` — vẫn tồn tại trên "server", chỉ bị RLS select ẩn.
+  final Set<String> softDeleted = {};
+
+  /// `auth.uid()` của phiên giả đang đăng nhập.
+  String? sessionUserId = _userA;
   final List<Map<String, dynamic>> activityUpserts = [];
   int plotUpserts = 0;
   int cropSeasonUpserts = 0;
@@ -64,10 +72,19 @@ class FakeSyncGateway implements SyncGateway {
       String table, Map<String, dynamic> row) async {}
 
   @override
-  Future<int?> softDeleteActivity(String id, DateTime deletedAt) async {
-    final had = visible.remove(id);
-    return had ? 1 : 0;
+  Future<void> softDeleteActivity(String id) async {
+    // Như RPC thật: chỉ NÉM khi caller không được phép. Dòng đã xoá mềm từ
+    // lượt trước vẫn trả về bình thường — retry là idempotent.
+    if (!visible.contains(id) && !softDeleted.contains(id)) {
+      throw const PostgrestException(
+          message: 'not allowed to delete activity', code: '42501');
+    }
+    visible.remove(id);
+    softDeleted.add(id);
   }
+
+  @override
+  String? currentUserId() => sessionUserId;
 
   @override
   Future<String?> currentCooperativeId() async => 'org';

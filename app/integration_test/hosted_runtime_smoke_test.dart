@@ -269,45 +269,168 @@ void main() {
       expect(await db2.getActivity(badEvent), isNotNull,
           reason: 'vẫn hiện trên màn Đồng bộ để người dùng xử lý');
 
-      // ---- 9. XOÁ MỀM TỪ MOBILE: HIỆN ĐANG BỊ RLS CHẶN --------------------
-      // PHÁT HIỆN (runtime, không thấy được bằng unit test / `flutter analyze`):
-      // `activities_select` có `deleted_at is null`, và Postgres áp policy SELECT
-      // như một WITH CHECK cho UPDATE, nên hàng vừa đặt `deleted_at` trở nên vô
-      // hình -> 42501. Đã chứng minh riêng bằng psql: cùng hàng, cùng user,
-      // `set deleted_at = null` PASS còn `set deleted_at = now()` FAIL, trong khi
-      // `user_can_write_batch` = true.
-      // Đường xoá của Farmer Web đi qua FastAPI (`DELETE /v1/activities/{id}`,
-      // kết nối đặc quyền) nên không dính. Mobile thì không.
-      // Test này KHOÁ hành vi hiện tại: không mất dữ liệu, không nã lại vô hạn.
+      // ---- 9. AI GHI BẢN NÀY (P1-4) ---------------------------------------
+      // `recorded_by` phải là CHÍNH user đang đăng nhập, lấy từ phiên Supabase.
+      // Không có nó thì chủ sở hữu không tự xoá được bản ghi của mình, và
+      // `DELETE /v1/activities/{id}` của backend cũng không (lọc `recorded_by`).
+      final owned = await client
+          .from('activities')
+          .select('id, recorded_by, source')
+          .eq('id', serverId1)
+          .single();
+      log('recorded_by=${owned['recorded_by']} expected=$userId');
+      expect(owned['recorded_by'], userId,
+          reason: 'P1-4: mobile phải ghi recorded_by = auth.uid()');
+
+      // ---- 10. SỬA BẢN ĐÃ ĐỒNG BỘ -----------------------------------------
+      // Sửa vẫn phải chạy được sau khi siết policy: trigger bất biến chỉ chặn
+      // ĐỔI chủ / đổi loại / đổi khoá idempotency, không chặn sửa nội dung.
+      const editedNote = '$_kQaTag da sua tren dien thoai';
+      final before = await db2.getActivity(eventId);
+      await db2.saveActivity(Activity(
+        clientEventId: eventId,
+        cropSeasonId: before!.cropSeasonId,
+        type: before.type,
+        occurredAt: before.occurredAt,
+        payload: const {'method': 'awd', 'water_volume_m3': 19.0},
+        note: editedNote,
+        syncState: SyncState.pending,
+        createdAt: before.createdAt,
+        serverActivityId: before.serverActivityId,
+      ));
+      final sEdit = await sync2.syncAll();
+      log('mobile_edit synced=${sEdit.activitiesSynced} '
+          'failures=${sEdit.failures.map((f) => f.kind.name).toList()}');
+      expect(sEdit.activitiesSynced, 1, reason: 'sửa bản của mình phải PASS');
+
+      final edited = await client
+          .from('activities')
+          .select('id, note, recorded_by, row_version')
+          .eq('id', serverId1)
+          .single();
+      log('after_edit=$edited');
+      expect(edited['note'], editedNote);
+      expect(edited['recorded_by'], userId,
+          reason: 'sửa KHÔNG được làm rơi chủ sở hữu');
+      expect((await remote()).length, 1, reason: 'sửa KHÔNG tạo dòng thứ 2');
+
+      // ---- 11. XOÁ MỀM TỪ MOBILE (P1-3) -----------------------------------
+      // Đi qua RPC `public.soft_delete_activity`, KHÔNG phải
+      // `update ... set deleted_at`: Postgres áp policy SELECT lên cả dòng MỚI
+      // của một UPDATE, mà `activities_select` đòi `deleted_at is null`, nên
+      // đường UPDATE luôn 42501 dù `activities_update` cho phép.
       await db2.tombstoneActivity(eventId);
       final sDel = await sync2.syncAll();
       log('mobile_soft_delete deleted=${sDel.activitiesDeleted} '
           'failures=${sDel.failures.map((f) => f.kind.name).toList()}');
-      expect(sDel.activitiesDeleted, 0,
-          reason: 'PHÁT HIỆN: RLS chặn mobile xoá mềm activity đã đồng bộ');
-      expect(sDel.failures.single.kind, SyncErrorKind.rlsDenied);
+      expect(sDel.activitiesDeleted, 1,
+          reason: 'P1-3: chủ sở hữu phải xoá mềm được bản của mình');
+      expect(sDel.hasErrors, isFalse);
 
-      final tomb = await db2.getActivity(eventId);
-      expect(tomb, isNotNull,
-          reason: 'tombstone phải được GIỮ, không mất hàng');
-      expect(tomb!.deletedLocally, isTrue);
-      log('tombstone_preserved=true state=${tomb.syncState.value} '
-          'error=${tomb.syncError}');
-      final tombRequeued = (await db2.listPendingActivities())
-          .any((a) => a.clientEventId == eventId);
-      log('tombstone_requeued=$tombRequeued '
-          '(false = P1-2 chặn vòng lặp nã request vô hạn)');
-      expect(tombRequeued, isFalse);
+      expect(await db2.getActivity(eventId), isNull,
+          reason: 'server đã xác nhận -> dọn tombstone local');
 
-      // ---- 10. LIỆT KÊ DỮ LIỆU QA CÒN LẠI ĐỂ HOST DỌN --------------------
+      // Đọc bình thường KHÔNG còn thấy dòng đó nữa.
+      final afterDelete = await remote();
+      log('remote_rows_after_soft_delete=${afterDelete.length} (phải là 0)');
+      expect(afterDelete, isEmpty,
+          reason: 'dòng đã xoá mềm phải bị ẩn khỏi SELECT thường');
+
+      // Bảng chi tiết cũng bị ẩn THEO CHA (policy của nó join qua activities),
+      // nhưng dòng vẫn còn trên server — host xác minh bằng kết nối đặc quyền.
+      final detailAfter = await client
+          .from('irrigation_events')
+          .select('activity_id')
+          .eq('activity_id', serverId1);
+      log('irrigation_events_visible_after_delete=${(detailAfter as List).length} '
+          '(0 = ẩn theo cha, KHÔNG phải bị xoá cứng)');
+      log('HOST_VERIFY_SOFT_DELETED_ACTIVITY_ID=$serverId1');
+
+      // Lượt đồng bộ tiếp theo: không nhân đôi, không lỗi, không nã lại.
+      final sAfter = await sync2.syncAll();
+      log('sync_after_delete deleted=${sAfter.activitiesDeleted} '
+          'synced=${sAfter.activitiesSynced} '
+          'failures=${sAfter.failures.map((f) => f.kind.name).toList()}');
+      expect(sAfter.activitiesDeleted, 0);
+      expect(sAfter.hasErrors, isFalse);
+      expect((await remote()).length, 0, reason: 'không hồi sinh dòng đã xoá');
+
+      // ---- 12. BẢN THỨ HAI, ĐỂ HOST THỬ XOÁ QUA BACKEND --------------------
+      // Chứng minh dòng do MOBILE tạo giờ tương thích với ngữ nghĩa xoá của
+      // backend: `ActivityWriteRepository.soft_delete` lọc `recorded_by = actor`,
+      // trước P1-4 thì cột đó rỗng nên endpoint cũng không xoá được.
+      final backendEvent = _uuid.v4();
+      await db2.insertActivity(Activity(
+        clientEventId: backendEvent,
+        cropSeasonId: season.clientId,
+        type: 'irrigation',
+        occurredAt: DateTime.now(),
+        payload: const {'method': 'awd', 'water_volume_m3': 3.0},
+        note: '$_kQaTag cho host xoa qua DELETE /v1/activities/{id}',
+        createdAt: DateTime.now(),
+      ));
+      final sBackend = await sync2.syncAll();
+      log('backend_compat_row synced=${sBackend.activitiesSynced} '
+          'failures=${sBackend.failures.map((f) => f.kind.name).toList()}');
+      expect(sBackend.activitiesSynced, 1);
+      final backendRow = await db2.getActivity(backendEvent);
+      log('HOST_VERIFY_BACKEND_DELETE_ACTIVITY_ID='
+          '${backendRow!.serverActivityId}');
+      final backendRemote = await client
+          .from('activities')
+          .select('id, recorded_by')
+          .eq('id', backendRow.serverActivityId as Object)
+          .single();
+      expect(backendRemote['recorded_by'], userId,
+          reason: 'dòng thứ hai cũng phải có recorded_by');
+      await db2.hardDeleteActivity(backendEvent); // host sở hữu vòng đời dòng này
+
+      // ---- 12. XOÁ NGOÀI PHẠM VI -> TỪ CHỐI, KHÔNG NÃ LẠI ------------------
+      // Dòng thật thuộc DEMO-FARM-02 (host truyền vào). Không có thì dùng một
+      // uuid không tồn tại — cùng một nhánh từ chối của RPC.
+      const crossId = String.fromEnvironment('QA_CROSS_ACTIVITY_ID');
+      final targetCrossId =
+          crossId.isNotEmpty ? crossId : '00000000-0000-0000-0000-0000000000aa';
+      final crossEvent = _uuid.v4();
+      await db2.insertActivity(Activity(
+        clientEventId: crossEvent,
+        cropSeasonId: season.clientId,
+        type: 'irrigation',
+        occurredAt: DateTime.now(),
+        payload: const {'method': 'awd'},
+        note: '$_kQaTag xoa ngoai pham vi (khong duoc phep)',
+        createdAt: DateTime.now(),
+        serverActivityId: targetCrossId,
+        syncState: SyncState.synced,
+      ));
+      await db2.tombstoneActivity(crossEvent);
+      final sCross = await sync2.syncAll();
+      log('cross_scope_delete target=$targetCrossId '
+          'deleted=${sCross.activitiesDeleted} '
+          'failures=${sCross.failures.map((f) => f.kind.name).toList()}');
+      expect(sCross.activitiesDeleted, 0,
+          reason: 'KHÔNG được xoá dòng ngoài phạm vi / của người khác');
+      expect(sCross.failures.single.kind, SyncErrorKind.rlsDenied);
+
+      final crossRow = await db2.getActivity(crossEvent);
+      expect(crossRow, isNotNull, reason: 'giữ hàng, không nuốt lỗi');
+      final crossRequeued = (await db2.listPendingActivities())
+          .any((a) => a.clientEventId == crossEvent);
+      log('cross_scope_requeued=$crossRequeued '
+          '(false = từ chối VĨNH VIỄN, không nã request vô hạn)');
+      expect(crossRequeued, isFalse);
+      await db2.hardDeleteActivity(crossEvent);
+
+      // ---- 13. LIỆT KÊ DỮ LIỆU QA CÒN LẠI ĐỂ HOST DỌN --------------------
       // `authenticated` KHÔNG có quyền delete trên `activities` / `devices`, và
-      // xoá mềm thì bị chặn như trên, nên bước dọn phải chạy từ host bằng kết
-      // nối đặc quyền. Ở đây chỉ LIỆT KÊ chính xác cái gì còn lại.
+      // dòng đã xoá mềm thì chính client cũng không còn thấy, nên bước dọn phải
+      // chạy từ host bằng kết nối đặc quyền. Ở đây chỉ LIỆT KÊ cái còn THẤY.
       final strays = await client
           .from('activities')
           .select('id, note')
           .like('note', '$_kQaTag%');
-      log('QA_ROWS_FOR_HOST_CLEANUP=${(strays as List).map((r) => (r as Map)['id']).toList()}');
+      log('QA_LIVE_ROWS_VISIBLE_TO_FARMER='
+          '${(strays as List).map((r) => (r as Map)['id']).toList()}');
       final devs = await client.from('devices').select('id, created_at');
       log('QA_DEVICE_ROWS_FOR_HOST_CLEANUP='
           '${(devs as List).map((r) => (r as Map)['id']).toList()}');

@@ -30,23 +30,28 @@ abstract interface class SyncGateway {
   /// (khoá CHÍNH — `ON CONFLICT (activity_id)` an toàn).
   Future<void> upsertActivityDetail(String table, Map<String, dynamic> row);
 
-  /// Set `deleted_at` cho 1 activity theo SERVER id.
+  /// Xoá mềm 1 activity theo SERVER id, qua RPC `public.soft_delete_activity`.
   ///
-  /// Trả **SỐ DÒNG mà lệnh UPDATE tác động** (lấy từ `Content-Range` của
-  /// PostgREST với `Prefer: count=exact`). Đây là NGUỒN XÁC NHẬN DUY NHẤT không
-  /// mơ hồ:
-  ///  - `1`   → server ĐÃ ghi `deleted_at` cho đúng `serverActivityId`
-  ///            (WHERE khớp + RLS `activities_update USING` cho phép). Caller
-  ///            được phép dọn tombstone local.
-  ///  - `0`   → KHÔNG tác động dòng nào: RLS `USING` chặn (quyền bị thu hồi,
-  ///            row còn SỐNG) HOẶC row không tồn tại. Caller PHẢI giữ tombstone.
-  ///  - `null`→ không đọc được count → coi như chưa xác nhận, giữ tombstone.
+  /// KHÔNG dùng `update activities set deleted_at = ...`: Postgres áp policy
+  /// SELECT lên CẢ dòng MỚI của một UPDATE, mà `activities_select` đòi
+  /// `deleted_at is null` — nên mọi client tự set `deleted_at` đều bị 42501,
+  /// bất kể `activities_update` cho phép gì. RPC chạy security definer, tự kiểm
+  /// tra quyền bằng đúng helper mà policy dùng (`private.user_can_write_batch`
+  /// + `recorded_by = auth.uid()`), rồi mới ghi `deleted_at`.
   ///
-  /// KHÔNG dùng returned representation: RLS `activities_select`
-  /// (`deleted_at is null`) lọc mất row ngay sau update nên `.select()` luôn
-  /// rỗng, không phân biệt được "đã xoá" với "RLS ẩn". `count` thì tính TRƯỚC
-  /// RLS select nên tin được.
-  Future<int?> softDeleteActivity(String serverActivityId, DateTime deletedAt);
+  /// Kết quả KHÔNG mơ hồ — đây là điểm khác biệt với đường UPDATE cũ:
+  ///  - trả về bình thường → dòng đó ĐANG ở trạng thái đã xoá mềm, dù lượt này
+  ///    hay lượt trước ghi (idempotent). Caller được dọn tombstone local.
+  ///  - ném `PostgrestException` 42501 → caller KHÔNG có quyền xoá dòng này
+  ///    (khác chủ / khác phạm vi). Lỗi VĨNH VIỄN, không thử lại.
+  ///  - ném lỗi mạng → tạm thời, lượt sau thử lại.
+  Future<void> softDeleteActivity(String serverActivityId);
+
+  /// `auth.uid()` của phiên hiện tại — `null` nếu KHÔNG có phiên đăng nhập.
+  ///
+  /// Nguồn duy nhất cho `activities.recorded_by`: lấy từ phiên Supabase đang
+  /// hoạt động, KHÔNG bao giờ từ form hay hằng số trong mã.
+  String? currentUserId();
 
   /// `organization_id` đang hiệu lực của user hiện tại — `null` nếu chưa thuộc
   /// HTX nào (hoặc chưa đăng nhập).
@@ -170,19 +175,15 @@ class SupabaseSyncGateway implements SyncGateway {
   }
 
   @override
-  Future<int?> softDeleteActivity(
-    String serverActivityId,
-    DateTime deletedAt,
-  ) async {
-    // `.count()` KHÔNG kèm `.select()` ⇒ `return=minimal` ⇒ `Content-Range` =
-    // số dòng UPDATE tác động (row_count của lệnh), KHÔNG bị RLS `select` lọc.
-    final res = await _client
-        .from('activities')
-        .update({'deleted_at': deletedAt.toUtc().toIso8601String()})
-        .eq('id', serverActivityId)
-        .count(CountOption.exact);
-    return res.count;
+  Future<void> softDeleteActivity(String serverActivityId) async {
+    await _client.rpc<void>(
+      'soft_delete_activity',
+      params: {'p_activity_id': serverActivityId},
+    );
   }
+
+  @override
+  String? currentUserId() => _client.auth.currentUser?.id;
 
   @override
   Future<String?> currentCooperativeId() async {

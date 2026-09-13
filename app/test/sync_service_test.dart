@@ -14,9 +14,9 @@ import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 const _user = 'eeeeeeee-0000-0000-0000-000000000000';
 
-/// Gateway giả — mô phỏng ĐỘC LẬP từng tín hiệu server (số dòng UPDATE tác động,
-/// exception, số lần gọi), KHÔNG chạm mạng và KHÔNG dùng SELECT visibility làm
-/// bằng chứng xoá.
+/// Gateway giả — mô phỏng ĐỘC LẬP từng tín hiệu server (trả về / exception /
+/// số lần gọi), KHÔNG chạm mạng và KHÔNG dùng SELECT visibility làm bằng chứng
+/// xoá.
 class _FakeGateway implements SyncGateway {
   _FakeGateway();
 
@@ -24,10 +24,9 @@ class _FakeGateway implements SyncGateway {
   final detailUpserts = <({String table, Map<String, dynamic> row})>[];
   final softDeleteCalls = <String>[];
 
-  /// Số dòng lệnh `UPDATE ... SET deleted_at` tác động (từ `Content-Range`).
-  /// `1` = server nhận `deleted_at` cho đúng row; `0` = RLS `USING` chặn / row
-  /// không tồn tại; `null` = không đọc được count.
-  int? softDeleteAffectedRows = 1;
+  /// `auth.uid()` của phiên giả. `null` = CHƯA đăng nhập.
+  String? sessionUserId = _user;
+
   Object? softDeleteThrows;
   Object? upsertThrows;
 
@@ -55,13 +54,14 @@ class _FakeGateway implements SyncGateway {
   }
 
   @override
-  Future<int?> softDeleteActivity(
-      String serverActivityId, DateTime deletedAt) async {
+  Future<void> softDeleteActivity(String serverActivityId) async {
     softDeleteCalls.add(serverActivityId);
     final t = softDeleteThrows;
     if (t != null) throw t;
-    return softDeleteAffectedRows;
   }
+
+  @override
+  String? currentUserId() => sessionUserId;
 
   @override
   Future<String?> currentCooperativeId() async => 'org';
@@ -175,8 +175,8 @@ void main() {
   });
 
   group(
-      'xoá Activity đã sync — chỉ hard-delete local khi UPDATE tác động ĐÚNG 1 '
-      'row (không dựa SELECT visibility) (#4)', () {
+      'xoá Activity đã sync — RPC `soft_delete_activity` là nguồn xác nhận '
+      '(không dựa SELECT visibility, không dựa số dòng UPDATE) (#4)', () {
     Future<void> seedSyncedTombstone() async {
       await _db.saveActivity(
           _act(id: 'a1', state: SyncState.synced, serverId: 'srv-act-a1'));
@@ -186,11 +186,9 @@ void main() {
     Future<Activity?> row() => _db.getActivity('a1');
 
     // 1
-    test(
-        'affected == 1 (server ghi deleted_at cho đúng row) -> hard-delete local',
+    test('RPC trả về bình thường -> hard-delete local, gửi ĐÚNG server id',
         () async {
       await seedSyncedTombstone();
-      _gw.softDeleteAffectedRows = 1;
       final s = await _sync.syncAll();
       expect(s.activitiesDeleted, 1);
       expect(await row(), isNull);
@@ -198,44 +196,49 @@ void main() {
       expect(_gw.activityUpserts, isEmpty); // KHÔNG bao giờ upsert lại
     });
 
-    // 2 + 8
-    test(
-        'quyền bị thu hồi trước update, UPDATE tác động 0 row (không ném) -> '
-        'GIỮ tombstone notConfirmed', () async {
+    // 2 — hợp đồng idempotent: server đã xoá mềm ở lượt trước vẫn trả về
+    // bình thường, nên lượt sau dọn được hàng local thay vì kẹt mãi.
+    test('lượt thứ hai trên CÙNG tombstone -> idempotent, không lỗi, không '
+        'nhân đôi', () async {
       await seedSyncedTombstone();
-      _gw.softDeleteAffectedRows = 0; // RLS `using` lọc — update không đổi gì
+      await _sync.syncAll();
+      expect(await row(), isNull);
+      final s2 = await _sync.syncAll(); // hàng đợi đã rỗng
+      expect(s2.activitiesDeleted, 0);
+      expect(s2.hasErrors, isFalse);
+      expect(_gw.softDeleteCalls, ['srv-act-a1']); // gọi đúng 1 lần
+    });
+
+    // 3 — RLS từ chối: KHÁC chủ / khác phạm vi. Đây là lỗi VĨNH VIỄN.
+    test('RPC ném 42501 (không phải chủ / ngoài phạm vi) -> GIỮ tombstone, '
+        'đánh dấu rlsDenied', () async {
+      await seedSyncedTombstone();
+      _gw.softDeleteThrows =
+          const PostgrestException(message: 'permission denied', code: '42501');
       final s = await _sync.syncAll();
       expect(s.activitiesDeleted, 0);
       final r = await row();
       expect(r, isNotNull);
       expect(r!.deletedLocally, isTrue);
       expect(r.syncState, SyncState.failed);
-      expect(r.syncError, SyncErrorKind.notConfirmed.name);
+      expect(r.syncError, SyncErrorKind.rlsDenied.name);
+      expect(s.hasPermissionError, isTrue);
     });
 
-    // 3
-    test('row không tồn tại (affected 0) -> GIỮ tombstone', () async {
+    // 4 — và KHÔNG được thử lại vô hạn (P1-2 giữ nguyên qua đường RPC).
+    test('42501 là lỗi VĨNH VIỄN -> hàng đợi thôi tự chọn lại', () async {
       await seedSyncedTombstone();
-      _gw.softDeleteAffectedRows = 0;
+      _gw.softDeleteThrows =
+          const PostgrestException(message: 'permission denied', code: '42501');
       await _sync.syncAll();
-      expect(await row(), isNotNull);
-      expect((await row())!.syncState, SyncState.failed);
-    });
-
-    // 4
-    test(
-        'đã xoá ở lượt trước nhưng KHÔNG có ack (affected 0) -> GIỮ tombstone, '
-        'KHÔNG đoán', () async {
-      await seedSyncedTombstone();
-      _gw.softDeleteAffectedRows = 0;
-      await _sync.syncAll();
-      final r = await row();
-      expect(r, isNotNull);
-      expect(r!.syncError, SyncErrorKind.notConfirmed.name);
+      expect(_gw.softDeleteCalls, hasLength(1));
+      await _sync.syncAll(); // lượt sau KHÔNG được chạm server nữa
+      expect(_gw.softDeleteCalls, hasLength(1));
+      expect(await row(), isNotNull); // vẫn giữ hàng, không mất dữ liệu
     });
 
     // 5
-    test('network error -> GIỮ tombstone', () async {
+    test('network error -> GIỮ tombstone, thử lại được', () async {
       await seedSyncedTombstone();
       _gw.softDeleteThrows = Exception('SocketException: Failed host lookup');
       await _sync.syncAll();
@@ -243,6 +246,12 @@ void main() {
       expect(r, isNotNull);
       expect(r!.syncState, SyncState.failed);
       expect(r.syncError, SyncErrorKind.network.name);
+
+      // mạng trở lại -> lượt sau xoá được, không mất hàng ở giữa
+      _gw.softDeleteThrows = null;
+      final s = await _sync.syncAll();
+      expect(s.activitiesDeleted, 1);
+      expect(await row(), isNull);
     });
 
     // 6
@@ -258,38 +267,6 @@ void main() {
     });
 
     // 7
-    test('PostgREST/RLS exception (42501) -> GIỮ tombstone', () async {
-      await seedSyncedTombstone();
-      _gw.softDeleteThrows =
-          const PostgrestException(message: 'permission denied', code: '42501');
-      await _sync.syncAll();
-      final r = await row();
-      expect(r, isNotNull);
-      expect(r!.syncState, SyncState.failed);
-      expect(r.syncError, SyncErrorKind.rlsDenied.name);
-    });
-
-    // 9
-    test(
-        'retry >= 3 lần với affected 0/null -> KHÔNG mất tombstone, KHÔNG upsert',
-        () async {
-      await seedSyncedTombstone();
-      _gw.softDeleteAffectedRows = 0;
-      for (var i = 0; i < 3; i++) {
-        final s = await _sync.syncAll();
-        expect(s.activitiesDeleted, 0, reason: 'lượt $i');
-        expect(await row(), isNotNull, reason: 'lượt $i — KHÔNG mất hàng');
-        expect((await row())!.deletedLocally, isTrue);
-      }
-      // count == null cũng phải giữ hàng.
-      _gw.softDeleteAffectedRows = null;
-      await _sync.syncAll();
-      expect(await row(), isNotNull);
-      expect(_gw.activityUpserts, isEmpty);
-      expect(_gw.softDeleteCalls, hasLength(4));
-    });
-
-    // 10
     test('serverId == null -> hard-delete local, KHÔNG gọi server', () async {
       await _db.saveActivity(_act(id: 'a2', state: SyncState.pending));
       await _db.tombstoneActivity('a2');
@@ -299,11 +276,10 @@ void main() {
       expect(_gw.softDeleteCalls, isEmpty);
     });
 
-    // 11
+    // 8
     test('hai syncAll() đồng thời -> single-flight, tombstone xử lý đúng 1 lần',
         () async {
       await seedSyncedTombstone();
-      _gw.softDeleteAffectedRows = 1;
       final f1 = _sync.syncAll();
       final f2 = _sync.syncAll();
       final results = await Future.wait([f1, f2]);
@@ -311,6 +287,61 @@ void main() {
       expect(_gw.softDeleteCalls, ['srv-act-a1']); // KHÔNG xử lý 2 lần
       expect(results[0].activitiesDeleted, 1);
       expect(await row(), isNull);
+    });
+  });
+
+  group('recorded_by — danh tính người ghi lấy từ phiên đăng nhập (P1-4)', () {
+    test('create gửi recorded_by = auth.uid() của phiên hiện tại', () async {
+      await _db.saveActivity(_act(id: 'r1', state: SyncState.pending));
+      await _sync.syncAll();
+      expect(_gw.activityUpserts, hasLength(1));
+      expect(_gw.activityUpserts.single['recorded_by'], _user);
+    });
+
+    test('edit một bản ĐÃ sync cũng gửi lại recorded_by (không rơi về null)',
+        () async {
+      await _db.saveActivity(_act(
+        id: 'r2',
+        state: SyncState.pending,
+        serverId: 'srv-act-r2',
+        note: 'đã sửa',
+      ));
+      await _sync.syncAll();
+      expect(_gw.activityUpserts.single['recorded_by'], _user);
+    });
+
+    test('đổi tài khoản -> recorded_by đi theo phiên MỚI, không phải hằng số',
+        () async {
+      _gw.sessionUserId = 'ffffffff-1111-2222-3333-444444444444';
+      await _db.saveActivity(_act(id: 'r3', state: SyncState.pending));
+      await _sync.syncAll();
+      expect(_gw.activityUpserts.single['recorded_by'],
+          'ffffffff-1111-2222-3333-444444444444');
+    });
+
+    test('KHÔNG có phiên đăng nhập -> KHÔNG ghi, KHÔNG gửi recorded_by null; '
+        'hỏng thật với lỗi auth và giữ nguyên dữ liệu trên máy', () async {
+      _gw.sessionUserId = null;
+      await _db.saveActivity(_act(id: 'r4', state: SyncState.pending));
+      final s = await _sync.syncAll();
+      expect(_gw.activityUpserts, isEmpty);
+      expect(_gw.detailUpserts, isEmpty);
+      expect(s.activitiesSynced, 0);
+      expect(s.hasErrors, isTrue);
+      final r = await _db.getActivity('r4');
+      expect(r, isNotNull);
+      expect(r!.syncState, SyncState.failed);
+      expect(r.syncError, SyncErrorKind.auth.name);
+    });
+
+    test('mất phiên KHÔNG chặn tombstone đã có server id (xoá vẫn do RLS quyết)',
+        () async {
+      await _db.saveActivity(
+          _act(id: 'r5', state: SyncState.synced, serverId: 'srv-act-r5'));
+      await _db.tombstoneActivity('r5');
+      _gw.sessionUserId = null;
+      await _sync.syncAll();
+      expect(_gw.softDeleteCalls, ['srv-act-r5']);
     });
   });
 

@@ -38,8 +38,10 @@ class _StubGateway implements SyncGateway {
   @override
   Future<String> ensureDefaultBatch(String id) async => 'b';
   @override
-  Future<int?> softDeleteActivity(String id, DateTime at) async =>
-      serverActivities.containsValue(id) ? 1 : 0;
+  Future<void> softDeleteActivity(String id) async =>
+      serverActivities.removeWhere((_, v) => v == id);
+  @override
+  String? currentUserId() => _user;
   @override
   Future<String?> currentCooperativeId() async => null;
   @override
