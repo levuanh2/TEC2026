@@ -14,6 +14,7 @@ import copy
 import hashlib
 import io
 import json
+import math
 import sys
 import time
 from datetime import datetime, timezone
@@ -585,3 +586,18 @@ def test_a_large_manifest_renders_in_reasonable_time_and_size():
     assert elapsed < 30, f"1000-activity render took {elapsed:.1f}s"
     assert len(data) < 8 * 1024 * 1024, f"workbook is {len(data)} bytes"
     print(f"\n  large manifest: {elapsed:.2f}s, {len(data) / 1024:.0f} KiB")
+
+
+def test_numbers_keep_every_digit_excel_can_hold():
+    # Found by the hosted smoke: openpyxl serializes numbers as "%.16g", so a
+    # 17-digit ratio loses its last digit. Pin exactly that, and nothing worse:
+    # the cell stays numeric and agrees to 16 significant digits.
+    manifest, *_ = build_manifest()
+    raw = "0.028846153846153848"
+    manifest["resource_metrics"] = {"per_crop_season": {"season-x": {"fertilizer_per_kg": raw}}}
+    book = load_workbook(io.BytesIO(wb.render_workbook(manifest, rendered_at=RENDERED_AT)))
+    cells = [row[2] for row in book["Chỉ số tài nguyên"].iter_rows(values_only=True)
+             if row[1] == "Phân bón trên mỗi kg"]
+    assert len(cells) == 1 and isinstance(cells[0], float)
+    assert cells[0] == float("%.16g" % float(raw))
+    assert math.isclose(cells[0], float(raw), rel_tol=1e-15, abs_tol=0)

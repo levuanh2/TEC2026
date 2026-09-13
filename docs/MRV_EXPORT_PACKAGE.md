@@ -415,6 +415,15 @@ skipped evidence" cannot be confused.
 - **Numbers are real numeric cells.** The manifest carries quantities as decimal
   strings so its checksum stays stable; the renderer parses them through
   `Decimal` so precision is preserved and the spreadsheet can sort and total.
+  One measured limit: openpyxl writes every number as `"%.16g"`, so a ratio the
+  manifest carries as 17-digit float text (`"0.028846153846153848"`) lands in
+  the cell as `0.02884615384615385` — agreement to 16 significant digits
+  (relative error ≤ 1e-15), not bit-identical. Excel displays 15 digits, so
+  at a rounding boundary like this one the last *displayed* digit can differ
+  from rounding the manifest value (`…539` vs `…538`). Sums, sorting and any
+  practical use are unaffected; the manifest remains the full-precision
+  record, and `test_numbers_keep_every_digit_excel_can_hold` pins exactly this
+  behaviour so it cannot silently get worse.
 - **Timestamps are datetime cells in UTC**, with the offset dropped because Excel
   has no timezone concept — every such column is labelled `(UTC)`. Converting to
   local time would silently shift dates across the ICT boundary.
@@ -454,6 +463,16 @@ artifact, and `storage_object_path` only fixes the filename.
 | object missing, metadata present | `404 export_artifact_missing` |
 | bytes do not match `file_sha256` | `409 export_artifact_integrity_failed` |
 | render fails | the snapshot stays valid; no partial artifact is written |
+
+**CDN cache window.** Hosted Supabase Storage sits behind a CDN that keeps
+serving the previous object for roughly 20–60 s after an overwrite or delete,
+even to service-role requests (measured: `CF-Cache-Status: HIT` until ~60 s).
+Inside that window a deleted or tampered object can still be served *as it was*.
+That never breaks integrity: the backend re-hashes whatever it receives, so it
+can only ever serve the recorded bytes, or refuse. Once the CDN catches up, the
+table above applies. Artifacts are written once (`upsert=false`) and never
+overwritten by the application, so the window only matters for out-of-band
+tampering or deletion.
 
 None of these fall back to rebuilding from live data. A rebuild would return
 something other than the snapshot the row promises, which is the one thing an
