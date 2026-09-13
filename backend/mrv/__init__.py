@@ -14,6 +14,7 @@ from .manifest import (
     export_filename,
     manifest_checksum,
 )
+from .report_pdf import render_pdf, report_filename
 from .workbook import SHEET_TITLES, render_workbook, workbook_filename
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "canonical_bytes",
     "export_filename",
     "manifest_checksum",
+    "render_pdf",
     "render_workbook",
+    "report_filename",
     "workbook_filename",
 ]
