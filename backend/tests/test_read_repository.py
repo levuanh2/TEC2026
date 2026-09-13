@@ -425,6 +425,14 @@ def test_mrv_export_export_payload_not_exposed(repo_a):
     assert export["warning_text"] == "TEST DATA"
 
 
+def test_mrv_export_metadata_hides_the_storage_location(repo_a):
+    # M07 part 2: a rendered artifact's path names a real private object.
+    for export in (repo_a.mrv_export(f"{ORG_A}-exp1"), *repo_a.mrv_exports(f"{ORG_A}-case1")):
+        assert "storage_object_path" not in export
+        assert "storage_bucket" not in export
+        assert export["file_name"] == "export.csv"
+
+
 # ---------------------------------------------------------------------------
 # Farm/org aggregation — sum, không average; null nếu thiếu dữ liệu
 # ---------------------------------------------------------------------------

@@ -467,9 +467,12 @@ class MrvExportResponse(BaseModel):
     contains_sample_data: bool
     is_finalized: bool
     warning_text: str | None = None
-    storage_bucket: str
-    storage_object_path: str
+    # No storage_bucket / storage_object_path: they name a real private object
+    # for rendered artifacts. The filename is all a client needs.
+    file_name: str
     file_sha256: str | None = None
+    payload_sha256: str | None = None
+    source_snapshot_export_id: str | None = None
     generated_at: str
 
 

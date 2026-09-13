@@ -297,10 +297,16 @@ followed.
 
 Belt and braces, because RLS is not the only exposure:
 
-- `_export_view` no longer returns `storage_bucket` or `storage_object_path` to
-  anyone. No client has a use for them; the download route supplies the filename.
+- Neither export view returns `storage_bucket` or `storage_object_path` to
+  anyone — not the create/render responses (`MrvExportService._export_view`)
+  and not the metadata routes `GET /v1/mrv/exports/{id}` and
+  `GET /v1/mrv/cases/{id}/exports` (`SupabaseReadRepository._export_view`,
+  `MrvExportResponse`). Both expose `file_name`, `file_sha256`,
+  `payload_sha256` and `source_snapshot_export_id` instead. No client has a use
+  for the path; the download route supplies the bytes.
 - No signed URL is ever minted, so there is nothing time-limited to leak.
-- A test asserts the create response contains neither the bucket name nor a path.
+- Tests assert neither the create response nor the metadata views contain a
+  bucket name or an object path.
 
 ### Deliberately not granted
 
@@ -324,8 +330,15 @@ Measured separately, because they are different costs with different fixes.
 | step | hosted dev, demo case | 1000 activities + 100 evidence |
 | --- | --- | --- |
 | canonical snapshot assembly | ~8.2 s | — |
-| XLSX render (pure function) | ~0.1 s | 1.55 s |
-| artifact size | 11.3 KiB (json) / ~25 KiB (xlsx) | 68 KiB |
+| XLSX render (pure function) | ~0.1–0.2 s | 1.55 s idle / 3.3 s under load |
+| XLSX render peak Python memory | 0.7 MiB | 5.8 MiB |
+| storage write (private bucket, service role) | — | 1.41 s for 68 KiB |
+| storage read for download | — | 1.68 s for 68 KiB |
+| artifact size | 11.3 KiB (json) / ~18–25 KiB (xlsx) | 68 KiB |
+
+Storage timings were measured against hosted `mrv-exports` with a synthetic
+workbook; the end-to-end manager generate/download wall time needs the manager
+credential and is not in this table.
 
 Assembly dominates and is round-trip bound against hosted Supabase; every read is
 batched with `IN` and there is no per-entity request loop. One deliberate
