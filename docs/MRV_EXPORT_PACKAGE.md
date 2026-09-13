@@ -505,6 +505,28 @@ Renders an **existing** snapshot. This is the auditable path: the workbook
 demonstrably comes from one stored manifest rather than from data as it happens
 to look now. Refused if the target is itself a rendering.
 
+## QA cleanup (resumable)
+
+Hosted smoke runs create real rows and objects. Clean them up child before
+parent, because `mrv_export_snapshot_lineage_chk` forbids orphaning a rendering
+(setting `source_snapshot_export_id` to null on an `xlsx` row is rejected):
+
+1. `mrv_export_calculations` rows of the case's exports;
+2. rendered rows — `format <> 'json'`;
+3. snapshot rows — `format = 'json'`;
+4. storage objects, enumerated from **`storage.objects`** by the
+   `<organization>/<case>/` prefix — not from the rows just deleted.
+
+Every step is a filtered delete, so re-running after a crash is safe; step 4
+enumerating `storage.objects` is what makes it resumable — a run that dies after
+step 3 still finds its objects. Verify with `count(*)` on both tables. Remember
+the CDN window above: a deleted object can remain downloadable for up to a
+minute, which is not a cleanup failure.
+
+QA identities used for these runs are **demo/QA only**; their passwords come
+from environment variables and are never written to files, logs, traces or
+commits (see `AGENTS.md`).
+
 ## Not implemented
 
 - **PDF (part 3)** — bound by the same renderer contract above.
