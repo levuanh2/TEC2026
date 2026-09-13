@@ -142,3 +142,56 @@ test.describe('authenticated real-data dashboard', () => {
     }
   })
 })
+
+// M07 part 3: generating a PDF from the real MRV page writes hosted export rows
+// and a storage object, so it only runs when explicitly requested, and the QA
+// export cleanup (rendered rows -> snapshot rows -> storage objects) must run
+// afterwards. The real config keeps traces off, so the password is never recorded.
+test.describe('authenticated Management MRV export (writes hosted QA data)', () => {
+  const exportEnabled = enabled && process.env.REAL_MRV_EXPORT_E2E === 'true'
+  test.skip(!exportEnabled, 'Set REAL_E2E=true, REAL_MRV_EXPORT_E2E=true, REAL_E2E_EMAIL and REAL_E2E_PASSWORD; run the QA export cleanup afterwards.')
+
+  test('generates and downloads the PDF, and history lists it without storage details', async ({ page }) => {
+    test.setTimeout(300_000)
+    const consoleErrors: string[] = []
+    page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+
+    await page.goto('/login')
+    await page.getByLabel('Email').fill(email!)
+    await page.getByLabel('Mật khẩu').fill(password!)
+    await page.getByRole('button', { name: 'Đăng nhập' }).click()
+    await expect(page).toHaveURL(/\/dashboard$/)
+
+    await page.goto('/mrv')
+    const pdfButton = page.getByRole('button', { name: 'Xuất PDF' })
+    await expect(pdfButton).toBeVisible({ timeout: 120_000 })
+    await expect(page.getByRole('button', { name: 'Xuất Excel (.xlsx)' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Xuất JSON' })).toBeVisible()
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 240_000 }),
+      pdfButton.click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(/^agricarbon-mrv-[A-Za-z0-9._-]+\.pdf$/)
+    const stream = await download.createReadStream()
+    const head = await new Promise<Uint8Array>((resolve, reject) => {
+      stream.once('data', (chunk) => resolve(chunk as Uint8Array))
+      stream.once('error', reject)
+    })
+    stream.destroy()
+    expect(String.fromCharCode(...head.slice(0, 5))).toBe('%PDF-')
+    await expect(page.getByRole('status').filter({ hasText: 'Đã tạo PDF' })).toBeVisible()
+
+    const history = page.locator('table.data')
+    const pdfRow = history.locator('tbody tr', { has: page.locator('td.col-key', { hasText: /^PDF$/ }) }).first()
+    await expect(pdfRow).toBeVisible({ timeout: 60_000 })
+    await expect(pdfRow).toContainText('Đã tạo')
+    await expect(pdfRow).toContainText(/Từ snapshot [0-9a-f]{8}/)
+    await expect(pdfRow.locator('td').nth(2)).toHaveText(/^[0-9a-f]{8}$/) // generated_by
+    await expect(history.locator('td.col-key', { hasText: /^JSON$/ }).first()).toBeVisible()
+
+    const panelText = await page.locator('.card', { hasText: 'Lịch sử xuất' }).innerText()
+    expect(panelText).not.toMatch(/mrv-exports|storage_object_path|storage_bucket|\/object\/sign|[0-9a-f-]{36}\/[0-9a-f-]{36}\//)
+    expect(consoleErrors).toEqual([])
+  })
+})

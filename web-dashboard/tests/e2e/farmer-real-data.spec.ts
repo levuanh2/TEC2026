@@ -75,3 +75,26 @@ test.describe('authenticated Farmer real-data experience', () => {
     expect(consoleErrors.filter((line) => !/Failed to load resource.*\b404\b/i.test(line))).toEqual([])
   })
 })
+
+// M07 part 3: the Management export controls must not exist for a farmer. The
+// app keeps a farmer inside /farmer, so a deep link to /mrv never renders them.
+test.describe('authenticated Farmer cannot reach Management MRV export', () => {
+  const exportEnabled = enabled && process.env.REAL_MRV_EXPORT_E2E === 'true'
+  test.skip(!exportEnabled, 'Set REAL_E2E=true, FARMER_REAL_E2E=true and REAL_MRV_EXPORT_E2E=true with the Farmer QA identity.')
+
+  test('a farmer deep-linking to /mrv stays in the Farmer shell with no export controls', async ({ page }) => {
+    test.setTimeout(180_000)
+    await page.goto('/login')
+    await page.getByLabel('Email').fill(email!)
+    await page.getByLabel('Mật khẩu').fill(password!)
+    await page.getByRole('button', { name: 'Đăng nhập' }).click()
+    await expect(page).toHaveURL(/\/farmer/, { timeout: 120_000 })
+
+    await page.goto('/mrv')
+    await expect(page).toHaveURL(/\/farmer/, { timeout: 120_000 })
+    for (const name of ['Xuất PDF', 'Xuất Excel (.xlsx)', 'Xuất JSON']) {
+      await expect(page.getByRole('button', { name })).toHaveCount(0)
+    }
+    await expect(page.getByText('Lịch sử xuất')).toHaveCount(0)
+  })
+})
