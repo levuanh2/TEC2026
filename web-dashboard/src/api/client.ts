@@ -19,3 +19,23 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   if (!response.ok) { const detail = body.detail ?? body; const err = detail.error ?? {}; throw new ApiError(response.status, err.code ?? 'request_failed', err.message ?? 'Yêu cầu không thành công.') }
   return body as T
 }
+
+/** Same auth and error contract as `apiRequest`, but for binary downloads.
+ *
+ * Separate from `apiRequest` so the JSON path keeps one return type: an .xlsx
+ * must never be run through `response.json()`. The error envelope is still
+ * JSON, so a failure is parsed exactly as `apiRequest` parses it. */
+export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  const headers = new Headers(init.headers)
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  let response: Response
+  try { response = await fetch(`${baseUrl}${path}`, { ...init, headers }) }
+  catch { throw new ApiError(0, 'offline', 'Không thể kết nối FastAPI. Kiểm tra mạng hoặc API server.') }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as any))
+    const detail = body.detail ?? body
+    const err = detail.error ?? {}
+    throw new ApiError(response.status, err.code ?? 'request_failed', err.message ?? 'Yêu cầu không thành công.')
+  }
+  return response.blob()
+}

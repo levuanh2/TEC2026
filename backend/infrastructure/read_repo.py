@@ -620,7 +620,12 @@ class SupabaseReadRepository:
         ]
 
     def _export_view(self, row: dict[str, Any]) -> dict[str, Any]:
-        return {key: row.get(key) for key in ("id", "mrv_case_id", "format", "factor_set_id", "scope_description", "data_as_of_at", "contains_sample_data", "is_finalized", "warning_text", "storage_bucket", "storage_object_path", "file_sha256", "generated_at")}
+        # storage_bucket/storage_object_path are NOT returned: since M07 part 2 an
+        # XLSX row names a real private object. Clients get the filename only;
+        # the bytes come from the authorized download route.
+        view = {key: row.get(key) for key in ("id", "mrv_case_id", "format", "factor_set_id", "scope_description", "data_as_of_at", "contains_sample_data", "is_finalized", "warning_text", "file_sha256", "payload_sha256", "source_snapshot_export_id", "generated_at")}
+        view["file_name"] = str(row.get("storage_object_path") or "").rsplit("/", 1)[-1]
+        return view
 
     def mrv_exports(self, case_id: str) -> list[dict[str, Any]]:
         self._one("mrv_cases", case_id)

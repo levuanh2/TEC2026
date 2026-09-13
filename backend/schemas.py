@@ -467,9 +467,12 @@ class MrvExportResponse(BaseModel):
     contains_sample_data: bool
     is_finalized: bool
     warning_text: str | None = None
-    storage_bucket: str
-    storage_object_path: str
+    # No storage_bucket / storage_object_path: they name a real private object
+    # for rendered artifacts. The filename is all a client needs.
+    file_name: str
     file_sha256: str | None = None
+    payload_sha256: str | None = None
+    source_snapshot_export_id: str | None = None
     generated_at: str
 
 
@@ -499,6 +502,38 @@ class MrvPackageIntegrity(BaseModel):
     manifest_sha256: str
 
 
+class MrvArtifactResponse(BaseModel):
+    """A rendered artifact (currently XLSX) and its lineage.
+
+    `source_snapshot_export_id` names the canonical JSON snapshot this was
+    rendered from; `payload_sha256` is that snapshot's digest and `file_sha256`
+    is the artifact's own. The two being different is the point: one says which
+    data, the other says which file.
+
+    No storage bucket or object path is returned. They name a real private
+    object, and a client only ever needs the filename.
+    """
+    export_id: str
+    mrv_case_id: str
+    format: str
+    schema_version: str
+    status: str
+    generated_at: str
+    generated_by: str
+    file_sha256: str
+    payload_sha256: str | None = None
+    source_snapshot_export_id: str | None = None
+    file_name: str
+    scope_description: str
+    warning_text: str | None = None
+    is_finalized: bool
+    byte_size: int | None = None
+
+
+class MrvRenderRequest(BaseModel):
+    format: str = Field("xlsx", description="Artifact format to render from a stored snapshot.")
+
+
 class MrvExportCreatedResponse(BaseModel):
     """The generated package's identity and audit metadata, plus the manifest.
 
@@ -516,11 +551,18 @@ class MrvExportCreatedResponse(BaseModel):
     generated_at: str
     generated_by: str
     file_sha256: str
-    storage_object_path: str
+    payload_sha256: str | None = None
+    source_snapshot_export_id: str | None = None
+    file_name: str
     scope_description: str
     warning_text: str | None = None
     is_finalized: bool
-    manifest: dict[str, Any]
+    # Present for a JSON snapshot, which IS the manifest. A rendered artifact
+    # (xlsx) omits it: the bytes are the deliverable and the manifest it came
+    # from is named by `source_snapshot_export_id`, so echoing it would ship the
+    # same document twice in two formats in one response.
+    manifest: dict[str, Any] | None = None
+    byte_size: int | None = None
 
 
 class MrvExportRequest(BaseModel):
@@ -531,7 +573,7 @@ class MrvExportRequest(BaseModel):
     rather than FastAPI's raw request-validation shape.
     """
     format: str = Field(
-        "json", description="Only 'json' is produced in this part; xlsx/pdf come later."
+        "json", description="'json' (the canonical snapshot) or 'xlsx' (rendered from it). PDF is not implemented."
     )
 
 

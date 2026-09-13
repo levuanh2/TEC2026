@@ -22,7 +22,10 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import api  # noqa: E402
-from infrastructure.mrv_export_repo import MrvExportNotFoundError  # noqa: E402
+from infrastructure.mrv_export_repo import (  # noqa: E402
+    MrvArtifactMissingError,
+    MrvExportNotFoundError,
+)
 from infrastructure.read_repo import ReadNotFoundError  # noqa: E402
 from mrv import manifest as m  # noqa: E402
 from service import MrvExportService  # noqa: E402
@@ -158,6 +161,7 @@ class FakeCarbon:
 class FakeExportStore:
     def __init__(self):
         self.rows: dict[str, dict] = {}
+        self.objects: dict[str, bytes] = {}
 
     def create(self, **kw):
         row = {
@@ -167,6 +171,8 @@ class FakeExportStore:
             "is_finalized": False, "warning_text": kw["warning_text"],
             "storage_bucket": "mrv-exports", "storage_object_path": kw["storage_object_path"],
             "file_sha256": kw["file_sha256"], "generated_by": kw["generated_by"],
+            "payload_sha256": kw.get("payload_sha256"),
+            "source_snapshot_export_id": kw.get("source_snapshot_export_id"),
             "generated_at": kw["generated_at"],
             # Stored as JSON, exactly as jsonb would: proves the snapshot survives
             # a serialization round trip rather than aliasing a live dict.
@@ -175,11 +181,24 @@ class FakeExportStore:
         self.rows[kw["export_id"]] = row
         return row
 
-    def payload(self, export_id, *, authorized_case_ids):
+    def artifact_row(self, export_id, *, authorized_case_ids):
         row = self.rows.get(export_id)
         if row is None or row["mrv_case_id"] not in authorized_case_ids:
             raise MrvExportNotFoundError()
         return row
+
+    # -- artifact object store (in memory, same contract as Supabase Storage) --
+
+    def put_artifact(self, object_path, data, content_type):
+        if object_path in self.objects:
+            raise RuntimeError("object already exists")  # upsert=false, as in production
+        self.objects[object_path] = bytes(data)
+
+    def get_artifact(self, object_path):
+        data = self.objects.get(object_path)
+        if data is None:
+            raise MrvArtifactMissingError(object_path)
+        return data
 
 
 SUCCEEDED_CARBON = {
@@ -280,7 +299,10 @@ def test_checksum_is_stable_across_a_json_round_trip():
     result, _, _, store = generate()
     stored = store.rows[result["export_id"]]["export_payload"]
     assert m.verify_checksum(stored)
-    assert stored["package_integrity"]["manifest_sha256"] == result["file_sha256"]
+    # `payload_sha256` is the manifest digest; `file_sha256` digests the served
+    # bytes, which include the integrity block the manifest digest excludes.
+    assert stored["package_integrity"]["manifest_sha256"] == result["payload_sha256"]
+    assert result["file_sha256"] != result["payload_sha256"]
 
 
 # --------------------------------------------------------------------------
@@ -580,10 +602,14 @@ def test_download_returns_the_stored_snapshot_not_a_rebuild():
         "uploaded_by": ACTOR, "uploaded_at": AT,
     })
 
-    snapshot, filename = service.download(read_repository=repo, export_id=created["export_id"])
+    data, filename, media_type = service.download(
+        read_repository=repo, export_id=created["export_id"]
+    )
+    snapshot = json.loads(data)
     assert [e["evidence_id"] for e in snapshot["evidence"]] == ["e1"]
     assert snapshot == created["manifest"]
     assert m.verify_checksum(snapshot)
+    assert media_type == "application/json; charset=utf-8"
     assert filename.endswith(".json") and "/" not in filename
 
     # A new export does see the change.
@@ -606,10 +632,12 @@ def test_the_stored_row_records_the_audit_metadata():
     row = store.rows[result["export_id"]]
     assert row["format"] == "json"
     assert row["generated_by"] == ACTOR
-    assert row["file_sha256"] == result["manifest"]["package_integrity"]["manifest_sha256"]
+    assert row["payload_sha256"] == result["manifest"]["package_integrity"]["manifest_sha256"]
     assert row["is_finalized"] is False
     assert row["warning_text"] == m.DISCLAIMER
-    assert row["storage_object_path"] == f"{ORG}/{CASE}/{result['storage_object_path'].rsplit('/', 1)[-1]}"
+    assert row["storage_object_path"] == f"{ORG}/{CASE}/{result['file_name']}"
+    # The response names the file but never the bucket or the object path.
+    assert "storage_object_path" not in result and "storage_bucket" not in result
 
 
 def test_factor_set_is_null_when_no_carbon_backs_the_package():

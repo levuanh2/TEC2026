@@ -19,8 +19,11 @@ export default defineConfig({
     baseURL,
     headless: true,
     channel: 'chrome',
+    // Real specs type a real (demo/QA) password. A retained trace records
+    // every fill() value, so traces stay off; the password field is
+    // type=password, so a failure screenshot shows only masked dots.
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    trace: 'off',
   },
   // Do not start a normal dashboard server for a skipped test.  When enabled,
   // compile an explicit real-data build; VITE_USE_MOCK_DATA remains false.

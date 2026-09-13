@@ -14,12 +14,16 @@ from .manifest import (
     export_filename,
     manifest_checksum,
 )
+from .workbook import SHEET_TITLES, render_workbook, workbook_filename
 
 __all__ = [
     "MANIFEST_SCHEMA_VERSION",
     "ManifestInputs",
+    "SHEET_TITLES",
     "build_manifest",
     "canonical_bytes",
     "export_filename",
     "manifest_checksum",
+    "render_workbook",
+    "workbook_filename",
 ]

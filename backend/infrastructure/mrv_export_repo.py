@@ -20,22 +20,40 @@ from typing import Any
 from . import pg_pool
 from .config import Settings
 
+EXPORTS_BUCKET = "mrv-exports"
+
 
 class MrvExportNotFoundError(Exception):
     pass
 
 
+class MrvArtifactMissingError(Exception):
+    """Metadata exists but the stored object does not.
+
+    Deliberately its own error: the correct answer is a controlled failure, never
+    a silent regeneration from live data -- that would hand back something that
+    is not the snapshot the row promises.
+    """
+
+
+class MrvArtifactCorruptError(Exception):
+    """Stored bytes do not match the recorded digest. Fail closed."""
+
+
 _COLUMNS = (
     "id::text, mrv_case_id::text, format::text, factor_set_id::text, scope_description, "
     "data_as_of_at, contains_sample_data, is_finalized, warning_text, storage_bucket, "
-    "storage_object_path, file_sha256, generated_by::text, generated_at"
+    "storage_object_path, file_sha256, payload_sha256, "
+    "source_snapshot_export_id::text, generated_by::text, generated_at"
 )
 
 
 class PostgresMrvExportRepository:
-    def __init__(self, settings: Settings, connect: Any | None = None):
+    def __init__(self, settings: Settings, connect: Any | None = None,
+                 storage_client: Any | None = None):
         self._settings = settings
         self._connect = connect
+        self._storage_client = storage_client
 
     def _connection(self):
         if self._connect is not None:
@@ -59,6 +77,8 @@ class PostgresMrvExportRepository:
         generated_by: str,
         generated_at: datetime,
         calculation_ids: list[str],
+        payload_sha256: str | None = None,
+        source_snapshot_export_id: str | None = None,
     ) -> dict[str, Any]:
         """One transaction: the snapshot row and the calculations it covers.
 
@@ -73,14 +93,16 @@ class PostgresMrvExportRepository:
                 f"""insert into public.mrv_exports
                       (id, mrv_case_id, format, factor_set_id, scope_description,
                        data_as_of_at, contains_sample_data, is_finalized, warning_text,
-                       storage_object_path, file_sha256, export_payload, generated_by,
+                       storage_object_path, file_sha256, payload_sha256,
+                       source_snapshot_export_id, export_payload, generated_by,
                        generated_at)
                     values (%s, %s, %s::public.export_format, %s, %s, %s, false, false, %s,
-                            %s, %s, %s::jsonb, %s, %s)
+                            %s, %s, %s, %s, %s::jsonb, %s, %s)
                     returning {_COLUMNS}""",
                 [
                     export_id, mrv_case_id, fmt, factor_set_id, scope_description,
                     data_as_of_at, warning_text, storage_object_path, file_sha256,
+                    payload_sha256, source_snapshot_export_id,
                     json.dumps(payload, sort_keys=True, ensure_ascii=False),
                     generated_by, generated_at,
                 ],
@@ -103,6 +125,52 @@ class PostgresMrvExportRepository:
         who may read an export, so the case filter is applied in SQL rather than
         trusted to the caller.
         """
+        if not authorized_case_ids:
+            raise MrvExportNotFoundError()
+        with self._connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""select {_COLUMNS}, export_payload
+                    from public.mrv_exports
+                    where id = %s and mrv_case_id = any(%s)""",
+                [export_id, list(authorized_case_ids)],
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise MrvExportNotFoundError()
+            return dict(row)
+
+    # -- artifact bytes: Supabase Storage, private bucket ------------------
+    # The project already stores CV images this way (`cv_repo.upload_image`), the
+    # `mrv-exports` bucket already exists and is NOT public, and the
+    # `<organization>/<case>/<file>` path is already enforced by a DB trigger.
+    # Retrieval goes through the backend after authorization -- no signed URL is
+    # ever put into export metadata, so there is nothing to leak by holding a path.
+
+    @property
+    def _storage(self) -> Any:
+        if self._storage_client is None:
+            from supabase import create_client  # lazy, as in cv_repo/supabase_repo
+
+            url, key = self._settings.require_supabase()
+            self._storage_client = create_client(url, key)
+        return self._storage_client
+
+    def put_artifact(self, object_path: str, data: bytes, content_type: str) -> None:
+        self._storage.storage.from_(EXPORTS_BUCKET).upload(
+            object_path, data, {"content-type": content_type, "upsert": "false"},
+        )
+
+    def get_artifact(self, object_path: str) -> bytes:
+        try:
+            data = self._storage.storage.from_(EXPORTS_BUCKET).download(object_path)
+        except Exception as exc:  # noqa: BLE001 - any storage miss is the same answer
+            raise MrvArtifactMissingError(object_path) from exc
+        if not data:
+            raise MrvArtifactMissingError(object_path)
+        return bytes(data)
+
+    def artifact_row(self, export_id: str, *, authorized_case_ids: list[str]) -> dict[str, Any]:
+        """Metadata needed to serve an artifact, scoped in SQL to managed cases."""
         if not authorized_case_ids:
             raise MrvExportNotFoundError()
         with self._connection() as conn, conn.cursor() as cur:

@@ -1,4 +1,4 @@
-import { apiRequest } from './client'
+import { apiBlob, apiRequest } from './client'
 
 export interface MrvStep { stepNo: number; name: string; status: string; startedAt: string | null; completedAt: string | null; notes: string | null }
 export interface MrvCase { caseId: string; caseCode: string; name: string; periodStart: string; periodEnd: string; status: string; organizationId: string; steps: MrvStep[]; batchCount: number; evidenceCount: number }
@@ -24,27 +24,56 @@ export async function listMrvBatches(caseId: string): Promise<MrvBatch[]> {
 
 export interface MrvExportResult {
   exportId: string
+  format: string
   schemaVersion: string
   fileSha256: string
+  payloadSha256: string | null
+  sourceSnapshotExportId: string | null
+  fileName: string
   generatedAt: string
   warningCount: number
+  byteSize: number | null
   manifest: unknown
 }
+
+const exportResult = (r: any): MrvExportResult => ({
+  exportId: r.export_id,
+  format: r.format,
+  schemaVersion: r.schema_version,
+  fileSha256: r.file_sha256,
+  payloadSha256: r.payload_sha256 ?? null,
+  sourceSnapshotExportId: r.source_snapshot_export_id ?? null,
+  fileName: r.file_name,
+  generatedAt: r.generated_at,
+  warningCount: Array.isArray(r.manifest?.warnings) ? r.manifest.warnings.length : 0,
+  byteSize: r.byte_size ?? null,
+  manifest: r.manifest ?? null,
+})
 
 /** Generate the JSON evidence package for one case.
  *
  * JSON only — XLSX and PDF do not exist yet, and the UI must not offer them. */
 export async function createMrvJsonExport(caseId: string): Promise<MrvExportResult> {
-  const r = await apiRequest<any>(`/v1/mrv/cases/${caseId}/exports`, {
+  return exportResult(await apiRequest<any>(`/v1/mrv/cases/${caseId}/exports`, {
     method: 'POST',
     body: JSON.stringify({ format: 'json' }),
-  })
-  return {
-    exportId: r.export_id,
-    schemaVersion: r.schema_version,
-    fileSha256: r.file_sha256,
-    generatedAt: r.generated_at,
-    warningCount: Array.isArray(r.manifest?.warnings) ? r.manifest.warnings.length : 0,
-    manifest: r.manifest,
-  }
+  }))
+}
+
+/** Generate the canonical snapshot and render it as a workbook.
+ *
+ * The backend does both in one call from one snapshot, so the spreadsheet can
+ * never disagree with the JSON package it was rendered from. */
+export async function createMrvXlsxExport(caseId: string): Promise<MrvExportResult> {
+  return exportResult(await apiRequest<any>(`/v1/mrv/cases/${caseId}/exports`, {
+    method: 'POST',
+    body: JSON.stringify({ format: 'xlsx' }),
+  }))
+}
+
+/** Fetch a stored artifact's bytes. The server checks the recorded digest
+ *  before serving, so a mismatched or missing object fails instead of
+ *  silently handing back something rebuilt from newer data. */
+export async function downloadMrvExport(exportId: string): Promise<Blob> {
+  return apiBlob(`/v1/mrv/exports/${exportId}/download`)
 }

@@ -49,7 +49,7 @@ from service import (
     RecommendationService,
     UnsupportedExportFormatError,
 )
-from mrv import canonical_bytes
+from infrastructure.mrv_export_repo import MrvArtifactCorruptError, MrvArtifactMissingError
 from infrastructure.write_repo import IdempotencyConflictError
 
 router = APIRouter(prefix="/v1")
@@ -531,7 +531,28 @@ def _mrv_export_or_http(callback):
             status_code=422,
             detail=error_detail(
                 "unsupported_export_format",
-                "Hiện chỉ tạo được gói dữ liệu định dạng 'json'. Bản xuất XLSX/PDF chưa có.",
+                "Chỉ hỗ trợ định dạng 'json' (gói dữ liệu gốc) và 'xlsx' (bảng tính kết "
+                "xuất từ gói đó). Bản xuất PDF chưa có.",
+            ),
+        ) from exc
+    except MrvArtifactMissingError as exc:
+        # Metadata without an object. The snapshot is still intact, so this is
+        # reported honestly rather than papered over by rebuilding from live
+        # data -- that would return something other than the recorded snapshot.
+        raise HTTPException(
+            status_code=404,
+            detail=error_detail(
+                "export_artifact_missing",
+                "Tệp kết xuất không còn trong kho lưu trữ. Gói dữ liệu gốc vẫn nguyên vẹn; "
+                "hãy kết xuất lại từ gói đó.",
+            ),
+        ) from exc
+    except MrvArtifactCorruptError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=error_detail(
+                "export_artifact_integrity_failed",
+                "Tệp kết xuất không khớp mã băm đã ghi nhận nên không được phục vụ.",
             ),
         ) from exc
 
@@ -555,23 +576,43 @@ def create_mrv_export(
     )
 
 
+@router.post("/mrv/exports/{mrv_export_id}/render", tags=['MRV'], status_code=201, response_model=schemas.MrvArtifactResponse)
+def render_mrv_export(
+    mrv_export_id: str,
+    payload: schemas.MrvRenderRequest | None = None,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: MrvExportService = Depends(_mrv_export_service),
+) -> dict[str, Any]:
+    """Render an artifact from an EXISTING canonical snapshot.
+
+    The auditable path: the workbook demonstrably comes from one stored manifest
+    rather than from data as it happens to look now. Nothing is reassembled and
+    no carbon or resource figure is recomputed.
+    """
+    fmt = (payload.format if payload else "xlsx")
+    return _mrv_export_or_http(
+        lambda: service.render(read_repository=repo, export_id=mrv_export_id, fmt=fmt)
+    )
+
+
 @router.get("/mrv/exports/{mrv_export_id}/download", tags=['MRV'], response_model=None)
 def download_mrv_export(
     mrv_export_id: str,
     repo: SupabaseReadRepository = Depends(_read_repo),
     service: MrvExportService = Depends(_mrv_export_service),
 ) -> Response:
-    """Re-serve the stored snapshot byte-for-byte.
+    """Re-serve the stored artifact byte-for-byte.
 
     Never rebuilt from live data: an export is evidence of what the system held
-    when it was generated, so a later change to the case must not change it.
+    when it was generated, so a later change to the case must not change it. The
+    bytes are checked against their recorded digest before being served.
     """
-    manifest, filename = _mrv_export_or_http(
+    data, filename, media_type = _mrv_export_or_http(
         lambda: service.download(read_repository=repo, export_id=mrv_export_id)
     )
     return Response(
-        content=canonical_bytes(manifest),
-        media_type="application/json; charset=utf-8",
+        content=data,
+        media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

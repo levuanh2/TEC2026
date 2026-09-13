@@ -24,9 +24,15 @@ from infrastructure.repository import CarbonRepository
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.cv_repo import CvNotFoundError, DuplicateImageError, PostgresCvRepository
 from infrastructure.recommendation_repo import PostgresRecommendationRepository, RecommendationNotFoundError
-from infrastructure.mrv_export_repo import MrvExportNotFoundError, PostgresMrvExportRepository
+from infrastructure.mrv_export_repo import (
+    MrvArtifactCorruptError,
+    MrvArtifactMissingError,
+    MrvExportNotFoundError,
+    PostgresMrvExportRepository,
+)
 from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository
 from mrv import manifest as mrv_manifest
+from mrv import workbook as mrv_workbook
 from recommendation import generate_recommendations
 import schemas
 
@@ -426,7 +432,12 @@ class MrvExportService:
     connection is touched, exactly like the activity write path.
     """
 
-    SUPPORTED_FORMATS = ("json",)
+    SUPPORTED_FORMATS = ("json", "xlsx")
+
+    JSON_MEDIA_TYPE = "application/json; charset=utf-8"
+    XLSX_MEDIA_TYPE = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     # A full-case evidence package is a Management capability, not a field one.
     # This is the same role `private.user_is_org_manager` keys on, and the same
@@ -489,9 +500,63 @@ class MrvExportService:
     def create(
         self, *, read_repository: SupabaseReadRepository, mrv_case_id: str, fmt: str = "json",
     ) -> dict[str, Any]:
+        """Produce an export of `fmt` for this case.
+
+        There is exactly ONE assembly path. `xlsx` does not assemble anything of
+        its own: it takes the canonical snapshot this call just produced and
+        renders it, so the workbook and the manifest can never disagree.
+        """
         if fmt not in self.SUPPORTED_FORMATS:
             raise UnsupportedExportFormatError(fmt)
 
+        view, row, manifest = self._create_snapshot(
+            read_repository=read_repository, mrv_case_id=mrv_case_id
+        )
+        if fmt == "json":
+            return view
+        return self._render_from(
+            read_repository=read_repository, snapshot_row=row, manifest=manifest, fmt=fmt,
+        )
+
+    def render(
+        self, *, read_repository: SupabaseReadRepository, export_id: str, fmt: str = "xlsx",
+    ) -> dict[str, Any]:
+        """Render an EXISTING snapshot into another format.
+
+        This is the auditable path: the workbook demonstrably comes from a
+        specific stored manifest rather than from data as it happens to look now.
+        `json` is refused -- a snapshot is not re-derivable from itself, and
+        allowing it would create a snapshot of a snapshot.
+        """
+        if fmt not in self.SUPPORTED_FORMATS or fmt == "json":
+            raise UnsupportedExportFormatError(fmt)
+
+        actor = read_repository.me()
+        managed = self._managed_case_ids(read_repository, actor)
+        try:
+            row = self._exports.artifact_row(export_id, authorized_case_ids=managed)
+        except MrvExportNotFoundError as exc:
+            raise MrvExportAccessError() from exc
+        if row["format"] != "json":
+            # Renderers consume canonical snapshots, never other renderings.
+            raise UnsupportedExportFormatError(row["format"])
+        return self._render_from(
+            read_repository=read_repository,
+            snapshot_row=row,
+            manifest=row["export_payload"],
+            fmt=fmt,
+            actor=actor,
+        )
+
+    def _create_snapshot(
+        self, *, read_repository: SupabaseReadRepository, mrv_case_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Assemble and persist one canonical snapshot.
+
+        Returns (client view, stored row, manifest). The raw row is what a
+        renderer needs -- it carries the lineage columns the view deliberately
+        does not expose.
+        """
         actor = read_repository.me()
         case = self._authorized_case(read_repository, mrv_case_id, actor)
         organization_id = str(case["organization_id"])
@@ -547,20 +612,30 @@ class MrvExportService:
             factors_by_set=factors_by_set,
         ))
 
-        checksum = manifest["package_integrity"]["manifest_sha256"]
+        # Two digests, two questions. `payload_sha256` answers "which snapshot",
+        # `file_sha256` answers "which bytes were served". For JSON the served
+        # bytes are the canonical manifest INCLUDING package_integrity, so the
+        # two differ even here -- the manifest digest deliberately excludes its
+        # own integrity block.
+        payload_sha256 = manifest["package_integrity"]["manifest_sha256"]
+        artifact_bytes = mrv_manifest.canonical_bytes(manifest)
+        artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
         filename = mrv_manifest.export_filename(str(case["case_code"]), generated_at, export_id)
         row = self._exports.create(
             export_id=export_id,
             mrv_case_id=mrv_case_id,
             organization_id=organization_id,
-            fmt=fmt,
+            # A snapshot is always json: it IS the canonical manifest. Other
+            # formats are renderings of it and are created by `_render_from`.
+            fmt="json",
             factor_set_id=next((str(x) for x in factor_set_ids if x), None),
             scope_description=self._scope_description(case, scope_entries),
             data_as_of_at=generated_at,
             warning_text=mrv_manifest.DISCLAIMER,
             storage_object_path=f"{organization_id}/{mrv_case_id}/{filename}",
-            file_sha256=checksum,
+            file_sha256=artifact_sha256,
             payload=manifest,
+            payload_sha256=payload_sha256,
             generated_by=str(actor["user_id"]),
             generated_at=generated_at,
             calculation_ids=[
@@ -568,27 +643,106 @@ class MrvExportService:
                 if row and row.get("id")
             ],
         )
-        return {**self._export_view(row), "manifest": manifest}
+        return self._export_view(row) | {"manifest": manifest}, row, manifest
 
     def download(
         self, *, read_repository: SupabaseReadRepository, export_id: str,
-    ) -> tuple[dict[str, Any], str]:
-        """Return the stored snapshot and its filename. Never rebuilds.
+    ) -> tuple[bytes, str, str]:
+        """Return (bytes, filename, media type) for a stored export. Never rebuilds.
 
         Scoped to cases the caller MANAGES, not merely ones they can read, so a
         known export id is not a way around the generation restriction.
+
+        The bytes are checked against `file_sha256` before being served. A
+        mismatch fails closed: serving an artifact that does not match its own
+        record would defeat the point of recording a digest at all.
         """
         actor = read_repository.me()
-        managed = [
+        managed = self._managed_case_ids(read_repository, actor)
+        try:
+            row = self._exports.artifact_row(export_id, authorized_case_ids=managed)
+        except MrvExportNotFoundError as exc:
+            raise MrvExportAccessError() from exc
+
+        filename = str(row["storage_object_path"]).rsplit("/", 1)[-1]
+        if row["format"] == "json":
+            # The canonical manifest IS the artifact; no object is stored for it.
+            payload = row["export_payload"]
+            data = mrv_manifest.canonical_bytes(payload)
+            media_type = self.JSON_MEDIA_TYPE
+            # Check the snapshot against its own self-describing digest. That is
+            # stronger than re-hashing bytes we just serialized ourselves, and it
+            # also validates rows written before `payload_sha256` existed.
+            recorded = row.get("payload_sha256") or (
+                payload.get("package_integrity") or {}
+            ).get("manifest_sha256")
+            actual = mrv_manifest.manifest_checksum(payload)
+        else:
+            data = self._exports.get_artifact(row["storage_object_path"])
+            media_type = self.XLSX_MEDIA_TYPE
+            recorded = row.get("file_sha256")
+            actual = hashlib.sha256(data).hexdigest()
+
+        if recorded and actual != recorded:
+            raise MrvArtifactCorruptError(export_id)
+        return data, filename, media_type
+
+    def _render_from(
+        self, *, read_repository: SupabaseReadRepository, snapshot_row: dict[str, Any],
+        manifest: dict[str, Any], fmt: str, actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Render one stored manifest into an artifact and persist it.
+
+        The ONLY input is `manifest`. Nothing here reads an activity, a metric or
+        a carbon result; if it did, the artifact could disagree with the snapshot
+        it claims to render.
+        """
+        actor = actor or read_repository.me()
+        mrv_case_id = str(snapshot_row["mrv_case_id"])
+        organization_id = str(manifest.get("case", {}).get("organization_id") or "")
+        case_code = str(manifest.get("case", {}).get("case_code") or "case")
+        snapshot_id = str(snapshot_row["id"])
+        payload_sha256 = (manifest.get("package_integrity") or {}).get("manifest_sha256")
+
+        export_id = mrv_manifest.new_export_id()
+        rendered_at = datetime.now(timezone.utc)
+        data = mrv_workbook.render_workbook(manifest, rendered_at=rendered_at)
+        artifact_sha256 = hashlib.sha256(data).hexdigest()
+        filename = mrv_workbook.workbook_filename(
+            case_code, manifest.get("generated_at"), export_id
+        )
+        object_path = f"{organization_id}/{mrv_case_id}/{filename}"
+
+        # Object first: a metadata row pointing at nothing is worse than an
+        # orphaned object, because the row promises a retrievable artifact.
+        self._exports.put_artifact(object_path, data, self.XLSX_MEDIA_TYPE)
+        row = self._exports.create(
+            export_id=export_id,
+            mrv_case_id=mrv_case_id,
+            organization_id=organization_id,
+            fmt=fmt,
+            factor_set_id=snapshot_row.get("factor_set_id"),
+            scope_description=str(snapshot_row["scope_description"]),
+            data_as_of_at=snapshot_row["data_as_of_at"],
+            warning_text=mrv_manifest.DISCLAIMER,
+            storage_object_path=object_path,
+            file_sha256=artifact_sha256,
+            payload=manifest,
+            payload_sha256=payload_sha256,
+            source_snapshot_export_id=snapshot_id,
+            generated_by=str(actor["user_id"]),
+            generated_at=rendered_at,
+            calculation_ids=[],
+        )
+        return {**self._export_view(row), "byte_size": len(data)}
+
+    def _managed_case_ids(
+        self, read_repository: SupabaseReadRepository, actor: dict[str, Any]
+    ) -> list[str]:
+        return [
             str(scope["id"]) for scope in read_repository.mrv_case_scopes()
             if self._manages(actor, str(scope["organization_id"]))
         ]
-        try:
-            row = self._exports.payload(export_id, authorized_case_ids=managed)
-        except MrvExportNotFoundError as exc:
-            raise MrvExportAccessError() from exc
-        filename = str(row["storage_object_path"]).rsplit("/", 1)[-1]
-        return row["export_payload"], filename
 
     @staticmethod
     def _actor_metadata(actor: dict[str, Any]) -> dict[str, Any]:
@@ -606,6 +760,13 @@ class MrvExportService:
 
     @staticmethod
     def _export_view(row: dict[str, Any]) -> dict[str, Any]:
+        """What a client is told about an export.
+
+        `storage_bucket` / `storage_object_path` are deliberately NOT here. They
+        name a real private object now that XLSX artifacts exist, and no client
+        has any use for them -- the download route already supplies the filename.
+        Only the filename is surfaced.
+        """
         return {
             "export_id": row["id"], "mrv_case_id": row["mrv_case_id"],
             "format": row["format"], "schema_version": mrv_manifest.MANIFEST_SCHEMA_VERSION,
@@ -613,7 +774,9 @@ class MrvExportService:
             "generated_at": mrv_manifest.iso_utc(row["generated_at"]),
             "generated_by": row["generated_by"],
             "file_sha256": row["file_sha256"],
-            "storage_object_path": row["storage_object_path"],
+            "payload_sha256": row.get("payload_sha256"),
+            "source_snapshot_export_id": row.get("source_snapshot_export_id"),
+            "file_name": str(row["storage_object_path"]).rsplit("/", 1)[-1],
             "scope_description": row["scope_description"],
             "warning_text": row["warning_text"],
             "is_finalized": row["is_finalized"],

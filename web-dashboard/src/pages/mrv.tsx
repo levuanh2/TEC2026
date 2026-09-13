@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Ico } from '../icons'
-import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, type MrvCase, type MrvEvidence } from '../api/mrv'
+import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, createMrvXlsxExport, downloadMrvExport, type MrvCase, type MrvEvidence } from '../api/mrv'
 import { usingMockData } from '../api/farms'
 import { date, shortHash } from '../format'
 import { presentMrvStatus, mrvBadgeTone, mrvProgress, MRV_STEP_NAMES } from '../utils/mrvPresentation'
@@ -96,12 +96,19 @@ export function MrvPage({ role }: { role?: Role } = {}) {
                     restricts full-case packages to cooperative_manager, so an
                     enterprise/regulator viewer would only get a 404. The button
                     mirrors that rule; it does not create it. */}
-                {mrvCase && role === 'cooperative_manager' && <MrvJsonExport caseId={mrvCase.caseId} />}
+                {mrvCase && role === 'cooperative_manager' && (
+                  <>
+                    <MrvJsonExport caseId={mrvCase.caseId} />
+                    <div style={{ marginTop: 12 }}>
+                      <MrvXlsxExport caseId={mrvCase.caseId} />
+                    </div>
+                  </>
+                )}
                 <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
                   <div>
-                    <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất hồ sơ MRV (PDF/Excel)</b>
+                    <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất hồ sơ MRV (PDF)</b>
                     <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
-                      Chức năng tạo file đang được phát triển — chưa có bản xuất chính thức.
+                      Bản PDF đang được phát triển — chưa có.
                     </p>
                   </div>
                   <button className="btn btn--ghost" disabled aria-disabled="true">Sắp có</button>
@@ -185,6 +192,66 @@ function MrvJsonExport({ caseId }: { caseId: string }) {
       </div>
       <button className="btn" onClick={run} disabled={state.kind === 'working'} aria-busy={state.kind === 'working'}>
         {state.kind === 'working' ? 'Đang tạo…' : 'Xuất JSON'}
+      </button>
+    </div>
+  )
+}
+
+
+/** Generate the canonical snapshot and download it rendered as a workbook.
+ *
+ * One backend call does both from ONE snapshot, so the spreadsheet and the JSON
+ * package can never disagree. The copy says what the file is and is not, and
+ * shows the artifact digest plus the warning count so an incomplete package
+ * stays visibly incomplete. */
+function MrvXlsxExport({ caseId }: { caseId: string }) {
+  const [state, setState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'working' }
+    | { kind: 'done'; warnings: number; sha: string }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' })
+
+  async function run() {
+    setState({ kind: 'working' })
+    try {
+      const result = await createMrvXlsxExport(caseId)
+      const blob = await downloadMrvExport(result.exportId)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = result.fileName
+      a.click()
+      URL.revokeObjectURL(url)
+      setState({ kind: 'done', warnings: result.warningCount, sha: result.fileSha256 })
+    } catch (error) {
+      setState({ kind: 'error', message: error instanceof Error ? error.message : 'Không tạo được bảng tính.' })
+    }
+  }
+
+  return (
+    <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+      <div>
+        <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất bảng tính MRV (.xlsx)</b>
+        <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 3 }}>
+          Kết xuất từ chính gói dữ liệu JSON — không tính lại CO2e hay chỉ số tài nguyên.
+          Đây không phải chứng nhận hay kết quả thẩm định; bảng tính có thể chứa cảnh báo
+          về bằng chứng hoặc hệ số chưa đầy đủ. Tệp bằng chứng gốc KHÔNG kèm trong bảng tính.
+        </p>
+        {state.kind === 'done' && (
+          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }}>
+            Đã tạo bảng tính · SHA-256 tệp {shortHash(state.sha)}
+            {state.warnings > 0 ? ` · ${state.warnings} cảnh báo về dữ liệu chưa đầy đủ` : ''}
+          </p>
+        )}
+        {state.kind === 'error' && (
+          <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 6 }} role="alert">
+            {state.message}
+          </p>
+        )}
+      </div>
+      <button className="btn" onClick={run} disabled={state.kind === 'working'} aria-busy={state.kind === 'working'}>
+        {state.kind === 'working' ? 'Đang tạo…' : 'Xuất Excel'}
       </button>
     </div>
   )
