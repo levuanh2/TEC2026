@@ -1,7 +1,7 @@
 # MRV evidence package — JSON manifest v1
 
 Module 07. Part 1 defined the canonical JSON snapshot; part 2 added the XLSX
-renderer that consumes it. PDF (part 3) is not implemented.
+renderer and part 3 the PDF evidence report, both rendering that stored snapshot.
 
 The JSON manifest is the contract. Every other format is a *rendering* of a
 stored snapshot, so the shape here is the thing to agree on, not a spreadsheet
@@ -222,9 +222,10 @@ enforces the disclaimer.
 ## API
 
 ```
-POST /v1/mrv/cases/{mrv_case_id}/exports    {"format": "json"|"xlsx"}  -> 201
-POST /v1/mrv/exports/{mrv_export_id}/render {"format": "xlsx"}         -> 201
-GET  /v1/mrv/exports/{mrv_export_id}                                   -> metadata
+POST /v1/mrv/cases/{mrv_case_id}/exports    {"format": "json"|"xlsx"|"pdf"} -> 201
+POST /v1/mrv/exports/{mrv_export_id}/render {"format": "xlsx"|"pdf"}        -> 201
+GET  /v1/mrv/cases/{mrv_case_id}/exports                                    -> history, newest first
+GET  /v1/mrv/exports/{mrv_export_id}                                        -> metadata
 GET  /v1/mrv/exports/{mrv_export_id}/download                          -> the artifact
 ```
 
@@ -235,12 +236,14 @@ deterministic ASCII filename:
 | --- | --- |
 | json | `application/json; charset=utf-8` |
 | xlsx | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
+| pdf | `application/pdf` |
 
 ```
-agricarbon-mrv-{case_code}-{generated_date}-{export_id[:8]}.{json|xlsx}
+agricarbon-mrv-{case_code}-{generated_date}-{export_id[:8]}.{json|xlsx|pdf}
 ```
 
-`pdf` returns `422 unsupported_export_format`. No API response contains
+Any other format returns `422 unsupported_export_format`, as does rendering from
+an export that is itself a rendering. No API response contains
 `storage_bucket` or `storage_object_path`; only `file_name` is surfaced.
 
 ## Authorization
@@ -297,6 +300,8 @@ followed.
 
 Belt and braces, because RLS is not the only exposure:
 
+- `generated_by` (a user id) is returned in export metadata so the Management
+  export history can show who generated each row; nothing else about the user is.
 - Neither export view returns `storage_bucket` or `storage_object_path` to
   anyone — not the create/render responses (`MrvExportService._export_view`)
   and not the metadata routes `GET /v1/mrv/exports/{id}` and
@@ -332,6 +337,8 @@ Measured separately, because they are different costs with different fixes.
 | canonical snapshot assembly | ~8.2 s | — |
 | XLSX render (pure function) | ~0.1–0.2 s | 1.55 s idle / 3.3 s under load |
 | XLSX render peak Python memory | 0.7 MiB | 5.8 MiB |
+| PDF render (pure function) | ~1 s, 5 pages, ~52 KiB | 2.2–2.4 s, 44 pages, 148 KiB |
+| PDF render peak Python memory | 1.6 MiB | 14.6 MiB |
 | storage write (private bucket, service role) | — | 1.41 s for 68 KiB |
 | storage read for download | — | 1.68 s for 68 KiB |
 | artifact size | 11.3 KiB (json) / ~18–25 KiB (xlsx) | 68 KiB |
@@ -356,8 +363,8 @@ off-request, the existing status column is where that would be modelled.
 ## The renderer contract
 
 **JSON manifest v1 is the canonical export snapshot.** XLSX is a **renderer of a
-stored snapshot**, not an independent assembler of business data. PDF, when it
-comes, is bound by the same rule.
+stored snapshot**, not an independent assembler of business data. PDF (part 3)
+is bound by exactly the same rule.
 
 A renderer:
 
@@ -376,12 +383,12 @@ A renderer must **not**:
 - change the meaning of any value in the snapshot;
 - omit the disclaimer.
 
-`mrv/workbook.py` takes a `dict` and returns `bytes`. It imports no repository
-and no service, which is what makes the rule enforceable rather than aspirational.
+`mrv/workbook.py` and `mrv/report_pdf.py` each take a `dict` and return `bytes`.
+Neither imports a repository or a service, which is what makes the rule
+enforceable rather than aspirational.
 
 This is also the performance answer. Assembly is the expensive half (~8 s against
-hosted Supabase); rendering a stored manifest takes ~0.1 s. A part 3 that re-ran
-assembly per format would be both slower and *wrong*, because two formats
+hosted Supabase); rendering a stored manifest takes ~0.1 s. A renderer that re-ran assembly per format would be both slower and *wrong*, because two formats
 generated minutes apart could disagree. Generate once, render many times.
 
 If a renderer needs a value the manifest does not carry, the fix is to add it to
@@ -441,9 +448,104 @@ The `.xlsx` **bytes** are not claimed to be reproducible — a zip carries
 timestamps and openpyxl writes its own metadata. Content is what is deterministic,
 and content is what the tests assert.
 
+## PDF evidence report
+
+"Gói báo cáo MRV — MRV evidence report — snapshot dữ liệu và bằng chứng hỗ trợ."
+A human-readable audit / field report of **one stored snapshot**. It is not a
+certification, an authority report, a carbon credit certificate or an MRV
+compliance certificate. The cover says so, the manifest disclaimer is repeated
+verbatim, a scientific disclaimer states that no CO₂e figure has been validated
+by an authority, and every page footer reads "Tài liệu hỗ trợ, không phải chứng
+nhận". There are no seals, badges, scores or "certified" visuals.
+
+### Library and font
+
+- **ReportLab** (BSD, pure Python): tables with repeated headers, pagination,
+  TrueType embedding. No browser engine and no native GTK stack (WeasyPrint
+  needs one on Windows).
+- **Be Vietnam Pro** (SIL Open Font License 1.1) — the family the web app
+  already uses, designed for Vietnamese. Regular and SemiBold are bundled in
+  `backend/mrv/fonts/` with `OFL.txt`; `fsType` permits embedding, and ReportLab
+  embeds only the glyph subset each PDF uses. Hex digests use the built-in
+  Courier face. The font lacks `→`, so the report never uses it.
+
+### Layout
+
+A4 portrait, Hallmark language: mineral neutral ground, forest-green section
+numbers, hairline rules, dense tables with a light header band and no vertical
+rules, no gradients and no card soup.
+
+| # | section | contents |
+| --- | --- | --- |
+| cover | report identity | case code/name, status, period, organization, snapshot time and author, schema version, snapshot id, PDF id, disclaimers, warning count |
+| 01 | summary & readiness | completed/total steps, remaining, evidence count, steps without evidence, carbon availability, per-season data completeness — counts only, no score |
+| 02 | scope | organization › farm › plot › crop season; production batch labelled traceability-only, carbon scope stated as crop season |
+| 03 | MRV steps | order, name, status as `label (code)`, completed_at, evidence count, notes |
+| 04 | evidence | step, type, file name/MIME, uploaded at/by, SHA-256 or "Chưa có mã băm", reference id; states binaries are not embedded; no storage path |
+| 05 | activities | per type: count, first/last date, sources. Quantities are **not summed** — a second total could disagree with the canonical resource metrics |
+| 06 | harvest | date, yield_kg, harvested area, moisture |
+| 07 | resource metrics | per season: value, unit, input completeness |
+| 08 | carbon | succeeded: totals, per-kg, calculation id/time, scenario, engine, tier, factor set, breakdown. Otherwise: "Chưa thể tính CO₂e với bộ dữ liệu/hệ số hiện tại." plus the recorded reason |
+| 09 | provenance | carbon scope, deleted-activity policy, binaries flag, factor sets and factors — or an explicit `factor_provenance_unavailable` row |
+| 10 | warnings | every warning, warnings before info, severity as `label (code)`, never dropped |
+| 11 | integrity | schema_version, source snapshot id, PDF id, `payload_sha256`, canonicalization, snapshot and render times in UTC ISO |
+| A | appendix | every activity: time, type, recorded values, source/recorder, note |
+
+Headers repeat on every continued table page; headings and intro notes travel
+with the table they introduce (`keepWithNext`), so no heading is stranded at a
+page bottom.
+
+### Value semantics
+
+- **null reads as words** — "Chưa đủ dữ liệu" for measurements, "Chưa có" for
+  references and times — never `0`. A value column is never silently empty.
+- **Numbers** use Vietnamese grouping (`5.200`, `0,02317`). Quantities keep the
+  snapshot's digits with trailing zeros trimmed. **Per-kg ratios are shown to 6
+  significant digits** (`0,0288462`); the report says so, and the full value
+  stays in JSON/XLSX. Units: kg, ha, m³, kgCO₂e, VND.
+- **Dates**: date-only values (`period_start`, `valid_from`) are shown as
+  `dd/mm/yyyy` with no timezone arithmetic. Instants are shown in Vietnam time
+  (UTC+7, labelled). The integrity section keeps raw UTC ISO strings. A naive
+  timestamp is printed as-is, never guessed.
+- **Statuses** are shown as a Vietnamese label *and* the recorded code, so
+  `not_started` reads "Chưa bắt đầu (not_started)" and is never "failed".
+  State never relies on colour alone.
+- The activity appendix prints up to 2,000 rows. Beyond that it says how many
+  rows were omitted and that they are in JSON/XLSX of the same snapshot.
+
+### Integrity
+
+`payload_sha256` (the manifest digest) is printed in the report. The PDF's own
+SHA-256 cannot be — a file cannot contain its own digest — so it lives in
+`file_sha256` on the export row and the report says where to find it. Download
+re-hashes the stored bytes and fails closed on mismatch, exactly as for XLSX.
+
+ReportLab runs with `invariant=1`, so the same manifest, export id and render
+time produce byte-identical PDFs. In production the export id and render time
+differ per artifact, so bytes differ while content does not.
+
+### Failure handling
+
+- Rendering happens in memory before anything is written: a renderer failure
+  leaves no object, no row, and the snapshot valid.
+- If the object uploads but the metadata insert fails, the object is deleted
+  best-effort. Should that delete also fail, the orphan is still removed by the
+  resumable QA/ops cleanup below, which enumerates `storage.objects` by the case
+  prefix rather than trusting rows.
+
+### Authorization and storage
+
+Identical to XLSX: `cooperative_manager` of the case's organization for
+generate, render, download and metadata; farmer, grantee roles and other
+organizations get `404`; unauthenticated `401`. PDF bytes go to the private
+`mrv-exports` bucket as `application/pdf` (already on the bucket's MIME
+allowlist) under `<organization>/<case>/<filename>`. No URL, bucket or path is
+ever returned or printed. The CDN cache window described below applies to PDF
+objects too; correctness rests on the SHA check, never on cache invalidation.
+
 ## Artifact storage
 
-XLSX bytes go to the existing private `mrv-exports` Supabase Storage bucket, the
+XLSX and PDF bytes go to the existing private `mrv-exports` Supabase Storage bucket, the
 same mechanism `cv_repo` already uses for plant images, under the
 `<organization_uuid>/<mrv_case_uuid>/<filename>` path a database trigger already
 enforces. The bucket is **not public**.
@@ -480,8 +582,9 @@ audit artifact must never do.
 
 ## Export lineage
 
-An XLSX export is its own `mrv_exports` row with `format = 'xlsx'` and
-`source_snapshot_export_id` pointing at the JSON snapshot it rendered. A
+An XLSX or PDF export is its own `mrv_exports` row with `format = 'xlsx'` or
+`'pdf'` and `source_snapshot_export_id` pointing at the JSON snapshot it rendered.
+XLSX and PDF of one snapshot are **siblings**: neither is rendered from the other. A
 constraint enforces the shape: a `json` row has no parent, every other format
 must have one, so a snapshot-of-a-snapshot cannot exist.
 
@@ -490,18 +593,18 @@ deliberate — an audit row must stay self-describing even if the parent is late
 removed — and `payload_sha256` proves both rows rendered from byte-identical
 manifests.
 
-### Two ways to get a workbook
+### Two ways to get a rendering
 
 ```
-POST /v1/mrv/cases/{case_id}/exports   {"format": "xlsx"}
+POST /v1/mrv/cases/{case_id}/exports   {"format": "xlsx"|"pdf"}
 ```
 Assembles one canonical snapshot, then renders it. Both rows are created. There
 is only ever **one** assembly path.
 
 ```
-POST /v1/mrv/exports/{export_id}/render   {"format": "xlsx"}
+POST /v1/mrv/exports/{export_id}/render   {"format": "xlsx"|"pdf"}
 ```
-Renders an **existing** snapshot. This is the auditable path: the workbook
+Renders an **existing** snapshot. This is the auditable path: the artifact
 demonstrably comes from one stored manifest rather than from data as it happens
 to look now. Refused if the target is itself a rendering.
 
@@ -529,8 +632,12 @@ commits (see `AGENTS.md`).
 
 ## Not implemented
 
-- **PDF (part 3)** — bound by the same renderer contract above.
-- **Zipping evidence binaries** with the manifest or workbook. Both formats
-  reference evidence and say so explicitly; neither claims to contain it.
+
+- **Zipping evidence binaries** with the manifest, workbook or report. All three
+  formats reference evidence and say so explicitly; none claims to contain it. A
+  later evidence package (for example a ZIP of manifest + report + binaries with a
+  per-file SHA-256 index) is the natural place for that.
+- A tagged, PDF/UA-conformant report. The PDF uses text labels and readable
+  contrast, but is not certified accessible.
 - Asynchronous generation.
 - Any notion of an approved, submitted or verified package.
