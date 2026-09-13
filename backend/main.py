@@ -31,11 +31,12 @@ from infrastructure import pg_pool, supabase_clients
 from infrastructure.supabase_repo import SupabaseCarbonRepository
 from infrastructure.read_repo import SupabaseReadRepository
 from infrastructure.write_repo import PostgresActivityWriteRepository
+from infrastructure.mrv_export_repo import PostgresMrvExportRepository
 from infrastructure.recommendation_repo import PostgresRecommendationRepository
 from infrastructure.cv_repo import PostgresCvRepository
 from infrastructure.auth import InvalidTokenError, MissingAuthError, extract_bearer_token
 from infrastructure.request_context import RequestIdMiddleware
-from service import ActivityWriteService, CarbonService, CvService, RecommendationService
+from service import ActivityWriteService, CarbonService, CvService, MrvExportService, RecommendationService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -157,6 +158,14 @@ if settings.auth_configured and settings.supabase_db_url:
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
     _recommendation_service_singleton = RecommendationService(_service_singleton, PostgresRecommendationRepository(settings))
     app.dependency_overrides[api._recommendation_service] = lambda: _recommendation_service_singleton
+
+if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
+    # Carbon is read through the same service the carbon routes use, so the
+    # export can never disagree with /v1/crop-seasons/{id}/carbon.
+    _mrv_export_service_singleton = MrvExportService(
+        PostgresMrvExportRepository(settings), _service_singleton
+    )
+    app.dependency_overrides[api._mrv_export_service] = lambda: _mrv_export_service_singleton
 
 
 def _build_cv_service() -> CvService | None:
