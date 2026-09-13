@@ -207,26 +207,78 @@ Download returns `application/json; charset=utf-8` with
 
 ## Authorization
 
-Access is decided by an RLS-bound read of the case before any privileged
-connection is touched — the same pattern the activity write path uses. Writes go
-through the backend's database role because `authenticated` has no INSERT grant
-on `mrv_exports`; that is the existing architecture, not a shortcut, and the
-download path filters by the caller's own readable case ids in SQL rather than
-trusting the privileged connection to decide.
+A full-case evidence package is a **Management** capability. Generating one
+requires `cooperative_manager` on the case's own organization — the same role
+`private.user_is_org_manager` keys on, and the same authority
+`mrv_cases_insert` / `mrv_cases_update` already require. Whoever may create or
+change an MRV case may package it.
 
-| caller | result |
-| --- | --- |
-| unauthenticated | 401 |
-| organization member (`mrv_cases_select` → `private.user_can_read_organization`) | allowed |
-| cross-organization | 404 (never 403) |
-| unknown case id | 404 |
+The role rule sits **on top of** RLS visibility, not instead of it. The case is
+first read through the caller-bound client, so RLS remains the tenant boundary;
+only then is the role checked. Both misses raise the same error.
 
-**Note for product:** this inherits the *existing* case-read rule, which admits
-any organization member — including a `farmer`. That role can already read the
-case, its steps, its evidence and its activities through the current endpoints,
-so the package exposes no new data; it packages data the caller could already
-fetch. Narrowing MRV export to managers only would be a deliberate product
-decision and a policy change, not something to slip in here.
+| caller | generate | download |
+| --- | --- | --- |
+| unauthenticated | 401 | 401 |
+| `cooperative_manager`, own organization | allowed | allowed |
+| `cooperative_manager`, another organization | 404 | 404 |
+| `farmer` in the organization | 404 | 404 |
+| `enterprise_viewer` / `regulator` | 404 | 404 |
+| lapsed management membership (`ended_at` in the past) | 404 | 404 |
+| unknown case / export id | 404 | 404 |
+
+**Denial and absence are the same response**, byte for byte. A farmer must not
+be able to tell "no such case" from "you may not export this one"; that
+distinction is itself a disclosure, and 404-for-both is this API's existing
+convention (`ActivityWriteAccessError`, `CropAccessError`, `_read_or_404`).
+
+Download is scoped to cases the caller **manages**, not merely ones they can
+read, so a guessed or shared `export_id` is not a way around the generation
+restriction.
+
+### What this does not change
+
+Farmers keep every bit of their existing own-scope access: their activities,
+their seasons, their metrics, their own MRV case reads through the current
+endpoints. The restriction is specifically on minting and retrieving the
+**packaged full-case artifact**. A farmer can still see the MRV page's case
+detail exactly as before — there is simply no export button, and the server
+would refuse anyway.
+
+### Residual: export metadata is still org-readable
+
+`GET /v1/mrv/exports/{id}` and `GET /v1/mrv/cases/{id}/exports` predate this
+feature and are governed by `mrv_exports_select` RLS
+(`private.user_can_read_mrv_case`), so any organization member — a farmer
+included — can still see **that** an export exists, plus its
+`scope_description`, `file_sha256` and `storage_object_path`.
+
+They expose **no package content**: `_export_view` does not select
+`export_payload`, and a test pins that. So the restriction that matters holds —
+a farmer cannot obtain the packaged artifact by any route.
+
+This was left as-is deliberately: tightening `mrv_exports_select` is an RLS
+policy change to a pre-existing read surface that the Management list view uses,
+and it is a separate product decision from "who may package a case". Worth
+revisiting in part 2 for one specific reason: if exports ever gain real objects
+in the `mrv-exports` bucket, `storage_object_path` stops being an inert string
+and becomes a fetch hint, and the bucket policy would need to be at least as
+strict as the download route.
+
+### Deliberately not granted
+
+`enterprise_viewer` and `regulator` can read a case through an
+`organization_data_grants` share, and they are plausibly the eventual *audience*
+for an evidence package. They are still refused here, because letting a grantee
+mint a persisted artifact attributed to themselves is a product decision nobody
+has made. Granting it later is a one-line change to
+`MrvExportService.MANAGEMENT_ROLE` plus tests — but it should be an explicit
+decision, not a default.
+
+Writes go through the backend's database role because `authenticated` has no
+INSERT grant on `mrv_exports`; that is the existing architecture, not a
+shortcut. The download path filters by the caller's own managed case ids in SQL
+rather than trusting the privileged connection to decide.
 
 ## Performance
 
@@ -244,6 +296,39 @@ own copy of the metric logic, which is exactly what must not happen.
 An export is not on a latency-critical path. If it becomes one, the fix is to
 pass the already-fetched activities into a metrics entry point, not to inline
 the formulas.
+
+## Part 2/3 renderer contract
+
+**JSON manifest v1 is the canonical export snapshot.** The XLSX and PDF exports
+are **renderers of a stored snapshot**, not independent assemblers of business
+data.
+
+A renderer:
+
+- reads `mrv_exports.export_payload` for an existing `export_id`;
+- may add presentation metadata — sheet names, column order, page headers,
+  localized labels, formatting;
+- may fail honestly if the snapshot's `schema_version` is one it does not
+  understand.
+
+A renderer must **not**:
+
+- recalculate carbon or resource metrics;
+- fetch newer data from any table, which would silently produce a document that
+  disagrees with the snapshot it claims to render;
+- drop or reinterpret `warnings`, or present an incomplete package as complete;
+- change the meaning of any value in the snapshot;
+- omit the disclaimer.
+
+This is also the performance answer. Assembly is the expensive half (~8 s
+against hosted Supabase); rendering a stored 11 KiB document is not. A part 2
+that re-ran assembly per format would be both slower and *wrong*, because two
+formats generated minutes apart could then disagree. Generate once, render many
+times, and the XLSX, the PDF and the JSON all say the same thing because they
+came from the same bytes.
+
+If a renderer needs a value the manifest does not carry, the fix is to add it to
+the manifest behind a `schema_version` bump — not to reach past the snapshot.
 
 ## Not in part 1
 

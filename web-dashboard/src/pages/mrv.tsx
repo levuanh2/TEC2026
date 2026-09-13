@@ -5,6 +5,7 @@ import { usingMockData } from '../api/farms'
 import { date, shortHash } from '../format'
 import { presentMrvStatus, mrvBadgeTone, mrvProgress, MRV_STEP_NAMES } from '../utils/mrvPresentation'
 import { Async, Badge, EmptyState, Hero, Notice, PageHead, Progress, Section, useAsync } from '../ui'
+import type { Role } from '../types'
 
 type MrvStep = { stepNo: number; name: string; status: string; startedAt: string | null; completedAt: string | null; notes: string | null }
 
@@ -17,7 +18,7 @@ const MOCK_STEPS: MrvStep[] = MRV_STEP_NAMES.map((name, i) => ({
   notes: null,
 }))
 
-export function MrvPage() {
+export function MrvPage({ role }: { role?: Role } = {}) {
   const state = useAsync<{ mrvCase: MrvCase | null; evidence: MrvEvidence[] }>(async () => {
     if (usingMockData) return { mrvCase: null, evidence: [] }
     const cases = await listMrvCases()
@@ -90,10 +91,12 @@ export function MrvPage() {
               </Section>
 
               <Section title="Xuất dữ liệu" description="Gói dữ liệu MRV gồm dữ liệu, bằng chứng và nguồn gốc hệ số hiện có">
-                {/* Only offered for a real case: there is nothing to package in
-                    the mock-data view, and a button that cannot work is worse
-                    than no button. */}
-                {mrvCase && <MrvJsonExport caseId={mrvCase.caseId} />}
+                {/* Only offered for a real case the viewer may actually export:
+                    nothing to package in the mock-data view, and the server
+                    restricts full-case packages to cooperative_manager, so an
+                    enterprise/regulator viewer would only get a 404. The button
+                    mirrors that rule; it does not create it. */}
+                {mrvCase && role === 'cooperative_manager' && <MrvJsonExport caseId={mrvCase.caseId} />}
                 <div className="card card--pad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
                   <div>
                     <b style={{ fontSize: 'var(--fs-sm)' }}>Xuất hồ sơ MRV (PDF/Excel)</b>

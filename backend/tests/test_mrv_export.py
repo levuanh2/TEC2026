@@ -42,9 +42,12 @@ AT = datetime(2026, 9, 13, 8, 0, 0, tzinfo=timezone.utc)
 
 class FakeRead:
     def __init__(self, *, visible=True, roles=("cooperative_manager",), evidence=None,
-                 carbon=None, metrics=None, activities=None, scope=True, factor_sets=None):
+                 carbon=None, metrics=None, activities=None, scope=True, factor_sets=None,
+                 membership_org=ORG, membership_ended_at=None):
         self.visible = visible
         self.roles = list(roles)
+        self.membership_org = membership_org
+        self.membership_ended_at = membership_ended_at
         self._evidence = evidence if evidence is not None else [{
             "id": "e1", "step_no": 1, "production_batch_id": None, "evidence_type": "photo",
             "file_name": "demo.jpg", "mime_type": "image/jpeg", "sha256": None,
@@ -88,7 +91,15 @@ class FakeRead:
                 "organization_id": ORG, "created_at": AT, "updated_at": AT}
 
     def me(self):
-        return {"user_id": ACTOR, "roles": self.roles}
+        return {
+            "user_id": ACTOR,
+            "roles": self.roles,
+            "organization_memberships": [
+                {"organization_id": self.membership_org, "user_id": ACTOR,
+                 "role": role, "ended_at": self.membership_ended_at}
+                for role in self.roles
+            ],
+        }
 
     def organization(self, org_id):
         return {"id": ORG, "organization_code": "DEMO-ORG", "name": "HTX demo",
@@ -130,8 +141,8 @@ class FakeRead:
                    copy.deepcopy(sets).items()}
         return sets, factors
 
-    def mrv_cases_ids(self):
-        return [CASE] if self.visible else []
+    def mrv_case_scopes(self):
+        return [{"id": CASE, "organization_id": ORG}] if self.visible else []
 
 
 class FakeCarbon:
@@ -484,6 +495,8 @@ def test_generated_by_comes_from_auth_and_leaks_nothing():
     assert result["manifest"]["generated_by"] == {
         "user_id": ACTOR, "roles": ["cooperative_manager"]
     }
+    # Never a membership row, a claim set or anything else me() happens to carry.
+    assert "organization_memberships" not in result["manifest"]["generated_by"]
     assert set(result["manifest"]["generated_by"]) == {"user_id", "roles"}
 
 
@@ -702,3 +715,117 @@ def test_download_is_byte_identical_to_the_canonical_form(client_for):
     created = client.post(f"/v1/mrv/cases/{CASE}/exports").json()
     response = client.get(f"/v1/mrv/exports/{created['export_id']}/download")
     assert response.content == m.canonical_bytes(created["manifest"])
+
+
+# --------------------------------------------------------------------------
+# Export authorization: a full-case package is a Management capability
+#
+# The role rule sits on top of RLS visibility, not instead of it: a farmer in
+# the organization CAN read the case (that is the existing product contract and
+# these tests do not change it), and still must not be able to package it.
+# --------------------------------------------------------------------------
+
+FARMER = FakeRead(roles=("farmer",))
+
+
+def test_a_farmer_cannot_generate_a_full_case_package(client_for):
+    client, _ = client_for(FakeRead(roles=("farmer",)))
+    response = client.post(f"/v1/mrv/cases/{CASE}/exports", json={"format": "json"})
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"]["code"] == "not_found"
+
+
+def test_a_farmer_who_can_read_the_case_still_cannot_export_it():
+    """The denial is the role, not visibility -- the read itself succeeds."""
+    repo = FakeRead(roles=("farmer",))
+    assert repo.mrv_case_row(CASE)["case_code"] == "DEMO-MRV-2026"
+    service, _, _ = build_service(repo)
+    with pytest.raises(Exception) as exc:
+        service.create(read_repository=repo, mrv_case_id=CASE)
+    assert exc.type.__name__ == "MrvExportAccessError"
+
+
+def test_a_farmer_cannot_download_a_known_export_id(client_for):
+    """Guessing an id must not route around the generation restriction."""
+    manager_client, store = client_for(FakeRead())
+    created = manager_client.post(f"/v1/mrv/cases/{CASE}/exports").json()
+
+    farmer_client, _ = client_for(FakeRead(roles=("farmer",)), store=store)
+    response = farmer_client.get(f"/v1/mrv/exports/{created['export_id']}/download")
+    assert response.status_code == 404
+
+
+def test_enterprise_and_regulator_are_not_silently_granted_export(client_for):
+    for role in ("enterprise_viewer", "regulator"):
+        client, _ = client_for(FakeRead(roles=(role,)))
+        assert client.post(f"/v1/mrv/cases/{CASE}/exports").status_code == 404, role
+
+
+def test_a_manager_of_a_different_organization_is_denied(client_for):
+    """Readable via a data grant, managed elsewhere -> still not exportable."""
+    stranger = FakeRead(roles=("cooperative_manager",),
+                        membership_org="99999999-9999-9999-9999-999999999999")
+    client, _ = client_for(stranger)
+    assert client.post(f"/v1/mrv/cases/{CASE}/exports").status_code == 404
+
+
+def test_a_cross_org_manager_cannot_download(client_for):
+    manager_client, store = client_for(FakeRead())
+    created = manager_client.post(f"/v1/mrv/cases/{CASE}/exports").json()
+
+    stranger = FakeRead(roles=("cooperative_manager",),
+                        membership_org="99999999-9999-9999-9999-999999999999")
+    other_client, _ = client_for(stranger, store=store)
+    assert other_client.get(f"/v1/mrv/exports/{created['export_id']}/download").status_code == 404
+
+
+def test_a_lapsed_management_membership_is_not_management_authority(client_for):
+    lapsed = FakeRead(membership_ended_at="2026-01-01T00:00:00Z")
+    client, _ = client_for(lapsed)
+    assert client.post(f"/v1/mrv/cases/{CASE}/exports").status_code == 404
+
+
+def test_a_membership_ending_in_the_future_is_still_authority(client_for):
+    active = FakeRead(membership_ended_at="2099-01-01T00:00:00Z")
+    client, _ = client_for(active)
+    assert client.post(f"/v1/mrv/cases/{CASE}/exports").status_code == 201
+
+
+def test_a_manager_generates_and_downloads_their_own_org_export(client_for):
+    client, _ = client_for(FakeRead())
+    created = client.post(f"/v1/mrv/cases/{CASE}/exports").json()
+    response = client.get(f"/v1/mrv/exports/{created['export_id']}/download")
+    assert response.status_code == 200
+    assert response.json() == created["manifest"]
+
+
+def test_denial_is_indistinguishable_from_a_missing_case(client_for):
+    """Same status and same code, so neither reveals the other."""
+    farmer_client, _ = client_for(FakeRead(roles=("farmer",)))
+    denied = farmer_client.post(f"/v1/mrv/cases/{CASE}/exports")
+    missing = farmer_client.post("/v1/mrv/cases/00000000-0000-0000-0000-000000000000/exports")
+    assert denied.status_code == missing.status_code == 404
+    assert denied.json() == missing.json()
+
+
+def test_the_metadata_route_never_exposes_the_payload():
+    """`GET /v1/mrv/exports/{id}` predates this feature and is governed by
+    `mrv_exports_select` RLS, so an organization member -- including a farmer --
+    can still see that an export exists. It must never carry the package itself.
+
+    This is the property that matters: the generation/download restriction is
+    about the packaged artifact, and metadata visibility is a separate,
+    pre-existing product decision (see docs/MRV_EXPORT_PACKAGE.md).
+    """
+    from infrastructure.read_repo import SupabaseReadRepository
+
+    row = {
+        "id": "x", "mrv_case_id": CASE, "format": "json", "factor_set_id": None,
+        "scope_description": "s", "data_as_of_at": AT, "contains_sample_data": False,
+        "is_finalized": False, "warning_text": "w", "storage_bucket": "mrv-exports",
+        "storage_object_path": "p", "file_sha256": "h", "generated_at": AT,
+        "export_payload": {"secret": "must not appear"},
+    }
+    view = SupabaseReadRepository._export_view(SupabaseReadRepository, row)
+    assert "export_payload" not in view
+    assert "secret" not in json.dumps(view, default=str)

@@ -428,15 +428,63 @@ class MrvExportService:
 
     SUPPORTED_FORMATS = ("json",)
 
+    # A full-case evidence package is a Management capability, not a field one.
+    # This is the same role `private.user_is_org_manager` keys on, and the same
+    # authority `mrv_cases_insert`/`mrv_cases_update` already require: whoever
+    # may create or change an MRV case may package it.
+    #
+    # `enterprise_viewer` and `regulator` are deliberately NOT included. They can
+    # read a case through an `organization_data_grants` share, but letting a
+    # grantee mint a persisted artifact attributed to themselves is a product
+    # decision nobody has made; see docs/MRV_EXPORT_PACKAGE.md.
+    MANAGEMENT_ROLE = "cooperative_manager"
+
     def __init__(self, export_repository: PostgresMrvExportRepository, carbon_service: CarbonService):
         self._exports = export_repository
         self._carbon = carbon_service
 
-    def _authorized_case(self, read_repository: SupabaseReadRepository, mrv_case_id: str) -> dict[str, Any]:
+    @classmethod
+    def _manages(cls, actor: dict[str, Any], organization_id: str) -> bool:
+        """Python mirror of `private.user_is_org_manager`, including `ended_at`.
+
+        Reads the membership rows `me()` already returned, so this costs no extra
+        round trip. A lapsed membership is not management authority, which is why
+        `ended_at` is honoured here exactly as the SQL helper honours it.
+        """
+        now = datetime.now(timezone.utc)
+        for membership in actor.get("organization_memberships") or []:
+            if str(membership.get("organization_id")) != str(organization_id):
+                continue
+            if str(membership.get("role")) != cls.MANAGEMENT_ROLE:
+                continue
+            ended = membership.get("ended_at")
+            if ended is None:
+                return True
+            if isinstance(ended, str):
+                ended = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+            if ended.tzinfo is None:
+                ended = ended.replace(tzinfo=timezone.utc)
+            if ended > now:
+                return True
+        return False
+
+    def _authorized_case(
+        self, read_repository: SupabaseReadRepository, mrv_case_id: str, actor: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Readable AND managed by the caller, or it does not exist as far as they know.
+
+        Both misses raise the same error and become the same 404. A farmer who can
+        read the case must not be able to tell the difference between "no such
+        case" and "you may not export this one" -- that distinction is itself a
+        disclosure, and 404-for-both is this API's existing convention.
+        """
         try:
-            return read_repository.mrv_case_row(mrv_case_id)
+            case = read_repository.mrv_case_row(mrv_case_id)
         except ReadNotFoundError as exc:
             raise MrvExportAccessError() from exc
+        if not self._manages(actor, str(case["organization_id"])):
+            raise MrvExportAccessError()
+        return case
 
     def create(
         self, *, read_repository: SupabaseReadRepository, mrv_case_id: str, fmt: str = "json",
@@ -444,9 +492,9 @@ class MrvExportService:
         if fmt not in self.SUPPORTED_FORMATS:
             raise UnsupportedExportFormatError(fmt)
 
-        case = self._authorized_case(read_repository, mrv_case_id)
-        organization_id = str(case["organization_id"])
         actor = read_repository.me()
+        case = self._authorized_case(read_repository, mrv_case_id, actor)
+        organization_id = str(case["organization_id"])
 
         # Reads that do not depend on each other, but kept sequential and small:
         # each is already batched internally, and an export is not on a
@@ -525,10 +573,18 @@ class MrvExportService:
     def download(
         self, *, read_repository: SupabaseReadRepository, export_id: str,
     ) -> tuple[dict[str, Any], str]:
-        """Return the stored snapshot and its filename. Never rebuilds."""
-        cases = read_repository.mrv_cases_ids()
+        """Return the stored snapshot and its filename. Never rebuilds.
+
+        Scoped to cases the caller MANAGES, not merely ones they can read, so a
+        known export id is not a way around the generation restriction.
+        """
+        actor = read_repository.me()
+        managed = [
+            str(scope["id"]) for scope in read_repository.mrv_case_scopes()
+            if self._manages(actor, str(scope["organization_id"]))
+        ]
         try:
-            row = self._exports.payload(export_id, authorized_case_ids=cases)
+            row = self._exports.payload(export_id, authorized_case_ids=managed)
         except MrvExportNotFoundError as exc:
             raise MrvExportAccessError() from exc
         filename = str(row["storage_object_path"]).rsplit("/", 1)[-1]

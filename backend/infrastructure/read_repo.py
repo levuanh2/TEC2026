@@ -730,11 +730,17 @@ class SupabaseReadRepository:
         self._one("mrv_cases", case_id)
         return self._many("mrv_evidence", mrv_case_id=case_id)
 
-    def mrv_cases_ids(self) -> list[str]:
-        """Ids of every MRV case the caller can read, for scoping an export
-        lookup without letting a privileged connection decide access.
+    def mrv_case_scopes(self) -> list[dict[str, str]]:
+        """(case id, organization id) for every MRV case the caller can read.
+
+        The organization comes back too so the caller can apply a role rule on
+        top of RLS visibility -- reading a case and being allowed to package it
+        are different questions.
         """
-        return [str(row["id"]) for row in self._many("mrv_cases")]
+        return [
+            {"id": str(row["id"]), "organization_id": str(row["organization_id"])}
+            for row in self._many("mrv_cases")
+        ]
 
     def metrics_for_seasons(self, season_ids: list[str]) -> dict[str, dict[str, Any]]:
         """`metrics()` for many seasons without a request chain per season.
