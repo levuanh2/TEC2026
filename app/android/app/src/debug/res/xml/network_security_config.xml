@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CHỈ áp dụng cho debug build (thư mục src/debug/res ghi đè src/main/res).
+  Cho phép HTTP cleartext DUY NHẤT tới các host loopback dùng khi phát triển:
+    - 10.0.2.2  : máy host nhìn từ trong Android emulator
+    - localhost / 127.0.0.1 : chạy trên máy trực tiếp / thiết bị qua adb reverse
+  Mọi domain khác vẫn bị chặn cleartext. Bản release KHÔNG có file này.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

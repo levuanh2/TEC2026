@@ -10,8 +10,15 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Localization tieng Viet cho widget Material dung san (DatePicker, nut he thong...).
+  # Keo theo `intl` transitively — app KHONG dung `intl` truc tiep, tu format ngay/so
+  # trong lib/design/app_format.dart de giu it dependency (ponytail).
+  flutter_localizations:
+    sdk: flutter
+
   # Auth + ghi/doc truc tiep Supabase (RLS quyet dinh, khong qua backend rieng).
-  # Token luu boi chinh package nay (flutter_secure_storage o duoi), khong tu che.
+  # supabase_flutter 2.x luu session qua SharedPreferences (KHONG phai
+  # flutter_secure_storage - do la mac dinh cua 1.x). Xem lib/services/auth_service.dart.
   supabase_flutter: ^2.5.0
 
   # Luu offline local. sqflite_common_ffi KHONG dua vao day - chi can cho unit test
@@ -26,14 +33,32 @@ dependencies:
   # (khong can thong tin thiet bi that, chi can 1 UUID on dinh).
   shared_preferences: ^2.2.0
 
-  # Goi FastAPI backend (POST /v1/carbon/calculate, GET .../carbon).
+  # Goi FastAPI backend (POST /v1/carbon/calculate, GET .../carbon, GET /v1/me).
   http: ^1.2.0
+
+  # Trang thai online/offline that (co song hay khong) — stream, khong polling.
+  connectivity_plus: ^6.0.0
+
+  # Diem cham CV (man 24): chup/chon anh la lua. image_picker tu xu ly dialog
+  # chon nguon + resize/compress (maxWidth/maxHeight/imageQuality) + tai ma hoa
+  # lai anh (rot bo EXIF GPS). permission_handler cho trang thai quyen chi tiet
+  # (granted/denied/permanentlyDenied/restricted) + openAppSettings — image_picker
+  # khong phan biet duoc permanentlyDenied. KHONG dung MethodChannel truc tiep.
+  image_picker: ^1.1.2
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   # Chay test cho local_database.dart tren desktop (khong can emulator).
   sqflite_common_ffi: ^2.3.0
+  # Lint rule chuan cho app Flutter (analysis_options.yaml include flutter.yaml cua no).
+  flutter_lints: ^5.0.0
+  # Test luong tich hop (integration_test/) — nghiem thu offline -> sync -> carbon
+  # -> logout -> isolation. Chay bang `flutter test integration_test/` (headless
+  # flutter_tester); can device/emulator that neu muon chay platform channel that.
+  integration_test:
+    sdk: flutter
 
 flutter:
   uses-material-design: true

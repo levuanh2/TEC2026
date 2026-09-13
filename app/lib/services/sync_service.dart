@@ -1,11 +1,10 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../db/local_database.dart';
 import '../models/activity.dart';
-import '../models/crop_season.dart';
+import '../models/activity_field_spec.dart';
 import '../models/farm.dart';
-import '../models/plot.dart';
 import 'device_service.dart';
+import 'sync_errors.dart';
+import 'sync_gateway.dart';
 
 const _kDetailTableFor = <String, String>{
   'seeding': 'seeding_events',
@@ -18,106 +17,169 @@ const _kDetailTableFor = <String, String>{
 };
 
 /// Đẩy dữ liệu offline lên Supabase khi có mạng. KHÔNG qua backend FastAPI —
-/// activities là dữ liệu CRUD RLS đã tự chịu trách nhiệm phân quyền (baseline
-/// đã có policy insert cho authenticated); backend chỉ lo tính CO2e.
+/// RLS đã tự chịu trách nhiệm phân quyền; backend chỉ lo tính CO2e.
 ///
-/// Idempotent bằng đúng cơ chế schema đã có sẵn: unique (device_id,
-/// client_event_id) trên `activities`, và activity_id làm PRIMARY KEY của mọi
-/// bảng chi tiết — upsert lại không tạo bản ghi trùng, retry an toàn (FR-1a-07).
+/// Idempotent bằng khoá tự nhiên: `plots (farm_id, plot_code)`,
+/// `crop_seasons (plot_id, season_code)`, `activities (device_id, client_event_id)`
+/// — upsert lại không tạo bản ghi trùng (retry an toàn sau crash / mất mạng).
+///
+/// Tham chiếu cha dùng `clientId` cục bộ; ở đây mới tra ra `serverId`. Con nào
+/// có cha chưa đồng bộ thì bỏ qua lượt này, thử lại lượt sau.
+///
+/// Mọi thao tác mạng đi qua [SyncGateway] — test bơm bản giả, không cần Supabase.
 class SyncService {
-  SyncService(this._client, this._db, this._devices);
-  final SupabaseClient _client;
+  SyncService(this._gateway, this._db, this._devices,
+      {Future<void> Function()? onSynced})
+      : _onSynced = onSynced;
+  final SyncGateway _gateway;
   final LocalDatabase _db;
   final DeviceService _devices;
+  final Future<void> Function()? _onSynced;
 
-  final _batchCache = <String, String>{}; // cropSeasonId(server) -> batchId(server)
+  final _batchCache =
+      <String, String>{}; // cropSeason server id -> batch server id
 
-  Future<SyncSummary> syncAll() async {
+  /// Single-flight: một lượt `syncAll` tại một thời điểm. Lời gọi thứ hai (kể cả
+  /// từ ngoài coordinator) nhận lại đúng future đang chạy — không đẩy 2 lần.
+  Future<SyncSummary>? _inFlight;
+
+  /// Xoá cache gắn với user hiện tại (gọi khi đăng xuất / đổi tài khoản).
+  void clearCache() => _batchCache.clear();
+
+  Future<SyncSummary> syncAll() {
+    final running = _inFlight;
+    if (running != null) return running;
+    final future = _syncAllOnce();
+    _inFlight = future;
+    return future.whenComplete(() => _inFlight = null);
+  }
+
+  Future<SyncSummary> _syncAllOnce() async {
     final summary = SyncSummary();
     await _pushPlots(summary);
     await _pushCropSeasons(summary);
     await _pushActivities(summary);
+    // Ghi mốc "gửi gần nhất" khi có tiến triển hoặc không lỗi (Trang chủ đọc lại).
+    final progressed = summary.plotsSynced +
+            summary.cropSeasonsSynced +
+            summary.activitiesSynced +
+            summary.activitiesDeleted >
+        0;
+    if (!summary.hasErrors || progressed) {
+      await _onSynced?.call();
+    }
     return summary;
   }
 
   Future<void> _pushPlots(SyncSummary summary) async {
-    for (final row in await _db.listPendingPlots()) {
-      final localId = row['id'] as String;
+    for (final plot in await _db.listPendingPlots()) {
       try {
-        final plot = Plot.fromMap(row);
-        final inserted = await _client
-            .from('plots')
-            .insert(plot.toInsertMap())
-            .select('id')
-            .single();
-        await _db.markPlotSynced(localId, inserted['id'] as String);
+        await _db.markPlotSyncing(plot.clientId);
+        final serverId = await _gateway.upsertPlot(plot.toServerInsert());
+        await _db.markPlotSynced(plot.clientId, serverId);
         summary.plotsSynced++;
-      } catch (e) {
-        summary.errors.add('Thửa ${row['plot_code']}: $e');
+      } catch (error) {
+        final kind = classifySyncError(error);
+        await _db.markPlotSyncFailed(plot.clientId, kind.name);
+        summary.record('Thửa ${plot.plotCode}', kind);
       }
     }
   }
 
   Future<void> _pushCropSeasons(SyncSummary summary) async {
-    final localPlotIds = (await _db.listPendingPlots()).map((r) => r['id'] as String).toSet();
-    for (final row in await _db.listPendingCropSeasons()) {
-      final localId = row['id'] as String;
-      final plotId = row['plot_id'] as String;
-      if (localPlotIds.contains(plotId)) {
-        continue; // thửa cha chưa đồng bộ xong — thử lại lượt sau
+    for (final season in await _db.listPendingCropSeasons()) {
+      final plot = await _db.getPlotByClientId(season.plotClientId);
+      final plotServerId = plot?.serverId;
+      if (plotServerId == null) {
+        summary.deferred++;
+        continue; // thửa cha chưa đồng bộ xong
       }
       try {
-        final season = CropSeason.fromMap(row);
-        final inserted = await _client
-            .from('crop_seasons')
-            .insert(season.toInsertMap())
-            .select('id')
-            .single();
-        await _db.markCropSeasonSynced(localId, inserted['id'] as String);
+        await _db.markCropSeasonSyncing(season.clientId);
+        final serverId = await _gateway.upsertCropSeason(
+          season.toServerInsert(plotServerId: plotServerId),
+        );
+        await _db.markCropSeasonSynced(season.clientId, serverId);
         summary.cropSeasonsSynced++;
-      } catch (e) {
-        summary.errors.add('Vụ ${row['season_code']}: $e');
+      } catch (error) {
+        final kind = classifySyncError(error);
+        await _db.markCropSeasonSyncFailed(season.clientId, kind.name);
+        summary.record('Vụ ${season.seasonCode}', kind);
       }
     }
   }
 
   Future<void> _pushActivities(SyncSummary summary) async {
-    final localCropSeasonIds =
-        (await _db.listPendingCropSeasons()).map((r) => r['id'] as String).toSet();
+    final pending = await _db.listPendingActivities();
+    if (pending.isEmpty) return;
     final deviceId = await _devices.ensureServerDeviceId();
 
-    for (final activity in await _db.listPendingActivities()) {
-      if (localCropSeasonIds.contains(activity.cropSeasonId)) {
-        continue; // vụ canh tác cha chưa có id thật trên server — thử lại lượt sau
+    // Danh tính người ghi, lấy MỘT lần cho cả lượt. Không có phiên thì KHÔNG
+    // đoán và KHÔNG gửi `null`: mọi bản ghi trong lượt này hỏng thật (auth),
+    // giữ nguyên trên máy và chờ đăng nhập lại.
+    final recorderId = _gateway.currentUserId();
+
+    for (final activity in pending) {
+      // Tombstone: bản ghi đã đồng bộ bị xoá → gọi RPC xoá mềm, CHỈ dọn hàng
+      // local khi server XÁC NHẬN. Mạng/chưa xác nhận → giữ nguyên hàng.
+      if (activity.deletedLocally) {
+        await _pushDelete(activity, summary);
+        continue;
+      }
+
+      if (recorderId == null) {
+        await _db.updateActivitySyncState(
+          activity.clientEventId,
+          state: SyncState.failed,
+          error: SyncErrorKind.auth.name,
+        );
+        summary.record('Hoạt động ${activity.type}', SyncErrorKind.auth);
+        continue;
+      }
+
+      final season = await _db.getCropSeasonByClientId(activity.cropSeasonId);
+      final seasonServerId = season?.serverId;
+      if (seasonServerId == null) {
+        summary.deferred++;
+        continue; // vụ cha chưa có id thật trên server
       }
       try {
-        await _db.updateActivitySyncState(activity.clientEventId, state: SyncState.syncing);
-        final batchId = await _ensureDefaultBatch(activity.cropSeasonId);
+        await _db.updateActivitySyncState(activity.clientEventId,
+            state: SyncState.syncing);
+        final batchId = await _ensureDefaultBatch(seasonServerId);
 
-        final activityRow = await _client
-            .from('activities')
-            .upsert(
-              {
-                'production_batch_id': batchId,
-                'activity_type': activity.type,
-                'occurred_at': activity.occurredAt.toIso8601String(),
-                'recorded_at': activity.createdAt.toIso8601String(),
-                'source': 'mobile_offline',
-                'device_id': deviceId,
-                'client_event_id': activity.clientEventId,
-                if (activity.note != null) 'note': activity.note,
-              },
-              onConflict: 'device_id,client_event_id',
-            )
-            .select('id')
-            .single();
-        final serverActivityId = activityRow['id'] as String;
+        final serverActivityId = await _gateway.upsertActivity({
+          'production_batch_id': batchId,
+          'activity_type': activity.type,
+          // `activities.occurred_at` / `recorded_at` là `timestamptz` — mốc
+          // thời gian THẬT, không phải ngày lịch. `DateTime` ở đây là giờ máy
+          // (giờ VN), và `toIso8601String()` trên một DateTime local sinh chuỗi
+          // KHÔNG có `Z` cũng không có offset; Postgres đọc chuỗi trần đó theo
+          // giờ phiên (UTC), nên 23:00 ICT bị lưu thành 23:00Z và đọc lại thành
+          // 06:00 hôm sau — lệch NGÀY canh tác của nông dân.
+          // `.toUtc()` gửi đúng mốc (23:00 ICT → 16:00Z); tầng hiển thị đã gọi
+          // `.toLocal()` (AppFormat) nên vòng đọc–ghi trả lại đúng giờ đã nhập.
+          'occurred_at': activity.occurredAt.toUtc().toIso8601String(),
+          'recorded_at': activity.createdAt.toUtc().toIso8601String(),
+          'source': 'mobile_offline',
+          // AI ghi bản này. Lấy từ PHIÊN ĐĂNG NHẬP đang hoạt động — không phải
+          // từ form, không phải hằng số. `activities_insert` chỉ nhận `null`
+          // hoặc chính `auth.uid()`, và policy xoá + `soft_delete_activity`
+          // dựa vào đúng cột này để biết ai được xoá; để trống thì chủ sở hữu
+          // không tự xoá được bản ghi của mình, và cả backend cũng không
+          // (`write_repo.soft_delete` lọc `recorded_by = actor`).
+          'recorded_by': recorderId,
+          'device_id': deviceId,
+          'client_event_id': activity.clientEventId,
+          // LUÔN gửi `note`, kể cả `null` → xoá ghi chú cũ trên server khi sửa.
+          'note': activity.note,
+        });
 
         final table = _kDetailTableFor[activity.type];
         if (table != null) {
-          await _client.from(table).upsert(
-            {'activity_id': serverActivityId, ...activity.payload},
-            onConflict: 'activity_id',
+          await _gateway.upsertActivityDetail(
+            table,
+            _detailRow(activity.type, serverActivityId, activity.payload),
           );
         }
 
@@ -127,68 +189,103 @@ class SyncService {
           serverActivityId: serverActivityId,
         );
         summary.activitiesSynced++;
-      } catch (e) {
+      } catch (error) {
+        final kind = classifySyncError(error);
         await _db.updateActivitySyncState(
           activity.clientEventId,
           state: SyncState.failed,
-          error: e.toString(),
+          error: kind.name,
         );
-        summary.errors.add('Hoạt động ${activity.type} (${activity.occurredAt}): $e');
+        summary.record('Hoạt động ${activity.type}', kind);
       }
+    }
+  }
+
+  /// Hàng ĐẦY ĐỦ cho bảng chi tiết: mọi cột của loại này (lấy từ
+  /// [kActivityFieldSpecs] — `key` khớp tuyệt đối cột migration). Cột người dùng
+  /// bỏ trống gửi `null` để XOÁ giá trị cũ trên server khi sửa. KHÔNG thêm cột lạ
+  /// (không trộn nhầm field giữa các bảng chi tiết).
+  static Map<String, Object?> _detailRow(
+    String type,
+    String serverActivityId,
+    Map<String, dynamic> payload,
+  ) {
+    final specs = kActivityFieldSpecs[type] ?? const <ActivityFieldSpec>[];
+    return {
+      'activity_id': serverActivityId,
+      for (final s in specs) s.key: payload[s.key],
+    };
+  }
+
+  Future<void> _pushDelete(Activity activity, SyncSummary summary) async {
+    final id = activity.clientEventId;
+    final serverId = activity.serverActivityId;
+    if (serverId == null) {
+      // Chưa từng lên server → xoá hẳn local là đủ (nghiệp vụ xoá bản chưa sync).
+      await _db.hardDeleteActivity(id);
+      summary.activitiesDeleted++;
+      return;
+    }
+    try {
+      await _db.updateActivitySyncState(id, state: SyncState.syncing);
+
+      // RPC trả về bình thường ⇒ dòng đó ĐANG ở trạng thái xoá mềm trên server,
+      // dù lượt này hay lượt trước ghi. Đó là XÁC NHẬN đủ mạnh để dọn tombstone
+      // local: lần gọi thứ hai cũng trả về như vậy nên retry là idempotent, và
+      // trường hợp "không có quyền" KHÔNG đi vào nhánh này — nó ném 42501.
+      await _gateway.softDeleteActivity(serverId);
+
+      await _db.hardDeleteActivity(id);
+      summary.activitiesDeleted++;
+    } catch (error) {
+      final kind = classifySyncError(error);
+      // KHÔNG mất hàng: giữ tombstone, đánh dấu failed để thử lại.
+      await _db.updateActivitySyncState(id,
+          state: SyncState.failed, error: kind.name);
+      summary.record('Xoá hoạt động ${activity.type}', kind);
     }
   }
 
   /// Nông dân không thao tác khái niệm "lô" — MVP tự tạo 1 batch mặc định mỗi vụ
   /// để thoả `activities.production_batch_id NOT NULL`. Carbon Engine vẫn tính
-  /// theo Crop Season, batch này chỉ để thoả ràng buộc DB (xem
-  /// docs/CARBON_CALCULATION_SCOPE_RESOLUTION.md — Batch là traceability).
-  Future<String> _ensureDefaultBatch(String cropSeasonId) async {
-    final cached = _batchCache[cropSeasonId];
+  /// theo Crop Season (xem docs/CARBON_CALCULATION_SCOPE_RESOLUTION.md).
+  Future<String> _ensureDefaultBatch(String cropSeasonServerId) async {
+    final cached = _batchCache[cropSeasonServerId];
     if (cached != null) return cached;
-    final row = await _client
-        .from('production_batches')
-        .upsert(
-          {'crop_season_id': cropSeasonId, 'batch_code': 'default'},
-          onConflict: 'crop_season_id,batch_code',
-        )
-        .select('id')
-        .single();
-    final id = row['id'] as String;
-    _batchCache[cropSeasonId] = id;
+    final id = await _gateway.ensureDefaultBatch(cropSeasonServerId);
+    _batchCache[cropSeasonServerId] = id;
     return id;
   }
 
   /// HTX (organization) mà người dùng hiện tại là thành viên — cần để tạo Farm
-  /// mới (farms.cooperative_id). Việc gia nhập HTX nằm ngoài phạm vi MVP 1a
-  /// (do quản lý HTX thêm thủ công qua Supabase), app chỉ đọc lại.
-  Future<String?> currentCooperativeId() async {
-    final userId = _client.auth.currentUser?.id;
-    if (userId == null) return null;
-    final rows = await _client
-        .from('organization_memberships')
-        .select('organization_id')
-        .eq('user_id', userId)
-        .limit(1);
-    final list = rows as List;
-    if (list.isEmpty) return null;
-    return list.first['organization_id'] as String;
-  }
+  /// (farms.cooperative_id). Gia nhập HTX ngoài phạm vi MVP 1a (quản lý HTX
+  /// thêm thủ công), app chỉ đọc lại.
+  Future<String?> currentCooperativeId() => _gateway.currentCooperativeId();
 
-  /// Kéo Farm/Plot/CropSeason từ Supabase về cache local — chỉ hiển thị, không
-  /// phải nguồn ghi (RLS đã lọc đúng theo người dùng hiện tại).
+  /// Kéo Farm/Plot/CropSeason từ Supabase về cache local (RLS đã lọc theo user).
+  /// Bản ghi local đang chờ đồng bộ (chưa có `server_id`) KHÔNG bị đụng. Bản ghi
+  /// ĐÃ đồng bộ mà server không còn trả về → bị gỡ khỏi cache (thửa/vụ bị xoá
+  /// hoặc bị thu hồi quyền phía server). Caller nên gọi
+  /// `activeContext.revalidate()` sau đó để dọn lựa chọn đã mất.
   Future<void> pullFarmsPlotsSeasons() async {
-    final farms = await _client.from('farms').select();
-    for (final row in farms as List) {
-      await _db.upsertFarm(Farm.fromMap(row as Map<String, dynamic>));
+    final farms = await _gateway.fetchFarms();
+    await _db.replaceFarms([for (final row in farms) Farm.fromServer(row)]);
+
+    final plots = await _gateway.fetchPlots();
+    for (final row in plots) {
+      await _db.mergeServerPlot(row);
     }
-    final plots = await _client.from('plots').select();
-    for (final row in plots as List) {
-      await _db.upsertPlot(Plot.fromMap(row as Map<String, dynamic>));
+    await _db.reconcilePulledPlots(
+      {for (final row in plots) row['id'] as String},
+    );
+
+    final seasons = await _gateway.fetchCropSeasons();
+    for (final row in seasons) {
+      await _db.mergeServerCropSeason(row);
     }
-    final seasons = await _client.from('crop_seasons').select();
-    for (final row in seasons as List) {
-      await _db.upsertCropSeason(CropSeason.fromMap(row as Map<String, dynamic>));
-    }
+    await _db.reconcilePulledCropSeasons(
+      {for (final row in seasons) row['id'] as String},
+    );
   }
 }
 
@@ -196,7 +293,28 @@ class SyncSummary {
   int plotsSynced = 0;
   int cropSeasonsSynced = 0;
   int activitiesSynced = 0;
-  final errors = <String>[];
+  int activitiesDeleted = 0; // tombstone đã đẩy `deleted_at` + server xác nhận
 
-  bool get hasErrors => errors.isNotEmpty;
+  /// Số bản ghi bị hoãn vì cha chưa đồng bộ (không phải lỗi).
+  int deferred = 0;
+
+  final failures = <SyncFailure>[];
+
+  bool get hasErrors => failures.isNotEmpty;
+  int get errorCount => failures.length;
+
+  void record(String label, SyncErrorKind kind) =>
+      failures.add(SyncFailure(label, kind));
+
+  /// Có lỗi RLS/quyền trong lượt này → UI nên nhắc liên hệ HTX.
+  bool get hasPermissionError =>
+      failures.any((f) => f.kind == SyncErrorKind.rlsDenied);
+}
+
+class SyncFailure {
+  const SyncFailure(this.label, this.kind);
+  final String label;
+  final SyncErrorKind kind;
+
+  String get message => '$label: ${syncErrorMessage(kind)}';
 }
