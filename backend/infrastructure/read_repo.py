@@ -632,3 +632,121 @@ class SupabaseReadRepository:
         # emission_factor_set(), dựa vào RLS của chính bảng mrv_exports để chặn
         # truy cập chéo tổ chức, không tự suy luận quyền bằng code Python.
         return self._export_view(self._one("mrv_exports", export_id))
+
+    # -- MRV export bundle ------------------------------------------------
+    # Raw rows for the evidence package. `mrv_batches`/`activities` above are
+    # shaped for the UI (names, no ids, no audit columns); an export needs the
+    # opposite. These read through the same caller-bound client, so RLS remains
+    # the boundary, and they batch with `IN` so adding a season to a case does
+    # not add a round trip per season.
+
+    def mrv_scope(self, case_id: str) -> list[dict[str, Any]]:
+        """Batch -> crop season -> plot -> farm for every batch on the case.
+
+        5 requests regardless of how many batches the case links, instead of the
+        4-per-batch the UI-facing `mrv_batches` costs.
+        """
+        self._one("mrv_cases", case_id)
+        links = self._many("mrv_case_batches", mrv_case_id=case_id)
+        batch_ids = [str(x["production_batch_id"]) for x in links]
+        if not batch_ids:
+            return []
+        batches = self._many_in("production_batches", "id", batch_ids)
+        season_ids = [str(b["crop_season_id"]) for b in batches]
+        seasons = self._many_in("crop_seasons", "id", season_ids)
+        by_season = {str(s["id"]): s for s in seasons}
+        plots = self._many_in("plots", "id", [str(s["plot_id"]) for s in seasons])
+        by_plot = {str(p["id"]): p for p in plots}
+        farms = self._many_in("farms", "id", [str(p["farm_id"]) for p in plots])
+        by_farm = {str(f["id"]): f for f in farms}
+
+        entries: list[dict[str, Any]] = []
+        for batch in batches:
+            season = by_season.get(str(batch["crop_season_id"])) or {}
+            plot = by_plot.get(str(season.get("plot_id"))) or {}
+            farm = by_farm.get(str(plot.get("farm_id"))) or {}
+            entries.append({
+                "production_batch_id": batch["id"], "batch_code": batch.get("batch_code"),
+                "crop_season_id": season.get("id"), "season_code": season.get("season_code"),
+                "season_status": season.get("status"),
+                "started_on": season.get("planting_date"),
+                "closed_on": season.get("actual_harvest_date"),
+                "plot_id": plot.get("id"), "plot_code": plot.get("plot_code"),
+                "plot_area_ha": plot.get("area_ha"),
+                "farm_id": farm.get("id"), "farm_code": farm.get("farm_code"),
+                "farm_name": farm.get("farm_name"),
+            })
+        return entries
+
+    def export_activities(self, season_ids: list[str]) -> list[dict[str, Any]]:
+        """Raw activity rows plus their detail row, carrying the audit columns.
+
+        Soft-deleted rows are returned here and filtered by the manifest builder,
+        which is where the include/exclude decision is documented -- this method
+        stays a faithful read of the table.
+        """
+        if not season_ids:
+            return []
+        batches = self._many_in("production_batches", "crop_season_id", season_ids)
+        season_by_batch = {str(b["id"]): str(b["crop_season_id"]) for b in batches}
+        if not season_by_batch:
+            return []
+        rows = self._many_in("activities", "production_batch_id", list(season_by_batch))
+        details = self._details_by_activity_id(rows)
+        return [
+            {**row, "crop_season_id": season_by_batch.get(str(row["production_batch_id"])),
+             "detail": details.get(str(row["id"]), {})}
+            for row in rows
+        ]
+
+    def emission_factor_provenance(
+        self, factor_set_ids: list[str]
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        """The factor sets a calculation used, and their factors. 2 requests.
+
+        Only published sets are visible to a caller (`ef_sets_select`), so an
+        unpublished set simply yields no provenance and the manifest warns.
+        """
+        ids = sorted({str(x) for x in factor_set_ids if x})
+        if not ids:
+            return {}, {}
+        sets, factors = self._concurrent(
+            lambda: self._many_in("emission_factor_sets", "id", ids),
+            lambda: self._many_in("emission_factors", "factor_set_id", ids),
+        )
+        by_set: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for factor in factors:
+            by_set[str(factor["factor_set_id"])].append(factor)
+        return {str(s["id"]): s for s in sets}, dict(by_set)
+
+    def mrv_case_row(self, case_id: str) -> dict[str, Any]:
+        """The raw case row (the UI view drops created_at/updated_at)."""
+        return self._one("mrv_cases", case_id)
+
+    def mrv_evidence_rows(self, case_id: str) -> list[dict[str, Any]]:
+        """Raw evidence rows. The UI view drops `uploaded_by`, which an audit
+        package needs in order to say who supplied a file.
+        """
+        self._one("mrv_cases", case_id)
+        return self._many("mrv_evidence", mrv_case_id=case_id)
+
+    def mrv_cases_ids(self) -> list[str]:
+        """Ids of every MRV case the caller can read, for scoping an export
+        lookup without letting a privileged connection decide access.
+        """
+        return [str(row["id"]) for row in self._many("mrv_cases")]
+
+    def metrics_for_seasons(self, season_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """`metrics()` for many seasons without a request chain per season.
+
+        Same computation as the single-season path -- it delegates to the same
+        `_bulk_metric_totals` the organization/farm rollups use, so the export
+        cannot drift from what the dashboards show.
+        """
+        if not season_ids:
+            return {}
+        totals = self._bulk_metric_totals(list(season_ids))
+        return {
+            sid: {k: v for k, v in totals[sid].items() if not k.startswith("_")}
+            for sid in season_ids
+        }
