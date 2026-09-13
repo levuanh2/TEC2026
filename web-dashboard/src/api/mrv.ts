@@ -71,6 +71,45 @@ export async function createMrvXlsxExport(caseId: string): Promise<MrvExportResu
   }))
 }
 
+/** Generate the canonical snapshot and render it as the PDF evidence report.
+ *
+ * Same single call as XLSX: one snapshot, rendered, never recomputed. */
+export async function createMrvPdfExport(caseId: string): Promise<MrvExportResult> {
+  return exportResult(await apiRequest<any>(`/v1/mrv/cases/${caseId}/exports`, {
+    method: 'POST',
+    body: JSON.stringify({ format: 'pdf' }),
+  }))
+}
+
+export type MrvExportFormat = 'json' | 'xlsx' | 'pdf'
+
+export interface MrvExportHistoryItem {
+  exportId: string
+  format: string
+  generatedAt: string
+  generatedBy: string | null
+  fileName: string
+  fileSha256: string | null
+  payloadSha256: string | null
+  sourceSnapshotExportId: string | null
+}
+
+/** Export history for one case, newest first. Metadata only — the API never
+ *  returns a storage bucket, object path or signed URL, and neither does this. */
+export async function listMrvExports(caseId: string): Promise<MrvExportHistoryItem[]> {
+  const r = await apiRequest<{ items: any[] }>(`/v1/mrv/cases/${caseId}/exports`)
+  return r.items.map((x) => ({
+    exportId: x.id,
+    format: x.format,
+    generatedAt: x.generated_at,
+    generatedBy: x.generated_by ?? null,
+    fileName: x.file_name,
+    fileSha256: x.file_sha256 ?? null,
+    payloadSha256: x.payload_sha256 ?? null,
+    sourceSnapshotExportId: x.source_snapshot_export_id ?? null,
+  }))
+}
+
 /** Fetch a stored artifact's bytes. The server checks the recorded digest
  *  before serving, so a mismatched or missing object fails instead of
  *  silently handing back something rebuilt from newer data. */
