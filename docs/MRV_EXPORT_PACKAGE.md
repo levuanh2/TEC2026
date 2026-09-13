@@ -1,8 +1,11 @@
 # MRV evidence package — JSON manifest v1
 
-Module 07, part 1. This is the canonical export contract: the XLSX and PDF
-exports planned for parts 2 and 3 render *from* this manifest, so the shape here
-is the thing to agree on, not the eventual spreadsheet layout.
+Module 07. Part 1 defined the canonical JSON snapshot; part 2 added the XLSX
+renderer that consumes it. PDF (part 3) is not implemented.
+
+The JSON manifest is the contract. Every other format is a *rendering* of a
+stored snapshot, so the shape here is the thing to agree on, not a spreadsheet
+layout.
 
 ## What the package is, and is not
 
@@ -75,8 +78,25 @@ discoverable from the artifact itself:
 5. attach `package_integrity`.
 
 A verifier repeats steps 2–4 and compares. `mrv.manifest.verify_checksum` does
-exactly this, and `GET …/download` returns those same canonical bytes, so a
-downloaded file hashes to its recorded `file_sha256`.
+exactly this, and `GET …/download` returns those same canonical bytes.
+
+### Two digests, two questions
+
+| column | digests | answers |
+| --- | --- | --- |
+| `payload_sha256` | the canonical manifest (`package_integrity.manifest_sha256`) | *which data* |
+| `file_sha256` | the downloadable artifact bytes | *which file* |
+
+They are **not** the same number even for JSON: the manifest digest deliberately
+excludes its own `package_integrity` block, while the served bytes include it.
+A JSON snapshot and an XLSX rendered from it share `payload_sha256` and differ
+in `file_sha256` — which is exactly how "same data, different file" is told
+apart from "different data".
+
+Part 1 wrote the manifest digest into `file_sha256`; the part 2 migration moves
+that value to `payload_sha256` where it belongs. Download verifies JSON against
+the snapshot's own self-describing digest and XLSX against the stored object's
+bytes, so pre-part-2 rows keep verifying correctly.
 
 Naive timestamps are **rejected**, not assumed to be UTC: a dropped timezone
 somewhere upstream would otherwise put a wrong instant into an audit artifact.
@@ -163,21 +183,15 @@ The export computes nothing of its own:
 No formula and no domain query is duplicated, so the package cannot drift from
 what the rest of the product shows.
 
-## Storage
+## Snapshot storage
 
-The snapshot lives in `mrv_exports.export_payload` (jsonb). No object storage is
-involved in part 1, and the package does not claim otherwise.
-`storage_object_path` still holds the canonical
-`<organization_uuid>/<mrv_case_uuid>/<filename>` path — the database trigger
-requires that shape and the unique constraint keeps one export per name — and it
-is what fixes the download filename. **No object is written to the
-`mrv-exports` bucket.**
+The snapshot lives in `mrv_exports.export_payload` (jsonb) and **no object is
+written for a JSON export** — the canonical manifest is the artifact, and
+`storage_object_path` only fixes the download filename (the database trigger
+requires the `<organization>/<case>/<file>` shape and the unique constraint keeps
+one export per name).
 
-Filenames are deterministic and sanitized to ASCII:
-
-```
-agricarbon-mrv-{case_code}-{generated_date}-{export_id[:8]}.json
-```
+Rendered artifacts are different: see [Artifact storage](#artifact-storage).
 
 ## Schema changes
 
@@ -189,21 +203,45 @@ agricarbon-mrv-{case_code}-{generated_date}-{export_id[:8]}.json
   in the "carbon unavailable" state the package most needs to describe;
 - an index on `(mrv_case_id, generated_at desc)`.
 
+`20260913150000_mrv_xlsx_export_artifacts.sql`:
+
+- `mrv_exports.source_snapshot_export_id` — the rendered-from lineage, with a
+  constraint that a `json` row has no parent and every other format must have
+  one;
+- `mrv_exports.payload_sha256` — the manifest digest, separated from the
+  artifact digest in `file_sha256` (see
+  [Two digests](#two-digests-two-questions)); part 1's value is backfilled into it;
+- `mrv_exports_select` / `mrv_export_calcs_select` tightened to
+  `private.user_can_manage_mrv_case`.
+
 `mrv_export_warning_chk` is untouched on purpose: a package that is not
 finalized *must* carry `warning_text`, which is the behaviour this feature
-wants. Part 1 always writes `is_finalized = false`, so the schema itself
+wants. Both parts always write `is_finalized = false`, so the schema itself
 enforces the disclaimer.
 
 ## API
 
 ```
-POST /v1/mrv/cases/{mrv_case_id}/exports     body: {"format": "json"}   -> 201
-GET  /v1/mrv/exports/{mrv_export_id}                                    -> metadata
-GET  /v1/mrv/exports/{mrv_export_id}/download                           -> the snapshot
+POST /v1/mrv/cases/{mrv_case_id}/exports    {"format": "json"|"xlsx"}  -> 201
+POST /v1/mrv/exports/{mrv_export_id}/render {"format": "xlsx"}         -> 201
+GET  /v1/mrv/exports/{mrv_export_id}                                   -> metadata
+GET  /v1/mrv/exports/{mrv_export_id}/download                          -> the artifact
 ```
 
-Download returns `application/json; charset=utf-8` with
-`Content-Disposition: attachment`.
+Download returns the artifact with `Content-Disposition: attachment` and a
+deterministic ASCII filename:
+
+| format | media type |
+| --- | --- |
+| json | `application/json; charset=utf-8` |
+| xlsx | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
+
+```
+agricarbon-mrv-{case_code}-{generated_date}-{export_id[:8]}.{json|xlsx}
+```
+
+`pdf` returns `422 unsupported_export_format`. No API response contains
+`storage_bucket` or `storage_object_path`; only `file_name` is surfaced.
 
 ## Authorization
 
@@ -245,25 +283,24 @@ endpoints. The restriction is specifically on minting and retrieving the
 detail exactly as before — there is simply no export button, and the server
 would refuse anyway.
 
-### Residual: export metadata is still org-readable
+### Export metadata is management-only (tightened in part 2)
 
-`GET /v1/mrv/exports/{id}` and `GET /v1/mrv/cases/{id}/exports` predate this
-feature and are governed by `mrv_exports_select` RLS
-(`private.user_can_read_mrv_case`), so any organization member — a farmer
-included — can still see **that** an export exists, plus its
-`scope_description`, `file_sha256` and `storage_object_path`.
+Part 1 left `mrv_exports_select` open to any organization member, on the grounds
+that `export_payload` was never selected and `storage_object_path` pointed at
+nothing.
 
-They expose **no package content**: `_export_view` does not select
-`export_payload`, and a test pins that. So the restriction that matters holds —
-a farmer cannot obtain the packaged artifact by any route.
+Part 2 makes that path point at a **real private object**, so the same row now
+describes a retrievable artifact. The policy was therefore tightened to
+`private.user_can_manage_mrv_case` — metadata now matches generation and
+download instead of being the one surface that did not. `mrv_export_calculations`
+followed.
 
-This was left as-is deliberately: tightening `mrv_exports_select` is an RLS
-policy change to a pre-existing read surface that the Management list view uses,
-and it is a separate product decision from "who may package a case". Worth
-revisiting in part 2 for one specific reason: if exports ever gain real objects
-in the `mrv-exports` bucket, `storage_object_path` stops being an inert string
-and becomes a fetch hint, and the bucket policy would need to be at least as
-strict as the download route.
+Belt and braces, because RLS is not the only exposure:
+
+- `_export_view` no longer returns `storage_bucket` or `storage_object_path` to
+  anyone. No client has a use for them; the download route supplies the filename.
+- No signed URL is ever minted, so there is nothing time-limited to leak.
+- A test asserts the create response contains neither the bucket name nor a path.
 
 ### Deliberately not granted
 
@@ -282,58 +319,164 @@ rather than trusting the privileged connection to decide.
 
 ## Performance
 
-Measured against hosted dev, demo case `DEMO-MRV-2026` (1 crop season, 7
-activities, 1 evidence file, 6 steps): **~8.2 s**, **11.3 KiB** manifest, 9
-warnings.
+Measured separately, because they are different costs with different fixes.
 
-Every read is batched with `IN` — there is no per-entity request loop. The cost
-is dominated by round trips to hosted Supabase, and one deliberate duplication
-remains: activities are read once for the manifest and again inside
+| step | hosted dev, demo case | 1000 activities + 100 evidence |
+| --- | --- | --- |
+| canonical snapshot assembly | ~8.2 s | — |
+| XLSX render (pure function) | ~0.1 s | 1.55 s |
+| artifact size | 11.3 KiB (json) / ~25 KiB (xlsx) | 68 KiB |
+
+Assembly dominates and is round-trip bound against hosted Supabase; every read is
+batched with `IN` and there is no per-entity request loop. One deliberate
+duplication remains: activities are read once for the manifest and again inside
 `metrics_for_seasons`. Reusing the metric service rather than recomputing its
-formulas is worth one extra read; collapsing it would mean the export owning its
-own copy of the metric logic, which is exactly what must not happen.
+formulas is worth one extra read.
 
-An export is not on a latency-critical path. If it becomes one, the fix is to
-pass the already-fetched activities into a metrics entry point, not to inline
-the formulas.
+Rendering is cheap and scales linearly — which is the whole argument for
+rendering from a stored snapshot rather than reassembling per format.
 
-## Part 2/3 renderer contract
+Generation is synchronous and `status` is always `generated`. There is no job
+queue because nothing yet justifies one; if assembly ever needs to move
+off-request, the existing status column is where that would be modelled.
 
-**JSON manifest v1 is the canonical export snapshot.** The XLSX and PDF exports
-are **renderers of a stored snapshot**, not independent assemblers of business
-data.
+## The renderer contract
+
+**JSON manifest v1 is the canonical export snapshot.** XLSX is a **renderer of a
+stored snapshot**, not an independent assembler of business data. PDF, when it
+comes, is bound by the same rule.
 
 A renderer:
 
-- reads `mrv_exports.export_payload` for an existing `export_id`;
-- may add presentation metadata — sheet names, column order, page headers,
-  localized labels, formatting;
-- may fail honestly if the snapshot's `schema_version` is one it does not
-  understand.
+- reads `export_payload` from an existing export row;
+- may add presentation metadata — sheet names, column order, widths, localized
+  labels, the rendering timestamp;
+- may fail honestly on a `schema_version` it does not understand.
 
 A renderer must **not**:
 
 - recalculate carbon or resource metrics;
-- fetch newer data from any table, which would silently produce a document that
-  disagrees with the snapshot it claims to render;
+- query activities, evidence, steps or metrics again;
+- fetch newer data, which would silently produce a document that disagrees with
+  the snapshot it claims to render;
 - drop or reinterpret `warnings`, or present an incomplete package as complete;
 - change the meaning of any value in the snapshot;
 - omit the disclaimer.
 
-This is also the performance answer. Assembly is the expensive half (~8 s
-against hosted Supabase); rendering a stored 11 KiB document is not. A part 2
-that re-ran assembly per format would be both slower and *wrong*, because two
-formats generated minutes apart could then disagree. Generate once, render many
-times, and the XLSX, the PDF and the JSON all say the same thing because they
-came from the same bytes.
+`mrv/workbook.py` takes a `dict` and returns `bytes`. It imports no repository
+and no service, which is what makes the rule enforceable rather than aspirational.
+
+This is also the performance answer. Assembly is the expensive half (~8 s against
+hosted Supabase); rendering a stored manifest takes ~0.1 s. A part 3 that re-ran
+assembly per format would be both slower and *wrong*, because two formats
+generated minutes apart could disagree. Generate once, render many times.
 
 If a renderer needs a value the manifest does not carry, the fix is to add it to
-the manifest behind a `schema_version` bump — not to reach past the snapshot.
+the manifest behind a `schema_version` bump — never to reach past the snapshot.
 
-## Not in part 1
+## XLSX workbook
 
-- XLSX (part 2) and PDF (part 3)
-- zipping evidence binaries with the manifest
-- asynchronous generation — generation is synchronous and `status` is always
-  `generated`; there is no job queue because nothing yet needs one
-- any notion of an approved, submitted or verified package
+Eleven sheets, always present. A section with no data gets an explicit
+empty-state row rather than a silent gap, so "no evidence" and "the exporter
+skipped evidence" cannot be confused.
+
+| sheet | contents |
+| --- | --- |
+| Tổng quan | export metadata, case, readiness, disclaimer |
+| Phạm vi | organization → farm → plot → crop season → production batch |
+| Các bước MRV | the six steps, statuses verbatim |
+| Bằng chứng | evidence metadata only |
+| Hoạt động canh tác | activities flattened over a stable column superset |
+| Thu hoạch | harvest events (the yield denominator) |
+| Chỉ số tài nguyên | resource metrics with completeness |
+| Carbon | per-season state plus the emission breakdown |
+| Nguồn gốc hệ số | factor sets, factors, sources |
+| Cảnh báo | one row per warning |
+| Gói dữ liệu gốc | schema version, export id, digests, canonicalization |
+
+### Cell semantics
+
+- **null → empty cell.** Never `0`, never `"N/A"`, never `"null"`. A missing
+  measurement and a measurement of zero are different facts. Where a human
+  explanation helps it goes in its own status column, leaving the value blank.
+- **Numbers are real numeric cells.** The manifest carries quantities as decimal
+  strings so its checksum stays stable; the renderer parses them through
+  `Decimal` so precision is preserved and the spreadsheet can sort and total.
+- **Timestamps are datetime cells in UTC**, with the offset dropped because Excel
+  has no timezone concept — every such column is labelled `(UTC)`. Converting to
+  local time would silently shift dates across the ICT boundary.
+- **Dates stay dates**, not midnight timestamps.
+- **No formulas.** The workbook is a report, not a second calculation engine.
+- Presentation only: one header style, thin borders, frozen headers, autofilter,
+  computed column widths. No merged-cell layouts, no charts, no KPI tiles.
+
+### Determinism
+
+Same manifest in, same cell values and same row order out. Every list is sorted
+on a stable key in the renderer rather than trusted to arrive ordered.
+
+The `.xlsx` **bytes** are not claimed to be reproducible — a zip carries
+timestamps and openpyxl writes its own metadata. Content is what is deterministic,
+and content is what the tests assert.
+
+## Artifact storage
+
+XLSX bytes go to the existing private `mrv-exports` Supabase Storage bucket, the
+same mechanism `cv_repo` already uses for plant images, under the
+`<organization_uuid>/<mrv_case_uuid>/<filename>` path a database trigger already
+enforces. The bucket is **not public**.
+
+Retrieval is backend-controlled: the download route authorizes, fetches the
+object, verifies `file_sha256`, and streams the bytes. **No signed URL is ever
+generated, and no bucket or object path is returned by any API.** A client is
+given the filename and nothing more.
+
+JSON exports store no object — the canonical manifest in `export_payload` is the
+artifact, and `storage_object_path` only fixes the filename.
+
+### Failure behaviour
+
+| situation | response |
+| --- | --- |
+| object missing, metadata present | `404 export_artifact_missing` |
+| bytes do not match `file_sha256` | `409 export_artifact_integrity_failed` |
+| render fails | the snapshot stays valid; no partial artifact is written |
+
+None of these fall back to rebuilding from live data. A rebuild would return
+something other than the snapshot the row promises, which is the one thing an
+audit artifact must never do.
+
+## Export lineage
+
+An XLSX export is its own `mrv_exports` row with `format = 'xlsx'` and
+`source_snapshot_export_id` pointing at the JSON snapshot it rendered. A
+constraint enforces the shape: a `json` row has no parent, every other format
+must have one, so a snapshot-of-a-snapshot cannot exist.
+
+The XLSX row also keeps its own copy of `export_payload`. That duplication is
+deliberate — an audit row must stay self-describing even if the parent is later
+removed — and `payload_sha256` proves both rows rendered from byte-identical
+manifests.
+
+### Two ways to get a workbook
+
+```
+POST /v1/mrv/cases/{case_id}/exports   {"format": "xlsx"}
+```
+Assembles one canonical snapshot, then renders it. Both rows are created. There
+is only ever **one** assembly path.
+
+```
+POST /v1/mrv/exports/{export_id}/render   {"format": "xlsx"}
+```
+Renders an **existing** snapshot. This is the auditable path: the workbook
+demonstrably comes from one stored manifest rather than from data as it happens
+to look now. Refused if the target is itself a rendering.
+
+## Not implemented
+
+- **PDF (part 3)** — bound by the same renderer contract above.
+- **Zipping evidence binaries** with the manifest or workbook. Both formats
+  reference evidence and say so explicitly; neither claims to contain it.
+- Asynchronous generation.
+- Any notion of an approved, submitted or verified package.
