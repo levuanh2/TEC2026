@@ -474,6 +474,7 @@ class MrvExportResponse(BaseModel):
     payload_sha256: str | None = None
     source_snapshot_export_id: str | None = None
     generated_at: str
+    generated_by: str | None = None
 
 
 # -- MRV evidence package (M07 part 1) ----------------------------------
@@ -503,7 +504,7 @@ class MrvPackageIntegrity(BaseModel):
 
 
 class MrvArtifactResponse(BaseModel):
-    """A rendered artifact (currently XLSX) and its lineage.
+    """A rendered artifact (XLSX or PDF) and its lineage.
 
     `source_snapshot_export_id` names the canonical JSON snapshot this was
     rendered from; `payload_sha256` is that snapshot's digest and `file_sha256`
@@ -531,7 +532,7 @@ class MrvArtifactResponse(BaseModel):
 
 
 class MrvRenderRequest(BaseModel):
-    format: str = Field("xlsx", description="Artifact format to render from a stored snapshot.")
+    format: str = Field("xlsx", description="Artifact format to render from a stored JSON snapshot: 'xlsx' or 'pdf'.")
 
 
 class MrvExportCreatedResponse(BaseModel):
@@ -573,7 +574,7 @@ class MrvExportRequest(BaseModel):
     rather than FastAPI's raw request-validation shape.
     """
     format: str = Field(
-        "json", description="'json' (the canonical snapshot) or 'xlsx' (rendered from it). PDF is not implemented."
+        "json", description="'json' (the canonical snapshot), or 'xlsx' / 'pdf' (rendered from that snapshot in the same call)."
     )
 
 

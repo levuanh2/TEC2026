@@ -169,6 +169,10 @@ class PostgresMrvExportRepository:
             raise MrvArtifactMissingError(object_path)
         return bytes(data)
 
+    def delete_artifact(self, object_path: str) -> None:
+        """Best-effort cleanup of an object whose metadata row was never written."""
+        self._storage.storage.from_(EXPORTS_BUCKET).remove([object_path])
+
     def artifact_row(self, export_id: str, *, authorized_case_ids: list[str]) -> dict[str, Any]:
         """Metadata needed to serve an artifact, scoped in SQL to managed cases."""
         if not authorized_case_ids:

@@ -519,9 +519,9 @@ def test_unauthenticated_xlsx_is_401():
     assert client.post(f"/v1/mrv/exports/{CASE}/render").status_code == 401
 
 
-def test_pdf_is_still_refused_with_the_shared_envelope(client_for):
+def test_an_unknown_format_is_refused_with_the_shared_envelope(client_for):
     client, _ = client_for(FakeRead())
-    response = client.post(f"/v1/mrv/cases/{CASE}/exports", json={"format": "pdf"})
+    response = client.post(f"/v1/mrv/cases/{CASE}/exports", json={"format": "docx"})
     assert response.status_code == 422
     assert response.json()["detail"]["error"]["code"] == "unsupported_export_format"
 

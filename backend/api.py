@@ -531,8 +531,8 @@ def _mrv_export_or_http(callback):
             status_code=422,
             detail=error_detail(
                 "unsupported_export_format",
-                "Chỉ hỗ trợ định dạng 'json' (gói dữ liệu gốc) và 'xlsx' (bảng tính kết "
-                "xuất từ gói đó). Bản xuất PDF chưa có.",
+                "Chỉ hỗ trợ định dạng 'json' (gói dữ liệu gốc), 'xlsx' và 'pdf' (kết xuất "
+                "từ gói đó). Chỉ kết xuất được từ một gói dữ liệu gốc, không từ bản kết xuất khác.",
             ),
         ) from exc
     except MrvArtifactMissingError as exc:
@@ -564,7 +564,8 @@ def create_mrv_export(
     repo: SupabaseReadRepository = Depends(_read_repo),
     service: MrvExportService = Depends(_mrv_export_service),
 ) -> dict[str, Any]:
-    """Generate an MRV evidence package (JSON) for one case.
+    """Generate an MRV evidence package for one case: the canonical JSON snapshot,
+    or that snapshot rendered as XLSX or PDF in the same call.
 
     The package is a snapshot of current data and its provenance. It is not a
     certification, a verification or a compliance statement, and it carries its
