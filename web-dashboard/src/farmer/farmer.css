@@ -139,35 +139,54 @@
 
 /* ----------------------------------------------------------------- shell */
 .fw-shell { min-height: 100vh; display: grid; grid-template-columns: 232px minmax(0, 1fr); background: var(--fw-paper); }
+/* Requested carve-out: solid navbar blue, not the shell's paper surface. */
 .fw-side {
   position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
   padding: var(--fw-space-24) var(--fw-space-20) var(--fw-space-16);
-  border-right: 1px solid var(--fw-rule);
+  background: linear-gradient(180deg, var(--fw-navbar), var(--fw-navbar-2));
+  color-scheme: dark;
 }
-/* Compact brand: a wordmark, not a logo tile. */
-.fw-brand { display: flex; align-items: baseline; gap: var(--fw-space-8); text-decoration: none; color: var(--fw-ink); }
+/* Compact brand: a wordmark, not a logo tile.
+ * `.fw-side` prefix beats the global `.fw a { color: inherit }` reset (which
+ * otherwise wins on specificity: class+type > class alone), so the brand
+ * link doesn't inherit the app's dark ink instead of white. */
+.fw-side .fw-brand { display: flex; align-items: baseline; gap: var(--fw-space-8); text-decoration: none; color: #fff; }
 .fw-brand__mark { display: none; }
 .fw-brand b { font-family: var(--fw-display); font-size: var(--fw-text-lg); font-weight: 600; letter-spacing: -.01em; line-height: 1; }
-.fw-brand small { font-size: var(--fw-text-xs); font-weight: 600; color: var(--fw-muted); }
+.fw-brand small { font-size: var(--fw-text-xs); font-weight: 600; color: rgb(255 255 255 / .62); }
 
-.fw-nav { display: grid; align-content: start; gap: var(--fw-space-20); padding-top: var(--fw-space-32); overflow-y: auto; flex: 1; }
+/* overflow-y: auto with overflow-x left as the visible default computes
+ * overflow-x to auto too (CSS overflow spec) — so the hover scale(1.1) on
+ * .fw-nav__item (which nudges scrollable-overflow width right) was enough to
+ * pop an unwanted horizontal scrollbar. Only vertical scroll is ever wanted. */
+.fw-nav { display: grid; align-content: start; gap: var(--fw-space-20); padding-top: var(--fw-space-32); overflow-y: auto; overflow-x: hidden; flex: 1; }
 .fw-nav__group { display: grid; gap: 1px; }
-.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--fw-muted); padding-bottom: var(--fw-space-6); }
-/* Quiet but unmistakable: the active row is the only one in display type and
- * full ink, and it is the only one with a rule beneath it. No pill, no slab. */
-.fw-nav__item {
+.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgb(255 255 255 / .5); padding-bottom: var(--fw-space-6); }
+/* Quiet but unmistakable: the active row is the only one in full white and
+ * the only one with a rule beneath it. No pill, no slab.
+ * `.fw-side` prefix (see .fw-brand note above): without it this rule's
+ * (0,1,0) specificity loses to `.fw a { color: inherit }`'s (0,1,1), so the
+ * resting label silently inherits the app's dark ink instead of staying
+ * white — invisible against navy, which is exactly the bug reported. */
+.fw-side .fw-nav__item {
   display: flex; align-items: center; gap: var(--fw-space-12); min-height: 40px;
-  color: var(--fw-ink-2); font-weight: 550; font-size: 14.5px; text-decoration: none;
+  color: rgb(255 255 255 / .86); font-weight: 550; font-size: 14.5px; text-decoration: none;
   border-bottom: 1px solid transparent;
-  transition: color var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out);
+  transform-origin: left center;
+  transition: color var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out), transform var(--fw-dur) var(--fw-ease-out);
 }
-.fw-nav__item svg { width: 18px; height: 18px; color: var(--fw-muted); transition: color var(--fw-dur) var(--fw-ease-out); }
-.fw-nav__item:hover { color: var(--fw-ink); border-bottom-color: var(--fw-rule); }
-.fw-nav__item:hover svg { color: var(--fw-ink-2); }
-.fw-nav__item[aria-current="page"] { color: var(--fw-accent-deep); font-weight: 700; border-bottom-color: var(--fw-rule-3); }
-.fw-nav__item[aria-current="page"] svg { color: var(--fw-accent); }
+.fw-nav__item svg { width: 18px; height: 18px; color: rgb(255 255 255 / .68); transition: color var(--fw-dur) var(--fw-ease-out); }
+.fw-nav__item:hover { color: #fff; font-weight: 700; border-bottom-color: rgb(255 255 255 / .35); transform: scale(1.1); }
+.fw-nav__item:hover svg { color: #fff; }
+.fw-nav__item[aria-current="page"] { color: #fff; font-weight: 700; border-bottom-color: var(--fw-leaf); }
+.fw-nav__item[aria-current="page"] svg { color: var(--fw-leaf); }
 
-.fw-profile { display: flex; align-items: center; gap: var(--fw-space-8); padding-top: var(--fw-space-16); border-top: 1px solid var(--fw-rule); }
+.fw-profile { display: flex; align-items: center; gap: var(--fw-space-8); padding-top: var(--fw-space-16); border-top: 1px solid rgb(255 255 255 / .16); }
+.fw-side .fw-avatar {
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  border: 1px solid rgb(255 255 255 / .35); color: #fff; font-weight: 650; font-size: var(--fw-text-sm);
+  text-decoration: none;
+}
 .fw-avatar {
   width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
   border: 1px solid var(--fw-rule-2); color: var(--fw-accent-deep); font-weight: 650; font-size: var(--fw-text-sm);
@@ -175,11 +194,11 @@
 }
 .fw-avatar--lg { width: 56px; height: 56px; font-size: var(--fw-text-lg); font-family: var(--fw-display); }
 .fw-profile__id { min-width: 0; flex: 1; display: grid; text-decoration: none; }
-.fw-profile__id b { font-size: var(--fw-text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fw-profile__id small { font-size: var(--fw-text-xs); color: var(--fw-muted); }
+.fw-profile__id b { font-size: var(--fw-text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+.fw-profile__id small { font-size: var(--fw-text-xs); color: rgb(255 255 255 / .58); }
 /* Logout reads as a real action, not an input-looking button. */
-.fw-signout { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-xs); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
-.fw-signout:hover { color: var(--fw-danger); }
+.fw-signout { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-xs); font-weight: 600; color: rgb(255 255 255 / .58); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
+.fw-signout:hover { color: #ff9aa2; }
 
 .fw-main { min-width: 0; display: flex; flex-direction: column; overflow-x: clip; }
 .fw-topbar {
@@ -264,26 +283,48 @@
 .fw-ledger__date b.is-empty { color: var(--fw-muted); font-weight: 550; }
 
 /* ------------------------------------------------------- quick record row */
-/* Six verbs on one ruled row — not six cards. Each carries its operation's ink
- * on the icon; the label does the rest. */
+/* Six verbs on one ruled row. Requested carve-out from the ink-only rule
+ * above: each verb now also gets its own pastel tile (left-to-right —
+ * seeding, fertilizer, irrigation, pesticide, straw, harvest), with a hover
+ * lift so the row still reads as interactive, not printed. */
 .fw-quick { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-top: 1px solid var(--fw-rule-2); }
 .fw-qa {
   display: grid; justify-items: start; align-content: start; gap: var(--fw-space-8);
-  padding: var(--fw-space-16) var(--fw-space-12) var(--fw-space-16) 0;
-  background: none; border: 0; border-bottom: 1px solid var(--fw-rule); text-align: left; color: var(--fw-ink);
-  transition: border-color var(--fw-dur) var(--fw-ease-out), color var(--fw-dur) var(--fw-ease-out);
+  padding: var(--fw-space-16) var(--fw-space-12);
+  background: none; border: 0; border-radius: var(--fw-radius-lg); border-bottom: 1px solid var(--fw-rule); text-align: left; color: var(--fw-ink);
+  transition: border-color var(--fw-dur) var(--fw-ease-out), color var(--fw-dur) var(--fw-ease-out), background-color var(--fw-dur) var(--fw-ease-out);
   cursor: pointer;
 }
-.fw-qa + .fw-qa { padding-left: var(--fw-space-12); border-left: 1px solid var(--fw-rule); }
+.fw-qa + .fw-qa { border-left: 1px solid var(--fw-rule); }
+.fw-qa .fw-tile {
+  width: 44px; height: 44px; border-radius: 13px;
+  transition: background-color var(--fw-dur) var(--fw-ease-out), transform var(--fw-dur) var(--fw-ease-out), box-shadow var(--fw-dur) var(--fw-ease-out);
+}
 .fw-qa .fw-tile svg { width: 22px; height: 22px; }
+.fw-qa.tone-leaf .fw-tile { background: var(--fw-qa-seeding); }
+.fw-qa.tone-earth .fw-tile { background: var(--fw-qa-fertilizer); }
+.fw-qa.tone-water .fw-tile { background: var(--fw-qa-irrigation); }
+.fw-qa.tone-terracotta .fw-tile { background: var(--fw-qa-pesticide); }
+.fw-qa.tone-straw .fw-tile { background: var(--fw-qa-straw); }
+.fw-qa.tone-amber .fw-tile { background: var(--fw-qa-harvest); }
 .fw-qa:hover:not(:disabled) { border-bottom-color: var(--fw-rule-3); color: var(--fw-accent-deep); }
-.fw-qa:active:not(:disabled) { background: var(--fw-paper-2); }
+/* The whole cell washes with the operation's own pastel on hover, not just the tile. */
+.fw-qa.tone-leaf:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-seeding) 22%, transparent); }
+.fw-qa.tone-earth:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-fertilizer) 22%, transparent); }
+.fw-qa.tone-water:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-irrigation) 26%, transparent); }
+.fw-qa.tone-terracotta:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-pesticide) 32%, transparent); }
+.fw-qa.tone-straw:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-straw) 26%, transparent); }
+.fw-qa.tone-amber:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-harvest) 26%, transparent); }
+.fw-qa:hover:not(:disabled) .fw-tile { transform: translateY(-3px); box-shadow: 0 10px 18px -10px oklch(24% 0.03 165 / 0.45); filter: saturate(1.15); }
+.fw-qa:active:not(:disabled) .fw-tile { transform: translateY(-1px); filter: saturate(1.15) brightness(.94); }
 .fw-qa__label { display: grid; gap: 1px; min-width: 0; }
 .fw-qa__label b { font-size: 14.5px; font-weight: 650; }
 .fw-qa__label small { font-size: var(--fw-text-xs); color: var(--fw-muted); font-weight: 500; line-height: 1.35; }
 .fw-qa:disabled { opacity: .45; cursor: not-allowed; }
+.fw-qa:disabled .fw-tile { filter: grayscale(.4); }
 .fw-quick--compact .fw-qa { padding-top: var(--fw-space-12); padding-bottom: var(--fw-space-12); }
 .fw-quick--compact .fw-qa small { display: none; }
+.fw-quick--compact .fw-qa .fw-tile { width: 38px; height: 38px; border-radius: 11px; }
 
 /* ------------------------------------------------------------- attention */
 /* Ruled lines, each opened by its own ink mark. No left slab, no card. */
@@ -732,7 +773,7 @@
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 1180px) {
   .fw-quick { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .fw-qa:nth-child(3n+1) { padding-left: 0; border-left: 0; }
+  .fw-qa:nth-child(3n+1) { border-left: 0; }
 }
 @media (max-width: 1100px) {
   .fw-shell { grid-template-columns: 208px minmax(0, 1fr); }
@@ -764,9 +805,9 @@
   .fw-greet h1 { font-size: var(--fw-text-lg); }
   /* Two columns of verbs, full-height touch targets. */
   .fw-quick, .fw-quick--compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fw-qa { min-height: 84px; padding-right: var(--fw-space-8); }
-  .fw-qa:nth-child(odd) { padding-left: 0; border-left: 0; }
-  .fw-qa:nth-child(even) { padding-left: var(--fw-space-12); border-left: 1px solid var(--fw-rule); }
+  .fw-qa { min-height: 84px; }
+  .fw-qa:nth-child(odd) { border-left: 0; }
+  .fw-qa:nth-child(even) { border-left: 1px solid var(--fw-rule); }
   .fw-quick--compact .fw-qa small { display: none; }
   .fw-carbon-hero { grid-template-columns: minmax(0, 1fr); gap: var(--fw-space-16); }
   .fw-tabs { gap: var(--fw-space-16); }
@@ -776,18 +817,18 @@
   .fw-cvhist__item { grid-template-columns: auto minmax(0, 1fr) auto; }
   .fw-cvhist__item .fw-conf { display: none; }
   .fw-ws-head__facts { gap: var(--fw-space-12) var(--fw-space-24); }
-  /* True 5-item bottom navigation. */
+  /* True 5-item bottom navigation — same navbar blue as the desktop sidebar. */
   .fw-bottom {
     position: fixed; z-index: 40; left: 0; right: 0; bottom: 0;
     display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
     padding: var(--fw-space-4) var(--fw-space-4) calc(var(--fw-space-4) + env(safe-area-inset-bottom));
-    background: var(--fw-paper); border-top: 1px solid var(--fw-rule-2);
+    background: linear-gradient(180deg, var(--fw-navbar), var(--fw-navbar-2)); border-top: 1px solid rgb(255 255 255 / .12);
   }
-  .fw-bottom a { display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 54px; padding: var(--fw-space-4) 2px; color: var(--fw-muted); text-decoration: none; font-size: 11px; font-weight: 600; }
+  .fw-bottom a { display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 54px; padding: var(--fw-space-4) 2px; color: rgb(255 255 255 / .62); text-decoration: none; font-size: 11px; font-weight: 600; }
   .fw-bottom__ico { display: grid; place-items: center; height: 24px; }
   .fw-bottom__ico svg { width: 21px; height: 21px; }
-  .fw-bottom a[aria-current="page"] { color: var(--fw-accent-deep); font-weight: 700; }
-  .fw-bottom a[aria-current="page"] .fw-bottom__ico { border-bottom: 2px solid var(--fw-accent); }
+  .fw-bottom a[aria-current="page"] { color: #fff; font-weight: 700; }
+  .fw-bottom a[aria-current="page"] .fw-bottom__ico { border-bottom: 2px solid var(--fw-leaf); }
   .fw-overlay { padding: 0; align-items: flex-end; }
   .fw-sheet, .fw-sheet--wide { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
   /* A short form must still put Save at the bottom of the sheet, not floating
