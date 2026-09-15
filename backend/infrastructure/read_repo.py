@@ -376,23 +376,28 @@ class SupabaseReadRepository:
         """
         yield_kg = water_m3 = fertilizer_kg = total_cost = 0.0
         has_yield = has_cost = True
-        has_water = has_fertilizer = False
+        # Seen at least one record / any record missing its value. Tracked
+        # separately so the result cannot depend on which record comes last (B1):
+        # one missing value anywhere makes the whole group incomplete.
+        seen_water = missing_water = seen_fertilizer = missing_fertilizer = False
         for item in activities:
             payload = item["payload"]; kind = item["activity_type"]
             if kind == "harvest":
                 if payload.get("yield_kg") is None: has_yield = False
                 else: yield_kg += float(payload["yield_kg"])
             if kind == "irrigation":
-                has_water = True
-                if payload.get("water_volume_m3") is None: has_water = False
+                seen_water = True
+                if payload.get("water_volume_m3") is None: missing_water = True
                 else: water_m3 += float(payload["water_volume_m3"])
             if kind == "fertilizer":
-                has_fertilizer = True
-                if payload.get("amount_kg") is None: has_fertilizer = False
+                seen_fertilizer = True
+                if payload.get("amount_kg") is None: missing_fertilizer = True
                 else: fertilizer_kg += float(payload["amount_kg"])
             cost = SupabaseReadRepository._activity_cost_vnd(kind, payload)
             if cost is None: has_cost = False
             else: total_cost += cost
+        has_water = seen_water and not missing_water
+        has_fertilizer = seen_fertilizer and not missing_fertilizer
         succeeded = [x for x in carbon if x.get("status") == "succeeded" and x.get("scenario") == "actual"]
         latest = max(succeeded, key=lambda x: str(x.get("calculated_at")), default=None)
         y = yield_kg if has_yield and yield_kg > 0 else None
