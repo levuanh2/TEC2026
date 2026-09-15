@@ -406,3 +406,9 @@ FILES RELEASED: ...
 
 Không tự commit/push trừ khi user yêu cầu rõ. Luôn `git status --short`
 trước khi sửa gì trong vùng đang share.
+
+## P0 security sprint (2026-09-15) — M7 → B7 → B3
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `supabase/migrations/20260915100000_restrict_mrv_exports_storage_client_access.sql` (new), `backend/infrastructure/memberships.py` (new), `backend/infrastructure/read_repo.py` (`me`), `backend/infrastructure/write_repo.py`, `backend/service.py` (`ActivityWriteService`, `MrvExportService._manages`), `backend/tests/test_p0_security_policies.py`, `test_memberships.py`, `test_me_active_memberships.py`, `test_activity_write_permissions.py` (new), `backend/scripts/hosted_p0_security_smoke.py` (new), `web-dashboard/src/api/me.ts`, `web-dashboard/src/farmer/writeAccess.tsx` (new), `FarmerExperience.tsx`, `pages/Home.tsx`, `pages/Season.tsx`, `pages/Journal.tsx`, `pages/Performance.tsx` | — (released) | P0 fixes only: MRV export Storage client access, ended memberships in `/v1/me`, farm viewer read-only writes. No P1/P2. Branch `feature/p0-security-auth-fixes`. | DONE: migration `20260915100000` applied to hosted dev; backend 510 passed (incl. 19 + 13 hosted rolled-back RLS/Storage tests); hosted smoke 50/50; web Vitest 160 passed, tsc + build passed, mock Farmer + Management Playwright passed; 0 QA rows left. |
