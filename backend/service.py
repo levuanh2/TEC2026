@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from carbon import CarbonResult, ParameterSet, calculate_carbon
+from infrastructure import memberships
 from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
@@ -166,12 +167,18 @@ class ActivityWriteService:
         actor_id = self._actor_and_farmer_scope(read_repository)
         batch_id = self._write_batch(read_repository, crop_season_id)
         data = schemas.validate_activity_data(request.activity_type, request.data).model_dump()
-        row, replay = self._write_repository.create(
-            crop_season_id=crop_season_id, production_batch_id=batch_id,
-            actor_id=actor_id, idempotency_key=str(request.idempotency_key),
-            activity_type=request.activity_type, occurred_at=request.occurred_at,
-            note=request.note, data=data,
-        )
+        try:
+            # The repository re-checks write permission (farm owner/editor or
+            # cooperative manager) inside its transaction; a read-only farm
+            # member is normalized to the same 404 as an out-of-scope season.
+            row, replay = self._write_repository.create(
+                crop_season_id=crop_season_id, production_batch_id=batch_id,
+                actor_id=actor_id, idempotency_key=str(request.idempotency_key),
+                activity_type=request.activity_type, occurred_at=request.occurred_at,
+                note=request.note, data=data,
+            )
+        except ActivityNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
         return self._response(row, replay=replay)
 
     def update(
@@ -191,10 +198,13 @@ class ActivityWriteService:
             data = schemas.validate_activity_data(
                 existing["activity_type"], {**existing["data"], **request.data}
             ).model_dump()
-        row = self._write_repository.update(
-            activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
-            note=request.note, update_note="note" in request.model_fields_set, data=data,
-        )
+        try:
+            row = self._write_repository.update(
+                activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
+                note=request.note, update_note="note" in request.model_fields_set, data=data,
+            )
+        except ActivityNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
         return self._response(row)
 
     def delete(self, *, read_repository: SupabaseReadRepository, activity_id: str) -> None:
@@ -462,25 +472,16 @@ class MrvExportService:
         """Python mirror of `private.user_is_org_manager`, including `ended_at`.
 
         Reads the membership rows `me()` already returned, so this costs no extra
-        round trip. A lapsed membership is not management authority, which is why
-        `ended_at` is honoured here exactly as the SQL helper honours it.
+        round trip. A lapsed membership is not management authority; the active
+        rule is the shared `infrastructure.memberships` one, so this check can
+        never disagree with `/v1/me` or the SQL helper. `me()` already drops ended
+        rows — filtering again keeps this safe for any other actor source.
         """
-        now = datetime.now(timezone.utc)
-        for membership in actor.get("organization_memberships") or []:
-            if str(membership.get("organization_id")) != str(organization_id):
-                continue
-            if str(membership.get("role")) != cls.MANAGEMENT_ROLE:
-                continue
-            ended = membership.get("ended_at")
-            if ended is None:
-                return True
-            if isinstance(ended, str):
-                ended = datetime.fromisoformat(ended.replace("Z", "+00:00"))
-            if ended.tzinfo is None:
-                ended = ended.replace(tzinfo=timezone.utc)
-            if ended > now:
-                return True
-        return False
+        return any(
+            str(membership.get("organization_id")) == str(organization_id)
+            and str(membership.get("role")) == cls.MANAGEMENT_ROLE
+            for membership in memberships.active_memberships(actor.get("organization_memberships") or [])
+        )
 
     def _authorized_case(
         self, read_repository: SupabaseReadRepository, mrv_case_id: str, actor: dict[str, Any]

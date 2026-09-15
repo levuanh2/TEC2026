@@ -7,6 +7,7 @@ never accepts a farm, organization, actor, or role from the HTTP payload.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +17,12 @@ from .config import Settings
 
 class ActivityNotFoundError(Exception):
     pass
+
+
+class ActivityWritePermissionError(ActivityNotFoundError):
+    """The caller can read the target scope but may not write it (for example a
+    farm member with `farm_role = viewer`). A subclass of `ActivityNotFoundError`
+    so every caller keeps the normalized 404 and never reveals the difference."""
 
 
 class IdempotencyConflictError(Exception):
@@ -83,6 +90,39 @@ class PostgresActivityWriteRepository:
             raise ActivityNotFoundError()
         return {**row, "data": dict(detail)}
 
+    @staticmethod
+    def _assert_can_write_batch(cur: Any, *, production_batch_id: str, actor_id: str) -> None:
+        """Ask the RLS write rule itself, inside the write's own transaction.
+
+        This connection bypasses RLS, and the service only establishes *read*
+        scope through the caller's JWT — read scope is wider than write scope
+        (a farm `viewer` can read). Rather than re-deriving `owner/editor or
+        cooperative manager` in Python, evaluate `private.user_can_write_batch`,
+        the helper the `activities` INSERT/UPDATE policies and the soft-delete
+        RPC already use, with `auth.uid()` = the JWT-verified actor. The claim is
+        transaction-local and cleared again before any row is written, so audit
+        triggers see the same session as before.
+        """
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
+        )
+        cur.execute("select private.user_can_write_batch(%s::uuid) as allowed", [production_batch_id])
+        allowed = bool(cur.fetchone()["allowed"])
+        cur.execute("select set_config('request.jwt.claims', '', true)")
+        if not allowed:
+            raise ActivityWritePermissionError()
+
+    def _assert_can_write_activity(self, cur: Any, *, activity_id: str, actor_id: str) -> None:
+        cur.execute(
+            "select production_batch_id::text as production_batch_id from public.activities where id = %s",
+            [activity_id],
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ActivityNotFoundError()
+        self._assert_can_write_batch(cur, production_batch_id=row["production_batch_id"], actor_id=actor_id)
+
     def get_for_actor(self, activity_id: str, actor_id: str) -> dict[str, Any]:
         with self._connection() as conn, conn.cursor() as cur:
             return self._view(cur, activity_id, actor_id=actor_id)
@@ -94,6 +134,9 @@ class PostgresActivityWriteRepository:
     ) -> tuple[dict[str, Any], bool]:
         table, columns = self._detail_spec(activity_type)
         with self._connection() as conn, conn.cursor() as cur:
+            # Before the idempotent-replay lookup too: a read-only member gets the
+            # same answer whether or not the key was used before.
+            self._assert_can_write_batch(cur, production_batch_id=production_batch_id, actor_id=actor_id)
             cur.execute(
                 """select id::text, deleted_at is not null as is_deleted from public.activities
                    where recorded_by=%s and web_idempotency_key=%s""",
@@ -131,6 +174,7 @@ class PostgresActivityWriteRepository:
     ) -> dict[str, Any]:
         with self._connection() as conn, conn.cursor() as cur:
             existing = self._view(cur, activity_id, actor_id=actor_id)
+            self._assert_can_write_activity(cur, activity_id=activity_id, actor_id=actor_id)
             if occurred_at is not None or update_note:
                 cur.execute(
                     """update public.activities set occurred_at=coalesce(%s, occurred_at),
@@ -150,6 +194,7 @@ class PostgresActivityWriteRepository:
     def soft_delete(self, *, activity_id: str, actor_id: str) -> None:
         with self._connection() as conn, conn.cursor() as cur:
             self._view(cur, activity_id, actor_id=actor_id)
+            self._assert_can_write_activity(cur, activity_id=activity_id, actor_id=actor_id)
             cur.execute(
                 """update public.activities set deleted_at=now(), updated_at=now(),
                    row_version=row_version+1 where id=%s and recorded_by=%s and deleted_at is null""",

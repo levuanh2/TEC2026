@@ -14,6 +14,7 @@ import { FarmerJournalPage } from './pages/Journal'
 import { FarmerPerformancePage } from './pages/Performance'
 import { SeasonWorkspace } from './pages/Season'
 import { prefetchNav, prefetchSeason, primarySeason, useScope } from './scope'
+import { FarmWriteAccess } from './writeAccess'
 
 type NavItem = { to: string; label: string; icon: IconName }
 
@@ -117,7 +118,11 @@ export function FarmerExperience({ session, viewer, path }: { session: Session |
     case 'account': content = <FarmerAccountPage session={session} viewer={viewer} />; break
     default: content = <Empty icon="search" title="Không tìm thấy trang" body="Đường dẫn này không thuộc khu vực nông hộ." action={<Link to="/farmer" className="fw-btn fw-btn--soft">Về Tổng quan</Link>} />
   }
-  return <FarmerShell session={session} viewer={viewer} path={path}>{content}</FarmerShell>
+  return (
+    <FarmWriteAccess.Provider value={viewer.writableFarmIds}>
+      <FarmerShell session={session} viewer={viewer} path={path}>{content}</FarmerShell>
+    </FarmWriteAccess.Provider>
+  )
 }
 
 type FarmerRoute = 'home' | 'journal' | 'farms' | 'farm' | 'plot' | 'season' | 'season-journal' | 'season-performance' | 'season-carbon' | 'performance' | 'account' | 'not-found'

@@ -12,7 +12,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from . import auth, profiling, supabase_clients
+from . import auth, memberships, profiling, supabase_clients
 from .config import Settings
 
 DETAIL_TABLES = {
@@ -164,6 +164,12 @@ class SupabaseReadRepository:
             lambda: self._many("organization_memberships", user_id=user_id),
             lambda: self._many("farm_members", user_id=user_id),
         )
+        # RLS lets a user read their own membership rows even after they end, so
+        # the ended ones come back here. Neither `roles` nor the membership list
+        # may advertise them: every consumer (the Farmer write/recommendation/CV
+        # gates, web role routing, the MRV management check) must see exactly the
+        # memberships the SQL helpers treat as active.
+        orgs = memberships.active_memberships(orgs)
         return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms})}
 
     @staticmethod

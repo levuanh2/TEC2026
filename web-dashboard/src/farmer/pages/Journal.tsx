@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link } from '../../ui'
-import { ActivityCardActions, ActivityDetailActions, AddActivityCta, toSeasonContext, useActivityMutations } from '../ActivityForms'
+import { ActivityCardActions, ActivityDetailActions, AddActivityCta, useActivityMutations } from '../ActivityForms'
 import { Ico } from '../icons'
 import { JournalView } from '../journal'
 import { Empty, ErrorPanel, Flash, PageHeader } from '../kit'
 import { isActiveStatus, primarySeason, seasonsOf, useActivities, useScope } from '../scope'
+import { useWritableSeason } from '../writeAccess'
 
 export function FarmerJournalPage() {
   const scope = useScope()
@@ -14,7 +15,8 @@ export function FarmerJournalPage() {
   const sid = current?.season.id ?? null
   const activities = useActivities(sid)
   const mutations = useActivityMutations()
-  const seasonCtx = current ? toSeasonContext(current.season, current.plot) : null
+  // Write target only when the farm role allows journal writes (not `viewer`).
+  const seasonCtx = useWritableSeason(current)
   const state = scope.loading ? { ...activities, loading: true } : activities
 
   return (
