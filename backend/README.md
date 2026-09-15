@@ -13,8 +13,8 @@
 |---|---|
 | `carbon/` — Carbon Engine | ✅ chạy được, **101 test pass** (57 engine + 44 integration/API/auth) |
 | Phương pháp luận CH4 / N2O / đốt rơm | ✅ VERIFIED theo IPCC, trích dẫn số hiệu bảng |
-| **GWP** | ⛔ **PENDING_VERIFICATION — đang chặn toàn bộ việc ra số CO2e** |
-| Hệ số nhiên liệu | ⏳ PENDING_VERIFICATION |
+| **GWP** | ✅ AR5 GWP-100 (CH4 28, N2O 265) VERIFIED — bộ `0.3.0-ipcc2019-tier1-ar5` import bằng `scripts/import_factor_set.py`; READY_FOR_DEMO, chuyên gia thẩm định PENDING |
+| Hệ số nhiên liệu | ⏳ PENDING_VERIFICATION — vụ có nhiên liệu trả 422 |
 | QĐ 4801/QĐ-BNNMT (Tier 1) | ❌ chưa lấy được toàn văn → **không được nói "MRV-compliant"** |
 | API `/v1/carbon/*` | ✅ POST calculate + GET result, **bắt buộc `Authorization: Bearer <jwt>`** |
 | Auth/RLS | ✅ `CropAccessChecker` replay JWT người gọi qua publishable key — service role không tự quyết định ai thấy gì. **Đã verify thật** với Supabase Auth user thật trên hosted (không phải JWT giả) |
@@ -81,7 +81,7 @@ route `/v1/carbon/*` trả **503** kèm hướng dẫn — cố ý, để không
 
 | Route | Việc |
 |---|---|
-| `GET /health` | trạng thái thật: `ef_config_version`, `carbon_production_ready`, `mrv_compliant`, `auth_configured` |
+| `GET /health` | trạng thái thật: `ef_config_version`, `carbon_scientific_readiness`, `carbon_production_ready` (chỉ true khi đã thẩm định chuyên gia), `mrv_compliant`, `auth_configured` |
 | `POST /v1/carbon/calculate` | header `Authorization: Bearer <jwt>` bắt buộc. `{crop_season_id, water_regime_scenario}` → tính + lưu cho toàn vụ |
 | `GET /v1/crop-seasons/{crop_season_id}/carbon?scenario=` | header `Authorization: Bearer <jwt>` bắt buộc. Bản tính **thành công** gần nhất của vụ |
 

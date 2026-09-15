@@ -100,21 +100,22 @@ Nhiên liệu là nguồn nhỏ so với CH4 ruộng ngập. Để `null` cho t�
 
 | Source | Exact document | Section/table | What it supports | Status |
 |---|---|---|---|---|
-| — | Khung GWP mà QĐ 4801 quy định | — | Quy đổi CH4, N2O → CO2e | ❌ **PENDING_VERIFICATION** |
+| IPCC AR5 WG1 (2013) | Climate Change 2013: The Physical Science Basis, Ch.8 | Table 8.A.1 (GWP100; CH4 non-fossil, no cc feedback) | CH4 = 28, N2O = 265; ±40% / ±30% (90%) | ✅ **VERIFIED** |
+| UNFCCC | Decision 18/CMA.1, annex, para 37; Decision 5/CMA.3, para 25 | — | Báo cáo theo Thoả thuận Paris dùng GWP-100 AR5 (loại CH4 hoá thạch) | ✅ căn cứ chọn khung |
+| QĐ 2626/QĐ-BTNMT (10/10/2022) | Danh mục hệ số phát thải phục vụ kiểm kê KNK | — | Không nêu khung GWP | ℹ️ đã đọc |
+| IPCC AR6 WG1 (2021) | Ch.7 Supplementary Material | Table 7.SM.7 | CH4 27,9, N2O 273 — chỉ để so sánh | không dùng |
 
-**Vì sao không tự chọn:** chênh lệch giữa các khung là lớn và ảnh hưởng trực tiếp con số cuối:
+**Quyết định (2026-09-15):** AR5 GWP-100. So sánh các khung:
 
 | Khung | GWP-100 CH4 | GWP-100 N2O |
 |---|---|---|
 | IPCC AR4 (2007) | 25 | 298 |
-| IPCC AR5 (2013) | 28 | 265 |
+| **IPCC AR5 (2013)** | **28** | **265** |
 | IPCC AR6 (2021) | 27,9 (phi hoá thạch) / 29,8 (hoá thạch) | 273 |
 
-Chọn AR4 thay vì AR6 làm lệch CH4 tới **~19%**. Đây đúng là loại câu hỏi hội đồng sẽ vặn.
-**Phải lấy đúng khung mà QĐ 4801 / QĐ 2626 quy định**, không chọn theo cảm tính.
-
-Ba con số trên **chưa được xác minh trong phiên này** — liệt kê để biết cần tra cái gì, chưa
-được đưa vào config.
+QĐ 4801 chưa lấy được. Nếu văn bản quy định khung khác, tạo bộ hệ số phiên bản mới — không
+sửa bộ đã published. Sổ đăng ký từng hệ số: `docs/methodology/carbon-factor-register.md`
+(nhánh tài liệu) và `backend/carbon/factor_register.py`.
 
 ---
 
@@ -131,18 +132,19 @@ OM/ĐS), phải thêm dòng vào bảng này trước khi đưa vào config.
 VERIFIED             : CH4 rice (Eq 5.1, 5.2, 5.3 + Tables 5.11/5.11A/5.12/5.13/5.14)
                        N2O fertilizer (Eq 11.1 + Table 11.1)
                        Straw burning (Eq 2.27 + Tables 2.5/2.6)
-PENDING_VERIFICATION : GWP CH4, GWP N2O
-                       Hệ số nhiên liệu diesel
-NOT_OBTAINED         : QĐ 4801/QĐ-BNNMT toàn văn + phụ lục  ← Tier 1, chặn nhãn "MRV-compliant"
-                       QĐ 2626/QĐ-BTNMT toàn văn
+                       GWP-100 AR5 (Table 8.A.1)
+PENDING_VERIFICATION : Hệ số nhiên liệu diesel/xăng/LPG (null → 422)
+NOT_USED             : QĐ 2626 Tier 2 — CH4 lúa, ROA, N2O-N theo vùng/mùa vụ (engine là Tier 1 theo chế độ nước)
+NOT_OBTAINED         : QĐ 4801/QĐ-BNNMT toàn văn + phụ lục  ← chặn nhãn "MRV-compliant"
+DOMAIN EXPERT REVIEW : PENDING
 NOT_IMPLEMENTED      : SFs (đất), SFr (giống) — Tier 2 Eq 5.2a
                        Cột aggregated của Table 5.13
                        Phát thải upstream (giống, thuốc BVTV, sản xuất phân)
                        CH4 ngoài vụ (pre-season, sau thu hoạch)
 ```
 
-**Engine hiện KHÔNG ra được con số CO2e** vì GWP còn `null` — dù toàn bộ hệ số CH4/N2O đã
-VERIFIED. Đây là hành vi đúng theo thiết kế.
+Engine ra số CO2e với bộ `0.3.0-ipcc2019-tier1-ar5` (27 hệ số VERIFIED, import + published trên
+hosted dev). Mức sẵn sàng: READY_FOR_DEMO — chưa thẩm định chuyên gia, không phải chứng nhận.
 
 ---
 
