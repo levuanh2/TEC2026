@@ -32,6 +32,7 @@ from carbon.errors import (
 import schemas
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthError, extract_bearer_token
+from infrastructure.persist_access import CropPersistChecker
 from infrastructure.pagination import paginate
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
@@ -81,6 +82,17 @@ def _access_checker() -> CropAccessChecker:  # bị ghi đè bằng dependency_o
             "auth_not_configured",
             "Chưa cấu hình kiểm tra quyền. Tạo backend/.env với SUPABASE_URL và "
             "SUPABASE_PUBLISHABLE_KEY.",
+        ),
+    )
+
+
+def _persist_checker() -> CropPersistChecker:  # bị ghi đè bằng dependency_overrides
+    raise HTTPException(
+        status_code=503,
+        detail=error_detail(
+            "auth_not_configured",
+            "Chưa cấu hình kiểm tra quyền lưu bản tính. Cần SUPABASE_URL, "
+            "SUPABASE_PUBLISHABLE_KEY và SUPABASE_DB_URL.",
         ),
     )
 
@@ -135,6 +147,23 @@ def _require_caller(
         ) from exc
 
 
+def _require_persist_authority(
+    authorization: str | None, checker: CropPersistChecker, crop_season_id: str
+) -> None:
+    """B4: persisting needs write authority on the crop, not just read access.
+
+    Runs after `_require_caller`, so the header is already known to be present.
+    A read-only caller gets the same 404 `crop_not_found` as an out-of-scope one.
+    """
+    token = extract_bearer_token(authorization)
+    try:
+        checker.assert_can_persist(token, crop_season_id)
+    except CropAccessError as exc:
+        raise HTTPException(
+            status_code=404, detail=error_detail("crop_not_found", str(exc))
+        ) from exc
+
+
 def _payload(result, calculation_id: str | None) -> dict[str, Any]:
     body = result.to_dict()
     body["water_regime_scenario"] = body["scenario"]  # tên cũ trong SRS §4.2
@@ -178,15 +207,18 @@ def calculate_carbon_endpoint(
     authorization: str | None = Header(default=None),
     service: CarbonService = Depends(_service),
     access_checker: CropAccessChecker = Depends(_access_checker),
+    persist_checker: CropPersistChecker = Depends(_persist_checker),
 ) -> dict[str, Any]:
     """Tính CO2e cho một vụ và lưu kết quả.
 
     Thiếu sản lượng nhưng đủ hệ số -> vẫn trả `co2e_total_kg`, `co2e_per_kg = null`,
     kèm cảnh báo. Thiếu hệ số bắt buộc (ví dụ GWP) -> 422, KHÔNG trả 0.
+    Chỉ người ghi được vụ (`private.user_can_write_crop`) mới lưu được bản tính.
     """
     request_id = str(uuid.uuid4())
     started = time.monotonic()
     _require_caller(authorization, access_checker, payload.crop_season_id)
+    _require_persist_authority(authorization, persist_checker, payload.crop_season_id)
 
     try:
         outcome = service.calculate(payload.crop_season_id, payload.water_regime_scenario)

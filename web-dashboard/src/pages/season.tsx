@@ -20,6 +20,7 @@ import {
 } from '../ui'
 import { ActivityTimeline, ActivityCoverage } from '../features/activities'
 import { CarbonPanel } from '../features/carbon'
+import type { Role } from '../types'
 
 export type SeasonTab = 'overview' | 'activities' | 'performance' | 'carbon' | 'mrv'
 
@@ -34,7 +35,7 @@ type Batches = Awaited<ReturnType<typeof getProductionBatches>>
  * Season "hub": the frame (hero + tabs) loads from one fast query, every tab's
  * data streams into its own section so a slow query never blanks the page.
  */
-export function SeasonHub({ id, tab }: { id: string; tab: SeasonTab }) {
+export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?: Role }) {
   const frame = useAsync(async () => {
     const season = await getCropSeason(id)
     const plot = season?.plotId ? await getPlot(season.plotId).catch(() => undefined) : undefined
@@ -102,7 +103,7 @@ export function SeasonHub({ id, tab }: { id: string; tab: SeasonTab }) {
                 {(m) => <Performance metrics={m} />}
               </Async>
             )}
-            {tab === 'carbon' && <CarbonPanel id={id} seasonLabel={season.name} />}
+            {tab === 'carbon' && <CarbonPanel id={id} seasonLabel={season.name} canRecalculate={role !== 'regulator' && role !== 'enterprise_viewer'} />}
             {tab === 'mrv' && (
               <Async state={batches} skeleton="table">
                 {(rows) => <SeasonMrv batches={rows} />}
