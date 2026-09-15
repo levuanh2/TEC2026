@@ -56,7 +56,8 @@ Bấm một vụ để mở không gian vụ với 4 tab:
 5. Bấm lưu. Nếu mạng chập chờn và bạn bấm lại, hệ thống **không** tạo bản ghi trùng.
 
 Để **sửa** hoặc **xoá**: mở bản ghi trong **Nhật ký**. Bạn chỉ sửa/xoá được bản ghi do
-chính mình tạo. Bản ghi bị xoá không còn hiển thị và không còn được tính vào chỉ số.
+chính mình tạo, trên ruộng bạn được giao quyền ghi. Tài khoản chỉ có quyền **xem** một ruộng sẽ
+không thấy các nút ghi, sửa, xoá của ruộng đó. Bản ghi bị xoá không còn hiển thị và không còn được tính vào chỉ số.
 
 ### Gieo sạ
 

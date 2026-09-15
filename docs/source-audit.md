@@ -84,7 +84,7 @@ mục, và phân loại rõ: đã xác nhận, chưa hoàn chỉnh, thử nghi�
 - Không có API soạn MRV case/bước/bằng chứng; chưa có gói ZIP kèm bytes bằng chứng.
 - Flutter chưa nối Recommendation và CV; chưa có production release signing; iOS chưa build.
 - Không có cấu hình triển khai, CI/CD, job nền.
-- Các vấn đề B1–B12, M3, M7 trong [Giới hạn](limitations/current-limitations.md#5-backend-api-va-web-van-e-phat-hien-trong-audit-tai-lieu)
+- Các vấn đề B1–B12, M3, M7 (M7, B3, B7 đã sửa trong sprint P0 ngày 2026-09-15) trong [Giới hạn](limitations/current-limitations.md#5-backend-api-va-web-van-e-phat-hien-trong-audit-tai-lieu)
   và [Phát hiện kiểm toán mã nguồn](limitations/implementation-audit-findings.md).
 
 ## Thử nghiệm

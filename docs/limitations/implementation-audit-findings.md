@@ -3,7 +3,9 @@
 Trang này ghi lại các **vấn đề thật trong code** (và các lỗi tài liệu đã sửa) phát
 hiện khi đối chiếu bộ tài liệu với mã nguồn. Mọi mục đều có bằng chứng `file:dòng`
 và đã được agent Codex kiểm tra chéo **read-only** qua Herdr. Không mục nào được
-đoán; không mục nào được sửa trong đợt tài liệu này.
+đoán; không mục nào được sửa trong đợt tài liệu. Ba mục P0 (M7, B7, B3) được sửa
+trong [sprint P0 ngày 2026-09-15](#sprint-p0-2026-09-15) và chỉ được đánh dấu
+`RESOLVED` sau khi có code, test và kiểm chứng trên Supabase hosted.
 
 - Code đối chiếu: commit `2f33972` (`main`). Kể từ baseline `81a8e24` chỉ có CSS của
   Farmer Web thay đổi (`farmer.css`, `tokens.css`), không ảnh hưởng các phát hiện.
@@ -30,9 +32,9 @@ dependency, comment.
 
 | ID | Module | Severity | Loại | Evidence | Impact | Status | Codex |
 |----|--------|----------|------|----------|--------|--------|-------|
-| [M7](#m7) | Storage / RLS | High | `CODE_BUG` | `baseline.sql:2837-2842` | Người không phải manager có thể đọc artifact MRV qua Storage API | OPEN | CONFIRMED |
-| [B3](#b3) | Activities (Farmer Web) | High | `CODE_BUG` | `service.py:128-150` | `farm_role = viewer` vẫn ghi được activity qua FastAPI | OPEN | CONFIRMED |
-| [B7](#b7) | Auth (`/v1/me`) | High | `CODE_BUG` | `read_repo.py:157-167` | Membership đã kết thúc vẫn qua cổng role `farmer` | OPEN | CONFIRMED |
+| [M7](#m7) | Storage / RLS | High | `CODE_BUG` | `baseline.sql:2837-2842` | Người không phải manager có thể đọc artifact MRV qua Storage API | **RESOLVED** 2026-09-15 | CONFIRMED |
+| [B3](#b3) | Activities (Farmer Web) | High | `CODE_BUG` | `service.py:128-150` | `farm_role = viewer` vẫn ghi được activity qua FastAPI | **RESOLVED** 2026-09-15 | CONFIRMED |
+| [B7](#b7) | Auth (`/v1/me`) | High | `CODE_BUG` | `read_repo.py:157-167` | Membership đã kết thúc vẫn qua cổng role `farmer` | **RESOLVED** 2026-09-15 | CONFIRMED |
 | [M3](#m3) | MRV Export | High | `CODE_BUG` | `service.py:589` | Gói MRV có thể chứa bản tính giả định thay vì `actual` | OPEN (tiềm ẩn) | CONFIRMED |
 | [B4](#b4) | Carbon API | Medium | `CODE_GAP` | `api.py:116-137` | Người chỉ có quyền đọc tạo được bản tính được lưu | OPEN (tiềm ẩn) | CONFIRMED |
 | [B5](#b5) | Carbon API | Medium | `CODE_BUG` | `models.py:193-205`, `api.py:149-158` | Thiếu `nitrogen_percent` → `500` thay vì `422` | OPEN (tiềm ẩn) | CONFIRMED |
@@ -62,7 +64,7 @@ dependency, comment.
 | Impact | Mọi thành viên còn hiệu lực của tổ chức (kể cả `farmer`) và `enterprise_viewer`/`regulator` qua data grant có thể dùng JWT + publishable key gọi trực tiếp Supabase Storage API để liệt kê/tải XLSX/PDF gói MRV — vượt qua quy tắc "chỉ manager" mà API và metadata áp dụng |
 | Hành vi hiện tại | Quyền đọc object rộng hơn quyền đọc metadata; ứng dụng không gọi Storage trực tiếp nhưng policy không phụ thuộc ứng dụng |
 | Hành vi mong đợi | Quyền đọc object `mrv-exports` khớp `mrv_exports_select` (manager của tổ chức sở hữu), hoặc client không có quyền đọc và chỉ backend (service role) đọc |
-| Status | OPEN — chưa thử khai thác trên hosted; kết luận từ policy SQL |
+| Status | **RESOLVED** — leak được tái hiện trên hosted qua Storage API thật trước khi sửa; migration `20260915100000` (commit `3af4205`); smoke hosted 50/50 sau khi áp. Xem [sprint P0](#sprint-p0-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B3 — Ghi activity qua Farmer Web không kiểm quyền ghi farm {#b3}
@@ -77,7 +79,7 @@ dependency, comment.
 | Impact | Người có role tổ chức `farmer` nhưng chỉ là `viewer` của một farm có thể tạo activity (và sửa/xoá activity do chính mình tạo) cho vụ của farm đó qua Farmer Web; Flutter với cùng tài khoản bị RLS từ chối |
 | Hành vi hiện tại | Quyền ghi qua FastAPI = quyền đọc + role `farmer` |
 | Hành vi mong đợi | Quyền ghi qua FastAPI không rộng hơn `private.user_can_write_batch` của lô đích |
-| Status | OPEN |
+| Status | **RESOLVED** — repository kiểm `private.user_can_write_batch` trong transaction ghi (commit `f9056fb`); viewer bị từ chối trên cả FastAPI và PostgREST (hosted); UI ẩn nút ghi. Xem [sprint P0](#sprint-p0-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B7 — `/v1/me` không lọc membership đã kết thúc {#b7}
@@ -92,7 +94,7 @@ dependency, comment.
 | Impact | Người có membership `farmer` đã kết thúc vẫn qua cổng role `farmer` của ActivityWriteService, RecommendationService, CvService (phần đọc vẫn bị RLS giới hạn). Web cũng phân giải shell theo role đã hết hạn. Xuất MRV **không** bị ảnh hưởng vì `_manages` tự lọc `ended_at` |
 | Hành vi hiện tại | Role hết hạn vẫn nằm trong `roles` |
 | Hành vi mong đợi | `roles` chỉ gồm membership còn hiệu lực, cùng quy tắc với helper RLS |
-| Status | OPEN |
+| Status | **RESOLVED** — `infrastructure/memberships.py` dùng trong `me()` và `_manages` (commit `202fb80`); `/v1/me` trên hosted không còn báo role của membership đã kết thúc. Xem [sprint P0](#sprint-p0-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### M3 — Gói MRV lấy bản tính Carbon mới nhất bất kể kịch bản {#m3}
@@ -215,6 +217,38 @@ dependency, comment.
 | Status | OPEN |
 | Codex | CONFIRMED |
 
+## Sprint P0 (2026-09-15) {#sprint-p0-2026-09-15}
+
+Nhánh `feature/p0-security-auth-fixes`, merge vào `main`. Chỉ sửa **M7, B7, B3**; mọi mục
+P1/P2 còn lại vẫn `OPEN`. Mỗi mục chỉ được đánh dấu `RESOLVED` sau khi có code, test và
+kiểm chứng trên Supabase hosted.
+
+| ID | Nguyên nhân gốc (đã xác nhận) | Sửa | Commit |
+|---|---|---|---|
+| M7 | Bốn policy baseline `mrv_files_storage_*` phủ cả `mrv-evidence` lẫn `mrv-exports`; migration `20260913150000` chỉ siết metadata `mrv_exports_select` | Migration `20260915100000_restrict_mrv_exports_storage_client_access.sql`: bốn policy được thay bằng bản giống hệt nhưng chỉ cho `mrv-evidence`; không còn policy client nào cho `mrv-exports`, nên mọi thao tác list/tải/upload/ghi đè/xoá từ client bị từ chối. Backend (service role) và đường tải qua FastAPI không đổi; bucket vẫn private | `3af4205` |
+| B7 | `SupabaseReadRepository.me()` gộp mọi dòng `organization_memberships` mà RLS trả về cho chính người dùng, kể cả dòng đã kết thúc | `backend/infrastructure/memberships.py` — bản Python duy nhất của quy tắc `ended_at is null or ended_at > now()` — dùng trong `me()` (cả `roles` lẫn danh sách membership) và trong `MrvExportService._manages` | `202fb80` |
+| B3 | Service chỉ xác lập quyền **đọc** qua JWT rồi ghi bằng kết nối bỏ qua RLS; quyền đọc farm gồm cả `viewer`. Đường ghi trực tiếp của Flutter vốn đã bị RLS từ chối (xác nhận lại trên hosted) | `PostgresActivityWriteRepository` gọi `private.user_can_write_batch` (helper của policy `activities` và RPC `soft_delete_activity`) trong chính transaction ghi, trước mọi thao tác, với `auth.uid()` là actor đã xác thực; từ chối → `404 not_found` như quy ước cũ. Farmer Web ẩn nút ghi/sửa/xoá trên ruộng mà `/v1/me` không báo `owner`/`editor` | `f9056fb` |
+
+Test và script kiểm chứng: `92fa4f6`.
+
+| Kiểm chứng | Kết quả |
+|---|---|
+| Tái hiện M7 trên hosted **trước** khi áp migration, qua Storage API thật | Farmer (owner, viewer), regulator và enterprise_viewer qua data grant, manager đều liệt kê và tải được XLSX; manager upload được object lạ. Smoke: 44/50, đúng 6 check M7 fail |
+| Áp migration lên hosted dev | `20260915100000` ghi vào `supabase_migrations.schema_migrations`; 0 policy `storage.objects` nhắc `mrv-exports`; 3 bucket vẫn private |
+| `backend/scripts/hosted_p0_security_smoke.py` sau migration (tenant + user tạm, Storage API, PostgREST, FastAPI thật) | **PASS** 50/50 |
+| `backend/tests/test_p0_security_policies.py` (hosted, transaction rollback) | **PASS** 13/13 |
+| `backend/tests/test_activity_rls_policies.py` (hosted, rollback — hợp đồng M01) | **PASS** 19/19 |
+| Backend `python -m pytest tests -q` | **PASS** 510 passed (trước sprint: 463) |
+| Web Vitest / `tsc -b` / `npm run build` | **PASS** 160 passed / PASS / PASS |
+| Playwright mock Farmer + Management | **PASS** 2 passed (8 spec dữ liệu thật bị gate, skipped) |
+| Playwright dữ liệu thật | **NOT RUN** — cần mật khẩu QA do người dùng cấp theo phiên; phần Storage/RLS/API thật do smoke script phủ |
+| Flutter test | **NOT RUN** — không đổi code hay policy mà Flutter dùng; RLS ghi trực tiếp đã kiểm trên hosted |
+
+Dữ liệu QA: mỗi lần chạy smoke tạo tenant `P0-SECURITY-SMOKE-<run>` và user Auth tạm với mật
+khẩu ngẫu nhiên, rồi xoá; số dòng của 17 bảng, số object `mrv-exports` và số user tạm trở
+về đúng như trước (0 dòng còn lại). Test rollback không để lại dữ liệu. `audit.change_log`
+giữ các dòng do trigger audit ghi (86 dòng/lần chạy) vì bảng audit là append-only.
+
 ## `PRODUCT_DECISION`
 
 | ID | Nội dung | Evidence | Cần quyết định |
@@ -231,7 +265,8 @@ hệ số quốc gia, bộ hệ số chưa import vào DB hosted.
 
 ## `ENV_BLOCKED` và trạng thái test
 
-Trạng thái trong lượt kiểm toán tài liệu này. Chỉ ghi PASS cho test **đã thực sự chạy**.
+Trạng thái trong lượt kiểm toán tài liệu (trước sprint P0). Chỉ ghi PASS cho test **đã thực sự
+chạy**. Kết quả của sprint P0 nằm ở [mục riêng](#sprint-p0-2026-09-15).
 
 | Nhóm test | Trạng thái |
 |---|---|

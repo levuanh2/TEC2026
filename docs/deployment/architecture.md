@@ -81,7 +81,7 @@ flowchart LR
 | Artifact CV | Thư mục `ml/runs/<run>/` với `model.pt` + `eval_metrics.json` phải có trên máy chạy backend; thiếu thì CV `503` | `backend/main.py` |
 | Thư mục làm việc | `uvicorn main:app` chạy từ `backend/`; `service.py` tự thêm repo root vào `sys.path` để import `ml` | `backend/service.py` |
 | Bí mật | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` chỉ ở backend | `backend/.env.example` |
-| Database | Chạy đủ 11 migration; tạo thủ công 3 bucket riêng tư; import + publish bộ hệ số trùng `version_code` YAML | `supabase/migrations/`, baseline §22 |
+| Database | Chạy đủ 12 migration; tạo thủ công 3 bucket riêng tư; import + publish bộ hệ số trùng `version_code` YAML | `supabase/migrations/`, baseline §22 |
 | Kết nối Postgres | Pool `psycopg_pool` tối đa 8 kết nối mỗi process; không có `psycopg_pool` thì mở kết nối theo từng câu lệnh | `infrastructure/pg_pool.py` |
 | Trạng thái trong process | Cache Supabase client theo token (32 client, TTL 600 s) và pool Postgres là **theo từng process** | `supabase_clients.py`, `pg_pool.py` |
 | Thời gian request | Tạo gói MRV chạy đồng bộ trong request (tổng hợp đo khoảng 8 giây trên hosted dev) → proxy/timeout phải cho phép | `docs/MRV_EXPORT_PACKAGE.md` |

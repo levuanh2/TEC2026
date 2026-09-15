@@ -7,20 +7,16 @@ Phân quyền của AgriCarbon có hai lớp:
 2. **Kiểm tra bổ sung ở FastAPI** — theo thiết kế chỉ *thu hẹp thêm* trên nền RLS
    (ví dụ bắt buộc role `farmer` để ghi qua web, `cooperative_manager` để xuất MRV).
 
-!!! bug "Ngoại lệ đã biết: hai đường ghi của backend rộng hơn RLS"
+!!! bug "Ngoại lệ còn mở: `POST /v1/carbon/calculate`"
     Backend ghi bằng kết nối bỏ qua RLS **sau** một bước kiểm tra đọc, nên nếu bước
-    kiểm tra lỏng hơn policy ghi thì quyền thực tế bị nới rộng. Audit tài liệu xác
-    nhận hai trường hợp như vậy, **chưa sửa**:
+    kiểm tra lỏng hơn policy ghi thì quyền thực tế bị nới rộng. Còn một trường hợp chưa
+    sửa: route này lưu bản tính cho bất kỳ ai đọc được vụ
+    ([B4](../limitations/implementation-audit-findings.md#b4)).
 
-    - Ghi activity qua Farmer Web không kiểm `farm_role` `owner`/`editor`
-      ([B3](../limitations/implementation-audit-findings.md#b3)), và role `farmer`
-      lấy từ membership không lọc `ended_at`
-      ([B7](../limitations/implementation-audit-findings.md#b7)).
-    - `POST /v1/carbon/calculate` lưu bản tính cho bất kỳ ai đọc được vụ
-      ([B4](../limitations/implementation-audit-findings.md#b4)).
-
-    Ngoài ra policy đọc Storage của bucket `mrv-exports` rộng hơn policy metadata
-    `mrv_exports_select` ([M7](../limitations/implementation-audit-findings.md#m7)).
+    Đã sửa ngày 2026-09-15: ghi activity qua Farmer Web nay kiểm đúng helper ghi của RLS
+    ([B3](../limitations/implementation-audit-findings.md#b3)); `/v1/me` chỉ tính membership
+    còn hiệu lực ([B7](../limitations/implementation-audit-findings.md#b7)); client không còn
+    quyền nào trên bucket `mrv-exports` ([M7](../limitations/implementation-audit-findings.md#m7)).
 
 ## Supabase Auth và JWT
 
@@ -71,7 +67,8 @@ Chi tiết đọc từ code:
 - `roles` trong `/v1/me` là **hợp** của `organization_memberships.role` và
   `farm_members.farm_role`, nên có thể chứa `farmer`, `cooperative_manager`,
   `enterprise_viewer`, `regulator`, `owner`, `editor`, `viewer`.
-  (Backend không lọc `ended_at` ở bước này; các helper RLS và kiểm tra quản lý MRV thì có.)
+  Chỉ membership còn hiệu lực (`ended_at` null hoặc ở tương lai) được tính — cùng quy tắc
+  với helper RLS, trong `infrastructure/memberships.py` (sửa B7).
 - Riêng hai route Carbon trả `401 missing_authorization` khi thiếu header; các route
   khác trả `401 unauthenticated`.
 
@@ -127,7 +124,7 @@ cầu `deleted_at is null`, nên client không thể tự `update ... set delete
 | Đọc farm / plot / vụ / activity | Farm mình là thành viên | Mọi farm của HTX mình quản lý | Farm của tổ chức nguồn có data grant còn hạn | Như Enterprise Viewer |
 | Đọc Carbon, metrics, khuyến nghị, CV của vụ | Theo quyền đọc vụ | Theo quyền đọc vụ | Theo quyền đọc vụ | Theo quyền đọc vụ |
 | Ghi activity qua **Flutter** (RLS) | `farm_role` `owner`/`editor` | Có (manager ghi được farm HTX) | Không | Không |
-| Ghi activity qua **Farmer Web** (FastAPI) | Có — xem ghi chú bên dưới | Không (thiếu role `farmer`) | Không | Không |
+| Ghi activity qua **Farmer Web** (FastAPI) | `farm_role` `owner`/`editor` (cùng quy tắc RLS) | Không (thiếu role `farmer`) | Không | Không |
 | Generate / chấp nhận khuyến nghị | Có | Không | Không | Không |
 | Upload ảnh CV (`POST .../cv/infer`) | Có | Không | Không | Không |
 | Xem kết quả CV đã lưu | Có | Có | Có | Có |
@@ -144,8 +141,9 @@ Ghi chú đối chiếu code:
 - **Ghi activity qua Farmer Web:** `ActivityWriteService` yêu cầu `"farmer"` có trong
   `roles`, đọc được vụ qua RLS, vụ ở trạng thái `active`, vụ có đúng một lô chưa
   `closed`/`cancelled`; sửa/xoá chỉ áp cho activity do chính người gọi ghi
-  (`recorded_by = actor`). Service **không** kiểm tra `farm_role` `owner`/`editor` như
-  RLS của Flutter — xem [Giới hạn](../limitations/current-limitations.md).
+  (`recorded_by = actor`). Repository ghi còn gọi `private.user_can_write_batch` trong
+  chính transaction ghi — cùng helper với RLS của Flutter — nên `viewer` bị từ chối
+  `404` (sửa B3).
 - **Khuyến nghị và CV:** `RecommendationService.generate/set_status` và
   `CvService.infer` yêu cầu role `farmer` + đọc được vụ. `CvService.list/get` chỉ
   yêu cầu đọc được vụ.
@@ -177,10 +175,9 @@ Mọi lỗi dùng một envelope: `{"detail": {"error": {"code": "...", "message
 - CORS chỉ cho các origin trong `AGRICARBON_CORS_ORIGINS`, method
   `GET/POST/PATCH/DELETE`, header `Authorization`/`Content-Type`.
 - Response gói xuất MRV không chứa `storage_bucket`/`storage_object_path`; không có
-  signed URL. Tuy vậy policy `storage.objects` `mrv_files_storage_select` cho mọi
-  người `user_can_read_organization` đọc object trong `mrv-exports` (đường dẫn bắt
-  đầu bằng `organization_id`), nên người dùng có JWT gọi thẳng Storage API vẫn có thể
-  liệt kê/tải artifact dù không phải manager
-  ([M7](../limitations/implementation-audit-findings.md#m7), chưa sửa).
+  signed URL. Từ migration `20260915100000`, `storage.objects` không có policy client
+  nào cho bucket `mrv-exports`: mọi thao tác list/tải/upload/xoá từ client bị từ chối, chỉ
+  backend (service role) đọc/ghi artifact
+  ([M7](../limitations/implementation-audit-findings.md#m7), đã sửa).
 - `AGENTS.md` ghi nhận lịch sử Git cũ còn chứa mật khẩu của **tài khoản demo** trước
   đây; tài khoản QA chỉ dùng cho demo, mật khẩu hiện truyền qua biến môi trường.

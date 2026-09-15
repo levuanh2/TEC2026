@@ -41,7 +41,7 @@ phân loại của các vấn đề trong code nằm ở
 | M4 | Sinh gói đồng bộ trong request (~8 giây tổng hợp trên hosted dev); không có job queue |
 | M5 | PDF không phải PDF/UA; không có khái niệm gói "đã phê duyệt / đã nộp / đã xác minh" |
 | M6 | `mrv_step_catalog.name` là tiếng Anh; nhãn tiếng Việt cố định trong `read_repo.py` |
-| M7 | **Lỗ hổng quyền đọc:** policy Storage `mrv_files_storage_select` cho mọi người đọc được tổ chức (kể cả `farmer`, và `enterprise_viewer`/`regulator` qua data grant) đọc object `mrv-exports`, rộng hơn policy metadata `mrv_exports_select` (chỉ manager). Ứng dụng không gọi Storage trực tiếp, nhưng JWT hợp lệ vẫn gọi được Storage API (`CODE_BUG`, [chi tiết](implementation-audit-findings.md#m7)) |
+| M7 | **Đã sửa 2026-09-15:** client không còn quyền nào trên bucket `mrv-exports` (migration `20260915100000`); trước đó policy Storage `mrv_files_storage_select` cho mọi người đọc được tổ chức tải artifact qua Storage API ([chi tiết](implementation-audit-findings.md#m7)) |
 | M8 | Gói xuất **không phải** chứng nhận; màn MRV ghi rõ "Bản mẫu / demo" |
 
 ## 4. Flutter Mobile
@@ -57,18 +57,18 @@ phân loại của các vấn đề trong code nằm ở
 ## 5. Backend, API và Web — vấn đề phát hiện trong audit tài liệu
 
 Các mục dưới đây được xác nhận bằng đọc code và kiểm tra chéo read-only bởi Codex,
-**chưa sửa**. Mức độ, phân loại (`CODE_BUG` / `CODE_GAP` / `PRODUCT_DECISION`) và bằng
+**chưa sửa** trừ B3, B7 (đã sửa trong sprint P0 2026-09-15). Mức độ, phân loại (`CODE_BUG` / `CODE_GAP` / `PRODUCT_DECISION`) và bằng
 chứng từng dòng: [Phát hiện kiểm toán mã nguồn](implementation-audit-findings.md).
 
 | # | Vấn đề | Vị trí |
 |---|---|---|
 | B1 | Cờ `data_completeness.water` / `fertilizer` phụ thuộc **bản ghi cuối**; bản ghi thiếu lượng nước đứng trước bản ghi có số vẫn cho `water_per_kg` từ tổng thiếu. Test chỉ phủ trường hợp thiếu ở cuối | `backend/infrastructure/read_repo.py::_compute_metric_totals` |
 | B2 | Web khai báo role `enterprise` thay vì `enterprise_viewer`; tài khoản chỉ có `enterprise_viewer` bị đưa vào khu Farmer | `web-dashboard/src/types.ts`, `src/api/me.ts`, `src/App.tsx` |
-| B3 | Ghi activity qua Farmer Web **không** kiểm `farm_role` `owner`/`editor` (chỉ kiểm role `farmer` + đọc được vụ), khác quy tắc RLS mà Flutter phải tuân theo | `backend/service.py::ActivityWriteService` |
+| B3 | **Đã sửa 2026-09-15:** ghi activity qua Farmer Web kiểm `private.user_can_write_batch` (`farm_role` `owner`/`editor` hoặc manager) trong transaction ghi; `viewer` bị từ chối `404`, UI ẩn nút ghi | `backend/infrastructure/write_repo.py` |
 | B4 | `POST /v1/carbon/calculate` không kiểm role: ai đọc được vụ (kể cả `regulator`/`enterprise_viewer` qua data grant) cũng kích hoạt được bản tính **được lưu** | `backend/api.py::_require_caller` |
 | B5 | Thiếu `nitrogen_percent` ném `ValidationError` gốc, không nằm trong bảng ánh xạ lỗi → sẽ thành `500 internal_error` khi GWP có giá trị | `carbon/models.py`, `api.py::_ERROR_STATUS` |
 | B6 | `backend/requirements.txt` thiếu `torch`, `torchvision`, `pillow` dù `service.py` import `ml.infer` khi khởi động | `backend/service.py` |
-| B7 | `/v1/me` gộp role từ membership mà không lọc `ended_at` (các helper RLS và kiểm tra MRV thì lọc) | `read_repo.py::me` |
+| B7 | **Đã sửa 2026-09-15:** `/v1/me` chỉ tính membership còn hiệu lực, cùng quy tắc với helper RLS | `backend/infrastructure/memberships.py`, `read_repo.py::me` |
 | B8 | `AGRICARBON_REQUIRE_FACTOR_SET_IN_DB` được đọc nhưng không được dùng | `infrastructure/config.py` |
 | B9 | Farmer Web ghi `occurred_at` là `YYYY-MM-DDT00:00:00Z` (chỉ ngày) | `src/farmer/ActivityForms.tsx` |
 | B10 | Farmer Web không có form nhiên liệu; không route nào tạo farm/thửa/vụ/lô | `write_repo.py::_DETAILS`, `api.py` |

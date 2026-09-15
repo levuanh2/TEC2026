@@ -16,11 +16,15 @@ Quy ước chung cho mọi fix:
 
 ## Tổng quan ưu tiên
 
+> **Cập nhật 2026-09-15:** P0 (M7, B7, B3) đã **RESOLVED** trên nhánh
+> `feature/p0-security-auth-fixes` với kiểm chứng hosted — chi tiết ở mục "Sprint P0" của
+> `docs/limitations/implementation-audit-findings.md`. Mọi mục P1/P2 vẫn **OPEN**.
+
 | Priority | ID | Severity | Module | Cần Supabase/runtime |
 |---|---|---|---|---|
-| P0 | M7 | High | Storage / RLS | Có (migration + kiểm tra hosted) |
-| P0 | B7 | High | Auth `/v1/me` | Có cho xác nhận cuối |
-| P0 | B3 | High | Activities (Farmer Web) | Có cho xác nhận cuối |
+| P0 | M7 | High | Storage / RLS | Có (migration + kiểm tra hosted) — **RESOLVED** |
+| P0 | B7 | High | Auth `/v1/me` | Có cho xác nhận cuối — **RESOLVED** |
+| P0 | B3 | High | Activities (Farmer Web) | Có cho xác nhận cuối — **RESOLVED** |
 | P1 | M3 | High | MRV Export | Không bắt buộc (unit); nên có E2E |
 | P1 | B4 | Medium | Carbon API | Có cho xác nhận cuối |
 | P1 | B5 | Medium | Carbon API | Không |
@@ -37,6 +41,7 @@ Quy ước chung cho mọi fix:
 ### M7 — Policy đọc Storage `mrv-exports` rộng hơn metadata
 
 - **Severity:** High · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — migration `20260915100000` bỏ mọi quyền client trên `mrv-exports` (không chỉ SELECT), giữ nguyên `mrv-evidence`; commit `3af4205`. Leak tái hiện trên hosted trước khi sửa; smoke hosted 50/50 và `test_p0_security_policies.py` 13/13 sau khi áp.
 - **Module:** Supabase Storage RLS, MRV Export
 - **Source:** `supabase/migrations/20260907000000_baseline.sql:2837-2842`
   (`mrv_files_storage_select`); `supabase/migrations/20260913150000_mrv_xlsx_export_artifacts.sql:97-99`;
@@ -69,6 +74,7 @@ Quy ước chung cho mọi fix:
 ### B7 — `/v1/me` không lọc membership đã kết thúc
 
 - **Severity:** High · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — khác đề xuất ban đầu: quy tắc active được gom vào `infrastructure/memberships.py` và dùng cho cả `me()` lẫn `_manages`, để hai nơi không thể lệch nhau; danh sách membership trả về cũng bỏ dòng đã kết thúc. Commit `202fb80`; kiểm trên hosted bằng user tạm có membership đã kết thúc.
 - **Module:** Auth — `SupabaseReadRepository.me`
 - **Source:** `backend/infrastructure/read_repo.py:157-167`; người dùng role:
   `backend/service.py:128-132`, `:229`, `:303`; web `web-dashboard/src/api/me.ts:13`
@@ -92,6 +98,7 @@ Quy ước chung cho mọi fix:
 ### B3 — Ghi activity qua Farmer Web không kiểm quyền ghi farm
 
 - **Severity:** High · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — khác đề xuất ban đầu: không thêm RPC/migration; repository gọi thẳng `private.user_can_write_batch` trong transaction ghi với claim `sub` của actor đã xác thực (không có khoảng hở giữa kiểm tra và ghi, không thêm round trip). RLS ghi trực tiếp đã từ chối viewer từ trước (xác nhận hosted). Commit `f9056fb`.
 - **Module:** Activities — `ActivityWriteService`
 - **Source:** `backend/service.py:128-150`; RLS tham chiếu
   `baseline.sql:1554-1564`, `1586-1603`, `1667-1678`, `1859-1866`
@@ -292,6 +299,8 @@ Quy ước chung cho mọi fix:
 | S1–S9 | `SCIENTIFIC_BLOCKER` | GWP, hệ số nhiên liệu/lưới điện, hệ số quốc gia, import bộ hệ số — việc của nhóm phương pháp luận |
 
 ## Thứ tự đề xuất
+
+> Bước 1–2 (M7, B7, B3) đã xong ngày 2026-09-15. Tiếp theo: bắt đầu từ bước 3.
 
 1. **M7** — lỗ hổng đọc dữ liệu đang khai thác được ngay hôm nay; một migration nhỏ.
 2. **B7 → B3** — cùng cổng quyền ghi của FastAPI; B7 là tiền đề (role phải còn hiệu lực).

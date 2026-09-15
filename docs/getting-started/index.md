@@ -106,8 +106,8 @@ Backend nạp run mới nhất trong `ml/runs/` (cần `model.pt` và
 
 ## 5. Database
 
-- Schema nằm trong `supabase/migrations/` (11 file, từ `20260907000000_baseline.sql`
-  tới `20260913150000_mrv_xlsx_export_artifacts.sql`), dùng Supabase CLI với
+- Schema nằm trong `supabase/migrations/` (12 file, từ `20260907000000_baseline.sql`
+  tới `20260915100000_restrict_mrv_exports_storage_client_access.sql`), dùng Supabase CLI với
   `supabase/config.toml`. Lịch sử áp dụng: `docs/MIGRATION_HISTORY.md`.
 - Bucket Storage phải tạo **thủ công** (baseline cố ý không insert
   `storage.buckets`): `plant-images`, `mrv-evidence`, `mrv-exports`, đều riêng tư.

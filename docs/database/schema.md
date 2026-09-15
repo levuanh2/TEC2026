@@ -19,6 +19,7 @@ cột và enum giữ nguyên như trong SQL.
 | `20260913090000_allow_owner_soft_delete_activities.sql` | RPC `public.soft_delete_activity`, helper `private.user_can_delete_activity`, trigger giữ bất biến chủ sở hữu |
 | `20260913120000_mrv_json_export_manifest.sql` | `export_format` thêm `json`; `mrv_exports.factor_set_id` thành nullable |
 | `20260913150000_mrv_xlsx_export_artifacts.sql` | `source_snapshot_export_id`, `payload_sha256`, ràng buộc lineage; siết `mrv_exports_select` về manager |
+| `20260915100000_restrict_mrv_exports_storage_client_access.sql` | Policy Storage MRV chỉ còn cho `mrv-evidence`; client không có quyền nào trên `mrv-exports` (sửa M7) |
 
 Không có migration riêng cho PDF: giá trị `pdf` đã có trong enum `export_format`
 từ baseline.
@@ -470,15 +471,13 @@ erDiagram
 |---|---|---|---|
 | `plant-images` | `<farm_uuid>/<crop_season_uuid>/<file>` | Backend (service role) | Đọc: `user_can_read_farm`; ghi/sửa/xoá: `user_can_write_farm`, đuôi `jpg/jpeg/png` |
 | `mrv-evidence` | `<organization_uuid>/<mrv_case_uuid>/<file>` | Chưa có luồng upload trong code | Đọc: `user_can_read_organization`; ghi: `user_is_org_manager` |
-| `mrv-exports` | `<organization_uuid>/<mrv_case_uuid>/<file>` | Backend (service role), chỉ XLSX/PDF | Đọc: `user_can_read_organization`; ghi: `user_is_org_manager` |
+| `mrv-exports` | `<organization_uuid>/<mrv_case_uuid>/<file>` | Backend (service role), chỉ XLSX/PDF | **Không có policy cho client** — mọi thao tác bị từ chối (migration `20260915100000`) |
 
 Backend **không** cấp signed URL; artifact MRV chỉ tải qua
 `GET /v1/mrv/exports/{id}/download` sau khi kiểm quyền và SHA-256.
 
-!!! bug "Policy đọc Storage của `mrv-exports` rộng hơn metadata"
-    `mrv_files_storage_select` (baseline) cho `user_can_read_organization` — gồm
-    `farmer` của tổ chức và `enterprise_viewer`/`regulator` qua data grant — đọc
-    object trong `mrv-exports`, trong khi `mrv_exports_select` đã siết về manager
-    (migration `20260913150000`). Ứng dụng không gọi Storage trực tiếp, nhưng policy
-    không phụ thuộc ứng dụng: ai có JWT hợp lệ vẫn gọi được Storage API. Đây là lỗ
-    hổng đã biết, chưa sửa ([M7](../limitations/implementation-audit-findings.md#m7)).
+!!! note "Không có đường client nào tới `mrv-exports`"
+    Trước migration `20260915100000`, policy `mrv_files_storage_select` cho mọi người
+    đọc được tổ chức tải artifact thẳng qua Storage API, rộng hơn metadata
+    `mrv_exports_select` (chỉ manager). Lỗ hổng này đã được sửa và kiểm chứng trên
+    hosted ngày 2026-09-15 ([M7](../limitations/implementation-audit-findings.md#m7)).

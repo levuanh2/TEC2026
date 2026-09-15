@@ -101,6 +101,6 @@ Nguyên tắc đọc được từ code:
    qua publishable key để RLS trả lời (`infrastructure/auth.py`,
    `infrastructure/read_repo.py`). Ngoại lệ đã biết: một số đường ghi chỉ kiểm tra
    quyền **đọc** trước khi ghi bằng kết nối bỏ qua RLS — xem
-   [Phát hiện kiểm toán](../limitations/implementation-audit-findings.md) (B3, B4, B7).
+   [Phát hiện kiểm toán](../limitations/implementation-audit-findings.md) (B4 còn mở; B3 và B7 đã sửa ngày 2026-09-15).
 3. "Không có quyền" và "không tồn tại" cùng trả **404** để không lộ sự tồn tại
    của dữ liệu nông hộ khác.

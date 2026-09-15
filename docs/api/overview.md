@@ -66,9 +66,9 @@ Không có route tạo/sửa farm, thửa, vụ hay lô.
 |---|---|---|---|---|
 | GET | `/v1/crop-seasons/{crop_season_id}/activities` | Nhật ký của vụ (phân trang, bỏ activity đã xoá) | JWT | RLS |
 | GET | `/v1/activities/{activity_id}` | Chi tiết activity | JWT | RLS |
-| POST | `/v1/crop-seasons/{crop_season_id}/activities` | Tạo activity (`seeding`, `fertilizer`, `irrigation`, `pesticide`, `straw_management`, `harvest`) — `201`, idempotent theo `idempotency_key` | JWT | farmer + RLS đọc vụ + vụ `active` + đúng 1 lô mở |
-| PATCH | `/v1/activities/{activity_id}` | Sửa `occurred_at`, `note`, `data` (merge) | JWT | farmer + là người ghi |
-| DELETE | `/v1/activities/{activity_id}` | Xoá mềm — `204` | JWT | farmer + là người ghi |
+| POST | `/v1/crop-seasons/{crop_season_id}/activities` | Tạo activity (`seeding`, `fertilizer`, `irrigation`, `pesticide`, `straw_management`, `harvest`) — `201`, idempotent theo `idempotency_key` | JWT | farmer + `farm_role` owner/editor (hoặc manager) + vụ `active` + đúng 1 lô mở |
+| PATCH | `/v1/activities/{activity_id}` | Sửa `occurred_at`, `note`, `data` (merge) | JWT | farmer + là người ghi + quyền ghi farm |
+| DELETE | `/v1/activities/{activity_id}` | Xoá mềm — `204` | JWT | farmer + là người ghi + quyền ghi farm |
 
 Lỗi riêng: `422 invalid_crop_season_state`, `409 duplicate_event`, `404 not_found`.
 
