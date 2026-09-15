@@ -27,6 +27,7 @@ from carbon import ENGINE_VERSION, ParameterSet
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import SupabaseCropAccessChecker
 from infrastructure.persist_access import PostgresCropPersistChecker
+from carbon.factor_register import load_parameter_file, readiness as factor_readiness
 from infrastructure.config import load_settings
 from infrastructure import pg_pool, supabase_clients
 from infrastructure.supabase_repo import SupabaseCarbonRepository
@@ -256,15 +257,14 @@ async def invalid_token_exception_handler(request: Request, exc: InvalidTokenErr
 def health() -> dict:
     """Nói thật trạng thái. Lightweight — chỉ đọc file YAML, KHÔNG query Supabase.
 
-    `carbon_production_ready` chỉ true khi GWP đã xác minh.
+    `carbon_scientific_readiness` = `carbon.factor_register.readiness` (READY_FOR_DEMO khi mọi hệ số lõi
+    VERIFIED + GWP đã chọn + đơn vị khớp; READY_FOR_PILOT chỉ khi thêm rà soát chuyên gia hoàn tất).
+    `carbon_production_ready` chỉ true khi READY_FOR_PILOT — tức đã có rà soát chuyên gia; hệ số đủ
+    thôi là CHƯA đủ. `mrv_compliant` luôn false (chưa có hệ số QĐ 4801/QĐ-BNNMT).
     """
+    raw = load_parameter_file(settings.ef_config_path)
     parameters = ParameterSet.load(settings.ef_config_path)
-    try:
-        parameters.gwp("ch4")
-        parameters.gwp("n2o")
-        gwp_ready = True
-    except Exception:  # noqa: BLE001
-        gwp_ready = False
+    carbon_readiness = factor_readiness(raw)
 
     return {
         "status": "ok",
@@ -273,11 +273,13 @@ def health() -> dict:
         "methodology": parameters.methodology.to_dict(),
         "supabase_configured": settings.supabase_configured,
         "auth_configured": settings.auth_configured,
-        "carbon_production_ready": gwp_ready,
+        "carbon_scientific_readiness": carbon_readiness,
+        "carbon_production_ready": carbon_readiness["level"] == "READY_FOR_PILOT",
         "mrv_compliant": False,
         "note": (
-            "GWP chưa xác minh (OI-05) nên chưa ra được CO2e thật. "
-            "Chưa lấy được QĐ 4801/QĐ-BNNMT nên KHÔNG được gọi là MRV-compliant."
+            "Hệ số lõi IPCC 2019 Tier 1 + GWP AR5 đã đối chiếu nguồn; rà soát chuyên gia chưa có nên chưa "
+            "sẵn sàng cho thí điểm. Hệ số nhiên liệu chưa xác minh. Chưa lấy được QĐ 4801/QĐ-BNNMT nên KHÔNG "
+            "được gọi là MRV-compliant."
         ),
     }
 

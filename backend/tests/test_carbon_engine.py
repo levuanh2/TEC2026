@@ -58,6 +58,9 @@ from carbon import (  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REAL_CONFIG = Path(__file__).resolve().parent.parent / "config" / "emission_factors.yaml"
+# Real config with gwp.ch4 removed — keeps the "no GWP -> fail closed" guarantee testable now that the
+# real file carries AR5 GWP.
+MISSING_GWP_CONFIG = FIXTURES / "factor_sets" / "missing_gwp.yaml"
 
 AWD_TOTAL = 2920.8
 CF_TOTAL = 5435.4
@@ -447,8 +450,8 @@ def test_negative_yield_is_validation_error(demo, params):
 
 
 def test_real_config_blocks_on_missing_gwp(demo):
-    """Config thật: hệ số CH4/N2O đã VERIFIED nhưng GWP còn null -> chặn ở GWP (OI-05)."""
-    real = ParameterSet.load(REAL_CONFIG)
+    """Config thật bỏ GWP CH4: hệ số CH4/N2O VERIFIED nhưng thiếu GWP -> chặn ở GWP, không trả 0."""
+    real = ParameterSet.load(MISSING_GWP_CONFIG)
     with pytest.raises(MissingEmissionFactorError) as exc:
         calculate_carbon(demo, "awd", real)
     assert "gwp.ch4" in str(exc.value)
@@ -487,11 +490,9 @@ def test_real_config_factors_carry_provenance():
         assert "Table" in (parameter.source or ""), path
 
 
-def test_real_config_fuel_and_gwp_pending():
+def test_real_config_fuel_pending_and_gwp_decided():
     real = ParameterSet.load(REAL_CONFIG)
-    for path in (("gwp", "ch4"), ("gwp", "n2o")):
-        with pytest.raises(MissingEmissionFactorError):
-            real.get(*path)
+    assert real.gwp("ch4").value == 28 and real.gwp("n2o").value == 265  # AR5 GWP-100 (decided 2026-09-15)
     with pytest.raises(MissingEmissionFactorError):
         real.factor("fuel", "diesel")
 
@@ -671,7 +672,7 @@ def test_tier1_default_warning_present(demo, params):
     """Kết quả phải tự nói rõ chưa được coi là MRV-compliant khi dùng default IPCC."""
     real = ParameterSet.load(REAL_CONFIG)
     assert real.methodology.tier == 1
-    # Không chạy được tới cuối vì GWP null, nên kiểm tra trực tiếp hàm cảnh báo.
+    # Kiểm tra trực tiếp hàm cảnh báo (độc lập với dữ liệu vụ).
     from carbon.engine import _provenance_warnings
 
     notes = _provenance_warnings([], real)

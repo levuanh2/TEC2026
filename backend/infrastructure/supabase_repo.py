@@ -138,8 +138,25 @@ class SupabaseCarbonRepository:
     def save_calculation(
         self, calculation: dict[str, Any], breakdowns: list[dict[str, Any]]
     ) -> str:
-        with profiling.observe("carbon insert carbon_calculations"):
-            inserted = self.client.table("carbon_calculations").insert(calculation).execute().data
+        """Ghi bản tính; tính lại với ĐÚNG đầu vào cũ trả lại bản tính đã có.
+
+        `carbon_calculations_season_input_uniq` (crop_season_id, scenario, factor_set_id,
+        input_hash) chặn bản trùng. Cùng input_hash nghĩa là cùng kết quả, nên trả id cũ
+        (idempotent) thay vì để unique violation thành 500. Bắt lỗi sau insert thay vì
+        select trước để không có race giữa hai người ghi cùng lúc.
+        """
+        from postgrest.exceptions import APIError
+
+        try:
+            with profiling.observe("carbon insert carbon_calculations"):
+                inserted = self.client.table("carbon_calculations").insert(calculation).execute().data
+        except APIError as exc:
+            if exc.code != "23505":
+                raise
+            existing = self._existing_calculation_id(calculation)
+            if existing is None:
+                raise
+            return existing
         calc_id = inserted[0]["id"]
         if breakdowns:
             with profiling.observe("carbon insert carbon_breakdowns"):
@@ -147,6 +164,14 @@ class SupabaseCarbonRepository:
                     [{**b, "calculation_id": calc_id} for b in breakdowns]
                 ).execute()
         return calc_id
+
+    def _existing_calculation_id(self, calculation: dict[str, Any]) -> str | None:
+        query = self.client.table("carbon_calculations").select("id").is_("production_batch_id", "null")
+        for column in ("crop_season_id", "scenario", "factor_set_id", "input_hash"):
+            query = query.eq(column, calculation[column])
+        with profiling.observe("carbon select carbon_calculations"):
+            rows = query.limit(1).execute().data or []
+        return rows[0]["id"] if rows else None
 
     def latest_calculation(
         self, crop_season_id: str, scenario: str | None = None

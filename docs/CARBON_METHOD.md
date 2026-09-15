@@ -1,12 +1,15 @@
 # CARBON_METHOD — Phương pháp luận tính phát thải
 
-Phiên bản: 0.2 · Ngày: 2026-09-08 · Engine: 0.2.0 · Bộ tham số: `0.2.0-ipcc-tier1`
+Phiên bản: 0.3 · Ngày: 2026-09-15 · Bộ tham số: `0.3.0-ipcc2019-tier1-ar5` (0.2.0 chưa từng được import)
 Nguồn từng dòng: [`CARBON_METHOD_SOURCES.md`](CARBON_METHOD_SOURCES.md)
 Cấu hình: `backend/config/emission_factors.yaml` · Code: `backend/carbon/`
 
-> **Trạng thái tổng quát:** cấu trúc công thức và hệ số CH4/N2O/đốt rơm đã **VERIFIED**
-> theo IPCC. **GWP còn PENDING_VERIFICATION** nên engine chưa ra được con số CO2e nào.
-> Đây là hành vi đúng theo thiết kế — xem §8.
+> **Trạng thái tổng quát:** công thức và 27 hệ số lõi (CH4 lúa, N2O phân bón, đốt rơm, GWP)
+> đã **VERIFIED** theo IPCC 2019 Refinement / 2006 GL / AR5, có số hiệu bảng. GWP chốt
+> **AR5 GWP-100** (§8). Bộ hệ số đã import và published trên hosted dev; engine ra số CO2e và
+> khớp tính tay (`backend/tests/test_carbon_real_factors.py`).
+> Mức sẵn sàng khoa học: **READY_FOR_DEMO** — chưa có chuyên gia thẩm định (PENDING), nhiên
+> liệu chưa có hệ số VERIFIED (vụ có nhiên liệu vẫn trả 422). Không phải chứng nhận.
 >
 > ⛔ **Chưa lấy được toàn văn QĐ 4801/QĐ-BNNMT.** Bộ số hiện tại là **IPCC Tier 1 default**,
 > không phải hệ số đặc trưng quốc gia mà quy trình MRV yêu cầu.
@@ -287,28 +290,34 @@ Chưa xác minh: có cần tính CH4/N2O từ đốt nhiên liệu không (thư�
 
 ---
 
-## 8. GWP — **PENDING_VERIFICATION** · đang chặn toàn bộ
+## 8. GWP — **AR5 GWP-100 · VERIFIED** (chốt 2026-09-15)
 
 ```text
 CO2e  =  CH4 × GWP_CH4  +  N2O × GWP_N2O
 ```
 
-**Chưa xác minh được QĐ 4801 quy định khung nào.** Không tự chọn, vì chênh lệch lớn:
+| Khung | GWP-100 CH4 | GWP-100 N2O | Dùng? |
+|---|---|---|---|
+| AR4 (2007) | 25 | 298 | không |
+| **AR5 (2013)** | **28** | **265** | **có** |
+| AR6 (2021) | 27,9 (phi hoá thạch) / 29,8 | 273 | không |
 
-| Khung | GWP-100 CH4 | GWP-100 N2O |
-|---|---|---|
-| AR4 (2007) | 25 | 298 |
-| AR5 (2013) | 28 | 265 |
-| AR6 (2021) | 27,9 (phi hoá thạch) / 29,8 | 273 |
+**Căn cứ chọn AR5:**
 
-Chọn AR4 thay vì AR6 làm lệch CH4 tới **~19%** — mà CH4 chiếm phần lớn phát thải lúa nước.
-Ba giá trị trên **liệt kê để biết cần tra cái gì**, chưa được đưa vào config.
+- Giá trị: IPCC AR5 WG1 (2013) Ch.8, Table 8.A.1 — CH4 28 (không phải CH4 hoá thạch 30,
+  không kèm climate-carbon feedback), N2O 265. Độ không chắc chắn theo chú thích bảng:
+  ±40% (CH4), ±30% (N2O), khoảng 90%.
+- Khung báo cáo: UNFCCC quyết định 18/CMA.1, phụ lục đoạn 37 và 5/CMA.3 đoạn 25 — báo cáo
+  minh bạch theo Thoả thuận Paris dùng GWP-100 của AR5 (Table 8.A.1, loại trừ CH4 hoá thạch).
+- QĐ 2626/QĐ-BTNMT không nêu khung GWP. QĐ 4801 chưa lấy được toàn văn — nếu văn bản quy
+  định khung khác thì tạo **bộ hệ số phiên bản mới**; bộ đã published không được sửa.
+- CH4 lúa là CH4 sinh học nên dùng 28, không dùng 30.
 
-**Hệ quả:** chạy engine với config thật hiện nay luôn dừng ở
-`MissingEmissionFactorError: gwp.ch4 chưa được xác minh/cấu hình`. Open issue **OI-05**.
+Không trộn AR5 và AR6: validator (`carbon/factor_register.py`) từ chối bộ hệ số có
+`methodology.gwp_basis` hoặc `gwp.framework` khác `AR5`.
 
-Đây là lựa chọn có chủ đích: thà *"Engine chưa tính được vì thiếu GWP"* còn hơn
-*"Engine trả một con số sai nhưng nhìn có vẻ hợp lý"*.
+Thiếu GWP vẫn **fail closed**: bỏ `gwp.ch4` khỏi config (fixture
+`backend/tests/fixtures/factor_sets/missing_gwp.yaml`) → `MissingEmissionFactorError`, không trả 0.
 
 ---
 
@@ -358,7 +367,9 @@ CO2e/kg  =  CO2e_tổng  /  yield_kg
 
 1. **Chưa phải MRV-compliant.** Đang dùng IPCC Tier 1 default. Quy trình MRV yêu cầu hệ số
    đặc trưng quốc gia đo trực tiếp trên đồng ruộng (Tier 2). Chưa lấy được QĐ 4801 (OI-02).
-2. **Chưa ra được số CO2e** vì GWP chưa xác minh (OI-05).
+2. **Chưa có chuyên gia lĩnh vực thẩm định** bộ hệ số (domain expert review: PENDING); chưa
+   dùng hệ số Tier 2 đặc trưng quốc gia của QĐ 2626 (theo vùng/mùa vụ). Nhiên liệu chưa có
+   hệ số VERIFIED → vụ có bản ghi nhiên liệu trả 422 `missing_emission_factor`.
 3. **Độ không chắc chắn lớn.** EFc SE Asia 1,22 có khoảng 0,83–1,81 — tức ±~40%. Mọi con số
    trình bày phải kèm khoảng, không nói như số đo chính xác.
 4. **Chỉ chính xác bằng dữ liệu đầu vào.** MVP chưa có Evidence/Anti-fraud (giai đoạn 2).
@@ -386,8 +397,8 @@ CO2e/kg  =  CO2e_tổng  /  yield_kg
 VERIFIED             : CH4 lúa (Eq 5.1/5.2/5.3, Tables 5.11/5.11A/5.12/5.13/5.14)
                        N2O trực tiếp (Eq 11.1, Table 11.1)
                        Đốt rơm (Eq 2.27, Tables 2.5/2.6)
-PENDING_VERIFICATION : GWP CH4, GWP N2O            ← đang chặn toàn bộ việc ra số
-                       Hệ số nhiên liệu, hệ số lưới điện
+                       GWP-100 AR5: CH4 28, N2O 265 (AR5 WG1 Ch.8 Table 8.A.1)
+PENDING_VERIFICATION : Hệ số nhiên liệu (null → 422), hệ số lưới điện
                        CO2 từ đốt rơm có tính hay không
 NOT_IMPLEMENTED      : N2O gián tiếp · N từ phân hữu cơ · upstream giống/thuốc BVTV
                        CH4 ngoài vụ · carbon đất · SFs/SFr (Tier 2) · lúa cạn (EF1)

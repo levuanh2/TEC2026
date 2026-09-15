@@ -134,8 +134,8 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
 
 ## Việc cần làm ngay (chặn tiến độ)
 
-- [ ] **OI-05 — xác minh khung GWP** (AR4/AR5/AR6) mà QĐ 4801 hoặc QĐ 2626 quy định.
-      **Đang chặn toàn bộ việc ra số CO2e.** Chênh AR4 vs AR6 tới ~19% cho CH4.
+- [x] **OI-05 — khung GWP: đã chốt AR5 GWP-100** (CH4 28, N2O 265; AR5 WG1 Table 8.A.1;
+      UNFCCC 18/CMA.1). QĐ 2626 không nêu GWP; nếu QĐ 4801 quy định khác → bộ hệ số phiên bản mới.
 - [ ] **OI-02 — lấy toàn văn + phụ lục QĐ 4801/QĐ-BNNMT.** Hiện engine dùng IPCC Tier 1
       default; quy trình MRV yêu cầu hệ số đặc trưng quốc gia. **Chưa lấy được thì không
       được nói "MRV-compliant".**

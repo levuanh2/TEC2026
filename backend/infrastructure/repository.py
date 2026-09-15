@@ -85,6 +85,12 @@ class InMemoryCarbonRepository:
     def save_calculation(
         self, calculation: dict[str, Any], breakdowns: list[dict[str, Any]]
     ) -> str:
+        # Như carbon_calculations_season_input_uniq: cùng vụ/kịch bản/bộ hệ số/input_hash
+        # thì không ghi bản mới mà trả bản đã có.
+        key = ("crop_season_id", "scenario", "factor_set_id", "input_hash")
+        for existing in self.calculations:
+            if existing.get("production_batch_id") is None and all(existing.get(k) == calculation.get(k) for k in key):
+                return existing["id"]
         self._seq += 1
         calc_id = f"calc-{self._seq:04d}"
         row = {**calculation, "id": calc_id}

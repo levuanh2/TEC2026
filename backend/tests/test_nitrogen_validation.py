@@ -26,6 +26,7 @@ from infrastructure.mapping import map_crop_activity_data  # noqa: E402
 from service import CarbonService  # noqa: E402
 from tests.fixtures import supabase_rows as rows  # noqa: E402
 from tests.test_integration_supabase import (  # noqa: E402,F401 - fixtures
+    MISSING_GWP_CONFIG,
     REAL_CONFIG,
     FakeCropAccessChecker,
     FakeCropPersistChecker,
@@ -53,14 +54,14 @@ def test_missing_nitrogen_is_missing_activity_data(bundle, params):
 
 
 def test_missing_nitrogen_is_reported_before_any_factor_lookup(bundle):
-    production = ParameterSet.load(REAL_CONFIG)  # GWP still null
+    production = ParameterSet.load(MISSING_GWP_CONFIG)  # a factor gap that would otherwise surface
     _set_nitrogen(bundle, None)
     with pytest.raises(MissingActivityDataError):
         calculate_carbon(map_crop_activity_data(bundle), "awd", production)
 
 
 def test_valid_nitrogen_proceeds_to_the_next_legitimate_gate(bundle):
-    production = ParameterSet.load(REAL_CONFIG)
+    production = ParameterSet.load(MISSING_GWP_CONFIG)
     _set_nitrogen(bundle, 46)
     with pytest.raises(MissingEmissionFactorError):
         calculate_carbon(map_crop_activity_data(bundle), "awd", production)

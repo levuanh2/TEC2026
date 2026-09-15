@@ -37,6 +37,7 @@ from tests.fixtures import supabase_rows as rows  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REAL_CONFIG = Path(__file__).resolve().parent.parent / "config" / "emission_factors.yaml"
+MISSING_GWP_CONFIG = FIXTURES / "factor_sets" / "missing_gwp.yaml"
 
 AWD_TOTAL = 2920.8
 CF_TOTAL = 5435.4
@@ -326,8 +327,8 @@ def test_deleted_activity_is_ignored(bundle, service):
 
 
 def test_production_config_fails_closed_on_missing_gwp(repo):
-    """Fail-closed: config thật thiếu GWP -> lỗi, KHÔNG trả 0."""
-    production = ParameterSet.load(REAL_CONFIG)
+    """Fail-closed: config thiếu GWP -> lỗi, KHÔNG trả 0."""
+    production = ParameterSet.load(MISSING_GWP_CONFIG)
     service = CarbonService(repo, production)
 
     with pytest.raises(MissingEmissionFactorError) as exc:
@@ -474,7 +475,7 @@ def test_api_missing_gwp_returns_422(bundle, repo):
     import api
     from fastapi import FastAPI
 
-    production = ParameterSet.load(REAL_CONFIG)
+    production = ParameterSet.load(MISSING_GWP_CONFIG)
     app = FastAPI()
     app.include_router(api.router)
     app.dependency_overrides[api._service] = lambda: CarbonService(repo, production)
