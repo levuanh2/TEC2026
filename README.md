@@ -154,6 +154,18 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
 
 ---
 
+## Documentation
+
+Bộ tài liệu kỹ thuật + hướng dẫn sử dụng tiếng Việt (MkDocs + Material, đối chiếu với
+mã nguồn) nằm trong `docs/`, cấu hình ở `mkdocs.yml`. Bắt đầu từ
+[`docs/index.md`](docs/index.md).
+
+```bash
+pip install -r docs/requirements.txt
+mkdocs serve -a 127.0.0.1:8001   # xem site tại http://127.0.0.1:8001
+mkdocs build --strict            # build ra site/ và kiểm tra link/nav
+```
+
 ## Tài liệu
 
 | File | Nội dung |

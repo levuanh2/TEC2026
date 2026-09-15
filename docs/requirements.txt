@@ -1,0 +1,5 @@
+# Dependency tối thiểu để build site tài liệu AgriCarbon.
+# Cài: pip install -r docs/requirements.txt
+# Chạy: mkdocs serve   |   Kiểm tra: mkdocs build --strict
+mkdocs>=1.6,<2
+mkdocs-material>=9.5,<10

@@ -1,0 +1,124 @@
+site_name: AgriCarbon Documentation
+site_description: >-
+  Tài liệu kỹ thuật, thiết kế hệ thống và hướng dẫn sử dụng AgriCarbon — viết
+  bằng tiếng Việt, đối chiếu trực tiếp với mã nguồn trong repository.
+docs_dir: docs
+site_dir: site
+copyright: >-
+  AgriCarbon · TEC 2026 — Tài liệu mô tả hệ thống, không phải chứng nhận MRV.
+
+theme:
+  name: material
+  language: vi
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/weather-night
+        name: Chuyển sang giao diện tối
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/weather-sunny
+        name: Chuyển sang giao diện sáng
+
+plugins:
+  - search
+
+# Nâng các kiểm tra link lên mức warning để `mkdocs build --strict` bắt được
+# link hỏng, anchor không tồn tại và trang có trong docs/ nhưng thiếu trong nav.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+# Thư mục docs/ còn chứa các báo cáo/đặc tả lịch sử (viết trước site này, có
+# link trỏ ra ngoài docs/). Chúng vẫn nằm trong repo nhưng không được build
+# thành trang, để `mkdocs build --strict` chỉ kiểm tra bộ tài liệu có cấu trúc.
+exclude_docs: |
+  /*.md
+  !/index.md
+  !/source-audit.md
+  /Data/
+  /openapi.json
+  /requirements.txt
+  /modules/0*.md
+
+nav:
+  - Trang chủ: index.md
+  - Bắt đầu:
+      - Chạy hệ thống local: getting-started/index.md
+      - Kiểm toán mã nguồn: source-audit.md
+  - Kiến trúc hệ thống:
+      - System context: architecture/system-context.md
+      - Container architecture: architecture/container-architecture.md
+      - Module map: architecture/module-map.md
+      - Domain model: architecture/domain-model.md
+      - Quyết định thiết kế: architecture/design-decisions.md
+      - Chỉ mục sơ đồ: architecture/diagrams.md
+  - Ứng dụng:
+      - Flutter Mobile: modules/flutter-mobile.md
+      - Web Farmer & Management: modules/web-dashboard.md
+  - Carbon:
+      - Carbon Engine: modules/carbon-engine.md
+      - Phương pháp tính: methodology/carbon-calculation.md
+      - Sequence tính Carbon: workflows/carbon-calculation-sequence.md
+  - Resource Metrics: modules/resource-metrics.md
+  - Recommendation: modules/recommendation.md
+  - Computer Vision: modules/computer-vision.md
+  - MRV: modules/mrv.md
+  - Workflows:
+      - Luồng nông hộ: workflows/farmer-workflow.md
+      - Sequence diagram hệ thống: workflows/system-sequences.md
+  - Hướng dẫn sử dụng:
+      - Nông hộ (Farmer): user-guide/farmer.md
+      - Quản lý (Management): user-guide/management.md
+  - API: api/overview.md
+  - Database: database/schema.md
+  - Security: security/authentication-and-rls.md
+  - Deployment:
+      - Kiến trúc triển khai: deployment/architecture.md
+      - Biến môi trường: deployment/environment.md
+  - Limitations:
+      - Giới hạn hiện tại: limitations/current-limitations.md
+      - Phát hiện kiểm toán mã nguồn: limitations/implementation-audit-findings.md

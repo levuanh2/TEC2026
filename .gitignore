@@ -24,6 +24,9 @@ playwright/.cache/
 .vite-dev.log
 .qa-screenshots/
 
+# MkDocs build output (mkdocs build)
+site/
+
 # Flutter (app/)
 .dart_tool/
 build/
