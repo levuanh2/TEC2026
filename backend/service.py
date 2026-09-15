@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from carbon import CarbonResult, ParameterSet, calculate_carbon
+from infrastructure import memberships
 from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
@@ -462,25 +463,16 @@ class MrvExportService:
         """Python mirror of `private.user_is_org_manager`, including `ended_at`.
 
         Reads the membership rows `me()` already returned, so this costs no extra
-        round trip. A lapsed membership is not management authority, which is why
-        `ended_at` is honoured here exactly as the SQL helper honours it.
+        round trip. A lapsed membership is not management authority; the active
+        rule is the shared `infrastructure.memberships` one, so this check can
+        never disagree with `/v1/me` or the SQL helper. `me()` already drops ended
+        rows â€” filtering again keeps this safe for any other actor source.
         """
-        now = datetime.now(timezone.utc)
-        for membership in actor.get("organization_memberships") or []:
-            if str(membership.get("organization_id")) != str(organization_id):
-                continue
-            if str(membership.get("role")) != cls.MANAGEMENT_ROLE:
-                continue
-            ended = membership.get("ended_at")
-            if ended is None:
-                return True
-            if isinstance(ended, str):
-                ended = datetime.fromisoformat(ended.replace("Z", "+00:00"))
-            if ended.tzinfo is None:
-                ended = ended.replace(tzinfo=timezone.utc)
-            if ended > now:
-                return True
-        return False
+        return any(
+            str(membership.get("organization_id")) == str(organization_id)
+            and str(membership.get("role")) == cls.MANAGEMENT_ROLE
+            for membership in memberships.active_memberships(actor.get("organization_memberships") or [])
+        )
 
     def _authorized_case(
         self, read_repository: SupabaseReadRepository, mrv_case_id: str, actor: dict[str, Any]
