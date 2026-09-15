@@ -1,0 +1,5 @@
+/* Fraunces splits Vietnamese diacritics in browser headings. Use the body
+   family's Vietnamese glyphs for Farmer display text as well. */
+.fw {
+  --fw-display: var(--fw-body);
+}

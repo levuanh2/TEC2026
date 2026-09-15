@@ -1,4 +1,5 @@
 import './farmer.css'
+import './font-fix.css'
 import { useEffect, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { signOut } from '../api/auth'
