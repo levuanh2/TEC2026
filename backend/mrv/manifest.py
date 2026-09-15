@@ -624,7 +624,10 @@ def _provenance_section(
                 "parameter_kind": f.get("parameter_kind"),
                 "uncertainty_range": f.get("uncertainty_range"),
             })
-        unverified = [f["factor_code"] for f in factors if f["verification_status"] not in (None, "verified")]
+        # The database enum is upper-case (VERIFIED / PENDING_VERIFICATION / ...); compare
+        # case-insensitively so a verified factor is never reported as unverified.
+        unverified = [f["factor_code"] for f in factors
+                      if f["verification_status"] is not None and str(f["verification_status"]).upper() != "VERIFIED"]
         if unverified:
             warnings.append(
                 _warning(
