@@ -5,7 +5,10 @@ interface Membership { organization_id?: string }
 interface FarmMembership { farm_id?: string; farm_role?: string }
 interface MeResponse { user_id?: string; full_name?: string | null; roles: string[]; organization_memberships: Membership[]; farm_memberships?: FarmMembership[] }
 
-const rolePriority: Role[] = ['cooperative_manager', 'enterprise', 'regulator', 'farmer']
+// Canonical backend role names (`organization_role` enum). A user with none of
+// them falls back to the Farmer shell, whose data is still RLS-scoped and whose
+// writes the server authorizes; a hint carrying a retired alias is ignored.
+const rolePriority: Role[] = ['cooperative_manager', 'enterprise_viewer', 'regulator', 'farmer']
 const WRITE_FARM_ROLES = new Set(['owner', 'editor'])
 
 /** `writableFarmIds`: farms where the caller's `farm_role` allows journal

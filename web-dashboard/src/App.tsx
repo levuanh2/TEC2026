@@ -19,7 +19,7 @@ import { prefetchFarmerScope } from './farmer/scope'
 const ROLE_LABEL: Record<string, string> = {
   farmer: 'Nông hộ',
   cooperative_manager: 'Quản lý HTX',
-  enterprise: 'Doanh nghiệp',
+  enterprise_viewer: 'Doanh nghiệp',
   regulator: 'Cơ quan quản lý',
 }
 
