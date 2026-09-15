@@ -15,6 +15,7 @@ import { RecommendationsSection } from '../Recommendations'
 import { isActiveStatus, resolveSeason, seasonStatusLabel, useActivities, useMetrics, useScope, type SeasonCtx } from '../scope'
 import { SeasonCarbon } from './Carbon'
 import { MetricCards } from './Performance'
+import { useWritableSeason } from '../writeAccess'
 
 export type SeasonTab = 'overview' | 'journal' | 'performance' | 'carbon'
 const NOT_FOUND = 'Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.'
@@ -26,6 +27,8 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
   const activities = useActivities(id)
   const mutations = useActivityMutations()
   const seasonCtx = ctx ? toSeasonContext(ctx.season, ctx.plot) : null
+  // Journal write affordances only where the farm role allows writing.
+  const writeCtx = useWritableSeason(ctx)
   const base = `/farmer/crop-seasons/${id}`
   const tabs: { label: string; to: string; icon: IconName; current: boolean }[] = [
     { label: 'Tổng quan', to: base, icon: 'overview', current: tab === 'overview' },
@@ -44,26 +47,26 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
       {ctx ? <SeasonHeader ctx={ctx} /> : <SeasonHeaderSkeleton />}
       <Tabs items={tabs} />
       <Flash message={mutations.flash} />
-      {tab === 'overview' && <SeasonOverview id={id} ctx={ctx} seasonCtx={seasonCtx} metrics={metrics} activities={activities} mutations={mutations} />}
+      {tab === 'overview' && <SeasonOverview id={id} ctx={ctx} seasonCtx={seasonCtx} writeCtx={writeCtx} metrics={metrics} activities={activities} mutations={mutations} />}
       {tab === 'journal' && (
         <Section
           title="Nhật ký của vụ này"
           icon="journal"
           tone="leaf"
           description={ctx ? `Chỉ hoạt động thuộc "${ctx.season.name}" — nhấn một hoạt động để xem chi tiết.` : undefined}
-          action={seasonCtx ? <AddActivityCta season={seasonCtx} mutations={mutations} /> : undefined}
+          action={writeCtx ? <AddActivityCta season={writeCtx} mutations={mutations} /> : undefined}
         >
           <JournalView
             state={activities}
             resetSignal={mutations.version}
-            renderCardActions={seasonCtx ? (a) => <ActivityCardActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined}
-            renderDetailActions={seasonCtx ? (a) => <ActivityDetailActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined}
+            renderCardActions={writeCtx ? (a) => <ActivityCardActions activity={a} season={writeCtx} mutations={mutations} /> : undefined}
+            renderDetailActions={writeCtx ? (a) => <ActivityDetailActions activity={a} season={writeCtx} mutations={mutations} /> : undefined}
           />
         </Section>
       )}
       {tab === 'performance' && (
         <Section title="Hiệu suất vụ này" icon="performance" description="Bốn chỉ số tính từ dữ liệu đã ghi của vụ; thiếu dữ liệu không bị thay bằng số 0.">
-          <MetricCards state={metrics} season={seasonCtx} mutations={mutations} />
+          <MetricCards state={metrics} season={writeCtx} mutations={mutations} />
         </Section>
       )}
       {tab === 'carbon' && <SeasonCarbon seasonId={id} />}
@@ -114,15 +117,17 @@ function SeasonHeaderSkeleton() {
   )
 }
 
-function SeasonOverview({ id, ctx, seasonCtx, metrics, activities, mutations }: {
-  id: string; ctx: SeasonCtx | null; seasonCtx: SeasonContext | null
+function SeasonOverview({ id, ctx, seasonCtx, writeCtx, metrics, activities, mutations }: {
+  id: string; ctx: SeasonCtx | null; seasonCtx: SeasonContext | null; writeCtx: SeasonContext | null
   metrics: QueryState<SeasonMetrics>; activities: QueryState<Activity[]>; mutations: ActivityMutations
 }) {
   return (
     <>
-      <Section title="Ghi nhanh cho vụ này" icon="plus" description="Chọn việc bạn vừa làm — không cần chọn lại vụ.">
-        <QuickActions seasons={seasonCtx ? [seasonCtx] : []} mutations={mutations} compact loading={!seasonCtx} />
-      </Section>
+      {(!seasonCtx || writeCtx) && (
+        <Section title="Ghi nhanh cho vụ này" icon="plus" description="Chọn việc bạn vừa làm — không cần chọn lại vụ.">
+          <QuickActions seasons={writeCtx ? [writeCtx] : []} mutations={mutations} compact loading={!seasonCtx} />
+        </Section>
+      )}
       <div className="fw-grid-2">
         <Section title="Tình trạng vụ" icon="checklist" tone="leaf">
           <SeasonStatus ctx={ctx} metrics={metrics} activities={activities} />

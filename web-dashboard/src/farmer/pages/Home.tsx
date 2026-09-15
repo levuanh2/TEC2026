@@ -12,6 +12,7 @@ import { MiniTimeline } from '../journal'
 import { Chip, Empty, ErrorPanel, Flash, IconTile, MoreLink, Section, Sk, SkBlock } from '../kit'
 import { metricViews } from '../metricsView'
 import { RecommendationsSection } from '../Recommendations'
+import { useCanWriteFarm, useWritableSeason } from '../writeAccess'
 import {
   activeSeasonsOf, prefetchSeason, primarySeason, seasonStatusLabel, useActivities, useMetrics, useRecommendations, useScope,
   type SeasonCtx,
@@ -30,8 +31,12 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   const activities = useActivities(sid)
   const recs = useRecommendations(sid)
   const mutations = useActivityMutations()
-  const writable: SeasonContext[] = activeSeasonsOf(scope.data).map((c) => toSeasonContext(c.season, c.plot))
+  const canWrite = useCanWriteFarm()
+  const active = activeSeasonsOf(scope.data)
+  const writable: SeasonContext[] = active.filter((c) => canWrite(c.plot?.farmId)).map((c) => toSeasonContext(c.season, c.plot))
+  const readOnly = !scope.loading && active.length > 0 && writable.length === 0
   const primaryCtx = primary ? toSeasonContext(primary.season, primary.plot) : null
+  const primaryWriteCtx = useWritableSeason(primary)
   const name = viewer.fullName?.trim()
 
   return (
@@ -50,9 +55,11 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
 
       <HomeHero scope={scope} primary={primary} />
 
-      <Section title="Ghi nhanh" description="Chọn việc bạn vừa làm để ghi vào nhật ký của vụ đang canh tác.">
-        <QuickActions seasons={writable} mutations={mutations} loading={scope.loading} />
-      </Section>
+      {!readOnly && (
+        <Section title="Ghi nhanh" description="Chọn việc bạn vừa làm để ghi vào nhật ký của vụ đang canh tác.">
+          <QuickActions seasons={writable} mutations={mutations} loading={scope.loading} />
+        </Section>
+      )}
 
       {/* Reading order is the farmer's, not the database's: what is running
         * (ledger, above) → what to record (quick, above) → is the data sound
@@ -74,7 +81,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
         </div>
         <div className="fw-home-col">
           <Section className="fw-area-attn" title="Cần chú ý" description="Chỉ từ dữ liệu thực tế của vụ.">
-            <AttentionList metrics={pending(metrics, scope.loading)} recs={recs.data} season={primaryCtx} mutations={mutations} hasSeason={Boolean(sid)} />
+            <AttentionList metrics={pending(metrics, scope.loading)} recs={recs.data} season={primaryWriteCtx} mutations={mutations} hasSeason={Boolean(sid)} />
           </Section>
           <div className="fw-area-recs">
             <RecommendationsSection seasonId={scope.loading ? null : sid} limit={2} moreTo={sid ? `/farmer/crop-seasons/${sid}` : undefined} />

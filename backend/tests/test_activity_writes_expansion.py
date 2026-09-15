@@ -267,6 +267,7 @@ def test_postgres_repository_inserts_into_the_correct_detail_table(activity_type
         "occurred_at": _now(), "note": None, "created_by": ACTOR, "created_at": _now(), "updated_at": _now(),
     }
     cursor = _FakeCursor([
+        {"allowed": True},       # 0. private.user_can_write_batch (B3) — set_config calls fetch nothing
         None,                    # 1. idempotency replay lookup: no existing row
         {"id": "activity-1"},    # 2. insert into activities ... returning id
         # 3. insert into public.<table> — no fetchone() call

@@ -1,12 +1,13 @@
 import type { SeasonMetrics } from '../../api/metrics'
 import { Link } from '../../ui'
 import { ACTIVITY_TITLE, fmtNumber } from '../activityView'
-import { toSeasonContext, useActivityMutations, type ActivityMutations, type SeasonContext } from '../ActivityForms'
+import { useActivityMutations, type ActivityMutations, type SeasonContext } from '../ActivityForms'
 import type { QueryState } from '../data'
 import { Ico } from '../icons'
 import { ACTIVITY_ICON, Chip, Empty, ErrorPanel, Flash, IconTile, PageHeader, Sk, SkBlock } from '../kit'
 import { metricViews } from '../metricsView'
 import { prefetchSeason, primarySeason, seasonStatusLabel, useMetrics, useScope } from '../scope'
+import { useWritableSeason } from '../writeAccess'
 
 export function MetricCards({ state, season, mutations, loading }: { state: QueryState<SeasonMetrics>; season: SeasonContext | null; mutations: ActivityMutations; loading?: boolean }) {
   if (loading || state.loading) {
@@ -69,7 +70,7 @@ export function FarmerPerformancePage() {
   const sid = primary?.season.id ?? null
   const metrics = useMetrics(sid)
   const mutations = useActivityMutations()
-  const seasonCtx = primary ? toSeasonContext(primary.season, primary.plot) : null
+  const seasonCtx = useWritableSeason(primary)
   return (
     <>
       <PageHeader eyebrow="Hiệu suất" icon="performance" title="Hiệu suất vụ của tôi" subtitle="Bốn chỉ số tài nguyên và phát thải của vụ đang canh tác, tính từ dữ liệu bạn đã ghi." />

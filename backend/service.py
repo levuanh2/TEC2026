@@ -167,12 +167,18 @@ class ActivityWriteService:
         actor_id = self._actor_and_farmer_scope(read_repository)
         batch_id = self._write_batch(read_repository, crop_season_id)
         data = schemas.validate_activity_data(request.activity_type, request.data).model_dump()
-        row, replay = self._write_repository.create(
-            crop_season_id=crop_season_id, production_batch_id=batch_id,
-            actor_id=actor_id, idempotency_key=str(request.idempotency_key),
-            activity_type=request.activity_type, occurred_at=request.occurred_at,
-            note=request.note, data=data,
-        )
+        try:
+            # The repository re-checks write permission (farm owner/editor or
+            # cooperative manager) inside its transaction; a read-only farm
+            # member is normalized to the same 404 as an out-of-scope season.
+            row, replay = self._write_repository.create(
+                crop_season_id=crop_season_id, production_batch_id=batch_id,
+                actor_id=actor_id, idempotency_key=str(request.idempotency_key),
+                activity_type=request.activity_type, occurred_at=request.occurred_at,
+                note=request.note, data=data,
+            )
+        except ActivityNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
         return self._response(row, replay=replay)
 
     def update(
@@ -192,10 +198,13 @@ class ActivityWriteService:
             data = schemas.validate_activity_data(
                 existing["activity_type"], {**existing["data"], **request.data}
             ).model_dump()
-        row = self._write_repository.update(
-            activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
-            note=request.note, update_note="note" in request.model_fields_set, data=data,
-        )
+        try:
+            row = self._write_repository.update(
+                activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
+                note=request.note, update_note="note" in request.model_fields_set, data=data,
+            )
+        except ActivityNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
         return self._response(row)
 
     def delete(self, *, read_repository: SupabaseReadRepository, activity_id: str) -> None:
@@ -466,7 +475,7 @@ class MrvExportService:
         round trip. A lapsed membership is not management authority; the active
         rule is the shared `infrastructure.memberships` one, so this check can
         never disagree with `/v1/me` or the SQL helper. `me()` already drops ended
-        rows â€” filtering again keeps this safe for any other actor source.
+        rows — filtering again keeps this safe for any other actor source.
         """
         return any(
             str(membership.get("organization_id")) == str(organization_id)
