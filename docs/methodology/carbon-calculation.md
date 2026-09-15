@@ -2,15 +2,15 @@
 
 Trang này diễn giải **chính xác những gì code đang làm** trong
 `backend/carbon/engine.py` và `backend/carbon/methodology.py`, với giá trị tham số
-lấy từ `backend/config/emission_factors.yaml` (`version: 0.2.0-ipcc-tier1`,
-`review_date: 2026-09-08`).
+lấy từ `backend/config/emission_factors.yaml` (`version: 0.3.0-ipcc2019-tier1-ar5`,
+`review_date: 2026-09-15`). Từng hệ số, nguồn và độ không chắc chắn:
+[Sổ đăng ký hệ số](carbon-factor-register.md).
 
-!!! danger "Không phải kết quả khoa học đã xác minh"
-    ENGINEERING READY — SCIENTIFIC PRODUCTION READINESS NOT COMPLETE.
-    GWP của CH₄ và N₂O chưa được chọn khung (AR4/AR5/AR6 — OI-05), hệ số nhiên liệu
-    và lưới điện chưa có (OI-06), bộ số là IPCC Tier 1 default thay vì hệ số quốc gia
-    (OI-02). Engine từ chối trả CO₂e khi thiếu GWP. Không trình bày kết quả là chứng
-    nhận, chính thức hay MRV-compliant.
+!!! warning "READY_FOR_DEMO — không phải kết quả đã thẩm định"
+    Hệ số lõi VERIFIED theo IPCC có số hiệu bảng, GWP chốt AR5 GWP-100 (OI-05 đã đóng),
+    engine khớp tính tay. Còn mở: chuyên gia lĩnh vực chưa thẩm định, hệ số nhiên liệu và
+    lưới điện chưa có (OI-06), bộ số là IPCC Tier 1 default thay vì hệ số quốc gia (OI-02).
+    Không trình bày kết quả là chứng nhận, chính thức hay MRV-compliant.
 
 ## 1. Phạm vi
 
@@ -70,7 +70,7 @@ CO2e = CH4 × GWP_CH4
 | `SFp` | `factors.ch4_rice.sfp.<pre_season_water_regime>` | xem bảng dưới (Table 5.13) | VERIFIED |
 | `SFo` | tính từ rơm vùi/ủ, `sfo_exponent = 0,59` (Eq 5.3) | — | VERIFIED |
 | `CFOA` | `factors.ch4_rice.cfoa.*` (Table 5.14) | xem mục Rơm rạ | VERIFIED |
-| `GWP_CH4` | `gwp.ch4` | **null** | **PENDING_VERIFICATION** |
+| `GWP_CH4` | `gwp.ch4` | 28 kg CO₂e/kg CH₄ (AR5 WG1 Table 8.A.1, GWP-100) | VERIFIED |
 
 **SFw — chế độ nước trong vụ**
 
@@ -123,7 +123,8 @@ CO2e   = N2O × GWP_N2O
 | `rainfed_regular`, `rainfed_drought_prone`, `deep_water` | `aggregate` + cảnh báo | 0,004 |
 | `upland` | — | `422 methodology_gap` (cần EF1, chưa cấu hình) |
 
-`n2o_n_to_n2o = 44/28 = 1,5714…` (hằng số hoá học). `GWP_N2O` (`gwp.n2o`) **null**.
+`n2o_n_to_n2o = 44/28 = 1,5714…` (hằng số hoá học). `GWP_N2O` (`gwp.n2o`) = 265
+(AR5 WG1 Table 8.A.1, GWP-100).
 Mỗi lần có dòng N₂O, engine thêm cảnh báo rằng N₂O gián tiếp chưa được tính.
 
 ## 5. Rơm rạ
@@ -260,17 +261,38 @@ Khi lưu, mỗi dòng phân rã thành một hàng `carbon_breakdowns`:
 | Tham số không `VERIFIED` hoặc thiếu nguồn | "Kết quả không dùng được cho báo cáo chính thức" |
 | `methodology.tier = 1` | Đang dùng IPCC Tier 1 default, không được gắn nhãn MRV-compliant |
 
+## 10a. Kiểm tra tính tay
+
+Vụ 1 ha, 100 ngày, ngập liên tục, không ngập <180 ngày trước vụ, không bổ sung hữu cơ, urea
+100 kg (46% N), 6.000 kg thóc:
+
+```text
+CH4   = 1,22 × 1,00 × 1,00 × 1,0 × 100 × 1        = 122,0 kg      × 28  = 3.416,0 kg CO2e
+N2O   = 46 kg N × 0,003 × 44/28                   = 0,2168571 kg  × 265 =    57,4671 kg CO2e
+Tổng                                                                   = 3.473,4671 kg CO2e
+CO2e/kg thóc = 3.473,4671 / 6.000                                      = 0,5789112
+AWD: CH4 1,22 × 0,55 × 100 = 67,1 kg → 1.878,8; N2O 46 × 0,005 × 44/28 → 95,7786
+     tổng 1.974,5786 (giảm 43,15%: CH4 giảm, N2O tăng — không phải tỷ lệ phẳng)
+```
+
+`backend/tests/test_carbon_real_factors.py` so engine với các số trên (và rơm vùi, rơm đốt)
+bằng file tham số thật. Trên hosted dev, `hosted_carbon_factor_smoke.py` thêm 2.000 kg rơm
+đốt (tổng 3.601,5111; AWD 2.102,6226) và khớp qua API, bảng breakdown và gói MRV.
+
 ## 11. Tính tái lập
 
 `input_hash = SHA-256(CropActivityData.canonical_json() | scenario | ef_config_version | ENGINE_VERSION)`.
 Cùng dữ liệu, kịch bản và phiên bản tham số cho cùng hash; DB có unique index
-`(crop_season_id, scenario, factor_set_id, input_hash)` cho bản tính cả vụ.
+`(crop_season_id, scenario, factor_set_id, input_hash)` cho bản tính cả vụ; tính lại
+với cùng hash trả lại bản tính đã lưu.
 
 ## 12. Hạn chế khoa học còn mở
 
 | Mã | Nội dung | Ảnh hưởng |
 |---|---|---|
-| OI-05 | Chưa xác minh khung GWP (AR4 25/298 · AR5 28/265 · AR6 27,9/273) | **Chặn toàn bộ việc ra số CO₂e** |
+| OI-05 | **Đã đóng 2026-09-15:** AR5 GWP-100 (CH₄ 28, N₂O 265) theo UNFCCC 18/CMA.1 | Engine ra số CO₂e |
+| — | Chuyên gia lĩnh vực chưa thẩm định bộ hệ số | Mức sẵn sàng dừng ở READY_FOR_DEMO |
+| — | Hệ số Tier 2 theo vùng/mùa vụ của QĐ 2626 chưa dùng (engine Tier 1 theo chế độ nước) | Chưa phản ánh điều kiện Việt Nam |
 | OI-02 | Chưa có toàn văn + phụ lục QĐ 4801/QĐ-BNNMT; đang dùng IPCC Tier 1 | Không được gọi là MRV-compliant |
 | OI-06 | Chưa có hệ số diesel/xăng/LPG và lưới điện Việt Nam | Vụ có nhiên liệu không tính được; điện bơm bị loại |
 | OI-01 | Giá trị tham chiếu 1,04 kg CO₂/kg và 2,29–3,72 kg CO₂e/kg mâu thuẫn | Không dùng làm benchmark (engine không đọc mục này) |

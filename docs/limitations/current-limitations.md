@@ -6,19 +6,25 @@ Farmer Web thay đổi). Không mục nào được làm nhẹ đi. Bằng chứ
 phân loại của các vấn đề trong code nằm ở
 [Phát hiện kiểm toán mã nguồn](implementation-audit-findings.md).
 
+Mục 1 được cập nhật sau [sprint hệ số Carbon](implementation-audit-findings.md#sprint-carbon-factors-2026-09-15)
+(2026-09-15): khoa học Carbon ở mức **READY_FOR_DEMO**, không còn chặn việc ra số.
+
 ## 1. Khoa học Carbon — blocker
 
 | # | Giới hạn | Bằng chứng | Hệ quả |
 |---|---|---|---|
-| S1 | **GWP CH₄ / N₂O chưa xác minh** (OI-05) | `gwp.ch4.value: null`, `gwp.n2o.value: null` trong `emission_factors.yaml` | **Không có bản tính CO₂e thật nào thành công** — `422 missing_emission_factor`; `/health` báo `carbon_production_ready: false` |
+| S1 | ~~GWP CH₄ / N₂O chưa xác minh (OI-05)~~ — **ĐÃ ĐÓNG 2026-09-15** | `gwp.ch4 = 28`, `gwp.n2o = 265` (AR5 WG1 Table 8.A.1, VERIFIED) | Engine ra số CO₂e; kiểm tính tay và trên hosted dev. Xem [Sổ đăng ký hệ số](../methodology/carbon-factor-register.md) |
 | S2 | Hệ số nhiên liệu diesel/xăng/LPG và lưới điện chưa có (OI-06) | `factors.fuel.*.value: null` | Vụ có `fuel_usages` luôn `422`; điện bơm không vào tổng |
 | S3 | Bộ tham số là **IPCC Tier 1 default**, không phải hệ số quốc gia; chưa có toàn văn QĐ 4801/QĐ-BNNMT (OI-02) | `methodology.tier: 1` | **Không được gọi là MRV-compliant**; `mrv_compliant` luôn `false` |
-| S4 | Bộ hệ số chưa được import/publish vào DB hosted (theo ghi chú migration `20260913120000`) | 0 hàng `emission_factor_sets` tại thời điểm migration | Kể cả khi có GWP, lưu bản tính sẽ `503 factor_set_not_imported` cho tới khi import |
+| S4 | ~~Bộ hệ số chưa import vào DB hosted~~ — **ĐÃ ĐÓNG 2026-09-15** | `0.3.0-ipcc2019-tier1-ar5` published trên hosted dev (27 hệ số, `--verify` khớp) | Lưu bản tính thành công, breakdown liên kết hệ số của bộ |
 | S5 | Ranh giới hệ thống loại trừ: N₂O gián tiếp, N từ phân hữu cơ, CH₄ ngoài vụ, CO₂ từ đốt rơm, upstream thuốc BVTV và giống | `engine.py` cảnh báo; `straw_burning.co2_counted` PENDING | CO₂e (khi có) là ước tính có phạm vi hẹp |
 | S6 | Giá trị tham chiếu 1,04 kg CO₂/kg và 2,29–3,72 kg CO₂e/kg mâu thuẫn (OI-01) | `reference_values.status: CONTESTED` | Không có benchmark hợp lệ |
 | S7 | Chưa đối chiếu với FarMoRe (OI-03) | `open_issues` | Chưa có kiểm chứng chéo |
 | S8 | Biến bắt buộc `pre_season_water_regime`, `dry_matter_fraction`, `days_before_cultivation` không suy được từ dữ liệu cũ | Migration `20260908000000` | Phải thu thập trực tiếp; thiếu thì `422 methodology_gap` |
-| S9 | Test backend dùng `tests/fixtures/test_factors.yaml` — **TEST ONLY, NOT SCIENTIFIC VALUES** | Tên và chú thích fixture | Test xanh chứng minh logic, **không** chứng minh giá trị khoa học |
+| S9 | Phần lớn test backend dùng `tests/fixtures/test_factors.yaml` — **TEST ONLY** | Tên và chú thích fixture | Test đó chứng minh logic. Giá trị thật được kiểm riêng bằng tính tay trong `tests/test_carbon_real_factors.py` |
+| S10 | **Chuyên gia lĩnh vực chưa thẩm định** bộ hệ số | `methodology.domain_expert_review: PENDING` | Mức sẵn sàng dừng ở READY_FOR_DEMO; `carbon_production_ready: false` |
+| S11 | Hệ số Tier 2 đặc trưng quốc gia của QĐ 2626 (CH₄, ROA, N₂O-N theo vùng/mùa vụ) chưa dùng | `methodology.country_specific_factors: NOT_USED` | Engine tính theo chế độ nước (Tier 1); cần mô hình vùng/mùa vụ để dùng QĐ 2626 |
+| S12 | Chưa có độ không chắc chắn tổng hợp cho một vụ | Chỉ có khoảng giá trị của từng hệ số trong bảng IPCC | Con số CO₂e trình bày phải kèm lưu ý độ không chắc chắn (EFc ±~40%, GWP CH₄ ±40%) |
 
 ## 2. Computer Vision
 

@@ -102,6 +102,7 @@ nav:
   - Carbon:
       - Carbon Engine: modules/carbon-engine.md
       - Phương pháp tính: methodology/carbon-calculation.md
+      - Sổ đăng ký hệ số: methodology/carbon-factor-register.md
       - Sequence tính Carbon: workflows/carbon-calculation-sequence.md
   - Resource Metrics: modules/resource-metrics.md
   - Recommendation: modules/recommendation.md

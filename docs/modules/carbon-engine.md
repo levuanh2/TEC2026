@@ -1,15 +1,17 @@
 # Carbon Engine
 
-!!! danger "Trạng thái sẵn sàng"
-    **ENGINEERING READY — SCIENTIFIC PRODUCTION READINESS NOT COMPLETE.**
+!!! warning "Trạng thái sẵn sàng"
+    **ENGINEERING CORRECTNESS: PASS — SCIENTIFIC READINESS: READY_FOR_DEMO.**
 
-    - `gwp.ch4`, `gwp.n2o` và toàn bộ `factors.fuel.*` đang `value: null`,
-      `status: PENDING_VERIFICATION` trong `backend/config/emission_factors.yaml`.
-    - Vì mọi bản tính đều có dòng CH₄ cần GWP, **mọi lần tính CO₂e với cấu hình
-      hiện tại dừng ở `422 missing_emission_factor`** (sau khi dữ liệu vụ đã được
-      kiểm tra). `GET /health` báo `carbon_production_ready: false`, `mrv_compliant: false`.
-    - Bộ tham số là **IPCC Tier 1 default**, không phải hệ số đặc trưng quốc gia;
-      toàn văn QĐ 4801/QĐ-BNNMT chưa được lấy (OI-02).
+    - Bộ hệ số `0.3.0-ipcc2019-tier1-ar5`: 27 hệ số lõi VERIFIED (IPCC 2019 Refinement,
+      2006 GL, GWP-100 AR5), đã import và `published` trên hosted dev. Engine ra số CO₂e,
+      khớp tính tay. Chi tiết: [Sổ đăng ký hệ số](../methodology/carbon-factor-register.md).
+    - **Chuyên gia lĩnh vực thẩm định: PENDING.** `GET /health` báo
+      `carbon_scientific_readiness.level = READY_FOR_DEMO`, `carbon_production_ready: false`,
+      `mrv_compliant: false`.
+    - `factors.fuel.*` vẫn `null`: vụ có bản ghi nhiên liệu trả `422 missing_emission_factor`.
+    - Bộ tham số là **IPCC Tier 1 default**. Hệ số Tier 2 theo vùng/mùa vụ của QĐ 2626 chưa
+      dùng; toàn văn QĐ 4801/QĐ-BNNMT chưa lấy được (OI-02).
     - Kết quả không được trình bày là chứng nhận, số liệu chính thức hay MRV-compliant.
 
 Công thức chi tiết: [Phương pháp tính Carbon](../methodology/carbon-calculation.md).
@@ -161,12 +163,21 @@ flowchart TB
 
 Thiếu `nitrogen_percent` được kiểm cùng nhóm kiểm tra dữ liệu, **trước** mọi tra cứu hệ
 số, và ném `MissingActivityDataError` → `422 missing_activity_data` (sửa B5 ngày
-2026-09-15), nên lỗi hiện ra ngay cả khi GWP còn null.
+2026-09-15).
 
 ## Dữ liệu cần import trước khi lưu được
 
 Giá trị hệ số lấy từ YAML, nhưng để **lưu** bản tính, database phải có một
-`emission_factor_sets` với `version_code = "0.2.0-ipcc-tier1"` và `status = published`,
+`emission_factor_sets` với `version_code` bằng `version` của YAML và `status = published`,
 cùng các `emission_factors.factor_code` khớp đường dẫn YAML (bỏ tiền tố `factors.`,
-ví dụ `ch4_rice.efc`, `n2o_fertilizer.ef1fr.continuous_flooding`). Theo migration
-`20260913120000`, hosted dev tại thời điểm đó có 0 hàng `emission_factor_sets`.
+ví dụ `ch4_rice.efc`, `n2o_fertilizer.ef1fr.continuous_flooding`, `gwp.ch4`). Thiếu thì
+`503 factor_set_not_imported`.
+
+Bộ `0.3.0-ipcc2019-tier1-ar5` được import lên hosted dev ngày 2026-09-15 bằng
+`backend/scripts/import_factor_set.py --apply --publish`
+(`id = 6b14adaa-cbbd-490d-b38d-c38c94ec8461`, 27 hệ số, `--verify` khớp 27/27). Không
+INSERT tay; bộ đã published là bất biến.
+
+**Tính lại với dữ liệu không đổi:** unique index
+`(crop_season_id, scenario, factor_set_id, input_hash)` chặn bản trùng. Repository trả lại
+`calculation_id` đã có thay vì báo lỗi (sửa `9fe6e50`; trước đó người ghi thứ hai nhận `500`).

@@ -140,6 +140,12 @@ Mã cảnh báo trong code (`WarningCode` + cảnh báo chuyển tiếp từ eng
 `mrv_step_incomplete`, `resource_metric_incomplete`, `harvest_missing`,
 `scope_empty`, `carbon_engine_warning`. Mức độ chỉ là `info` hoặc `warning`.
 
+`factor_unverified` so `verification_status` không phân biệt hoa thường (enum DB là
+`VERIFIED`; sửa `479bb13`). Với bộ `0.3.0-ipcc2019-tier1-ar5` đã published, gói trên hosted
+dev liệt kê đủ 27 hệ số trong `provenance`, không có `factor_provenance_unavailable` hay
+`factor_unverified`; XLSX và PDF render từ cùng snapshot có cùng `payload_sha256`. Gói vẫn
+không phải chứng nhận hay MRV-compliant.
+
 Dữ liệu thiếu **không chặn** việc xuất: case đọc được nhưng thiếu CO₂e vẫn xuất gói,
 kèm cảnh báo — chính khoảng trống đó là điều người thẩm định cần thấy.
 

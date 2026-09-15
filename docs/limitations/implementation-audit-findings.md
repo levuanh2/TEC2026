@@ -6,7 +6,8 @@ và đã được agent Codex kiểm tra chéo **read-only** qua Herdr. Không m
 đoán; không mục nào được sửa trong đợt tài liệu. Ba mục P0 (M7, B7, B3) được sửa
 trong [sprint P0 ngày 2026-09-15](#sprint-p0-2026-09-15) và chỉ được đánh dấu
 `RESOLVED` sau khi có code, test và kiểm chứng trên Supabase hosted. Năm mục P1 (B4, M3, B5,
-B1, B2) được sửa trong [sprint P1](#sprint-p1-2026-09-15) theo cùng tiêu chí.
+B1, B2) được sửa trong [sprint P1](#sprint-p1-2026-09-15) theo cùng tiêu chí. Bộ hệ số
+Carbon được xác minh và import trong [sprint hệ số Carbon](#sprint-carbon-factors-2026-09-15).
 
 - Code đối chiếu: commit `2f33972` (`main`). Kể từ baseline `81a8e24` chỉ có CSS của
   Farmer Web thay đổi (`farmer.css`, `tokens.css`), không ảnh hưởng các phát hiện.
@@ -292,6 +293,42 @@ còn lại). `audit.change_log` giữ dòng do trigger audit ghi (append-only).
 metrics) đã được sửa và kiểm trên hosted; **mức sẵn sàng khoa học vẫn BLOCKED** (GWP, hệ số
 nhiên liệu/lưới điện, hệ số quốc gia, import bộ hệ số — xem S1–S9).
 
+## Sprint hệ số Carbon (2026-09-15) {#sprint-carbon-factors-2026-09-15}
+
+Nhánh `feature/carbon-factor-readiness`, merge vào `main`. Mục tiêu: bộ hệ số truy được
+nguồn, có phiên bản, import lặp lại được, kiểm Carbon Engine đầu-cuối trên hosted dev.
+
+**Quyết định của chủ dự án:** GWP = **AR5 GWP-100**. Hệ số lúa = **IPCC 2019 Tier 1**; hệ số
+Tier 2 của QĐ 2626 ghi là khoảng trống. Nhiên liệu **để null**: vụ có nhiên liệu vẫn `422`.
+
+| Thay đổi | Nội dung | Commit |
+|---|---|---|
+| Bộ hệ số `0.3.0-ipcc2019-tier1-ar5` | GWP CH₄ 28 / N₂O 265 (AR5 WG1 Table 8.A.1; UNFCCC 18/CMA.1, 5/CMA.3). `carbon/factor_register.py` kiểm đơn vị, nguồn, số hiệu bảng, trạng thái, khoá trùng, khung GWP. `scripts/import_factor_set.py`: dry run mặc định, một transaction, version bất biến, `--verify`. `/health` thêm `carbon_scientific_readiness`; `carbon_production_ready` chỉ `true` khi đã thẩm định chuyên gia | `3f27cd4` |
+| Lỗi: gói MRV gắn `factor_unverified` cho hệ số đã xác minh | `mrv/manifest.py` so với chữ thường `verified`, trong khi enum DB là `VERIFIED` → mọi bộ hệ số thật đều bị báo chưa xác minh. Sửa: so không phân biệt hoa thường; hệ số `PENDING_VERIFICATION` vẫn bị báo | `479bb13` |
+| Lỗi (phát hiện trên hosted): tính lại với dữ liệu không đổi → `500` | Unique index `carbon_calculations_season_input_uniq` chặn bản thứ hai cùng `(crop_season_id, scenario, factor_set_id, input_hash)`. Chỉ lộ ra khi bộ hệ số đã published. Sửa: repository trả `calculation_id` đã có; lỗi DB khác vẫn ném | `9fe6e50` |
+| Kiểm tra tính tay với hệ số thật | `tests/test_carbon_real_factors.py` | `a1df7f4` |
+| Smoke hosted | `scripts/hosted_carbon_factor_smoke.py` (mới); `hosted_p1_correctness_smoke.py` chạy được cả khi đã có bộ published | `0108d3b` |
+
+| Kiểm chứng | Kết quả |
+|---|---|
+| Importer dry run (file thật) | Đủ điều kiện, 27 hệ số, thiếu tuỳ chọn `fuel.diesel/gasoline/lpg` |
+| 5 fixture hỏng (thiếu GWP, sai đơn vị, trùng khoá, chưa xác minh, nhiên liệu thiếu đơn vị) | Tất cả bị từ chối đúng lý do |
+| Diễn tập import trên hosted (commit bị thay bằng rollback) | 27 dòng, `published`, không vi phạm ràng buộc; sau rollback 0 bộ |
+| Import hosted dev | `id 6b14adaa-cbbd-490d-b38d-c38c94ec8461`, 27 hệ số, `published`, 5 nguồn; `--verify` khớp; import lại bị từ chối |
+| `hosted_carbon_factor_smoke.py` | **PASS 43/43** — tổng 3.601,5111 và 0,6002519/kg khớp tính tay, AWD 2.102,6226; 4 dòng breakdown liên kết hệ số của bộ; owner/editor/manager `200` (tính lại dùng lại bản cũ); viewer/regulator/enterprise lưu `404` nhưng đọc được; Recommendation không tạo bản tính; gói MRV: kịch bản `actual`, 27 hệ số trong provenance, không cảnh báo nguồn; XLSX + PDF cùng `payload_sha256`, SHA-256 tải về khớp; dọn sạch |
+| Lần chạy đầu của smoke | 36/41 — lộ lỗi `500` khi tính lại (đã sửa `9fe6e50`); 3 check đọc kết quả sai giả định (endpoint không truyền `scenario` trả bản mới nhất của mọi kịch bản — hành vi hiện có, không đổi) |
+| `hosted_p1_correctness_smoke.py` với bộ published | **PASS 30/30** |
+| Backend `python -m pytest tests -q` | **PASS** 610 passed (trước sprint: 567) |
+| Web Vitest / `npm run build` (gồm `tsc -b`) | **PASS** 171 passed / PASS |
+| Playwright mock | **PASS** 2 passed (8 spec dữ liệu thật bị gate, skipped) |
+
+Thời gian đo từ máy phát triển qua Internet tới hosted dev (không phải số production): nạp
+YAML 21–30 ms; tra bộ hệ số trên hosted 316–562 ms; `POST /v1/carbon/calculate` 5,2–5,9 s;
+tạo gói MRV JSON 5,7–6,4 s; render XLSX 2,5–3,0 s; render PDF 2,0–2,1 s.
+
+**Carbon sau sprint:** độ đúng kỹ thuật PASS; mức sẵn sàng khoa học **READY_FOR_DEMO**;
+chuyên gia lĩnh vực thẩm định **PENDING**; không phải chứng nhận hay MRV-compliant.
+
 ## `PRODUCT_DECISION`
 
 | ID | Nội dung | Evidence | Cần quyết định |
@@ -302,9 +339,9 @@ nhiên liệu/lưới điện, hệ số quốc gia, import bộ hệ số — x
 
 ## `SCIENTIFIC_BLOCKER`
 
-Không phải lỗi code; chi tiết ở [Giới hạn hiện tại](current-limitations.md) (S1–S9):
-GWP CH₄/N₂O `null`, hệ số nhiên liệu/lưới điện chưa có, IPCC Tier 1 default thay vì
-hệ số quốc gia, bộ hệ số chưa import vào DB hosted.
+Không phải lỗi code; chi tiết ở [Giới hạn hiện tại](current-limitations.md) (S1–S12).
+GWP (S1) và import bộ hệ số (S4) đã đóng ngày 2026-09-15. Còn mở: hệ số nhiên liệu/lưới
+điện, IPCC Tier 1 thay vì hệ số quốc gia, chuyên gia lĩnh vực chưa thẩm định.
 
 ## `ENV_BLOCKED` và trạng thái test
 
