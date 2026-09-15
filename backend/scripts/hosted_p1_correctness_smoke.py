@@ -8,7 +8,10 @@ Seeds an isolated tenant tagged `P1-CORRECTNESS-SMOKE-<run>` with the service ro
 creates temporary Auth users (random passwords, never printed), signs them in and
 calls the real FastAPI app (`main.app`, no overrides) against hosted Supabase.
 
-No emission factor or GWP is filled. For M3 the script inserts Carbon rows
+The script works with or without a published factor set on hosted dev: a
+writer's calculation either passes every gate (200, persisted) or stops at the
+factor gate (422 missing_emission_factor). Rows written by allowed writers are
+removed before M3; denied callers must write none. For M3 the script inserts Carbon rows
 directly, pointing at a DRAFT factor set it creates (drafts are invisible to
 clients) — the calculation rows are test data for the selection rule, not a
 scientific result. Everything created is removed in `finally` and row counts are
@@ -214,6 +217,20 @@ def carbon_row(s: dict, calc_id: str, scenario: str, day: int, total: float) -> 
     }
 
 
+def passed_all_input_gates(r) -> bool:
+    """200 when hosted dev has a published factor set; otherwise the next legitimate gate."""
+    if r.status_code == 200:
+        return True
+    return r.status_code == 422 and r.json()["detail"]["error"]["code"] == "missing_emission_factor"
+
+
+def drop_calculations(season_id: str) -> None:
+    """Remove rows persisted by allowed writers so M3 starts from its own fixture rows."""
+    for calc in admin.table("carbon_calculations").select("id").eq("crop_season_id", season_id).execute().data:
+        admin.table("carbon_breakdowns").delete().eq("calculation_id", calc["id"]).execute()
+        admin.table("carbon_calculations").delete().eq("id", calc["id"]).execute()
+
+
 def run_checks(s: dict, client: TestClient) -> None:
     users = s["users"]
     tokens = {label: sign_in(user) for label, user in users.items()}
@@ -235,9 +252,11 @@ def run_checks(s: dict, client: TestClient) -> None:
     check("b5_message_names_field_no_internals", "nitrogen_percent" in error.get("message", "") and "Traceback" not in r.text)
     admin.table("fertilizer_applications").update({"nitrogen_percent": 46}).eq("activity_id", s["fertilizer"]).execute()
     r = client.post("/v1/carbon/calculate", json=body(), headers=auth("owner"))
-    check("b5_valid_nitrogen_reaches_factor_gate", r.status_code == 422 and r.json()["detail"]["error"]["code"] == "missing_emission_factor", f"{r.status_code} {r.text[:160]}")
+    check("b5_valid_nitrogen_passes_validation", passed_all_input_gates(r), f"{r.status_code} {r.text[:160]}")
+    drop_calculations(season1)
 
     # ---- B4 ----------------------------------------------------------------
+    before_denied = calc_count()
     for label in ("viewer", "regulator", "enterprise"):
         r = client.get(f"/v1/crop-seasons/{season1}/carbon", headers=auth(label))
         check(f"b4_{label}_can_view_season_carbon", r.status_code == 404 and r.json()["detail"]["error"]["code"] == "no_calculation", f"{r.status_code} {r.text[:120]}")
@@ -247,10 +266,11 @@ def run_checks(s: dict, client: TestClient) -> None:
     check("b4_cross_scope_denied_404", r.status_code == 404 and r.json()["detail"]["error"]["code"] == "crop_not_found", f"{r.status_code}")
     r = client.post("/v1/carbon/calculate", json=body())
     check("b4_unauthenticated_401", r.status_code == 401, str(r.status_code))
+    check("b4_denied_callers_persist_nothing", calc_count() == before_denied, f"{before_denied} -> {calc_count()}")
     for label in ("owner", "editor", "manager"):
         r = client.post("/v1/carbon/calculate", json=body(), headers=auth(label))
-        check(f"b4_{label}_passes_persist_gate", r.status_code == 422 and r.json()["detail"]["error"]["code"] == "missing_emission_factor", f"{r.status_code} {r.text[:120]}")
-    check("b4_no_carbon_row_persisted", calc_count() == 0, str(calc_count()))
+        check(f"b4_{label}_passes_persist_gate", passed_all_input_gates(r), f"{r.status_code} {r.text[:120]}")
+    drop_calculations(season1)
 
     # ---- M3 ----------------------------------------------------------------
     ids = {k: str(uuid.uuid4()) for k in "ABC"}
