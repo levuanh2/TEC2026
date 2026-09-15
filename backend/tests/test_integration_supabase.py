@@ -99,6 +99,20 @@ class FakeCropAccessChecker:
             raise CropAccessError(f"test double denied: {crop_season_id}")
 
 
+class FakeCropPersistChecker:
+    """Test double cho CropPersistChecker (B4). Mặc định cho phép lưu; `deny_ids`
+    mô phỏng người chỉ có quyền đọc (không phải người ghi được vụ)."""
+
+    def __init__(self, deny_ids: set[str] | None = None) -> None:
+        self.deny_ids = deny_ids or set()
+        self.calls: list[tuple[str, str]] = []
+
+    def assert_can_persist(self, token: str, crop_season_id: str) -> None:
+        self.calls.append((token, crop_season_id))
+        if crop_season_id in self.deny_ids:
+            raise CropAccessError(f"test double denied persist: {crop_season_id}")
+
+
 @pytest.fixture
 def access_checker() -> FakeCropAccessChecker:
     return FakeCropAccessChecker()
@@ -114,6 +128,7 @@ def client(service, access_checker) -> TestClient:
     app.include_router(api.router)
     app.dependency_overrides[api._service] = lambda: service
     app.dependency_overrides[api._access_checker] = lambda: access_checker
+    app.dependency_overrides[api._persist_checker] = lambda: FakeCropPersistChecker()
     # Mọi request mặc định mang JWT giả — test nào cần test thiếu header thì tự xoá.
     return TestClient(app, headers={"Authorization": "Bearer test-fake-jwt"})
 
@@ -464,6 +479,7 @@ def test_api_missing_gwp_returns_422(bundle, repo):
     app.include_router(api.router)
     app.dependency_overrides[api._service] = lambda: CarbonService(repo, production)
     app.dependency_overrides[api._access_checker] = lambda: FakeCropAccessChecker()
+    app.dependency_overrides[api._persist_checker] = lambda: FakeCropPersistChecker()
 
     response = TestClient(app, headers={"Authorization": "Bearer test-fake-jwt"}).post(
         "/v1/carbon/calculate",
@@ -681,6 +697,7 @@ def test_missing_authorization_header_returns_401(service, access_checker):
     app.include_router(api.router)
     app.dependency_overrides[api._service] = lambda: service
     app.dependency_overrides[api._access_checker] = lambda: access_checker
+    app.dependency_overrides[api._persist_checker] = lambda: FakeCropPersistChecker()
     bare_client = TestClient(app)  # KHÔNG có header Authorization mặc định
 
     response = bare_client.post(

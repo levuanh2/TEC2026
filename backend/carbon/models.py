@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any
 
-from .errors import ValidationError
+from .errors import MissingActivityDataError, ValidationError
 
 # --- Chế độ nước trong vụ -------------------------------------------------
 # Khớp 1-1 với khoá trong factors.ch4_rice.sfw (IPCC Table 5.12, cột disaggregated).
@@ -196,7 +196,9 @@ class CropActivityData:
         for application in self.fertilizer:
             nitrogen = application.nitrogen_kg
             if nitrogen is None:
-                raise ValidationError(
+                # Missing activity data (-> 422 missing_activity_data), not a bare
+                # ValidationError that the API cannot map (B5).
+                raise MissingActivityDataError(
                     f"Lần bón '{application.fertilizer_type}' của vụ '{self.crop_season_id}' thiếu "
                     f"'n_content_pct'. Phương pháp luận áp hệ số lên **kg N**, không phải kg phân — "
                     f"engine không đoán hàm lượng N."

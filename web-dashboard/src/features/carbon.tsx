@@ -36,7 +36,7 @@ const statusClass = (v: unknown) =>
  * every number down to its IPCC citation. Never renders a fabricated figure —
  * a missing emission factor shows a calm "chưa thể tính" state, not a red wall.
  */
-export function CarbonPanel({ id, seasonLabel }: { id: string; seasonLabel?: string }) {
+export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: string; seasonLabel?: string; canRecalculate?: boolean }) {
   const [scenario, setScenario] = useState<Scenario>('as_recorded')
   const state = useAsync(() => getCarbon(id, scenario), [id, scenario])
   const [recalc, setRecalc] = useState<{ busy: boolean; error?: string }>({ busy: false })
@@ -69,32 +69,38 @@ export function CarbonPanel({ id, seasonLabel }: { id: string; seasonLabel?: str
         <div className="stack">
           <div className="section__head" style={{ marginBottom: 0 }}>
             <Segmented options={SCENARIOS} value={scenario} onChange={setScenario} label="Kịch bản chế độ nước" />
-            <button className="btn btn--ghost" onClick={recalculate} disabled={recalc.busy || state.loading}>
-              {recalc.busy ? 'Đang tính…' : 'Tính lại theo kịch bản'}
-            </button>
+            {/* Persisting a calculation needs write authority on the crop (B4);
+              * read-only management roles only view results. */}
+            {canRecalculate && (
+              <button className="btn btn--ghost" onClick={recalculate} disabled={recalc.busy || state.loading}>
+                {recalc.busy ? 'Đang tính…' : 'Tính lại theo kịch bản'}
+              </button>
+            )}
           </div>
           {recalc.error && <Notice kind="warning">{recalc.error}</Notice>}
 
-          <CarbonBody state={state} />
+          <CarbonBody state={state} canRecalculate={canRecalculate} />
         </div>
       </Section>
     </div>
   )
 }
 
-const NoCalcState = (
+const noCalcState = (canRecalculate: boolean) => (
   <EmptyState
     icon="calculator"
     title="Chưa có bản tính CO₂e cho vụ này"
-    body="Nhấn “Tính lại theo kịch bản” để chạy Carbon Engine với dữ liệu hoạt động hiện có."
+    body={canRecalculate
+      ? 'Nhấn “Tính lại theo kịch bản” để chạy Carbon Engine với dữ liệu hoạt động hiện có.'
+      : 'Kết quả sẽ hiển thị khi quản lý HTX hoặc nông hộ phụ trách lưu bản tính cho vụ này.'}
   />
 )
 
-function CarbonBody({ state }: { state: ReturnType<typeof useAsync<CarbonResult>> }) {
+function CarbonBody({ state, canRecalculate }: { state: ReturnType<typeof useAsync<CarbonResult>>; canRecalculate: boolean }) {
   const err = state.error ?? ''
   // Chưa từng tính thành công — đây là trạng thái bình thường, không phải lỗi.
   if (err && /(chưa có bản tính|no[_ ]?calculation|calculate trước|not[_ ]?found|\b404\b)/i.test(err)) {
-    return NoCalcState
+    return noCalcState(canRecalculate)
   }
   // Bộ hệ số chưa hoàn chỉnh (GWP / hệ số nhiên liệu) — trạng thái "chờ khoa học", bình tĩnh.
   if (err && /(hệ số phát thải|\bgwp\b|emission factor|factor[_ ]?set)/i.test(err)) {
@@ -105,7 +111,7 @@ function CarbonBody({ state }: { state: ReturnType<typeof useAsync<CarbonResult>
       state={state}
       skeleton="table"
       isEmpty={(r) => !r || (r.total_co2e_kg == null && (r.breakdown ?? []).length === 0)}
-      empty={NoCalcState}
+      empty={noCalcState(canRecalculate)}
     >
       {(r) => <CarbonResultView r={r} />}
     </Async>

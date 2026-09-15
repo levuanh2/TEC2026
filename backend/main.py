@@ -26,6 +26,7 @@ import api
 from carbon import ENGINE_VERSION, ParameterSet
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import SupabaseCropAccessChecker
+from infrastructure.persist_access import PostgresCropPersistChecker
 from infrastructure.config import load_settings
 from infrastructure import pg_pool, supabase_clients
 from infrastructure.supabase_repo import SupabaseCarbonRepository
@@ -150,6 +151,13 @@ if settings.auth_configured:
             ) from exc
         return SupabaseReadRepository(settings, token)
     app.dependency_overrides[api._read_repo] = _read_repo
+
+if settings.auth_configured and settings.supabase_db_url:
+    # B4: persisting a Carbon calculation needs write authority on the crop.
+    # Without a DB URL the dependency stays unconfigured and the route fails
+    # closed (503), never falls back to read-only authorization.
+    _persist_checker_singleton = PostgresCropPersistChecker(settings)
+    app.dependency_overrides[api._persist_checker] = lambda: _persist_checker_singleton
 
 if settings.auth_configured and settings.supabase_db_url:
     _activity_write_service_singleton = ActivityWriteService(PostgresActivityWriteRepository(settings))

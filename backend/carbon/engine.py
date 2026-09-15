@@ -101,6 +101,10 @@ def calculate_carbon(
         activity_data.straw, activity_data.crop_season_id, activity_data.area_ha
     )
     _assert_no_double_counting(amendments, burned, activity_data.crop_season_id)
+    # Activity-data completeness is settled before any factor lookup, like the
+    # water-regime/days/straw checks above: a missing input is the caller's data
+    # problem (422 missing_activity_data), not an unrelated factor gap.
+    _assert_fertilizer_nitrogen_known(activity_data)
 
     breakdown: list[BreakdownEntry] = [
         RiceMethaneCalculator().calculate(
@@ -142,6 +146,21 @@ def calculate_carbon(
         calculated_at=datetime.now(timezone.utc).isoformat(),
         warnings=warnings,
     )
+
+
+def _assert_fertilizer_nitrogen_known(data: CropActivityData) -> None:
+    """Every fertilizer application needs its nitrogen content.
+
+    Direct N2O is applied to kg N, not kg of product (IPCC Eq 11.1); the engine
+    never guesses a composition. Zero is a known value and is accepted.
+    """
+    for application in data.fertilizer:
+        if application.n_content_pct is None:
+            raise MissingActivityDataError(
+                f"Lần bón '{application.fertilizer_type}' của vụ '{data.crop_season_id}' thiếu "
+                f"hàm lượng đạm ('nitrogen_percent' / 'n_content_pct'). Phương pháp luận áp hệ "
+                f"số lên **kg N**, không phải kg phân — engine không đoán hàm lượng N."
+            )
 
 
 def compute_input_hash(

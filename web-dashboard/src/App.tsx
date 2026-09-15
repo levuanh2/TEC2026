@@ -19,7 +19,7 @@ import { prefetchFarmerScope } from './farmer/scope'
 const ROLE_LABEL: Record<string, string> = {
   farmer: 'Nông hộ',
   cooperative_manager: 'Quản lý HTX',
-  enterprise: 'Doanh nghiệp',
+  enterprise_viewer: 'Doanh nghiệp',
   regulator: 'Cơ quan quản lý',
 }
 
@@ -197,7 +197,7 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'season-mrv':
       return <SeasonHub id={id} tab="mrv" />
     case 'carbon':
-      return <SeasonHub id={id} tab={'carbon' as SeasonTab} />
+      return <SeasonHub id={id} tab={'carbon' as SeasonTab} role={viewer.role} />
     case 'mrv':
       return <MrvPage role={viewer.role} />
     case 'notFound':
