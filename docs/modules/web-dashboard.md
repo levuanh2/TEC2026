@@ -13,19 +13,19 @@ flowchart TB
     SES -->|"có"| ME["GET /v1/me<br/>api/me.ts"]
     ME --> ROLE{"Role phân giải"}
     ROLE -->|"farmer"| FS["FarmerExperience<br/>/farmer/*"]
-    ROLE -->|"cooperative_manager / regulator"| MS["Management shell<br/>/dashboard ..."]
+    ROLE -->|"cooperative_manager / enterprise_viewer / regulator"| MS["Management shell<br/>/dashboard ..."]
 ```
 
-- Role được chọn theo thứ tự `cooperative_manager` → `enterprise` → `regulator` →
+- Role được chọn theo thứ tự `cooperative_manager` → `enterprise_viewer` → `regulator` →
   `farmer`; không khớp gì thì mặc định `farmer` (`api/me.ts`).
 - Một "viewer hint" lưu trong `localStorage` theo đúng Supabase user id giúp vẽ đúng
   shell ngay khi tải lại trang; mọi dữ liệu vẫn được uỷ quyền bằng JWT + RLS.
 - Định tuyến tự viết (`routes.ts`, `ui.tsx::go/Link`), không dùng thư viện router.
 
-!!! bug "Role `enterprise_viewer`"
-    `src/types.ts` khai báo role `enterprise`, trong khi DB dùng `enterprise_viewer`.
-    Tài khoản chỉ có `enterprise_viewer` không khớp và bị đưa vào khu Farmer. Đây là
-    lỗi định tuyến giao diện; RLS phía server không đổi.
+!!! note "Role `enterprise_viewer`"
+    Web dùng đúng giá trị role của backend (`enterprise_viewer`), đưa tài khoản doanh nghiệp
+    vào Management shell chỉ đọc (sửa [B2](../limitations/implementation-audit-findings.md#b2)
+    ngày 2026-09-15). Nút "Tính lại" Carbon và nút xuất MRV không hiện với role chỉ đọc.
 
 ## Farmer shell (`src/farmer/`)
 

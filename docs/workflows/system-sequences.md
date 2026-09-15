@@ -23,7 +23,7 @@ sequenceDiagram
     API->>PR: profiles, organization_memberships, farm_members bằng JWT
     PR-->>API: hàng RLS cho phép
     API-->>W: user_id, roles, memberships
-    W->>W: chọn role theo thứ tự cooperative_manager, enterprise, regulator, farmer
+    W->>W: chọn role theo thứ tự cooperative_manager, enterprise_viewer, regulator, farmer
     alt role farmer
         W->>W: mở khu /farmer
     else role khác

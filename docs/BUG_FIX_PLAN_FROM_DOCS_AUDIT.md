@@ -18,18 +18,21 @@ Quy ước chung cho mọi fix:
 
 > **Cập nhật 2026-09-15:** P0 (M7, B7, B3) đã **RESOLVED** trên nhánh
 > `feature/p0-security-auth-fixes` với kiểm chứng hosted — chi tiết ở mục "Sprint P0" của
-> `docs/limitations/implementation-audit-findings.md`. Mọi mục P1/P2 vẫn **OPEN**.
+> `docs/limitations/implementation-audit-findings.md`.
+> **Cập nhật 2026-09-15 (P1):** B4, M3, B5, B1, B2 đã **RESOLVED** trên nhánh
+> `feature/p1-correctness-fixes` với kiểm chứng hosted — mục "Sprint P1" cùng tệp. Chỉ còn P2
+> (B6, B8, B12) **OPEN**.
 
 | Priority | ID | Severity | Module | Cần Supabase/runtime |
 |---|---|---|---|---|
 | P0 | M7 | High | Storage / RLS | Có (migration + kiểm tra hosted) — **RESOLVED** |
 | P0 | B7 | High | Auth `/v1/me` | Có cho xác nhận cuối — **RESOLVED** |
 | P0 | B3 | High | Activities (Farmer Web) | Có cho xác nhận cuối — **RESOLVED** |
-| P1 | M3 | High | MRV Export | Không bắt buộc (unit); nên có E2E |
-| P1 | B4 | Medium | Carbon API | Có cho xác nhận cuối |
-| P1 | B5 | Medium | Carbon API | Không |
-| P1 | B1 | Medium | Resource Metrics | Không |
-| P1 | B2 | Medium | Web routing | Không bắt buộc (mock E2E); nên có tài khoản thật |
+| P1 | M3 | High | MRV Export | Không bắt buộc (unit); nên có E2E — **RESOLVED** |
+| P1 | B4 | Medium | Carbon API | Có cho xác nhận cuối — **RESOLVED** |
+| P1 | B5 | Medium | Carbon API | Không — **RESOLVED** |
+| P1 | B1 | Medium | Resource Metrics | Không — **RESOLVED** |
+| P1 | B2 | Medium | Web routing | Không bắt buộc (mock E2E); nên có tài khoản thật — **RESOLVED** |
 | P2 | B6 | Medium | Backend dependency | Không |
 | P2 | B8 | Low | Config | Không |
 | P2 | B12 | Low | Activities schema | Không |
@@ -132,6 +135,7 @@ Quy ước chung cho mọi fix:
 ### M3 — Gói MRV lấy bản tính Carbon mới nhất bất kể kịch bản
 
 - **Severity:** High · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — đúng đề xuất (`latest(sid, "as_recorded")`), không cần cột mới. Kiểm hosted còn phát hiện trigger `validate_mrv_export_calculation` chặn mọi bản tính theo crop season; sửa bằng migration `20260915120000`. Commit `ef2424f`.
 - **Module:** MRV Export
 - **Source:** `backend/service.py:589`; `backend/infrastructure/supabase_repo.py:151-163`;
   `backend/mrv/manifest.py:577`; đối chiếu `backend/infrastructure/read_repo.py:390`
@@ -155,6 +159,7 @@ Quy ước chung cho mọi fix:
 ### B4 — `POST /v1/carbon/calculate` không có cổng role
 
 - **Severity:** Medium · **Loại:** `CODE_GAP` (+ quyết định sản phẩm)
+- **Trạng thái:** **RESOLVED** 2026-09-15 — chủ dự án chọn `private.user_can_write_crop` (owner/editor + manager). Không thêm RPC/migration: helper được đánh giá bằng kết nối backend với claim `sub` của người dùng Auth đã xác thực, trước khi engine chạy. Commit `7de5bf7`.
 - **Module:** Carbon API
 - **Source:** `backend/api.py:116-137`, `backend/api.py:174-211`; `baseline.sql:1907-1908`
 - **Root cause:** Cổng của route chỉ kiểm JWT + quyền đọc vụ; route ghi bằng service role.
@@ -177,6 +182,7 @@ Quy ước chung cho mọi fix:
 ### B5 — Thiếu `nitrogen_percent` trả `500`
 
 - **Severity:** Medium · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — ném `MissingActivityDataError` và kiểm trước bước hệ số (nên hiện ra ngay cả khi GWP còn null). Commit `182d0ba`.
 - **Module:** Carbon Engine / Carbon API
 - **Source:** `backend/carbon/models.py:193-205`; `backend/carbon/errors.py:12`;
   `backend/api.py:149-158`
@@ -197,6 +203,7 @@ Quy ước chung cho mọi fix:
 ### B1 — Cờ đầy đủ nước/phân bón phụ thuộc bản ghi cuối
 
 - **Severity:** Medium · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — đúng đề xuất (`seen`/`missing`). Commit `4c6c53b`.
 - **Module:** Resource Metrics
 - **Source:** `backend/infrastructure/read_repo.py:380-387`;
   `backend/tests/test_read_repository.py:251-265`
@@ -219,6 +226,7 @@ Quy ước chung cho mọi fix:
 ### B2 — Web không nhận role `enterprise_viewer`
 
 - **Severity:** Medium · **Loại:** `CODE_BUG`
+- **Trạng thái:** **RESOLVED** 2026-09-15 — `enterprise_viewer` vào Management Web chỉ đọc; vai trò không nhận ra vẫn về shell Farmer (dữ liệu vẫn theo RLS). Commit `8a1aeb6`.
 - **Module:** Web routing
 - **Source:** `web-dashboard/src/types.ts:1`, `web-dashboard/src/api/me.ts:7,13`,
   `web-dashboard/src/App.tsx:22`
@@ -300,7 +308,8 @@ Quy ước chung cho mọi fix:
 
 ## Thứ tự đề xuất
 
-> Bước 1–2 (M7, B7, B3) đã xong ngày 2026-09-15. Tiếp theo: bắt đầu từ bước 3.
+> Bước 1–7 (P0: M7, B7, B3; P1: B4, M3, B5, B1, B2) đã xong ngày 2026-09-15. Tiếp theo: bước 8
+> (P2) và cổng trước khi điền GWP — ba mục chặn cổng này (M3, B4, B5) đã xong.
 
 1. **M7** — lỗ hổng đọc dữ liệu đang khai thác được ngay hôm nay; một migration nhỏ.
 2. **B7 → B3** — cùng cổng quyền ghi của FastAPI; B7 là tiền đề (role phải còn hiệu lực).

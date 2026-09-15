@@ -96,14 +96,8 @@ request không tăng theo số vụ.
 
 ## Vấn đề đã biết {#van-de-da-biet}
 
-!!! bug "Cờ đầy đủ của nước và phân bón phụ thuộc bản ghi cuối"
-    Trong `_compute_metric_totals`, `has_water` được gán `True` ở **mỗi** bản ghi tưới
-    rồi mới gán `False` nếu bản ghi đó thiếu `water_volume_m3` (tương tự
-    `has_fertilizer` với `amount_kg`). Vì vậy giá trị cuối cùng chỉ phản ánh bản ghi
-    được duyệt **sau cùng**: nếu một bản ghi thiếu lượng nước đứng trước một bản ghi
-    có số, `completeness.water` vẫn là `true` và `water_per_kg` được tính từ tổng
-    thiếu. Thứ tự bản ghi phụ thuộc thứ tự trả về của truy vấn.
-    Test hiện có (`backend/tests/test_read_repository.py`) chỉ phủ trường hợp bản
-    ghi thiếu đứng cuối. Trong thực tế, `fertilizer_applications.amount_kg` là
-    `NOT NULL` ở DB nên phần phân bón khó xảy ra; phần nước (`water_volume_m3`
-    nullable) thì có thể. Được phát hiện trong audit tài liệu, **chưa sửa**.
+!!! note "Cờ đầy đủ không phụ thuộc thứ tự bản ghi"
+    `_compute_metric_totals` theo dõi riêng "đã có bản ghi" và "có bản ghi thiếu giá trị": chỉ
+    cần một bản ghi tưới thiếu `water_volume_m3` (hoặc phân bón thiếu `amount_kg`) là nhóm đó
+    `false` và tử số `null`, bất kể thứ tự trả về. Trước ngày 2026-09-15 kết quả phụ thuộc bản
+    ghi được duyệt sau cùng ([B1](../limitations/implementation-audit-findings.md#b1), đã sửa).

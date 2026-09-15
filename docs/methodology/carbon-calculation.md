@@ -110,9 +110,9 @@ CO2e   = N2O × GWP_N2O
 ```
 
 - Hệ số áp lên **kg N**, không phải kg phân. Một lần bón thiếu `nitrogen_percent`
-  → engine ném `ValidationError` (không tra bảng thành phần phân bón). Lỗi này chưa
-  được ánh xạ sang mã HTTP riêng nên API hiện trả `500 internal_error`
-  ([B5](../limitations/implementation-audit-findings.md#b5), chưa sửa).
+  → engine ném `MissingActivityDataError` trước mọi tra cứu hệ số (không tra bảng thành
+  phần phân bón); API trả `422 missing_activity_data`
+  ([B5](../limitations/implementation-audit-findings.md#b5), đã sửa).
 - Không có bản ghi phân bón → không có dòng N₂O, kèm cảnh báo "N₂O = 0 nếu thực tế
   có bón mà chưa nhập thì đang tính thiếu". Tổng N ≤ 0 → không có dòng N₂O.
 

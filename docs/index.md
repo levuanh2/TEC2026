@@ -80,7 +80,7 @@ tài liệu" là những gì bộ tài liệu này kiểm tra lại được tr�
 | M01 Flutter Mobile | Engineering/runtime Android đã verify | Code offline-first + sync xác nhận; release signing vẫn dùng khoá debug |
 | M02 Carbon Engine | Engineering DONE; khoa học PARTIAL/BLOCKED | Xác nhận: GWP và hệ số nhiên liệu `value: null` trong YAML |
 | M03 Computer Vision | Thử nghiệm DONE | Xác nhận: baseline MobileNetV2, dataset public, chưa xác thực thực địa |
-| M04 Resource Metrics | DONE | Xác nhận; có một vấn đề về cờ đầy đủ dữ liệu (xem [Resource Metrics](modules/resource-metrics.md#van-de-da-biet)) |
+| M04 Resource Metrics | DONE | Xác nhận; cờ đầy đủ dữ liệu không phụ thuộc thứ tự bản ghi (sửa B1, xem [Resource Metrics](modules/resource-metrics.md#van-de-da-biet)) |
 | M05 Recommendation | DONE | Xác nhận: 2 nhóm rule, tái dùng `CarbonService(persist=False)` |
 | M06 Web Farmer + Management | DONE | Xác nhận các route và luồng API |
 | M07 MRV JSON/XLSX/PDF | Engineering DONE | Xác nhận: snapshot JSON chuẩn + renderer XLSX/PDF + tải về có kiểm SHA-256 |

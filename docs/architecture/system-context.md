@@ -56,7 +56,7 @@ flowchart TB
 | Nông hộ | `organization_role = farmer` + `farm_members.farm_role` (`owner`/`editor`/`viewer`) | Flutter, Farmer Web | Farmer Web chỉ mở khu `/farmer/*` khi role phân giải là `farmer` (`web-dashboard/src/App.tsx`) |
 | Quản lý HTX | `cooperative_manager` | Management Web | Role duy nhất được tạo/tải gói xuất MRV (`MrvExportService.MANAGEMENT_ROLE`) |
 | Cơ quan quản lý | `regulator` | Management Web | Chỉ đọc dữ liệu của tổ chức nguồn qua `organization_data_grants` còn hiệu lực |
-| Doanh nghiệp | `enterprise_viewer` | (xem ghi chú) | RLS cho đọc qua data grant, nhưng web đang so khớp chuỗi `enterprise` thay vì `enterprise_viewer` nên tài khoản chỉ có role này bị đưa vào khu Farmer — xem [Giới hạn](../limitations/current-limitations.md) |
+| Doanh nghiệp | `enterprise_viewer` | Management Web | Chỉ đọc dữ liệu của tổ chức nguồn qua `organization_data_grants` còn hiệu lực; không lưu bản tính Carbon, không xuất MRV |
 
 ## Hệ thống phụ thuộc
 
@@ -101,6 +101,6 @@ Nguyên tắc đọc được từ code:
    qua publishable key để RLS trả lời (`infrastructure/auth.py`,
    `infrastructure/read_repo.py`). Ngoại lệ đã biết: một số đường ghi chỉ kiểm tra
    quyền **đọc** trước khi ghi bằng kết nối bỏ qua RLS — xem
-   [Phát hiện kiểm toán](../limitations/implementation-audit-findings.md) (B4 còn mở; B3 và B7 đã sửa ngày 2026-09-15).
+   [Phát hiện kiểm toán](../limitations/implementation-audit-findings.md) (B3, B4 và B7 — đã sửa ngày 2026-09-15).
 3. "Không có quyền" và "không tồn tại" cùng trả **404** để không lộ sự tồn tại
    của dữ liệu nông hộ khác.

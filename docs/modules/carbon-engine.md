@@ -46,7 +46,7 @@ FastAPI, Supabase hay UI.
 | Số ngày canh tác | `crop_seasons.cultivation_days`, hoặc `actual_harvest_date − planting_date` | CH₄ (Eq 5.1) | `422 missing_activity_data` (không dùng mặc định vùng 102 ngày) |
 | Chế độ nước trong vụ | `crop_seasons.ipcc_water_regime`, hoặc suy từ `irrigation_events.method` | SFw, khoá EF1FR | `as_recorded`: `422 missing_activity_data` |
 | Chế độ nước trước vụ | `crop_seasons.pre_season_water_regime` | SFp | `422 methodology_gap` |
-| Phân bón | `fertilizer_applications.amount_kg`, `nitrogen_percent` | N₂O trực tiếp | Thiếu `nitrogen_percent`: `ValidationError` gốc → hiện rơi vào `500 internal_error` (xem [B5](../limitations/implementation-audit-findings.md#b5)) |
+| Phân bón | `fertilizer_applications.amount_kg`, `nitrogen_percent` | N₂O trực tiếp | Thiếu `nitrogen_percent`: `422 missing_activity_data`, kiểm trước mọi tra cứu hệ số (sửa [B5](../limitations/implementation-audit-findings.md#b5)) |
 | Rơm rạ | `straw_management_events.method`, `straw_mass_kg`, `dry_matter_fraction`, `days_before_cultivation`, `returned_to_field` | SFo hoặc nguồn đốt rơm | `422 methodology_gap` / `missing_activity_data` |
 | Nhiên liệu | `fuel_usages.fuel_type`, `amount_liter` | Nguồn nhiên liệu | Hệ số null → `422 missing_emission_factor` |
 | Điện bơm | `irrigation_events.pump_energy_kwh` | Chỉ sinh **cảnh báo**, không cộng vào tổng | — |
@@ -159,10 +159,9 @@ flowchart TB
 | `FactorSetNotFoundError` | 503 | `factor_set_not_imported` |
 | Lỗi khác | 500 | `internal_error` (kèm `request_id`, không lộ stack trace) |
 
-Lỗi thiếu `nitrogen_percent` là `ValidationError` gốc (không phải lớp con trong
-bảng trên), nên rơi vào nhánh `500 internal_error`. Với YAML hiện tại lỗi này chưa
-lộ ra vì dòng CH₄ (tính trước N₂O) đã dừng ở GWP; nó sẽ xuất hiện khi GWP có giá
-trị — xem [Giới hạn](../limitations/current-limitations.md).
+Thiếu `nitrogen_percent` được kiểm cùng nhóm kiểm tra dữ liệu, **trước** mọi tra cứu hệ
+số, và ném `MissingActivityDataError` → `422 missing_activity_data` (sửa B5 ngày
+2026-09-15), nên lỗi hiện ra ngay cả khi GWP còn null.
 
 ## Dữ liệu cần import trước khi lưu được
 

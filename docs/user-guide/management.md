@@ -4,9 +4,8 @@ Hướng dẫn dành cho **quản lý HTX** (`cooperative_manager`) và **cơ qu
 (`regulator`) dùng Management Web.
 
 !!! note "Tài khoản doanh nghiệp (`enterprise_viewer`)"
-    Hiện web chưa nhận đúng role `enterprise_viewer`, nên tài khoản chỉ có role này
-    được đưa vào khu Nông hộ thay vì Management Web. Đây là lỗi đã biết, chưa sửa
-    ([B2](../limitations/implementation-audit-findings.md#b2)).
+    Tài khoản doanh nghiệp dùng Management Web ở chế độ **chỉ xem**: không tính lại Carbon và
+    không xuất gói MRV.
 
 !!! danger "Gói xuất là gói bằng chứng, không phải chứng nhận"
     Các tệp JSON, Excel và PDF xuất từ màn MRV là **gói dữ liệu và bằng chứng hỗ trợ**
@@ -80,10 +79,10 @@ Management Web **không** tạo hay sửa nhật ký canh tác; dữ liệu do n
     - Các lỗi khác (thiếu chế độ nước trước vụ, thiếu số ngày canh tác...) hiển thị lý do
       từ hệ thống; cần bổ sung dữ liệu vụ.
 
-!!! note "Kịch bản giả định cũng được lưu"
-    Tính với kịch bản AWD hoặc Ngập liên tục sẽ **lưu** một bản tính giả định. Trang
-    Hiệu suất chỉ dùng bản tính "Theo ghi nhận", nhưng gói xuất MRV lấy bản tính thành
-    công **mới nhất** của vụ, bất kể kịch bản (trường kịch bản được ghi rõ trong gói).
+!!! note "Kịch bản giả định không vào số liệu chính thức"
+    Tính với kịch bản AWD hoặc Ngập liên tục sẽ **lưu** một bản tính giả định để so sánh.
+    Trang Hiệu suất và gói xuất MRV chỉ dùng bản tính **Theo ghi nhận**. Chỉ quản lý HTX
+    và nông hộ phụ trách ruộng mới lưu được bản tính; cơ quan quản lý và doanh nghiệp chỉ xem.
 
 ## 6. Hồ sơ MRV
 

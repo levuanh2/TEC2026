@@ -203,10 +203,10 @@ Không response nào chứa `storage_bucket` hay `storage_object_path`; không c
 - Chưa có gói ZIP kèm **bytes bằng chứng**; cả ba định dạng chỉ tham chiếu bằng chứng.
 - Sinh gói **đồng bộ** trong request (tài liệu dự án đo khoảng 8 giây cho bước tổng hợp
   trên hosted dev); không có hàng đợi job.
-- Mục `carbon` lấy `CarbonService.latest(season)` **không lọc kịch bản**: nếu bản tính
-  thành công mới nhất là kịch bản giả định `awd`/`continuous_flooding` (Management Web
-  có thể lưu), gói sẽ chứa bản đó (trường `scenario` ghi rõ). Resource metrics thì chỉ
-  dùng kịch bản `actual`.
+- Mục `carbon` chỉ lấy bản tính thành công mới nhất của kịch bản **ghi nhận**
+  (`as_recorded` ↔ `actual`), cùng quy tắc với Resource Metrics; kịch bản giả định
+  `awd`/`continuous_flooding` không bao giờ vào gói, không có bản ghi nhận thì `unavailable`
+  + cảnh báo (sửa [M3](../limitations/implementation-audit-findings.md#m3) ngày 2026-09-15).
 - PDF không phải PDF/UA; không có khái niệm gói "đã phê duyệt / đã nộp / đã xác minh".
 - Không có API soạn hồ sơ, bước hay bằng chứng.
 

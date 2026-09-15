@@ -7,16 +7,14 @@ Phân quyền của AgriCarbon có hai lớp:
 2. **Kiểm tra bổ sung ở FastAPI** — theo thiết kế chỉ *thu hẹp thêm* trên nền RLS
    (ví dụ bắt buộc role `farmer` để ghi qua web, `cooperative_manager` để xuất MRV).
 
-!!! bug "Ngoại lệ còn mở: `POST /v1/carbon/calculate`"
-    Backend ghi bằng kết nối bỏ qua RLS **sau** một bước kiểm tra đọc, nên nếu bước
-    kiểm tra lỏng hơn policy ghi thì quyền thực tế bị nới rộng. Còn một trường hợp chưa
-    sửa: route này lưu bản tính cho bất kỳ ai đọc được vụ
-    ([B4](../limitations/implementation-audit-findings.md#b4)).
-
-    Đã sửa ngày 2026-09-15: ghi activity qua Farmer Web nay kiểm đúng helper ghi của RLS
-    ([B3](../limitations/implementation-audit-findings.md#b3)); `/v1/me` chỉ tính membership
-    còn hiệu lực ([B7](../limitations/implementation-audit-findings.md#b7)); client không còn
-    quyền nào trên bucket `mrv-exports` ([M7](../limitations/implementation-audit-findings.md#m7)).
+!!! note "Các đường ghi của backend không rộng hơn RLS"
+    Backend ghi bằng kết nối bỏ qua RLS **sau** một bước kiểm tra, nên bước kiểm tra phải
+    là quy tắc **ghi**, không phải quy tắc đọc. Các ngoại lệ phát hiện trong audit đã được
+    sửa ngày 2026-09-15: ghi activity qua Farmer Web kiểm đúng helper ghi của RLS
+    ([B3](../limitations/implementation-audit-findings.md#b3)); lưu bản tính Carbon cần
+    `private.user_can_write_crop` ([B4](../limitations/implementation-audit-findings.md#b4));
+    `/v1/me` chỉ tính membership còn hiệu lực ([B7](../limitations/implementation-audit-findings.md#b7));
+    client không còn quyền nào trên bucket `mrv-exports` ([M7](../limitations/implementation-audit-findings.md#m7)).
 
 ## Supabase Auth và JWT
 
@@ -128,7 +126,7 @@ cầu `deleted_at is null`, nên client không thể tự `update ... set delete
 | Generate / chấp nhận khuyến nghị | Có | Không | Không | Không |
 | Upload ảnh CV (`POST .../cv/infer`) | Có | Không | Không | Không |
 | Xem kết quả CV đã lưu | Có | Có | Có | Có |
-| Gọi `POST /v1/carbon/calculate` | Có | Có | Có | Có |
+| Lưu bản tính Carbon (`POST /v1/carbon/calculate`) | `farm_role` `owner`/`editor` | Có (farm của HTX) | Không (404) | Không (404) |
 | Đọc hồ sơ MRV (case, bước, lô, bằng chứng) | Có nếu là thành viên tổ chức | Có | Có qua data grant | Có qua data grant |
 | Tạo / sửa MRV case, step, evidence | Không | Có (qua DB/RLS; **không có API**) | Không | Không |
 | Tạo gói xuất MRV JSON/XLSX/PDF | Không (404) | **Có** — tổ chức của mình | Không (404) | Không (404) |
@@ -136,8 +134,10 @@ cầu `deleted_at is null`, nên client không thể tự `update ... set delete
 
 Ghi chú đối chiếu code:
 
-- **Carbon calculate:** `api.py::_require_caller` chỉ yêu cầu JWT hợp lệ và đọc được
-  crop season qua RLS; không kiểm role. Bản tính được lưu bằng service role.
+- **Carbon calculate:** `api.py::_require_caller` kiểm JWT và quyền đọc vụ, rồi
+  `_require_persist_authority` (`infrastructure/persist_access.py`) kiểm
+  `private.user_can_write_crop` với người dùng Auth đã xác thực, **trước** khi engine chạy;
+  người chỉ đọc nhận `404 crop_not_found` (sửa B4). Xem kết quả vẫn chỉ cần quyền đọc.
 - **Ghi activity qua Farmer Web:** `ActivityWriteService` yêu cầu `"farmer"` có trong
   `roles`, đọc được vụ qua RLS, vụ ở trạng thái `active`, vụ có đúng một lô chưa
   `closed`/`cancelled`; sửa/xoá chỉ áp cho activity do chính người gọi ghi

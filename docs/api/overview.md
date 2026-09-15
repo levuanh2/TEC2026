@@ -85,7 +85,7 @@ Lỗi riêng: `422 invalid_crop_season_state`, `409 duplicate_event`, `404 not_f
 | Method | Path | Mục đích | Auth | Scope |
 |---|---|---|---|---|
 | GET | `/v1/carbon/scenarios` | `as_recorded`, `awd`, `continuous_flooding` | Không | — |
-| POST | `/v1/carbon/calculate` | Tính và lưu CO₂e của một vụ | JWT | RLS đọc vụ (không kiểm role) |
+| POST | `/v1/carbon/calculate` | Tính và lưu CO₂e của một vụ | JWT | RLS đọc vụ + quyền ghi vụ (`private.user_can_write_crop`: farm owner/editor hoặc manager) |
 | GET | `/v1/crop-seasons/{crop_season_id}/carbon?scenario=` | Bản tính thành công mới nhất (`404 no_calculation` nếu chưa có) | JWT | RLS đọc vụ |
 
 ## Emission Factors

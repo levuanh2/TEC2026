@@ -5,7 +5,8 @@ hiện khi đối chiếu bộ tài liệu với mã nguồn. Mọi mục đều
 và đã được agent Codex kiểm tra chéo **read-only** qua Herdr. Không mục nào được
 đoán; không mục nào được sửa trong đợt tài liệu. Ba mục P0 (M7, B7, B3) được sửa
 trong [sprint P0 ngày 2026-09-15](#sprint-p0-2026-09-15) và chỉ được đánh dấu
-`RESOLVED` sau khi có code, test và kiểm chứng trên Supabase hosted.
+`RESOLVED` sau khi có code, test và kiểm chứng trên Supabase hosted. Năm mục P1 (B4, M3, B5,
+B1, B2) được sửa trong [sprint P1](#sprint-p1-2026-09-15) theo cùng tiêu chí.
 
 - Code đối chiếu: commit `2f33972` (`main`). Kể từ baseline `81a8e24` chỉ có CSS của
   Farmer Web thay đổi (`farmer.css`, `tokens.css`), không ảnh hưởng các phát hiện.
@@ -35,11 +36,11 @@ dependency, comment.
 | [M7](#m7) | Storage / RLS | High | `CODE_BUG` | `baseline.sql:2837-2842` | Người không phải manager có thể đọc artifact MRV qua Storage API | **RESOLVED** 2026-09-15 | CONFIRMED |
 | [B3](#b3) | Activities (Farmer Web) | High | `CODE_BUG` | `service.py:128-150` | `farm_role = viewer` vẫn ghi được activity qua FastAPI | **RESOLVED** 2026-09-15 | CONFIRMED |
 | [B7](#b7) | Auth (`/v1/me`) | High | `CODE_BUG` | `read_repo.py:157-167` | Membership đã kết thúc vẫn qua cổng role `farmer` | **RESOLVED** 2026-09-15 | CONFIRMED |
-| [M3](#m3) | MRV Export | High | `CODE_BUG` | `service.py:589` | Gói MRV có thể chứa bản tính giả định thay vì `actual` | OPEN (tiềm ẩn) | CONFIRMED |
-| [B4](#b4) | Carbon API | Medium | `CODE_GAP` | `api.py:116-137` | Người chỉ có quyền đọc tạo được bản tính được lưu | OPEN (tiềm ẩn) | CONFIRMED |
-| [B5](#b5) | Carbon API | Medium | `CODE_BUG` | `models.py:193-205`, `api.py:149-158` | Thiếu `nitrogen_percent` → `500` thay vì `422` | OPEN (tiềm ẩn) | CONFIRMED |
-| [B1](#b1) | Resource Metrics | Medium | `CODE_BUG` | `read_repo.py:380-387` | `water_per_kg` từ tổng thiếu nhưng báo đầy đủ | OPEN | CONFIRMED |
-| [B2](#b2) | Web routing | Medium | `CODE_BUG` | `types.ts:1`, `me.ts:7,13` | `enterprise_viewer` bị đưa vào khu Farmer | OPEN | CONFIRMED |
+| [M3](#m3) | MRV Export | High | `CODE_BUG` | `service.py:589` | Gói MRV có thể chứa bản tính giả định thay vì `actual` | **RESOLVED** 2026-09-15 | CONFIRMED |
+| [B4](#b4) | Carbon API | Medium | `CODE_GAP` | `api.py:116-137` | Người chỉ có quyền đọc tạo được bản tính được lưu | **RESOLVED** 2026-09-15 | CONFIRMED |
+| [B5](#b5) | Carbon API | Medium | `CODE_BUG` | `models.py:193-205`, `api.py:149-158` | Thiếu `nitrogen_percent` → `500` thay vì `422` | **RESOLVED** 2026-09-15 | CONFIRMED |
+| [B1](#b1) | Resource Metrics | Medium | `CODE_BUG` | `read_repo.py:380-387` | `water_per_kg` từ tổng thiếu nhưng báo đầy đủ | **RESOLVED** 2026-09-15 | CONFIRMED |
+| [B2](#b2) | Web routing | Medium | `CODE_BUG` | `types.ts:1`, `me.ts:7,13` | `enterprise_viewer` bị đưa vào khu Farmer | **RESOLVED** 2026-09-15 | CONFIRMED |
 | [B6](#b6) | Backend dependency | Medium | `CODE_GAP` | `service.py:50`, `requirements.txt` | Cài theo `backend/requirements.txt` không khởi động được API | OPEN | CONFIRMED |
 | [B8](#b8) | Config | Low | `CODE_GAP` | `config.py:42,95` | Biến môi trường không có tác dụng | OPEN | CONFIRMED |
 | [B12](#b12) | Activities schema | Low | `CODE_GAP` | `schemas.py:175-181` | Comment sai lệch với form | OPEN | CONFIRMED |
@@ -109,7 +110,7 @@ dependency, comment.
 | Impact | Cùng một gói có `resource_metrics` theo `actual` nhưng `carbon` có thể là kịch bản giả định; trường `scenario` có ghi, nhưng người đọc gói dễ hiểu nhầm là số liệu thực tế |
 | Hành vi hiện tại | Chọn bản `succeeded` mới nhất của vụ, mọi kịch bản |
 | Hành vi mong đợi | Mục `carbon` của gói dùng kịch bản ghi nhận (`as_recorded` ↔ DB `actual`), nhất quán với Resource Metrics |
-| Status | OPEN — tiềm ẩn (chưa có bản tính thành công nào khi GWP null) |
+| Status | **RESOLVED** — chỉ lấy kịch bản ghi nhận (commit `ef2424f`); kèm migration `20260915120000` sửa trigger chặn liên kết bản tính theo crop season; smoke hosted chọn đúng bản và `unavailable` khi chỉ có kịch bản giả định. Xem [sprint P1](#sprint-p1-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B4 — `POST /v1/carbon/calculate` không có cổng role {#b4}
@@ -124,7 +125,7 @@ dependency, comment.
 | Impact | `regulator`/`enterprise_viewer` (đọc qua data grant) hoặc `viewer` của farm tạo được hàng `carbon_calculations` — thứ DB không cho chính họ ghi trực tiếp. Hàng mới trở thành "mới nhất" cho metrics (`actual`) và cho gói MRV (xem [M3](#m3)) |
 | Hành vi hiện tại | Ai đọc được vụ đều lưu được bản tính |
 | Hành vi mong đợi | Chỉ các role được sản phẩm cho phép (ví dụ manager của HTX, người ghi được farm) mới lưu được; role chỉ đọc nhận `404`/`403` theo quy ước lỗi |
-| Status | OPEN — tiềm ẩn (mọi lần tính hiện dừng ở `422` trước bước lưu) |
+| Status | **RESOLVED** — quyết định sản phẩm: `private.user_can_write_crop`; kiểm trước engine (commit `7de5bf7`); hosted: viewer/regulator/enterprise bị `404`, owner/editor/manager qua cổng. Xem [sprint P1](#sprint-p1-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B5 — Thiếu `nitrogen_percent` trả `500` {#b5}
@@ -139,7 +140,7 @@ dependency, comment.
 | Impact | Khi GWP có giá trị, vụ có lần bón thiếu hàm lượng đạm nhận `500` chung chung thay vì lỗi `422` nêu rõ cần bổ sung dữ liệu; client không hiển thị được lý do |
 | Hành vi hiện tại | `500 internal_error` (tiềm ẩn vì dòng CH₄ dừng ở GWP trước) |
 | Hành vi mong đợi | `422 missing_activity_data` kèm thông điệp của engine |
-| Status | OPEN — tiềm ẩn |
+| Status | **RESOLVED** — `422 missing_activity_data` trước mọi tra cứu hệ số (commit `182d0ba`); hosted API trả `422` ngay cả khi GWP còn null. Xem [sprint P1](#sprint-p1-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B1 — Cờ đầy đủ nước/phân bón phụ thuộc bản ghi cuối {#b1}
@@ -154,7 +155,7 @@ dependency, comment.
 | Impact | Vụ có một bản ghi tưới thiếu lượng nước đứng trước bản ghi có số: `completeness.water = true`, `water_m3` và `water_per_kg` tính từ tổng thiếu (thấp hơn thực tế); lan sang tổng hợp farm/tổ chức, farm performance, khuyến nghị bổ sung dữ liệu và mục `resource_metrics` của gói MRV. Phân bón ít khả năng xảy ra vì `fertilizer_applications.amount_kg` là `NOT NULL` |
 | Hành vi hiện tại | Kết quả phụ thuộc thứ tự bản ghi |
 | Hành vi mong đợi | Chỉ cần một bản ghi thiếu → cờ `false`, tổng và chỉ số trên kg là `null` |
-| Status | OPEN |
+| Status | **RESOLVED** — cờ không phụ thuộc thứ tự, cùng hàm cho đường đơn vụ và tổng hợp (commit `4c6c53b`); hosted: thiếu-trước và thiếu-sau đều `null`/`false`. Xem [sprint P1](#sprint-p1-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B2 — Web không nhận role `enterprise_viewer` {#b2}
@@ -169,7 +170,7 @@ dependency, comment.
 | Impact | Tài khoản chỉ có `enterprise_viewer` vào khu Farmer. Server vẫn chặn ghi (không có role `farmer`), nên đây là lỗi luồng giao diện, không phải leo thang quyền |
 | Hành vi hiện tại | Hiển thị shell Farmer |
 | Hành vi mong đợi | Nhận đúng `enterprise_viewer` và đưa vào shell chỉ đọc phù hợp |
-| Status | OPEN |
+| Status | **RESOLVED** — web dùng đúng `enterprise_viewer` (commit `8a1aeb6`); `/v1/me` hosted trả `enterprise_viewer`, ánh xạ vào Management Web chỉ đọc. Xem [sprint P1](#sprint-p1-2026-09-15) |
 | Codex | CONFIRMED |
 
 ### B6 — `backend/requirements.txt` thiếu dependency của `ml/` {#b6}
@@ -248,6 +249,48 @@ Dữ liệu QA: mỗi lần chạy smoke tạo tenant `P0-SECURITY-SMOKE-<run>` 
 khẩu ngẫu nhiên, rồi xoá; số dòng của 17 bảng, số object `mrv-exports` và số user tạm trở
 về đúng như trước (0 dòng còn lại). Test rollback không để lại dữ liệu. `audit.change_log`
 giữ các dòng do trigger audit ghi (86 dòng/lần chạy) vì bảng audit là append-only.
+
+## Sprint P1 (2026-09-15) {#sprint-p1-2026-09-15}
+
+Nhánh `feature/p1-correctness-fixes`, merge vào `main`. Chỉ sửa **B4, M3, B5, B1, B2**.
+Không điền GWP, không import bộ hệ số, không đổi phương pháp luận Carbon; các mục P2
+(B6, B8, B12) vẫn `OPEN`.
+
+**Quyết định sản phẩm cho B4** (chủ dự án chốt trong sprint): chỉ **người ghi được vụ**
+mới được lưu bản tính — đúng helper sẵn có `private.user_can_write_crop` (farm
+`owner`/`editor` hoặc `cooperative_manager` còn hiệu lực của HTX). Xem kết quả, và chạy
+giả định `persist=False` của Recommendation, không đổi.
+
+| ID | Nguyên nhân gốc (đã xác nhận) | Sửa | Commit |
+|---|---|---|---|
+| B4 | Cổng của `POST /v1/carbon/calculate` chỉ kiểm JWT + quyền **đọc** vụ, rồi lưu bằng service role | `infrastructure/persist_access.py`: sau cổng đọc và **trước** khi engine chạy, đánh giá `private.user_can_write_crop` với `auth.uid()` là người dùng đã được Auth xác thực; từ chối → `404 crop_not_found` như cũ; thiếu cấu hình → `503` (fail closed). Management Web ẩn nút "Tính lại" với `regulator`/`enterprise_viewer` | `7de5bf7` |
+| M3 | `MrvExportService` gọi `CarbonService.latest(sid)` không truyền kịch bản | Gói xuất chỉ lấy kịch bản ghi nhận (`as_recorded` ↔ DB `actual`); không có thì `carbon` = `unavailable` + cảnh báo `carbon_unavailable`, không bao giờ lấy kịch bản khác. Cột `scenario` sẵn có đủ để phân biệt — **không** thêm cột mới | `ef2424f` |
+| M3 (blocker phát hiện khi kiểm hosted) | Trigger baseline `private.validate_mrv_export_calculation` vẫn đòi `carbon_calculations.production_batch_id` thuộc `mrv_case_batches`, trong khi bản tính theo crop season có `production_batch_id = NULL` → gói MRV đầu tiên có bản tính thật sẽ lỗi | Migration `20260915120000_mrv_export_calculation_crop_season_scope.sql`: giữ luật bộ hệ số, đổi luật phạm vi thành "crop season của bản tính có lô thuộc hồ sơ"; vụ ngoài hồ sơ vẫn bị từ chối. Hosted có 0 dòng `carbon_calculations`/`mrv_export_calculations` → không diễn giải lại dữ liệu cũ | `ef2424f` |
+| B5 | `total_nitrogen_kg` ném `ValidationError` gốc, API không ánh xạ | Engine kiểm hàm lượng đạm cùng nhóm kiểm tra dữ liệu, **trước** mọi tra cứu hệ số, ném `MissingActivityDataError` → `422 missing_activity_data`; không mặc định, không đoán; `0` là giá trị hợp lệ | `182d0ba` |
+| B1 | Cờ đầy đủ bị gán lại `True` ở mỗi bản ghi → phụ thuộc bản ghi cuối | Tách "đã thấy bản ghi" và "có bản ghi thiếu": chỉ một giá trị thiếu là cả nhóm thiếu, tử số `null`, bất kể thứ tự. Công thức không đổi | `4c6c53b` |
+| B2 | Web so khớp `enterprise` thay vì role DB `enterprise_viewer` | Kiểu role của web dùng đúng giá trị backend; `enterprise_viewer` vào Management Web chỉ đọc, không thành `cooperative_manager`; hint cũ mang alias bị bỏ qua | `8a1aeb6` |
+
+Test và script kiểm chứng: `76bb8a2`.
+
+| Kiểm chứng | Kết quả |
+|---|---|
+| Tái hiện blocker trigger trên hosted trước migration (test rollback) | Bản tính theo crop season trong phạm vi hồ sơ bị từ chối "MRV export calculation batch must be inside the MRV case scope" |
+| Áp migration `20260915120000` lên hosted dev | Ghi vào `supabase_migrations.schema_migrations`; hàm trigger dùng phạm vi crop season |
+| `backend/scripts/hosted_p1_correctness_smoke.py` (tenant + user tạm, bộ hệ số **draft**, FastAPI + Supabase thật) | **PASS** 30/30 — B2 `/v1/me` trả `enterprise_viewer`; B5 `422 missing_activity_data` trước cổng hệ số; B4 viewer/regulator/enterprise xem được nhưng lưu bị `404`, cross-scope `404`, không token `401`, owner/editor/manager qua cổng, không dòng nào được lưu; M3 chọn bản ghi nhận thay vì bản AWD mới hơn, liên kết đúng bản, bản ghi nhận mới hơn thay thế, chỉ có kịch bản giả định → `unavailable` + cảnh báo, không liên kết; B1 thiếu-trước và thiếu-sau đều `null`/`false`, tổng hợp farm `null` |
+| `backend/tests/test_p1_correctness_policies.py` (hosted, rollback) | **PASS** 9/9 — `user_can_write_crop` cho owner/editor/viewer/manager còn và hết hiệu lực/grant reader/người ngoài; trigger mới |
+| Backend `python -m pytest tests -q` | **PASS** 567 passed (trước sprint: 510) |
+| Web Vitest / `tsc -b` / `npm run build` | **PASS** 171 passed / PASS / PASS |
+| Playwright mock Farmer + Management | **PASS** 2 passed (8 spec dữ liệu thật bị gate, skipped) |
+| Playwright dữ liệu thật | **NOT RUN** — cần mật khẩu QA do người dùng cấp; không có tài khoản enterprise QA |
+| Flutter test | **NOT RUN** — không đổi code Flutter. Lưu ý hành vi: farm `viewer` bấm "Tính" trên app nay nhận `404 crop_not_found` |
+
+Dữ liệu QA: mỗi lần chạy smoke tạo tenant `P1-CORRECTNESS-SMOKE-<run>`, user tạm và bộ hệ số
+draft rồi xoá; số dòng của 21 bảng, object `mrv-exports` và user tạm trở về như trước (0 dòng
+còn lại). `audit.change_log` giữ dòng do trigger audit ghi (append-only).
+
+**Carbon sau sprint:** độ đúng kỹ thuật (quyền lưu, chọn bản tính chuẩn, mã lỗi, tổng hợp
+metrics) đã được sửa và kiểm trên hosted; **mức sẵn sàng khoa học vẫn BLOCKED** (GWP, hệ số
+nhiên liệu/lưới điện, hệ số quốc gia, import bộ hệ số — xem S1–S9).
 
 ## `PRODUCT_DECISION`
 
