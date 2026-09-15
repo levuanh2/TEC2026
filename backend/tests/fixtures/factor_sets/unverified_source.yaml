@@ -1,3 +1,4 @@
+# TEST FIXTURE derived from backend/config/emission_factors.yaml — deliberately broken; never import.
 # AgriCarbon — Bộ tham số phương pháp luận phát thải
 #
 # QUY TẮC (SRS RB-01): mọi con số Carbon Engine dùng phải nằm ở file này, kèm `unit`,
@@ -52,9 +53,9 @@ methodology:
     đặc trưng quốc gia đo trực tiếp trên đồng ruộng (IPCC Tier 2), không phải default này.
 
 # ---------------------------------------------------------------------------
-# GWP — quy đổi CH4, N2O sang CO2e (một khung duy nhất cho mọi khí)
+# GWP — CHẶN TOÀN BỘ VIỆC RA SỐ CO2e
 # ---------------------------------------------------------------------------
-# Khung GWP là quyết định có chủ đích: chênh lệch AR4 vs AR6 cho CH4 tới ~19% và đi thẳng vào con số cuối.
+# Không tự chọn khung. Chênh lệch AR4 vs AR6 cho CH4 tới ~19% và đi thẳng vào con số cuối.
 # Quyết định (chủ dự án, 2026-09-15): AR5 GWP-100. Căn cứ: UNFCCC 18/CMA.1 annex §37 + 5/CMA.3 §25 yêu cầu
 # báo cáo theo Thoả thuận Paris dùng GWP-100 của AR5 Table 8.A.1 (không gồm methane hoá thạch); Việt Nam
 # báo cáo quốc gia theo AR5. QĐ 2626/QĐ-BTNMT và QĐ 4801/QĐ-BNNMT không nêu khung GWP (QĐ 2626 đã kiểm tra).
@@ -288,7 +289,7 @@ factors:
     gef_ch4:
       value: 2.7
       unit: "g_CH4_per_kg_dry_matter"
-      status: "VERIFIED"
+      status: "PENDING_VERIFICATION"
       source: "IPCC 2006 Guidelines, Vol.4, Ch.2, Table 2.5 — Agricultural residues"
       uncertainty_range: "± 1.0"
 
