@@ -587,7 +587,12 @@ class MrvExportService:
         carbon_by_season: dict[str, dict[str, Any] | None] = {}
         for sid in season_ids:
             try:
-                carbon_by_season[sid] = self._carbon.latest(sid)
+                # M3: only the recorded (`as_recorded` <-> DB `actual`) calculation is
+                # the season's result. AWD / continuous-flooding rows are what-if
+                # scenarios and must never be exported as if they were measured;
+                # Resource Metrics already reads `actual` only. No row -> the
+                # section is `unavailable` with a warning, never another scenario.
+                carbon_by_season[sid] = self._carbon.latest(sid, "as_recorded")
             except Exception:  # noqa: BLE001 - carbon being unreadable is a warning, not a failed export
                 carbon_by_season[sid] = None
 
