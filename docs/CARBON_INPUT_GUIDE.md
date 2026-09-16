@@ -77,6 +77,27 @@ thuốc BVTV, rơm rạ) và ô *Chi phí* của Gieo sạ.
 
 ---
 
+## 3b. Bảng điều khiển hiển thị hai chỉ số này ra sao
+
+Trang chủ Farmer tách hẳn hai nhóm, vì chúng độc lập với nhau:
+
+| Nhóm | Mục nhắc | Nút | Dẫn tới |
+|---|---|---|---|
+| **Hiệu suất tài nguyên** | "Thiếu chi phí vật tư" | **Bổ sung chi phí** | Nhật ký của vụ — mở từng hoạt động để điền ô Chi phí |
+| **Phát thải carbon** | Tên đúng thứ còn thiếu, ví dụ "Thiếu chế độ nước trước vụ" | **Bổ sung dữ liệu Carbon** | Tab Carbon của vụ → panel *Thông tin phương pháp tính* |
+
+Danh sách thiếu của Carbon **do máy chủ trả về** (`GET /v1/crop-seasons/{id}/carbon/readiness`),
+suy ra từ đúng dữ liệu mà engine dùng. Giao diện không tự suy luận quy tắc khoa học nào; nó chỉ
+hiển thị những gì máy chủ báo và bấm đúng chỗ theo trường `flow` mà máy chủ trả về.
+
+Mục nhắc chi phí ghi rõ **"Chi phí không ảnh hưởng tới kết quả Carbon"**, để không ai đọc
+"thiếu chi phí" như nguyên nhân Carbon chưa tính được.
+
+Nếu thiếu sản lượng thu hoạch, đó **không** phải lỗi chặn: vẫn có tổng CO₂e, chỉ chưa có
+cường độ trên mỗi kg — giao diện nói đúng như vậy thay vì báo là chưa tính được.
+
+---
+
 ## 4. Bảng tổng hợp: dữ liệu nào dùng cho cái gì
 
 | Dữ liệu | Nhập ở đâu | Dùng cho Carbon? | Dùng cho Resource Metrics? |
