@@ -13,7 +13,7 @@ export async function getPlotsForFarm(id: string): Promise<Plot[]> { return usin
 export async function getPlot(id: string): Promise<Plot | undefined> { return usingMockData ? plots.find((x) => x.id === id) : plot(await apiRequest<any>(`/v1/plots/${id}`)) }
 
 // --- Farm-level rollups (brief §7 "hiệu suất riêng 1 farm", §22 no client math) ---
-const farmSeason = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, status: x.status })
+const farmSeason = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, status: x.status, ipccWaterRegime: x.ipcc_water_regime ?? null, preSeasonWaterRegime: x.pre_season_water_regime ?? null, cultivationDays: x.cultivation_days ?? null })
 
 export interface FarmerScope { farms: Farm[]; plots: Plot[]; seasons: CropSeason[] }
 

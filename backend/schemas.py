@@ -450,6 +450,27 @@ class CarbonScenarioResponse(BaseModel):
     scenarios: list[str]
 
 
+class CarbonMissingInput(BaseModel):
+    """One Carbon input the season lacks, plus where the user supplies it.
+
+    `flow` is what the client routes on ("carbon_methodology" | "activity" |
+    "plot"); it never has to decide which input belongs to which screen.
+    """
+    code: str
+    label: str
+    detail: str
+    flow: str
+    activity_type: str | None = None
+    #: False when the input only costs the per-kg intensity, not the whole result.
+    blocking: bool
+
+
+class CarbonReadinessResponse(BaseModel):
+    can_calculate: bool
+    blocking_count: int
+    missing_inputs: list[CarbonMissingInput]
+
+
 # -- MRV --------------------------------------------------------------------
 
 class MrvStepResponse(BaseModel):

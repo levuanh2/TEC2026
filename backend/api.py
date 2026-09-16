@@ -273,6 +273,32 @@ def get_crop_carbon(
     return row
 
 
+@router.get(
+    "/crop-seasons/{crop_season_id}/carbon/readiness", tags=['Carbon'],
+    response_model=schemas.CarbonReadinessResponse,
+)
+def get_crop_carbon_readiness(
+    crop_season_id: str,
+    authorization: str | None = Header(default=None),
+    service: CarbonService = Depends(_service),
+    access_checker: CropAccessChecker = Depends(_access_checker),
+) -> dict[str, Any]:
+    """Những đầu vào Carbon vụ này còn thiếu, và chỗ bổ sung từng thứ.
+
+    Lets a client say "Thiếu chế độ nước trước vụ" instead of a generic failure,
+    without holding any methodology itself: the list is derived from the same
+    `CropActivityData` the engine consumes. Read-only, so plain read scope is
+    enough — the same callers who may view a result may see why there isn't one.
+    """
+    request_id = str(uuid.uuid4())
+    _require_caller(authorization, access_checker, crop_season_id)
+    try:
+        return service.readiness(crop_season_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise_http(exc, request_id)
+        raise
+
+
 @router.get("/carbon/scenarios", tags=['Carbon'], response_model=schemas.CarbonScenarioResponse)
 def list_scenarios() -> dict[str, Any]:
     return {"scenarios": list(SCENARIOS)}

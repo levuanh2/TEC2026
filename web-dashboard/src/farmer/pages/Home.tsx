@@ -3,7 +3,8 @@ import type { SeasonMetrics } from '../../api/metrics'
 import type { Recommendation } from '../../api/recommendations'
 import { date, daysSince, ha } from '../../format'
 import { Link } from '../../ui'
-import { ACTIVITY_TITLE, buildAttention, greeting, localDay, longDay } from '../activityView'
+import { ACTIVITY_TITLE, buildAttention, greeting, localDay, longDay, type MetricGroup } from '../activityView'
+import type { CarbonMissingInput } from '../../api/carbon'
 import { QuickActions, toSeasonContext, useActivityMutations, type ActivityMutations, type SeasonContext } from '../ActivityForms'
 import { CvPreviewCard } from '../CvCheck'
 import type { QueryState } from '../data'
@@ -14,7 +15,7 @@ import { metricViews } from '../metricsView'
 import { RecommendationsSection } from '../Recommendations'
 import { useCanWriteFarm, useWritableSeason } from '../writeAccess'
 import {
-  activeSeasonsOf, prefetchSeason, primarySeason, seasonStatusLabel, useActivities, useMetrics, useRecommendations, useScope,
+  activeSeasonsOf, prefetchSeason, primarySeason, seasonStatusLabel, useActivities, useCarbonReadiness, useMetrics, useRecommendations, useScope,
   type SeasonCtx,
 } from '../scope'
 
@@ -30,6 +31,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   const metrics = useMetrics(sid)
   const activities = useActivities(sid)
   const recs = useRecommendations(sid)
+  const carbonReadiness = useCarbonReadiness(sid)
   const mutations = useActivityMutations()
   const canWrite = useCanWriteFarm()
   const active = activeSeasonsOf(scope.data)
@@ -81,7 +83,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
         </div>
         <div className="fw-home-col">
           <Section className="fw-area-attn" title="Cần chú ý" description="Chỉ từ dữ liệu thực tế của vụ.">
-            <AttentionList metrics={pending(metrics, scope.loading)} recs={recs.data} season={primaryWriteCtx} mutations={mutations} hasSeason={Boolean(sid)} />
+            <AttentionList metrics={pending(metrics, scope.loading)} recs={recs.data} carbonMissing={carbonReadiness.data?.missing_inputs} season={primaryWriteCtx} mutations={mutations} hasSeason={Boolean(sid)} />
           </Section>
           <div className="fw-area-recs">
             <RecommendationsSection seasonId={scope.loading ? null : sid} limit={2} moreTo={sid ? `/farmer/crop-seasons/${sid}` : undefined} />
@@ -160,8 +162,8 @@ export function SeasonHero({ ctx }: { ctx: SeasonCtx }) {
   )
 }
 
-function AttentionList({ metrics, recs, season, mutations, hasSeason }: {
-  metrics: QueryState<SeasonMetrics>; recs?: Recommendation[]; season: SeasonContext | null; mutations: ActivityMutations; hasSeason: boolean
+function AttentionList({ metrics, recs, carbonMissing, season, mutations, hasSeason }: {
+  metrics: QueryState<SeasonMetrics>; recs?: Recommendation[]; carbonMissing?: CarbonMissingInput[] | null; season: SeasonContext | null; mutations: ActivityMutations; hasSeason: boolean
 }) {
   if (metrics.loading) {
     return (
@@ -173,23 +175,44 @@ function AttentionList({ metrics, recs, season, mutations, hasSeason }: {
   const clear = <p className="fw-attn__clear"><Ico name="check" />Không có việc cần chú ý lúc này.</p>
   if (!hasSeason) return clear
   if (metrics.error) return <ErrorPanel error={metrics.error} onRetry={metrics.reload} />
-  const items = buildAttention(metrics.data, recs)
+  const items = buildAttention(metrics.data, recs, carbonMissing)
   if (!items.length) return clear
+
+  /* Cost and Carbon are independent metrics fed by different inputs. Grouping
+   * them under separate headings stops a farmer reading "thiếu chi phí" as a
+   * reason Carbon did not compute — money is never a Carbon input. */
+  const groups: { key: MetricGroup; label: string; hint: string }[] = [
+    { key: 'resource', label: 'Hiệu suất tài nguyên', hint: 'Nước, phân bón, chi phí trên mỗi kg lúa' },
+    { key: 'carbon', label: 'Phát thải carbon', hint: 'Dữ liệu canh tác theo phương pháp IPCC — không dùng chi phí' },
+  ]
+  const row = (item: (typeof items)[number]) => {
+    const tone = item.tone === 'warning' ? 'amber' : 'info'
+    return (
+      <li key={item.id} className={`fw-attn__item tone-${tone}`}>
+        <IconTile name={item.tone === 'warning' ? 'warning' : 'info'} tone={tone} size="sm" />
+        <div><b>{item.title}</b><p>{item.body}</p></div>
+        {item.action && season && (
+          <button type="button" className="fw-btn fw-btn--soft fw-btn--sm" aria-label={`Ghi ${ACTIVITY_TITLE[item.action].toLowerCase()} ngay`} onClick={() => mutations.openCreate(item.action!, season)}>Ghi ngay</button>
+        )}
+        {!item.action && item.link && season && (
+          <a className="fw-btn fw-btn--soft fw-btn--sm" href={item.link.to(season.id)}>{item.link.label}</a>
+        )}
+      </li>
+    )
+  }
   return (
-    <ul className="fw-attn">
-      {items.map((item) => {
-        const tone = item.tone === 'warning' ? 'amber' : 'info'
+    <>
+      {groups.map((g) => {
+        const rows = items.filter((i) => i.group === g.key)
+        if (!rows.length) return null
         return (
-          <li key={item.id} className={`fw-attn__item tone-${tone}`}>
-            <IconTile name={item.tone === 'warning' ? 'warning' : 'info'} tone={tone} size="sm" />
-            <div><b>{item.title}</b><p>{item.body}</p></div>
-            {item.action && season && (
-              <button type="button" className="fw-btn fw-btn--soft fw-btn--sm" aria-label={`Ghi ${ACTIVITY_TITLE[item.action].toLowerCase()} ngay`} onClick={() => mutations.openCreate(item.action!, season)}>Ghi ngay</button>
-            )}
-          </li>
+          <section key={g.key} className="fw-attn-group">
+            <h3 className="fw-attn-group__title">{g.label}<small>{g.hint}</small></h3>
+            <ul className="fw-attn">{rows.map(row)}</ul>
+          </section>
         )
       })}
-    </ul>
+    </>
   )
 }
 

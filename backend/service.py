@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from carbon import CarbonResult, ParameterSet, calculate_carbon
+from carbon.errors import CarbonEngineError
+from carbon.readiness import FLOW_METHODOLOGY, readiness as carbon_readiness
 from infrastructure import memberships
 from infrastructure.mapping import (
     breakdown_rows,
@@ -105,6 +107,30 @@ class CarbonService:
 
     def latest(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
         return self._repo.latest_calculation(crop_season_id, scenario)
+
+    def readiness(self, crop_season_id: str) -> dict[str, Any]:
+        """Which Carbon inputs the season still lacks, derived server-side.
+
+        Built from the same `CropActivityData` the engine consumes, so a client
+        can name the missing input without holding any methodology of its own.
+        """
+        bundle = self._repo.get_crop_bundle(crop_season_id)
+        try:
+            data = map_crop_activity_data(bundle)
+        except CarbonEngineError as exc:
+            # The mapper itself refuses (e.g. irrigation records that cannot be
+            # mapped to an IPCC class). That IS the actionable answer: the season
+            # needs its water regime declared explicitly.
+            return {
+                "can_calculate": False,
+                "blocking_count": 1,
+                "missing_inputs": [{
+                    "code": "water_regime", "label": "Thiếu chế độ nước trong vụ",
+                    "detail": str(exc), "flow": FLOW_METHODOLOGY,
+                    "activity_type": None, "blocking": True,
+                }],
+            }
+        return carbon_readiness(data)
 
 
 class ActivityWriteAccessError(Exception):

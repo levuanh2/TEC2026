@@ -339,6 +339,19 @@
 .fw-attn__item p { color: var(--fw-muted); font-size: var(--fw-text-sm); max-width: var(--fw-measure); }
 .fw-attn__clear { display: flex; align-items: center; gap: var(--fw-space-8); padding: var(--fw-space-12) 0; border-bottom: 1px solid var(--fw-rule); color: var(--fw-ink-2); font-size: 14px; }
 .fw-attn__clear svg { width: 17px; height: 17px; color: var(--fw-accent); }
+/* Cost and Carbon are independent metrics fed by different inputs. The heading
+   keeps them visually apart so "thiếu chi phí" never reads as a Carbon cause. */
+.fw-attn-group + .fw-attn-group { margin-top: var(--fw-space-20, 20px); }
+.fw-attn-group__title { font-size: var(--fw-text-sm); font-weight: 650; color: var(--fw-ink-2); padding-bottom: var(--fw-space-8); border-bottom: 1px solid var(--fw-rule); }
+.fw-attn-group__title small { display: block; font-weight: 400; color: var(--fw-muted); font-size: var(--fw-text-xs, 12px); margin-top: 2px; }
+.fw-attn__item a.fw-btn { align-self: center; white-space: nowrap; text-decoration: none; }
+/* Server-named missing Carbon inputs on the season Carbon tab. */
+.fw-missing { display: grid; gap: var(--fw-space-8); margin: var(--fw-space-12) 0; padding: 0; list-style: none; }
+.fw-missing li { padding-left: var(--fw-space-12); border-left: 2px solid var(--fw-amber); }
+.fw-missing b { display: block; font-size: 14.5px; font-weight: 650; }
+.fw-missing span { display: block; color: var(--fw-muted); font-size: var(--fw-text-sm); max-width: var(--fw-measure); }
+.fw-cta-row { display: flex; flex-wrap: wrap; gap: var(--fw-space-8); margin-top: var(--fw-space-12); }
+.fw-cta-row .fw-btn { text-decoration: none; }
 
 /* ------------------------------------------------- performance / metrics */
 /* Not four interchangeable KPI cards: a ruled table of four readings, each with
