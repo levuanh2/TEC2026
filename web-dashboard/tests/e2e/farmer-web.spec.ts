@@ -153,8 +153,13 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.locator('.fw-metric__empty')).toHaveCount(4)
 
   await page.getByRole('tab', { name: 'Carbon' }).click()
-  await expect(page.getByText('Chưa có kết quả phát thải hợp lệ cho vụ này')).toBeVisible()
+  // Mock mode has no readiness endpoint, so the tab falls back to the calm
+  // generic state rather than inventing a missing-input list of its own.
+  await expect(page.getByText('Chưa có kết quả phát thải cho vụ này')).toBeVisible()
+  await expect(page.getByTestId('carbon-missing')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Tính lại/i })).toHaveCount(0)
+  // Cost is never presented as a Carbon input.
+  await expect(page.getByText(/Chi phí không phải đầu vào của Carbon/)).toBeVisible()
 
   await nav.getByRole('link', { name: 'Hiệu suất', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Hiệu suất vụ của tôi', level: 1 })).toBeVisible()
