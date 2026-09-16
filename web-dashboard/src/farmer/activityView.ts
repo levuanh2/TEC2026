@@ -1,6 +1,7 @@
 import type { Activity } from '../types'
 import type { SeasonMetrics } from '../api/metrics'
 import type { Recommendation } from '../api/recommendations'
+import type { CarbonMissingInput } from '../api/carbon'
 
 /* Farmer-facing presentation of recorded activities. Management keeps its
  * own `presentActivity`; this one localizes enum values and never invents a
@@ -117,20 +118,76 @@ export function greeting(now = new Date()): string {
 /* ------------------------------------------------------ attention */
 
 export type QuickType = 'seeding' | 'fertilizer' | 'irrigation' | 'pesticide' | 'straw_management' | 'harvest'
-export interface AttentionItem { id: string; tone: 'warning' | 'info'; title: string; body: string; action?: QuickType }
 
-/** Only real signals: metric completeness flags + generated data-task recommendations. */
-export function buildAttention(metrics: SeasonMetrics | null | undefined, recs: Recommendation[] | null | undefined): AttentionItem[] {
+/** Which metric an attention item belongs to. Cost and Carbon are independent
+ * metrics fed by different inputs, and the dashboard must not let a farmer read
+ * one as a cause of the other: money is never a Carbon input. */
+export type MetricGroup = 'resource' | 'carbon'
+
+export interface AttentionItem {
+  id: string
+  tone: 'warning' | 'info'
+  group: MetricGroup
+  title: string
+  body: string
+  /** Opens the create form for this activity type. */
+  action?: QuickType
+  /** A link the user follows instead — used when the fix is editing existing
+   * records or filling the season's methodology panel, not creating anything. */
+  link?: { label: string; to: (seasonId: string) => string }
+}
+
+const COST_CTA = { label: 'Bổ sung chi phí', to: (id: string) => `/farmer/crop-seasons/${id}/journal` }
+const CARBON_CTA = { label: 'Bổ sung dữ liệu Carbon', to: (id: string) => `/farmer/crop-seasons/${id}/carbon` }
+
+/** Only real signals: metric completeness flags + generated data-task recommendations.
+ *
+ * `carbonMissing` comes from the server's readiness endpoint. When it is
+ * available the Carbon item names the actual missing input instead of saying
+ * "chưa có kết quả hợp lệ"; the client never derives that list itself. */
+export function buildAttention(
+  metrics: SeasonMetrics | null | undefined,
+  recs: Recommendation[] | null | undefined,
+  carbonMissing?: CarbonMissingInput[] | null,
+): AttentionItem[] {
   const items: AttentionItem[] = []
   const tasks = (recs ?? []).filter((r) => r.type === 'data_task' && r.status === 'generated')
   const taskCovers = (suffix: string) => tasks.some((t) => t.ruleCode.endsWith(suffix))
-  for (const t of tasks) items.push({ id: `rec-${t.id}`, tone: 'warning', title: t.title, body: t.reason })
+  for (const t of tasks) {
+    const cost = t.ruleCode.endsWith('.cost')
+    items.push({
+      id: `rec-${t.id}`, tone: 'warning', group: 'resource', title: t.title, body: t.reason,
+      ...(cost ? { link: COST_CTA } : {}),
+    })
+  }
   if (metrics) {
-    if (metrics.yieldKg == null && !taskCovers('.yield')) items.push({ id: 'yield', tone: 'warning', title: 'Chưa ghi nhận sản lượng thu hoạch', body: 'Các chỉ số trên mỗi kg lúa chỉ tính được khi có sản lượng.', action: 'harvest' })
-    if (!metrics.completeness.water && !taskCovers('.water')) items.push({ id: 'water', tone: 'warning', title: 'Chưa có dữ liệu nước tưới', body: 'Ghi các lần tưới để tính lượng nước trên mỗi kg lúa.', action: 'irrigation' })
-    if (!metrics.completeness.fertilizer && !taskCovers('.fertilizer')) items.push({ id: 'fertilizer', tone: 'warning', title: 'Chưa có dữ liệu phân bón', body: 'Ghi các lần bón để tính lượng phân trên mỗi kg lúa.', action: 'fertilizer' })
-    if (!metrics.completeness.cost && !taskCovers('.cost')) items.push({ id: 'cost', tone: 'warning', title: 'Thiếu chi phí vật tư', body: 'Chi phí / kg lúa chưa tính được khi hoạt động còn thiếu chi phí.' })
-    if (!metrics.completeness.carbon) items.push({ id: 'carbon', tone: 'info', title: 'Chưa có kết quả Carbon hợp lệ', body: 'Dữ liệu canh tác vẫn được lưu; kết quả phát thải sẽ có khi phương pháp tính sẵn sàng.' })
+    if (metrics.yieldKg == null && !taskCovers('.yield')) items.push({ id: 'yield', tone: 'warning', group: 'resource', title: 'Chưa ghi nhận sản lượng thu hoạch', body: 'Các chỉ số trên mỗi kg lúa chỉ tính được khi có sản lượng.', action: 'harvest' })
+    if (!metrics.completeness.water && !taskCovers('.water')) items.push({ id: 'water', tone: 'warning', group: 'resource', title: 'Chưa có dữ liệu nước tưới', body: 'Ghi các lần tưới để tính lượng nước trên mỗi kg lúa.', action: 'irrigation' })
+    if (!metrics.completeness.fertilizer && !taskCovers('.fertilizer')) items.push({ id: 'fertilizer', tone: 'warning', group: 'resource', title: 'Chưa có dữ liệu phân bón', body: 'Ghi các lần bón để tính lượng phân trên mỗi kg lúa.', action: 'fertilizer' })
+    if (!metrics.completeness.cost && !taskCovers('.cost')) items.push({
+      id: 'cost', tone: 'warning', group: 'resource', title: 'Thiếu chi phí vật tư',
+      // Says which metric it blocks, and which it does NOT.
+      body: 'Chi phí / kg lúa chưa tính được khi còn hoạt động thiếu chi phí. Chi phí không ảnh hưởng tới kết quả Carbon.',
+      link: COST_CTA,
+    })
+  }
+
+  // Carbon: prefer the server's named missing inputs over any generic wording.
+  const blocking = (carbonMissing ?? []).filter((m) => m.blocking)
+  if (blocking.length) {
+    items.push({
+      id: 'carbon', tone: 'warning', group: 'carbon',
+      title: blocking.length === 1 ? blocking[0].label : `Thiếu ${blocking.length} dữ liệu để tính Carbon`,
+      body: blocking.length === 1 ? blocking[0].detail : blocking.map((m) => m.label).join(' · '),
+      link: CARBON_CTA,
+    })
+  } else if (metrics && !metrics.completeness.carbon) {
+    // Readiness unavailable (or every input present but no calculation stored yet).
+    items.push({
+      id: 'carbon', tone: 'info', group: 'carbon', title: 'Chưa có kết quả Carbon cho vụ này',
+      body: 'Dữ liệu canh tác vẫn được lưu. Mở mục Carbon của vụ để tính.',
+      link: CARBON_CTA,
+    })
   }
   return items
 }

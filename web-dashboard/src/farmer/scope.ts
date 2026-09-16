@@ -6,7 +6,7 @@ import { getActivities } from '../api/crops'
 import { getResourceMetrics } from '../api/metrics'
 import { generateRecommendations, getRecommendations, type Recommendation } from '../api/recommendations'
 import { getCvInferences } from '../api/cv'
-import { getCarbon, type CarbonResult } from '../api/carbon'
+import { getCarbon, getCarbonReadiness, type CarbonReadiness, type CarbonResult } from '../api/carbon'
 import { clearSeasonDataChanged, fetchQuery, keys, peekQuery, prefetchQuery, seasonDataChanged, setQueryData, STABLE_MS, useQuery, type QueryState } from './data'
 
 export type SeasonCtx = { season: CropSeason; plot?: Plot; farm?: Farm }
@@ -126,6 +126,19 @@ export function useRecommendations(id: string | null): RecommendationsState {
 }
 
 export type CarbonState = { kind: 'result'; result: CarbonResult } | { kind: 'none'; reason: 'no_calculation' | null }
+
+/** Server-derived list of Carbon inputs the season still lacks.
+ *
+ * The dashboard uses it to name the missing input instead of saying "chưa có
+ * kết quả hợp lệ". Failure is soft: an unavailable readiness endpoint must not
+ * break the dashboard, it just falls back to the generic wording. */
+export const useCarbonReadiness = (id: string | null) => useQuery<CarbonReadiness | null>(
+  id ? `${keys.carbon(id)}:readiness` : null,
+  async () => {
+    if (usingMockData) return null
+    try { return await getCarbonReadiness(id!) } catch { return null }
+  },
+)
 
 export const useCarbon = (id: string | null) => useQuery<CarbonState>(id ? keys.carbon(id) : null, async () => {
   if (usingMockData) return { kind: 'none', reason: null }

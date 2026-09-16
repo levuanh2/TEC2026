@@ -117,6 +117,8 @@ export function SeasonMethodologyPanel({
   }
 
   return (
+    // Anchor target for the Carbon tab's "Bổ sung dữ liệu Carbon" button.
+    <div id="fw-carbon-methodology">
     <Section
       title="Thông tin phương pháp tính"
       description="Dữ liệu chế độ nước theo phân loại IPCC — bắt buộc để tính được phát thải CH₄ của vụ."
@@ -172,5 +174,6 @@ export function SeasonMethodologyPanel({
         )}
       </div>
     </Section>
+    </div>
   )
 }
