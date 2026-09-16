@@ -445,6 +445,16 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .form-field[aria-invalid="true"] input, .form-field[aria-invalid="true"] select { border-bottom: 2px solid var(--danger); }
 .form-field__hint { color: var(--text-muted); font-weight: 400; font-size: var(--fs-caption); }
 .form-field__required { color: var(--danger); font-weight: 700; }
+/* Methodology choices: each option carries a plain-language explanation, so the
+   row needs two lines rather than the single-line radio the rest of the app uses. */
+.form-fieldset { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 16px 0 0; margin: 0; display: grid; gap: 8px; }
+.form-fieldset legend { font-size: var(--fs-sm); font-weight: 650; color: var(--text-primary); padding: 0; }
+.form-fieldset__hint { color: var(--text-muted); font-size: var(--fs-caption); margin: 0 0 4px; }
+.form-choice { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 8px 10px; border-radius: var(--radius-sm, 6px); cursor: pointer; }
+.form-choice:hover { background: var(--bg-subtle); }
+.form-choice input { margin-top: 3px; min-height: 0; width: auto; }
+.form-choice strong { display: block; font-size: var(--fs-sm); font-weight: 650; color: var(--text-primary); }
+.form-choice small { display: block; color: var(--text-muted); font-weight: 400; font-size: var(--fs-caption); }
 .activity-form__actions { display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 16px; }
 .activity-form__disclosure { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 0; }
 .activity-form__disclosure summary { cursor: pointer; font-weight: 650; font-size: var(--fs-sm); min-height: 42px; display: flex; align-items: center; color: var(--brand-strong); }

@@ -20,6 +20,7 @@ import {
 } from '../ui'
 import { ActivityTimeline, ActivityCoverage } from '../features/activities'
 import { CarbonPanel } from '../features/carbon'
+import { SeasonMethodologyPanel } from '../features/seasonMethodology'
 import type { Role } from '../types'
 
 export type SeasonTab = 'overview' | 'activities' | 'performance' | 'carbon' | 'mrv'
@@ -103,7 +104,22 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
                 {(m) => <Performance metrics={m} />}
               </Async>
             )}
-            {tab === 'carbon' && <CarbonPanel id={id} seasonLabel={season.name} canRecalculate={role !== 'regulator' && role !== 'enterprise_viewer'} />}
+            {tab === 'carbon' && (
+              <div className="stack">
+                {/* Inputs first, result second: the panel says which methodology
+                  * input is still missing, which is the usual reason the result
+                  * below cannot be produced. */}
+                {/* A farm-level `viewer` still shows up as app role `farmer`, so the
+                  * client cannot rule them out here — the backend answers 404 and the
+                  * panel surfaces that as a permission message. */}
+                <SeasonMethodologyPanel
+                  season={season}
+                  canEdit={role !== 'regulator' && role !== 'enterprise_viewer'}
+                  onSaved={() => frame.reload()}
+                />
+                <CarbonPanel id={id} seasonLabel={season.name} canRecalculate={role !== 'regulator' && role !== 'enterprise_viewer'} />
+              </div>
+            )}
             {tab === 'mrv' && (
               <Async state={batches} skeleton="table">
                 {(rows) => <SeasonMrv batches={rows} />}

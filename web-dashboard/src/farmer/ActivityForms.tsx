@@ -442,8 +442,11 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
   } else {
     main = <>
       <SelectField label="Cách xử lý rơm rạ" value={wMethod} onChange={setWMethod} options={STRAW_METHOD_OPTIONS} error={err('method')} />
+      {/* Straw burning factors are verified (IPCC 2006 Vol.4 Ch.2 Tables 2.5/2.6),
+        * so this IS counted now — the old "khi phương pháp tính khả dụng" wording
+        * understated it. Needs the dry-matter fraction below to compute. */}
       {wMethod === 'burned' && (
-        <p className="fw-disclaimer"><Ico name="info" />Hình thức xử lý này sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng.</p>
+        <p className="fw-disclaimer"><Ico name="info" />Đốt rơm phát thải CH₄ và N₂O, sẽ được tính vào kết quả carbon của vụ. Cần điền <strong>Tỷ lệ chất khô của rơm</strong> ở phần Thông tin bổ sung.</p>
       )}
       <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint={OPTIONAL} error={err('strawMassKg')} big />
     </>
