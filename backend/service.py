@@ -217,6 +217,36 @@ class ActivityWriteService:
         except (ReadNotFoundError, ActivityNotFoundError) as exc:
             raise ActivityWriteAccessError() from exc
 
+    def update_crop_season_methodology(
+        self, *, read_repository: SupabaseReadRepository, crop_season_id: str,
+        request: schemas.CropSeasonMethodologyUpdate,
+    ) -> dict[str, Any]:
+        """Record the season's IPCC water-regime inputs.
+
+        Deliberately NOT behind `_actor_and_farmer_scope`: unlike the journal
+        activities, these are methodology inputs a cooperative manager legitimately
+        maintains for member farms, and the persist gate for Carbon (B4) already
+        treats an active `cooperative_manager` as a writer. The authority check is
+        `private.user_can_write_crop` in the repository, so this route grants
+        nothing the `crop_seasons` UPDATE policy would not.
+
+        Unlike the journal writes it also does not require `status = 'active'`:
+        the water regime of a finished season is a fact worth correcting, and
+        Carbon recalculation of a closed season is a normal review action.
+        """
+        me = read_repository.me()
+        actor_id = str(me["user_id"])
+        # Only the keys the client actually sent — an absent field keeps its
+        # stored value, an explicit null clears it.
+        fields = request.model_dump(include=request.model_fields_set)
+        try:
+            read_repository.season(crop_season_id)
+            return self._write_repository.update_crop_season_methodology(
+                crop_season_id=crop_season_id, actor_id=actor_id, fields=fields,
+            )
+        except (ReadNotFoundError, ActivityNotFoundError) as exc:
+            raise ActivityWriteAccessError() from exc
+
 
 class RecommendationAccessError(Exception):
     """Normalized to 404 so scope cannot enumerate other farmers' seasons."""

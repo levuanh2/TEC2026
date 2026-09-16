@@ -81,9 +81,12 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
 
   await quickEntry(page, 'Rơm rạ')
   await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toBeVisible()
-  // Selecting "Đốt" (burned) shows a neutral factual notice, never a fake CO2e number.
+  // Selecting "Đốt" (burned) states what actually happens — burning IS counted now
+  // (its IPCC factors are verified) and needs the dry-matter fraction — but still
+  // shows no CO2e number in the form, because only the server computes one.
   await page.getByLabel('Cách xử lý rơm rạ').selectOption('burned')
-  await expect(page.getByText('sẽ được ghi nhận cho tính toán phát thải khi phương pháp tính khả dụng')).toBeVisible()
+  await expect(page.getByText('Đốt rơm phát thải CH₄ và N₂O')).toBeVisible()
+  await expect(page.getByText('Tỷ lệ chất khô của rơm').first()).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toHaveCount(0)
 

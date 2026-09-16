@@ -375,6 +375,28 @@ def update_activity(
     return _write_or_http(lambda: service.update(read_repository=repo, activity_id=activity_id, request=payload))
 
 
+@router.patch(
+    "/crop-seasons/{crop_season_id}/methodology", tags=['Crop Seasons'],
+    response_model=schemas.CropSeasonResponse,
+)
+def update_crop_season_methodology(
+    crop_season_id: str, payload: schemas.CropSeasonMethodologyUpdate,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ActivityWriteService = Depends(_activity_write_service),
+) -> dict[str, Any]:
+    """Record the IPCC water-regime inputs the Carbon engine reads off the season.
+
+    Without this route the three columns could only be written by the Flutter app
+    (which upserts `crop_seasons` straight through PostgREST), so a Farmer Web-only
+    user could never supply SFw/SFp and never obtain a Carbon result.
+    """
+    return _write_or_http(
+        lambda: service.update_crop_season_methodology(
+            read_repository=repo, crop_season_id=crop_season_id, request=payload,
+        )
+    )
+
+
 @router.delete("/activities/{activity_id}", tags=['Activities'], status_code=204, response_model=None)
 def delete_activity(
     activity_id: str, repo: SupabaseReadRepository = Depends(_read_repo),
