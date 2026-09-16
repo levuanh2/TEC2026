@@ -191,6 +191,69 @@ class PostgresActivityWriteRepository:
                 )
             return self._view(cur, activity_id, actor_id=actor_id)
 
+    def update_crop_season_methodology(
+        self, *, crop_season_id: str, actor_id: str, fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Set the IPCC methodology inputs the Carbon engine reads off the season.
+
+        `fields` holds only the keys the caller actually sent, so an omitted key
+        keeps its stored value while an explicit None clears it. Authorization is
+        `private.user_can_write_crop` — the same helper behind the `crop_seasons`
+        UPDATE policy and behind B4's persist gate, evaluated here rather than
+        re-derived in Python, so a farm `viewer` or a read-only grant cannot write.
+        """
+        allowed = ("ipcc_water_regime", "pre_season_water_regime", "cultivation_days")
+        unknown = sorted(set(fields) - set(allowed))
+        if unknown:
+            raise ValueError(f"unsupported crop season methodology field(s): {', '.join(unknown)}")
+        with self._connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select id::text as id from public.crop_seasons where id=%s and deleted_at is null",
+                [crop_season_id],
+            )
+            if cur.fetchone() is None:
+                raise ActivityNotFoundError()
+            self._assert_can_write_crop(cur, crop_season_id=crop_season_id, actor_id=actor_id)
+            if fields:
+                # The two regime columns are enums; cast so psycopg sends a value
+                # Postgres will reject if it is not a member, instead of text.
+                casts = {
+                    "ipcc_water_regime": "%s::public.ipcc_water_regime",
+                    "pre_season_water_regime": "%s::public.ipcc_pre_season_regime",
+                    "cultivation_days": "%s",
+                }
+                assignments = ", ".join(f"{column}={casts[column]}" for column in fields)
+                cur.execute(
+                    f"""update public.crop_seasons set {assignments}, updated_at=now()
+                        where id=%s""",  # noqa: S608 -- column names come from `allowed`
+                    [*[fields[column] for column in fields], crop_season_id],
+                )
+            cur.execute(
+                """select id::text as id, plot_id::text as plot_id, season_code, crop_type,
+                          variety_name, planting_date::text as planting_date,
+                          expected_harvest_date::text as expected_harvest_date,
+                          actual_harvest_date::text as actual_harvest_date, status::text as status,
+                          ipcc_water_regime::text as ipcc_water_regime,
+                          pre_season_water_regime::text as pre_season_water_regime,
+                          cultivation_days
+                   from public.crop_seasons where id=%s""",
+                [crop_season_id],
+            )
+            return dict(cur.fetchone())
+
+    @staticmethod
+    def _assert_can_write_crop(cur: Any, *, crop_season_id: str, actor_id: str) -> None:
+        """Same transaction-local JWT trick as `_assert_can_write_batch`, one level up."""
+        cur.execute(
+            "select set_config('request.jwt.claims', %s, true)",
+            [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
+        )
+        cur.execute("select private.user_can_write_crop(%s::uuid) as allowed", [crop_season_id])
+        allowed = bool(cur.fetchone()["allowed"])
+        cur.execute("select set_config('request.jwt.claims', '', true)")
+        if not allowed:
+            raise ActivityWritePermissionError()
+
     def soft_delete(self, *, activity_id: str, actor_id: str) -> None:
         with self._connection() as conn, conn.cursor() as cur:
             self._view(cur, activity_id, actor_id=actor_id)

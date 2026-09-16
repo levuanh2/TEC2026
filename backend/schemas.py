@@ -88,6 +88,46 @@ class CropSeasonResponse(BaseModel):
     expected_harvest_date: str | None = None
     actual_harvest_date: str | None = None
     status: str
+    # IPCC methodology inputs the Carbon engine reads off the season itself.
+    # Null means "not recorded yet" — never a default; the engine refuses to
+    # calculate rather than assume a water regime.
+    ipcc_water_regime: str | None = None
+    pre_season_water_regime: str | None = None
+    cultivation_days: int | None = None
+
+
+# These two mirror `carbon.models.WATER_REGIMES` / `PRE_SEASON_REGIMES` and the
+# `public.ipcc_water_regime` / `ipcc_pre_season_regime` enums. All three must stay
+# in step; `test_crop_season_methodology.py` fails if they ever drift apart.
+IpccWaterRegime = Literal[
+    "irrigated_continuous_flooding",
+    "irrigated_single_drainage",
+    "irrigated_multiple_drainage",
+    "rainfed_regular",
+    "rainfed_drought_prone",
+    "deep_water",
+    "upland",
+]
+IpccPreSeasonRegime = Literal[
+    "non_flooded_pre_season_lt_180d",
+    "non_flooded_pre_season_gt_180d",
+    "flooded_pre_season_gt_30d",
+    "non_flooded_pre_season_gt_365d",
+]
+
+
+class CropSeasonMethodologyUpdate(BaseModel):
+    """PATCH body for the season's IPCC methodology inputs.
+
+    Every field is optional so a client may set one at a time, but an omitted
+    field is left alone while an explicit `null` clears it — the two are not the
+    same, and `model_fields_set` is what tells them apart.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    ipcc_water_regime: IpccWaterRegime | None = None
+    pre_season_water_regime: IpccPreSeasonRegime | None = None
+    cultivation_days: int | None = Field(default=None, gt=0)
 
 
 class FarmerScopeResponse(BaseModel):

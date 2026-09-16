@@ -225,7 +225,10 @@ class SupabaseReadRepository:
     def plot(self, plot_id: str) -> dict[str, Any]: return self.plot_view(self._one("plots", plot_id))
 
     def season_view(self, row: dict[str, Any]) -> dict[str, Any]:
-        return {key: row.get(key) for key in ("id", "plot_id", "season_code", "crop_type", "variety_name", "planting_date", "expected_harvest_date", "actual_harvest_date", "status")}
+        # The last three are IPCC methodology inputs (migration 20260908): the engine
+        # reads them straight off `crop_seasons`, so a client that cannot SEE them
+        # cannot tell the user which Carbon input is still missing.
+        return {key: row.get(key) for key in ("id", "plot_id", "season_code", "crop_type", "variety_name", "planting_date", "expected_harvest_date", "actual_harvest_date", "status", "ipcc_water_regime", "pre_season_water_regime", "cultivation_days")}
 
     def season(self, season_id: str) -> dict[str, Any]: return self.season_view(self._one("crop_seasons", season_id))
     def seasons_for_plot(self, plot_id: str) -> list[dict[str, Any]]:
