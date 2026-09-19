@@ -181,13 +181,19 @@ export const keys = {
   recsGen: (seasonId: string) => `recsgen:${seasonId}`,
   cv: (seasonId: string) => `cv:${seasonId}`,
   carbon: (seasonId: string) => `carbon:${seasonId}`,
+  /* Its own key under the `carbon:` prefix: an activity edit changes which
+   * inputs are missing, but never the stored result. */
+  carbonReadiness: (seasonId: string) => `carbon:${seasonId}:readiness`,
   org: (organizationId: string) => `org:${organizationId}`,
 }
 
 /** After a create/edit/delete: everything derived from that season's records —
  * and nothing that cannot have changed (viewer identity, farm/plot/season
- * hierarchy, organization), so one write does not cause a refetch storm. */
+ * hierarchy, organization), so one write does not cause a refetch storm.
+ * Carbon readiness is included — an edited fertilizer or straw record can
+ * resolve a missing input — but the stored Carbon result is not: only a
+ * calculation changes it. */
 export function markSeasonDataChanged(seasonId: string): void {
   changedSeasons.add(seasonId)
-  invalidateQueries(keys.activities(seasonId), keys.metrics(seasonId), keys.recs(seasonId), keys.recsGen(seasonId))
+  invalidateQueries(keys.activities(seasonId), keys.metrics(seasonId), keys.recs(seasonId), keys.recsGen(seasonId), keys.carbonReadiness(seasonId))
 }

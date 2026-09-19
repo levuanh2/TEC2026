@@ -226,11 +226,14 @@ const DATE_LABEL: Record<SupportedActivityType, string> = {
 
 /* --------------------------------------------------------- the form sheet */
 
-export function ActivitySheetForm({ mode, activityType, season, activity, onClose, onSaved }: {
+export function ActivitySheetForm({ mode, activityType, season, activity, revealMore = false, onClose, onSaved }: {
   mode: 'create' | 'edit'
   activityType: SupportedActivityType
   season: SeasonContext
   activity?: Activity
+  /** Open "Thông tin bổ sung" on the way in — used when the field being fixed
+   * (Nitơ, rơm) lives there and is, by definition, still blank. */
+  revealMore?: boolean
   onClose: () => void
   onSaved: (result: ActivityWriteResult) => void
 }) {
@@ -295,7 +298,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
   // One disclosure for every form. Open it on the way in when the record being
   // edited already carries something that lives inside it — otherwise a farmer
   // would have to guess that their own earlier entry is behind a closed summary.
-  const [moreOpen, setMoreOpen] = useState(() => mode === 'edit' && [
+  const [moreOpen, setMoreOpen] = useState(() => revealMore || mode === 'edit' && [
     detail.nitrogen_percent, detail.phosphorus_percent, detail.potassium_percent,
     detail.duration_minutes, detail.water_level_cm, detail.pump_energy_kwh,
     detail.harvested_area_ha, detail.moisture_percent,
@@ -455,7 +458,14 @@ export function ActivitySheetForm({ mode, activityType, season, activity, onClos
     extra = <>
       <NumberField label="Số ngày trước khi làm đất" unit="ngày" value={wDays} onChange={setWDays} hint={OPTIONAL} error={err('daysBeforeCultivation')} integer />
       <NumberField label="Tỷ lệ chất khô của rơm" value={wDry} onChange={setWDry} hint="Không bắt buộc · từ 0 đến 1, ví dụ 0,85" error={err('dryMatterFraction')} />
-      <CheckboxField label="Rơm được vùi trả lại ruộng" checked={wReturned === true} onChange={(v) => setWReturned(v ? true : null)} />
+      {/* Three states, not a checkbox: "không trả lại" is a real answer the
+        * Carbon Engine needs for composted straw, distinct from "chưa ghi". */}
+      <SelectField
+        label="Rơm có được trả lại ruộng không"
+        value={wReturned == null ? '' : wReturned ? 'yes' : 'no'}
+        onChange={(v) => setWReturned(v === 'yes' ? true : v === 'no' ? false : null)}
+        options={[{ value: 'yes', label: 'Có, trả lại ruộng' }, { value: 'no', label: 'Không, mang đi nơi khác' }]}
+      />
     </>
     costField = <NumberField label="Chi phí" unit="đ" value={wCost} onChange={setWCost} hint={OPTIONAL} error={err('totalCostVnd')} integer />
   }
@@ -557,7 +567,7 @@ const deletedMessage = (type: SupportedActivityType) => (type === 'harvest' ? '�
 
 type FlowState =
   | { kind: 'create'; type: SupportedActivityType; season: SeasonContext }
-  | { kind: 'edit'; activity: Activity; season: SeasonContext }
+  | { kind: 'edit'; activity: Activity; season: SeasonContext; revealMore?: boolean }
   | { kind: 'delete'; activity: Activity; season: SeasonContext }
   | null
 
@@ -578,7 +588,8 @@ export function useActivityMutations() {
   }, [flash])
 
   const openCreate = (type: SupportedActivityType, season: SeasonContext) => setState({ kind: 'create', type, season })
-  const openEdit = (activity: Activity, season: SeasonContext) => setState({ kind: 'edit', activity, season })
+  const openEdit = (activity: Activity, season: SeasonContext, opts?: { revealMore?: boolean }) =>
+    setState({ kind: 'edit', activity, season, revealMore: opts?.revealMore })
   const openDelete = (activity: Activity, season: SeasonContext) => setState({ kind: 'delete', activity, season })
   const close = () => setState(null)
   const done = (seasonId: string, message: string) => {
@@ -600,6 +611,7 @@ export function useActivityMutations() {
         activityType={type}
         season={state.season}
         activity={state.kind === 'edit' ? state.activity : undefined}
+        revealMore={state.kind === 'edit' && state.revealMore}
         onClose={close}
         onSaved={(result) => done(state.season.id, successMessage(state.kind, type, result))}
       />

@@ -69,7 +69,12 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
           <MetricCards state={metrics} season={writeCtx} mutations={mutations} />
         </Section>
       )}
-      {tab === 'carbon' && <SeasonCarbon seasonId={id} season={ctx?.season ?? null} canEdit={Boolean(writeCtx)} onSaved={scope.reload} />}
+      {tab === 'carbon' && (
+        <SeasonCarbon
+          seasonId={id} season={ctx?.season ?? null} plotId={ctx?.plot?.id ?? null} writeCtx={writeCtx}
+          activities={activities.data} mutations={mutations} onSaved={scope.reload}
+        />
+      )}
       {mutations.node}
     </>
   )

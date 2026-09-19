@@ -133,7 +133,7 @@ export type CarbonState = { kind: 'result'; result: CarbonResult } | { kind: 'no
  * kết quả hợp lệ". Failure is soft: an unavailable readiness endpoint must not
  * break the dashboard, it just falls back to the generic wording. */
 export const useCarbonReadiness = (id: string | null) => useQuery<CarbonReadiness | null>(
-  id ? `${keys.carbon(id)}:readiness` : null,
+  id ? keys.carbonReadiness(id) : null,
   async () => {
     if (usingMockData) return null
     try { return await getCarbonReadiness(id!) } catch { return null }

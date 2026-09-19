@@ -18,7 +18,9 @@ import type { CropSeason, IpccPreSeasonRegime, IpccWaterRegime } from '../types'
  * is still missing; every factor and formula stays server-side.
  */
 
-const WATER_REGIMES: { value: IpccWaterRegime; label: string; help: string }[] = [
+/* Exported so the Carbon tab's inline quick-fix editors offer the same choices
+ * with the same wording — one list, not two that can drift. */
+export const WATER_REGIMES: { value: IpccWaterRegime; label: string; help: string }[] = [
   { value: 'irrigated_continuous_flooding', label: 'Tưới — ngập liên tục', help: 'Ruộng giữ nước gần như suốt vụ, không rút cạn giữa vụ.' },
   { value: 'irrigated_single_drainage', label: 'Tưới — rút nước 1 lần', help: 'Có đúng một lần tháo cạn ruộng trong vụ.' },
   { value: 'irrigated_multiple_drainage', label: 'Tưới — rút nước nhiều lần (gồm AWD)', help: 'Ngập – khô xen kẽ, hoặc tháo cạn từ 2 lần trở lên.' },
@@ -28,7 +30,7 @@ const WATER_REGIMES: { value: IpccWaterRegime; label: string; help: string }[] =
   { value: 'upland', label: 'Lúa cạn', help: 'Ruộng không ngập nước trong thời gian đáng kể.' },
 ]
 
-const PRE_SEASON_REGIMES: { value: IpccPreSeasonRegime; label: string; help: string }[] = [
+export const PRE_SEASON_REGIMES: { value: IpccPreSeasonRegime; label: string; help: string }[] = [
   { value: 'non_flooded_pre_season_lt_180d', label: 'Không ngập, dưới 180 ngày trước vụ', help: 'Thường gặp khi làm 2 vụ lúa/năm.' },
   { value: 'non_flooded_pre_season_gt_180d', label: 'Không ngập, trên 180 ngày trước vụ', help: 'Ruộng để khô dài trước khi vào vụ.' },
   { value: 'flooded_pre_season_gt_30d', label: 'Có ngập từ 30 ngày trở lên trước vụ', help: 'Làm tăng phát thải CH₄ hơn gấp đôi — cần khai đúng.' },
