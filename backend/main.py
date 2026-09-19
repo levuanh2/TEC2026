@@ -237,6 +237,45 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+def _database_unavailable_types() -> tuple[type[BaseException], ...]:
+    types: list[type[BaseException]] = []
+    try:
+        import psycopg
+        types.append(psycopg.OperationalError)
+    except Exception:  # noqa: BLE001 - psycopg is optional for a fake-only test run
+        pass
+    try:
+        from psycopg_pool import PoolTimeout
+        types.append(PoolTimeout)
+    except Exception:  # noqa: BLE001
+        pass
+    return tuple(types)
+
+
+async def database_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    """No healthy database connection, or one lost mid-request.
+
+    A controlled 503 in the shared envelope. The message never includes the
+    exception text (which can carry a host name or SQL); the server log has the
+    full context. It does NOT claim that nothing was saved: a connection lost
+    during a write leaves the commit state unknown, so no retry happens here
+    (see infrastructure/pg_pool.py)."""
+    logging.getLogger("agricarbon.db").error(
+        "database_unavailable method=%s path=%s error=%s", request.method, request.url.path,
+        type(exc).__name__, exc_info=exc,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": error_detail(
+            "database_unavailable", "Tạm thời không kết nối được cơ sở dữ liệu. Vui lòng thử lại sau ít phút.",
+        )},
+    )
+
+
+for _exc_type in _database_unavailable_types():
+    app.add_exception_handler(_exc_type, database_unavailable_handler)
+
+
 @app.exception_handler(InvalidTokenError)
 async def invalid_token_exception_handler(request: Request, exc: InvalidTokenError) -> JSONResponse:
     """Token sai định dạng/hết hạn phải là 401, không phải 500.

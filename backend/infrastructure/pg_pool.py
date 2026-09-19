@@ -13,6 +13,27 @@ exception) — it returns the connection to the pool instead of closing it.
 If `psycopg_pool` is not installed the module falls back to the previous
 connect-per-statement behaviour, so this is a performance dependency, never a
 correctness one.
+
+Dead connections (P1-B). A pooled connection can be closed from the server
+side while it sits idle -- the Supavisor pooler or the network drops it, and a
+backend that idled overnight handed one out: the first write then failed with
+`psycopg.OperationalError` until the process was restarted. The pool now runs
+psycopg_pool's own `ConnectionPool.check_connection` on every checkout, so a
+dead connection is discarded and replaced BEFORE any statement is sent. That
+is the only kind of retry here, and it is safe because nothing was attempted
+on the dead connection. A failure DURING or AFTER a statement is never retried
+by this module: whether a COMMIT landed is then unknown, and replaying a write
+could duplicate it. Such a failure reaches the client as a 503
+`database_unavailable` (see main.py) and the caller's own idempotency decides
+whether a retry is safe.
+
+`max_idle` / `max_lifetime` stay at the library defaults (600 s / 3600 s): the
+database has `idle_session_timeout = 0`, and nothing in this deployment gives a
+lower bound to tune them against. The checkout check does not depend on them.
+Measured from a dev machine to hosted Supabase the check costs one round trip
+(~110 ms median per checkout, 297 -> 406 ms for checkout + `select 1`); a
+backend deployed next to the database pays ~1 RTT of a few ms. Only the psycopg
+write/lookup paths use this pool -- the read API goes through PostgREST.
 """
 from __future__ import annotations
 
@@ -47,6 +68,7 @@ def _pool_for(conninfo: str) -> Any | None:
     pool = ConnectionPool(
         conninfo, min_size=MIN_SIZE, max_size=MAX_SIZE,
         kwargs={"row_factory": dict_row}, timeout=TIMEOUT_SECONDS, open=True,
+        check=ConnectionPool.check_connection,
     )
     with _lock:
         existing = _pools.get(conninfo)
