@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config.dart';
+import '../models/carbon_readiness.dart';
 import '../models/carbon_result.dart';
 import 'auth_service.dart';
 
@@ -116,6 +117,24 @@ class CarbonApiService {
       if (err.code == 'no_calculation') return null;
     }
     return _parseOrThrow(response).copyWith(fetchedAt: DateTime.now());
+  }
+
+  /// `GET /v1/crop-seasons/{id}/carbon/readiness` — đầu vào Carbon còn thiếu và
+  /// chỗ bổ sung từng thứ. Nguồn sự thật duy nhất: app KHÔNG tự suy luật thiếu.
+  Future<CarbonReadiness> readiness({required String cropSeasonId}) async {
+    final response = await _http
+        .get(
+          _uri('/v1/crop-seasons/$cropSeasonId/carbon/readiness'),
+          headers: _authHeaders(),
+        )
+        .timeout(_timeout);
+    final body = _decodeBody(response);
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return CarbonReadiness.fromJson(body);
+    }
+    final err = _errorFrom(body, response.statusCode);
+    throw CarbonApiException(response.statusCode, err.code, err.message,
+        requestId: err.requestId);
   }
 
   /// `GET /v1/carbon/scenarios` — không cần auth. Lỗi bất kỳ → 3 enum chính thức.

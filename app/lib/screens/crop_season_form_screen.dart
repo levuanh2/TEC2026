@@ -159,6 +159,7 @@ class _CropSeasonFormScreenState extends State<CropSeasonFormScreen> {
       updatedAt: now,
     );
     await widget.services.db.upsertCropSeason(season);
+    if (e != null) await widget.services.db.markCarbonInputsChanged(season.clientId);
     if (!mounted) return;
     Navigator.of(context).pop(season);
   }

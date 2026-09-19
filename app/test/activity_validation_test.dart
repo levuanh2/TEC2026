@@ -144,15 +144,15 @@ void main() {
       expect(v.fieldErrors['days_before_cultivation'], isNotNull);
     });
 
-    test('straw incorporated CẦN dry_matter + days_before_cultivation', () {
+    test('straw incorporated để trống dry_matter/days VẪN lưu được — thiếu gì '
+        'cho Carbon là việc của readiness máy chủ, không phải luật trong Dart', () {
       final v = validateActivity(
         type: 'straw_management',
         parsed: {'method': _str('incorporated')},
         occurredAt: _past,
         now: _now,
       );
-      expect(v.fieldErrors['dry_matter_fraction'], isNotNull);
-      expect(v.fieldErrors['days_before_cultivation'], isNotNull);
+      expect(v.hasError, isFalse);
 
       final ok = validateActivity(
         type: 'straw_management',

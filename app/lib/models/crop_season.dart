@@ -128,12 +128,14 @@ class CropSeason {
           'actual_harvest_date': _dateOnly(actualHarvestDate),
         if (defaultIrrigationMethod != null)
           'default_irrigation_method': defaultIrrigationMethod!.wire,
-        if (ipccWaterRegime != null) 'ipcc_water_regime': ipccWaterRegime!.wire,
-        if (preSeasonWaterRegime != null)
-          'pre_season_water_regime': preSeasonWaterRegime!.wire,
-        if (cultivationDays != null) 'cultivation_days': cultivationDays,
-        if (drainageEventCount != null)
-          'drainage_event_count': drainageEventCount,
+        // Biến phương pháp luận LUÔN gửi, kể cả null: đây cũng là đường SỬA một
+        // vụ đã đồng bộ (upsert theo plot_id + season_code), nên bỏ key thì
+        // server giữ giá trị cũ và người dùng không xoá được. Các cột này không
+        // có default trên DB (null không bị "ép" thành gì cả).
+        'ipcc_water_regime': ipccWaterRegime?.wire,
+        'pre_season_water_regime': preSeasonWaterRegime?.wire,
+        'cultivation_days': cultivationDays,
+        'drainage_event_count': drainageEventCount,
         'status': status.wire,
       };
 

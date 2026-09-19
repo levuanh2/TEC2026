@@ -33,12 +33,19 @@ ParsedField parseActivityField(ActivityFieldSpec spec, String raw) {
           : ParsedField(v, null);
     case ActivityFieldKind.decimal:
       if (text.isEmpty) return const ParsedField.empty();
+      // Cùng quy ước Farmer Web: số thập phân thường, dấu phẩy hoặc chấm
+      // ("0,85" = "0.85"). "1e3", "1.000,5", "Infinity" là lỗi — không đoán.
+      if (!_kPlainDecimal.hasMatch(text)) {
+        return const ParsedField(null, 'Số không hợp lệ.');
+      }
       final v = double.tryParse(text.replaceAll(',', '.'));
       return v == null || v.isNaN || v.isInfinite
           ? const ParsedField(null, 'Số không hợp lệ.')
           : ParsedField(v, null);
   }
 }
+
+final _kPlainDecimal = RegExp(r'^[+-]?(\d+([.,]\d+)?|[.,]\d+)$');
 
 class ActivityValidation {
   ActivityValidation(this.fieldErrors, this.occurredAtError, this.warnings);
@@ -99,22 +106,9 @@ ActivityValidation validateActivity({
     }
   }
 
-  // -- Ràng buộc có điều kiện --------------------------------------------
-  if (type == 'straw_management') {
-    final method = parsed['method']?.value as String?;
-    if (method == 'incorporated') {
-      for (final k in const [
-        'dry_matter_fraction',
-        'days_before_cultivation'
-      ]) {
-        final f = parsed[k];
-        if (f == null || f.isEmpty) {
-          final label = specs.firstWhere((s) => s.key == k).label;
-          errors.putIfAbsent(k, () => 'Vùi vào đất thì cần "$label".');
-        }
-      }
-    }
-  }
+  // Rơm vùi/ủ/đốt cần thêm gì cho Carbon KHÔNG kiểm ở đây: đó là luật phương
+  // pháp luận, máy chủ báo qua readiness (màn Carbon). Để trống vẫn lưu được —
+  // giống Farmer Web — và sẽ hiện thành mục "Cần bổ sung" có nút Sửa ngay.
 
   if (type == 'harvest') {
     final y = parsed['yield_kg'];

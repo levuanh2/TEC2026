@@ -77,7 +77,8 @@ void main() {
       expect(body['status'], 'active');
     });
 
-    test('field null -> KHÔNG có trong payload (server không ép mặc định)', () {
+    test('methodology null -> gửi null TƯỜNG MINH (để sửa vụ đã đồng bộ xoá được '
+        'giá trị cũ); field khác null vẫn bỏ key', () {
       final bare = CropSeason(
         clientId: 'c',
         plotClientId: 'p',
@@ -86,9 +87,15 @@ void main() {
         updatedAt: DateTime(2026),
       );
       final body = bare.toServerInsert(plotServerId: 'x');
-      expect(body.containsKey('ipcc_water_regime'), isFalse);
-      expect(body.containsKey('pre_season_water_regime'), isFalse);
-      expect(body.containsKey('cultivation_days'), isFalse);
+      for (final k in const [
+        'ipcc_water_regime',
+        'pre_season_water_regime',
+        'cultivation_days',
+        'drainage_event_count',
+      ]) {
+        expect(body.containsKey(k), isTrue, reason: k);
+        expect(body[k], isNull, reason: k);
+      }
       expect(body.containsKey('variety_name'), isFalse);
     });
   });

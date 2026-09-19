@@ -11,6 +11,7 @@ class MeProfile {
     required this.roles,
     this.farmMembershipCount = 0,
     this.orgMembershipCount = 0,
+    this.writableFarmIds = const {},
   });
 
   final String userId;
@@ -28,8 +29,17 @@ class MeProfile {
   final int farmMembershipCount;
   final int orgMembershipCount;
 
+  /// Farm (server id) mà người dùng được GHI: `farm_role` owner/editor — cùng
+  /// nguồn Farmer Web dùng (`web-dashboard/src/api/me.ts`). Chỉ để ẩn/hiện nút;
+  /// quyền thật vẫn do RLS / backend quyết định.
+  final Set<String> writableFarmIds;
+
   bool get isFarmer => roles.contains('farmer');
+
+  bool canWriteFarm(String farmServerId) => writableFarmIds.contains(farmServerId);
 }
+
+const _kWriteFarmRoles = {'owner', 'editor'};
 
 class MeService {
   MeService(this._api);
@@ -46,6 +56,13 @@ class MeService {
           .map((e) => e.toString())
           .toList(),
       farmMembershipCount: (json['farm_memberships'] as List?)?.length ?? 0,
+      writableFarmIds: {
+        for (final m in (json['farm_memberships'] as List?) ?? const [])
+          if (m is Map &&
+              m['farm_id'] is String &&
+              _kWriteFarmRoles.contains(m['farm_role']))
+            m['farm_id'] as String,
+      },
       orgMembershipCount:
           (json['organization_memberships'] as List?)?.length ?? 0,
     );

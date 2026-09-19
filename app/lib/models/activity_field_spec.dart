@@ -12,7 +12,7 @@ enum ActivityFieldKind {
   integer,
   select,
 
-  /// 3 trạng thái Có / Không / Chưa rõ. Payload: `true` / `false` / (bỏ key khi
+  /// 3 trạng thái Có / Không / Chưa chọn. Payload: `true` / `false` / (bỏ key khi
   /// "chưa rõ" — KHÔNG default `false`, xem CARBON_METHOD.md `returned_to_field`).
   tristate,
 }
@@ -307,7 +307,7 @@ const kActivityFieldSpecs = <String, List<ActivityFieldSpec>>{
       kind: ActivityFieldKind.decimal,
       positive: true, // schema: > 0 và <= 1
       max: 1,
-      hint: 'Số lớn hơn 0 đến 1 (ví dụ 0,85). Bắt buộc khi vùi vào đất.',
+      hint: 'Số lớn hơn 0, tối đa 1 (ví dụ 0,85) — không phải phần trăm.',
     ),
     ActivityFieldSpec(
       key: 'days_before_cultivation',
@@ -315,13 +315,13 @@ const kActivityFieldSpecs = <String, List<ActivityFieldSpec>>{
       kind: ActivityFieldKind.integer,
       unit: 'ngày',
       nonNegative: true,
-      hint: 'Bắt buộc khi vùi vào đất.',
+      hint: 'Số nguyên, 0 trở lên.',
     ),
     ActivityFieldSpec(
       key: 'returned_to_field',
       label: 'Compost có trả lại chính ruộng này?',
       kind: ActivityFieldKind.tristate,
-      hint: 'Chỉ hỏi khi ủ compost. Chưa chắc thì chọn "Chưa rõ" — hệ thống '
+      hint: 'Cần khi ủ compost. Chưa chắc thì để "Chưa chọn" — hệ thống '
           'KHÔNG tự hiểu là "Không".',
     ),
     _costField,

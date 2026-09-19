@@ -44,12 +44,29 @@ class AppRoutes {
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => CarbonResultScreen(
+        builder: (routeContext) => CarbonResultScreen(
           carbonApi: services.carbonApi,
           cache: CarbonCache(services.db),
           db: services.db,
           cropSeasonClientId: cropSeasonClientId,
           onOpenSync: onOpenSync,
+          connectivity: services.connectivity,
+          // Lượt đồng bộ SẴN CÓ (upsert crop_seasons / activities qua Supabase) —
+          // màn Carbon không có đường ghi riêng.
+          syncNow: () async {
+            await services.syncCoordinator.runSync(manual: true);
+          },
+          loadWritableFarmIds: () async => (await services.me.fetch()).writableFarmIds,
+          editActivity: (activity) => Navigator.of(routeContext).push<bool>(
+            MaterialPageRoute(
+              builder: (_) => ActivityFormScreen(
+                services: services,
+                cropSeasonId: activity.cropSeasonId,
+                activityType: activity.type,
+                existing: activity,
+              ),
+            ),
+          ),
         ),
       ),
     );

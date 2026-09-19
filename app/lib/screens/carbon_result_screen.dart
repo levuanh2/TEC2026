@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../db/local_database.dart';
 import '../design/design.dart';
+import '../models/activity.dart';
+import '../models/carbon_readiness.dart';
 import '../models/carbon_result.dart';
-import '../models/sync_state.dart';
+import '../models/crop_season.dart';
 import '../services/carbon_api_service.dart';
 import '../services/carbon_cache.dart';
+import '../services/connectivity_service.dart';
+import 'carbon_readiness_section.dart';
+import 'season_methodology_sheet.dart';
 
 /// Màn 25 — "Kết quả phát thải" của một vụ.
 ///
@@ -23,6 +28,10 @@ class CarbonResultScreen extends StatefulWidget {
     required this.db,
     required this.cropSeasonClientId,
     this.onOpenSync,
+    this.connectivity,
+    this.syncNow,
+    this.loadWritableFarmIds,
+    this.editActivity,
   });
 
   final CarbonApiService carbonApi;
@@ -30,6 +39,20 @@ class CarbonResultScreen extends StatefulWidget {
   final LocalDatabase db;
   final String cropSeasonClientId;
   final VoidCallback? onOpenSync;
+
+  /// `null` → coi như có mạng (test / môi trường không có plugin).
+  final ConnectivityService? connectivity;
+
+  /// Chạy một lượt đồng bộ sẵn có (SyncCoordinator.runSync). Không có hệ thống
+  /// đồng bộ riêng cho màn này.
+  final Future<void> Function()? syncNow;
+
+  /// Farm (server id) được ghi — `null` khi chưa biết (offline): khi đó KHÔNG
+  /// ẩn nút sửa (sửa trên máy luôn an toàn, RLS chặn lúc gửi nếu không có quyền).
+  final Future<Set<String>?> Function()? loadWritableFarmIds;
+
+  /// Mở form sửa đúng hoạt động (mục readiness "Sửa ngay").
+  final Future<void> Function(Activity activity)? editActivity;
 
   @override
   State<CarbonResultScreen> createState() => _CarbonResultScreenState();
@@ -39,7 +62,6 @@ enum _Phase {
   loading,
   noSeason, // không tìm thấy vụ trong DB
   notSynced, // vụ chưa có server_id
-  unsynced, // còn Activity pending/failed
   content, // đã đủ điều kiện — hiện kết quả / empty / lỗi
 }
 
@@ -73,6 +95,36 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
   CarbonResult? _awdResult;
   CarbonResult? _continuousResult;
 
+  // Readiness — nguồn sự thật là máy chủ.
+  CropSeason? _season;
+  String? _plotFarmId;
+  bool _seasonPending = false;
+  Map<String, Activity> _localByServerId = const {};
+  CarbonReadiness? _readiness;
+  String? _readinessError;
+  bool _readinessLoading = false;
+  Set<String>? _writableFarmIds;
+  DateTime? _inputsChangedAt;
+
+  bool get _online => widget.connectivity?.isOnline ?? true;
+  bool get _canWrite {
+    final ids = _writableFarmIds;
+    final farm = _plotFarmId;
+    if (ids == null || farm == null) return true;
+    return ids.contains(farm);
+  }
+
+  bool get _hasPendingChanges => _seasonPending || _unsyncedCount > 0;
+
+  /// Kết quả đang xem được tính TRƯỚC lần người dùng sửa đầu vào gần nhất.
+  bool get _resultIsStale {
+    final r = _result;
+    final changed = _inputsChangedAt;
+    if (r == null || changed == null) return false;
+    final calculated = DateTime.tryParse(r.calculatedAt);
+    return calculated != null && changed.isAfter(calculated);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -87,30 +139,149 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
       setState(() => _phase = _Phase.noSeason);
       return;
     }
-    final plot = await widget.db.getPlotByClientId(season.plotClientId);
-    final activities = await widget.db
-        .listActivitiesByCropSeasonClientId(widget.cropSeasonClientId);
+    await _readLocal();
     if (!mounted) return;
-
-    _plotLabel = plot?.plotCode ?? plot?.name;
-    _seasonLabel = season.seasonCode;
-    _seasonServerId = season.serverId;
-    _unsyncedCount = activities
-        .where((a) =>
-            a.syncState == SyncState.pending || a.syncState == SyncState.failed)
-        .length;
 
     if (_seasonServerId == null) {
       setState(() => _phase = _Phase.notSynced);
       return;
     }
-    if (_unsyncedCount > 0) {
-      setState(() => _phase = _Phase.unsynced);
-      return;
-    }
 
     setState(() => _phase = _Phase.content);
-    await _loadContent();
+    await Future.wait([_loadContent(), _loadReadiness(), _loadWriteAccess()]);
+  }
+
+  /// Trạng thái trên máy: vụ, thửa, hoạt động (theo server id), thay đổi chưa gửi.
+  Future<void> _readLocal() async {
+    final season =
+        await widget.db.getCropSeasonByClientId(widget.cropSeasonClientId);
+    if (season == null) return;
+    final plot = await widget.db.getPlotByClientId(season.plotClientId);
+    final activities = await widget.db
+        .listActivitiesByCropSeasonClientId(widget.cropSeasonClientId);
+    final changedAt =
+        await widget.db.carbonInputsChangedAt(widget.cropSeasonClientId);
+    final pendingDeletes = (await widget.db.listActivitiesByCropSeasonClientId(
+            widget.cropSeasonClientId,
+            includeDeleted: true))
+        .where((a) => a.deletedLocally && a.syncState != SyncState.synced)
+        .length;
+    if (!mounted) return;
+    setState(() {
+      _season = season;
+      _plotLabel = plot?.plotCode ?? plot?.name;
+      _plotFarmId = plot?.farmId;
+      _seasonLabel = season.seasonCode;
+      _seasonServerId = season.serverId;
+      _seasonPending = season.syncState != SyncState.synced;
+      _inputsChangedAt = changedAt;
+      _unsyncedCount = activities
+              .where((a) =>
+                  a.syncState == SyncState.pending ||
+                  a.syncState == SyncState.failed)
+              .length +
+          pendingDeletes;
+      _localByServerId = {
+        for (final a in activities)
+          if (a.serverActivityId != null) a.serverActivityId!: a,
+      };
+    });
+  }
+
+  Future<void> _loadWriteAccess() async {
+    final load = widget.loadWritableFarmIds;
+    if (load == null) return;
+    try {
+      final ids = await load();
+      if (mounted) setState(() => _writableFarmIds = ids);
+    } catch (_) {
+      // Không biết quyền (offline): giữ null — không ẩn nút sửa trên máy.
+    }
+  }
+
+  Future<void> _loadReadiness() async {
+    final sid = _seasonServerId;
+    if (sid == null) return;
+    if (!_online) {
+      setState(() {
+        _readiness = null;
+        _readinessError =
+            'Cần kết nối mạng để kiểm tra dữ liệu còn thiếu và tính phát thải.';
+      });
+      return;
+    }
+    setState(() => _readinessLoading = true);
+    try {
+      final r = await widget.carbonApi.readiness(cropSeasonId: sid);
+      if (!mounted) return;
+      setState(() {
+        _readiness = r;
+        _readinessError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _readinessError = CarbonApiService.friendlyMessage(e));
+    } finally {
+      if (mounted) setState(() => _readinessLoading = false);
+    }
+  }
+
+  /// Sau một lần sửa trên máy: đọc lại trạng thái, gửi bằng lượt đồng bộ sẵn có
+  /// nếu có mạng, rồi hỏi lại máy chủ. Offline → giá trị nằm trên máy, chờ gửi.
+  Future<void> _afterLocalChange() async {
+    await widget.db.markCarbonInputsChanged(widget.cropSeasonClientId);
+    await _readLocal();
+    if (_online && widget.syncNow != null) {
+      try {
+        await widget.syncNow!();
+      } catch (_) {
+        // Lỗi đồng bộ đã hiện ở màn Gửi dữ liệu; ở đây chỉ đọc lại trạng thái.
+      }
+      await _readLocal();
+    }
+    await _loadReadiness();
+  }
+
+  Future<void> _syncNow() async {
+    if (widget.syncNow == null) return;
+    try {
+      await widget.syncNow!();
+    } catch (_) {}
+    await _readLocal();
+    await _loadReadiness();
+  }
+
+  Future<void> _fixSeason(MissingCarbonInput issue) async {
+    final season = _season;
+    if (season == null) return;
+    final values = await showSeasonMethodologySheet(context,
+        season: season, focusCode: issue.code);
+    if (values == null) return;
+    await widget.db.upsertCropSeason(season.copyWith(
+      ipccWaterRegime: values.ipccWaterRegime,
+      preSeasonWaterRegime: values.preSeasonWaterRegime,
+      cultivationDays: values.cultivationDays,
+      syncState: SyncState.pending,
+      updatedAt: DateTime.now(),
+      clearSyncError: true,
+    ));
+    await _afterLocalChange();
+  }
+
+  Future<void> _fixActivity(MissingCarbonInput issue, ReadinessRecord record) async {
+    final activity = _localByServerId[record.activityId];
+    final edit = widget.editActivity;
+    if (activity == null || edit == null) return;
+    await edit(activity);
+    // Form tự đánh dấu thay đổi khi lưu; huỷ thì không có gì để gửi.
+    await _readLocal();
+    if (_online && widget.syncNow != null && _unsyncedCount > 0) {
+      try {
+        await widget.syncNow!();
+      } catch (_) {}
+      await _readLocal();
+    }
+    await _loadReadiness();
   }
 
   Future<void> _loadContent() async {
@@ -231,6 +402,10 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
 
   Future<void> _calculate() async {
     if (_busy) return;
+    if (!_online) {
+      setState(() => _softError = 'Cần kết nối mạng để tính phát thải.');
+      return;
+    }
     setState(() => _busy = true);
     try {
       final live = await widget.carbonApi.calculate(
@@ -308,14 +483,6 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
               'Gửi dữ liệu lên rồi quay lại đây.',
           onOpenSync: widget.onOpenSync,
         );
-      case _Phase.unsynced:
-        return _BlockedCta(
-          icon: Icons.sync_problem_outlined,
-          title: 'Còn $_unsyncedCount hoạt động chưa gửi lên',
-          message: 'Kết quả phát thải chỉ đúng khi mọi hoạt động của vụ đã lên '
-              'hệ thống. Gửi nốt $_unsyncedCount mục rồi tính.',
-          onOpenSync: widget.onOpenSync,
-        );
       case _Phase.content:
         return _content();
     }
@@ -382,8 +549,20 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
           ),
         ],
         const SizedBox(height: AppSpacing.md),
+        _readinessBlock(),
+        const SizedBox(height: AppSpacing.md),
+        if (_resultIsStale) ...[
+          const _SoftBanner(
+            key: Key('carbon-stale'),
+            icon: Icons.update,
+            text: 'Dữ liệu đã thay đổi sau lần tính gần nhất — cần tính lại. '
+                'Số dưới đây là kết quả cũ.',
+            tone: AppColors.warningText,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
         if (r == null)
-          _EmptyResult(busy: _busy, onCalculate: _calculate)
+          const _EmptyResult()
         else ...[
           if (r.fromCache && _softError == null && !_sessionExpired) ...[
             _CacheStamp(result: r),
@@ -412,12 +591,6 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
             const SizedBox(height: AppSpacing.sm),
             _DetailsCard(result: r),
           ],
-          const SizedBox(height: AppSpacing.lg),
-          PrimaryButton(
-            label: 'Tính lại',
-            loading: _busy,
-            onPressed: _calculate,
-          ),
         ],
         const SizedBox(height: AppSpacing.xs),
         Text(
@@ -426,6 +599,37 @@ class _CarbonResultScreenState extends State<CarbonResultScreen> {
           style: text.labelSmall?.copyWith(color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+extension on _CarbonResultScreenState {
+  Widget _readinessBlock() {
+    final readiness = _readiness;
+    if (readiness == null) {
+      if (_readinessLoading) {
+        return const LoadingState(message: 'Đang kiểm tra dữ liệu còn thiếu...');
+      }
+      return _SoftBanner(
+        key: const Key('carbon-readiness-unavailable'),
+        icon: _online ? Icons.error_outline : Icons.cloud_off_outlined,
+        text: _readinessError ??
+            'Chưa kiểm tra được dữ liệu còn thiếu. Kéo xuống hoặc mở lại để thử.',
+        tone: AppColors.warningText,
+      );
+    }
+    return CarbonReadinessSection(
+      readiness: readiness,
+      canWrite: _canWrite,
+      online: _online,
+      hasResult: _result != null,
+      hasPendingChanges: _hasPendingChanges,
+      isRecordOnDevice: _localByServerId.containsKey,
+      busy: _busy,
+      onFixSeason: _fixSeason,
+      onFixActivity: widget.editActivity == null ? null : _fixActivity,
+      onCalculate: _calculate,
+      onSyncNow: widget.syncNow == null ? null : _syncNow,
     );
   }
 }
@@ -472,6 +676,7 @@ class _NotReadyBanner extends StatelessWidget {
 
 class _SoftBanner extends StatelessWidget {
   const _SoftBanner({
+    super.key,
     required this.icon,
     required this.text,
     required this.tone,
@@ -558,28 +763,14 @@ class _ScenarioPicker extends StatelessWidget {
 }
 
 class _EmptyResult extends StatelessWidget {
-  const _EmptyResult({required this.busy, required this.onCalculate});
-  final bool busy;
-  final VoidCallback onCalculate;
+  const _EmptyResult();
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const EmptyState(
-          icon: Icons.calculate_outlined,
-          title: 'Vụ này chưa được tính phát thải',
-          message:
-              'Bấm "Tính phát thải" để hệ thống tính theo nhật ký canh tác '
-              'đã ghi.',
-        ),
-        const SizedBox(height: AppSpacing.md),
-        PrimaryButton(
-          label: 'Tính phát thải',
-          loading: busy,
-          onPressed: onCalculate,
-        ),
-      ],
+    return const EmptyState(
+      icon: Icons.calculate_outlined,
+      title: 'Vụ này chưa được tính phát thải',
+      message: 'Khi đã đủ dữ liệu, bấm "Tính Carbon" ở trên — hệ thống tính '
+          'theo nhật ký canh tác đã gửi lên.',
     );
   }
 }
