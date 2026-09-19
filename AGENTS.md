@@ -442,3 +442,16 @@ Follow-ups (chỉ ghi nhận, chưa làm):
 - **P1 pg_pool stale connection** — sau khi backend idle lâu (qua đêm), `pg_pool` trao kết nối đã bị server đóng → `psycopg.OperationalError` → 500 ở lần ghi đầu (không có dữ liệu bị ghi). Cân nhắc `check=ConnectionPool.check_connection` / `max_idle`.
 - **P2** `docs/openapi.json` stale — regenerate/reconcile trong task API-contract riêng.
 - Carry-forward: Flutter methodology / fuel-warning parity.
+
+## P1 write-path reliability (2026-09-20)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/schemas.py` (`success_payload`), `backend/service.py`, `backend/api.py` (Carbon `_json_ready`), `backend/main.py` (503 `database_unavailable`), `backend/infrastructure/write_repo.py`, `recommendation_repo.py`, `cv_repo.py`, `mrv_export_repo.py`, `supabase_repo.py` (Carbon compensation), `pg_pool.py` (`check=ConnectionPool.check_connection`), `backend/tests/test_write_response_atomicity.py` + `test_write_response_routes.py` + `test_pg_pool_health.py` (new), fakes in existing tests, `backend/scripts/hosted_write_reliability_smoke.py` (new), `docs/WRITE_PATH_RELIABILITY.md` (new) | — (released) | P1-A: response của mọi endpoint ghi được validate + serialize TRONG transaction (callback `prepare`) nên không còn "commit rồi 500". P1-B: pool kiểm tra kết nối khi checkout, không retry câu lệnh ghi. Không đổi công thức/hệ số, quyền, Flutter, `docs/openapi.json`. Branch `feature/p1-write-reliability`. | DONE — merged. Backend 699 passed (gồm test rollback + kill-session trên Postgres thật); web Vitest 232, tsc + build; mock Farmer + Management Playwright 2/2; hosted: write reliability 19/19, straw 13/13, quick-fix 10/10, carbon factor 43/43, P1 30/30, P0 50/50, carbon input UX 44/44, cost/carbon 37/37; 0 QA rows left; Codex NO BLOCKER (1 non-blocker đã sửa). |
+
+Follow-ups (chỉ ghi nhận):
+- **Carbon persist trong 1 transaction** — `save_calculation` vẫn là 2 request PostgREST; process crash giữa 2 insert có thể để lại calculation `succeeded` không có breakdown (retry dùng lại qua `input_hash`). Chuyển sang psycopg transaction hoặc RPC. Xem `docs/WRITE_PATH_RELIABILITY.md` §3.
+- CV: không có job dọn orphan object trong bucket `plant-images` khi crash giữa upload và insert.
+- Chạy các hosted smoke in-process (`hosted_carbon_factor/p0/p1/input_ux/cost_carbon`) từ thư mục `backend/` (đọc `config/emission_factors.yaml` theo đường dẫn tương đối).
+- Carry-forward: `docs/openapi.json` drift; Flutter methodology / fuel-warning parity.
+
