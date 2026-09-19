@@ -112,6 +112,22 @@ def test_viewer_cannot_update_even_their_own_earlier_activity():
     assert repo.rows[activity_id]["note"] is None
 
 
+def test_viewer_cannot_complete_an_unattributed_record():
+    repo = PermissionAwareRepository("viewer")
+    repo.rows["seeded"] = {
+        "id": "seeded", "crop_season_id": SEASON, "activity_type": "irrigation",
+        "occurred_at": datetime(2026, 9, 8, tzinfo=timezone.utc), "note": None, "data": {"method": "awd"},
+        "created_by": None, "created_at": datetime(2026, 9, 8, tzinfo=timezone.utc),
+        "updated_at": datetime(2026, 9, 8, tzinfo=timezone.utc), "deleted": False,
+    }
+    with pytest.raises(ActivityWriteAccessError):
+        ActivityWriteService(repo).update(
+            read_repository=reader("viewer"), activity_id="seeded",
+            request=schemas.ActivityUpdateRequest(note="changed"),
+        )
+    assert repo.rows["seeded"]["note"] is None
+
+
 def test_viewer_cannot_delete_even_their_own_earlier_activity():
     repo, activity_id = seeded("viewer")
     with pytest.raises(ActivityWriteAccessError):

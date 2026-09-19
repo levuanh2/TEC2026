@@ -262,6 +262,23 @@ def test_another_farmers_record_stays_uneditable():
     assert repo.rows[activity_id]["data"]["days_before_cultivation"] is None
 
 
+@pytest.mark.parametrize("read", [
+    FakeRead(role="cooperative_manager"), FakeRead(role="enterprise_viewer"),
+    FakeRead(role="regulator"), FakeRead(visible=False),
+])
+def test_unattributed_record_is_not_editable_by_non_farmers_or_out_of_scope_callers(read):
+    """The `recorded_by is null` allowance widens *whose* rows a writer may
+    complete, never *who* is a writer."""
+    repo = FakeTransactionalWriteRepository(); write = service(repo)
+    activity_id = _seed_straw(repo)
+    with pytest.raises(ActivityWriteAccessError):
+        write.update(
+            read_repository=read, activity_id=activity_id,
+            request=schemas.ActivityUpdateRequest(data={"days_before_cultivation": 20}),
+        )
+    assert repo.rows[activity_id]["data"]["days_before_cultivation"] is None
+
+
 def test_unattributed_record_still_cannot_be_deleted():
     """Only edit follows the RLS `recorded_by is null` allowance; delete stays own-only."""
     repo = FakeTransactionalWriteRepository(); write = service(repo)

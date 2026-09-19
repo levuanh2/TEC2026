@@ -187,3 +187,37 @@ def test_a_seeded_record_still_cannot_be_deleted_by_the_farmer(db):
     with pytest.raises(ActivityWriteAccessError):
         _service(db).delete(read_repository=reader, activity_id=activity_id)
     assert _one(db, "select deleted_at from public.activities where id = %s", (activity_id,))["deleted_at"] is None
+
+
+def test_a_failed_subtype_update_rolls_back_the_base_row(db):
+    """activities + straw_management_events commit together or not at all.
+
+    The base-row UPDATE runs first; the subtype UPDATE then violates
+    `straw_dry_matter_chk` (Pydantic is bypassed on purpose). The exception
+    leaves the transaction — a savepoint here, the pool connection in
+    production, which rolls back on exception — and the base-row change is
+    discarded with it."""
+    scope = _scope(db)
+    activity_id = _straw(db, scope["batch"])
+    before = _one(db, "select note, row_version from public.activities where id = %s", (activity_id,))
+
+    class _Savepoint:
+        def __enter__(self):
+            self._tx = db.transaction()
+            self._tx.__enter__()
+            return type("Bound", (), {"cursor": lambda _self: db.cursor(row_factory=dict_row)})()
+
+        def __exit__(self, *exc):
+            return self._tx.__exit__(*exc)
+
+    repo = PostgresActivityWriteRepository(settings=None, connect=_Savepoint)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        repo.update(
+            activity_id=activity_id, actor_id=scope["farmer"], occurred_at=None,
+            note="SHOULD-ROLL-BACK", update_note=True,
+            data={"method": "incorporated", "straw_mass_kg": 800, "total_cost_vnd": None,
+                  "days_before_cultivation": 20, "dry_matter_fraction": 1.5, "returned_to_field": None},
+        )
+    assert _one(db, "select note, row_version from public.activities where id = %s", (activity_id,)) == before
+    row = _row(db, activity_id)
+    assert row["days_before_cultivation"] is None and row["dry_matter_fraction"] is None
