@@ -4,12 +4,14 @@ import 'dart:io';
 import 'package:agricarbon_app/db/local_database.dart';
 import 'package:agricarbon_app/design/design.dart';
 import 'package:agricarbon_app/models/activity.dart';
+import 'package:agricarbon_app/models/carbon_readiness.dart';
 import 'package:agricarbon_app/models/carbon_result.dart';
 import 'package:agricarbon_app/models/crop_season.dart';
 import 'package:agricarbon_app/models/plot.dart';
 import 'package:agricarbon_app/screens/carbon_result_screen.dart';
 import 'package:agricarbon_app/services/carbon_api_service.dart';
 import 'package:agricarbon_app/services/carbon_cache.dart';
+import 'package:agricarbon_app/services/connectivity_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -27,6 +29,19 @@ class _FakeCarbon extends CarbonApiService {
   bool healthReady = true;
   List<String> scenarioList = kOfficialScenarios;
   final askedIds = <String>[];
+
+  /// Readiness máy chủ trả về. Mặc định: đủ dữ liệu.
+  CarbonReadiness readinessResult = _ready;
+  Object? readinessError;
+  int readinessCalls = 0;
+
+  @override
+  Future<CarbonReadiness> readiness({required String cropSeasonId}) async {
+    readinessCalls++;
+    askedIds.add(cropSeasonId);
+    if (readinessError != null) throw readinessError!;
+    return readinessResult;
+  }
 
   @override
   Future<List<String>> scenarios() async => scenarioList;
@@ -94,12 +109,28 @@ CarbonResult _result({
       warnings: warnings,
     );
 
+const _ready = CarbonReadiness(canCalculate: true, blockingCount: 0, missingInputs: []);
+
+CarbonReadiness _missing(List<Map<String, dynamic>> items) => CarbonReadiness.fromJson({
+      'can_calculate': !items.any((m) => m['blocking'] != false),
+      'blocking_count': items.where((m) => m['blocking'] != false).length,
+      'missing_inputs': items,
+    });
+
 late Directory _tmp;
 late LocalDatabase _db;
 late _FakeCarbon _api;
 late CarbonCache _cache;
 
-Widget _screen({String cs = 'cs1', VoidCallback? onSync}) => MaterialApp(
+Widget _screen({
+  String cs = 'cs1',
+  VoidCallback? onSync,
+  bool online = true,
+  Future<void> Function()? syncNow,
+  Set<String>? writableFarmIds,
+  Future<void> Function(Activity)? editActivity,
+}) =>
+    MaterialApp(
       theme: AgriCarbonTheme.light(),
       home: CarbonResultScreen(
         carbonApi: _api,
@@ -107,6 +138,11 @@ Widget _screen({String cs = 'cs1', VoidCallback? onSync}) => MaterialApp(
         db: _db,
         cropSeasonClientId: cs,
         onOpenSync: onSync,
+        connectivity: ConnectivityService.fixed(online),
+        syncNow: syncNow,
+        loadWritableFarmIds:
+            writableFarmIds == null ? null : () async => writableFarmIds,
+        editActivity: editActivity,
       ),
     );
 
@@ -189,13 +225,15 @@ void main() {
     expect(synced, 1);
   });
 
-  testWidgets('còn Activity chưa gửi -> chặn + CTA, không gọi API',
+  testWidgets('còn thay đổi chưa gửi -> báo rõ, KHÔNG cho tính trên dữ liệu cũ',
       (tester) async {
     await _seedSeason(pendingActivities: 3);
     await tester.pumpWidget(_screen(onSync: () {}));
     await _settle(tester);
-    expect(find.textContaining('3 hoạt động chưa gửi'), findsOneWidget);
-    expect(_api.askedIds, isEmpty);
+    expect(find.byKey(const Key('carbon-pending-changes')), findsOneWidget);
+    expect(find.byKey(const Key('carbon-calculate')), findsNothing);
+    expect(find.byKey(const Key('carbon-calc-blocked')), findsOneWidget);
+    expect(_api.calcCalls, 0);
   });
 
   testWidgets('gọi API bằng SERVER id, không phải client id', (tester) async {
@@ -207,14 +245,15 @@ void main() {
     expect(_api.askedIds, isNot(contains('cs1')));
   });
 
-  testWidgets('no_calculation -> empty state "Tính phát thải"', (tester) async {
+  testWidgets('no_calculation + đủ dữ liệu -> empty state + nút "Tính Carbon"',
+      (tester) async {
     await _seedSeason();
     _api.byScenario[kScenarioAsRecorded] = null; // = no_calculation
     await tester.pumpWidget(_screen());
     await _settle(tester);
     expect(find.textContaining('chưa được tính phát thải'), findsOneWidget);
-    expect(
-        find.widgetWithText(ElevatedButton, 'Tính phát thải'), findsOneWidget);
+    expect(find.text('Đã đủ dữ liệu để tính phát thải.'), findsOneWidget);
+    expect(find.widgetWithText(ElevatedButton, 'Tính Carbon'), findsOneWidget);
   });
 
   testWidgets('crop_not_found -> ErrorState (khác no_calculation)',
@@ -343,6 +382,210 @@ void main() {
     await tester.pump(const Duration(milliseconds: 20));
     expect(tester.takeException(), isNull);
   });
+
+  // ---------------------------------------------------------------- readiness
+
+  final seasonIssues = [
+    {
+      'code': 'water_regime', 'label': 'Thiếu chế độ nước trong vụ',
+      'detail': 'Chọn chế độ nước.', 'flow': 'carbon_methodology', 'blocking': true,
+    },
+    {
+      'code': 'cultivation_days', 'label': 'Thiếu số ngày canh tác',
+      'detail': 'Số ngày từ gieo tới thu hoạch.', 'flow': 'carbon_methodology', 'blocking': true,
+    },
+  ];
+  final fuelIssue = {
+    'code': 'fuel_factor_unverified',
+    'label': 'Vụ có ghi nhiên liệu nhưng chưa có hệ số đã xác minh',
+    'detail': 'Đây là giới hạn của bộ hệ số, không phải do bạn nhập thiếu.',
+    'flow': 'factor_unavailable', 'activity_type': 'fuel', 'blocking': true,
+    'records': [
+      {'activity_id': 'srv-fuel', 'occurred_on': '2026-03-02', 'label': 'diesel'},
+    ],
+  };
+  Map<String, dynamic> nitrogenIssue(String activityId) => {
+        'code': 'fertilizer_nitrogen',
+        'label': 'Thiếu hàm lượng Nitơ của lần bón phân',
+        'detail': 'Cần % N.', 'flow': 'activity', 'activity_type': 'fertilizer',
+        'blocking': true,
+        'records': [
+          {'activity_id': activityId, 'occurred_on': '2026-03-05', 'label': 'NPK'},
+        ],
+      };
+
+  testWidgets('readiness: hiện đúng các mục MÁY CHỦ báo, không tự suy thêm',
+      (tester) async {
+    await _seedSeason();
+    _api.readinessResult = _missing([...seasonIssues, fuelIssue]);
+    await tester.pumpWidget(_screen());
+    await _settle(tester);
+    expect(find.text('Cần bổ sung 3 thông tin để tính phát thải'), findsOneWidget);
+    expect(find.text('Thiếu chế độ nước trong vụ'), findsOneWidget);
+    expect(find.text('Thiếu số ngày canh tác'), findsOneWidget);
+    expect(find.byKey(const Key('carbon-calculate')), findsNothing);
+    expect(_api.askedIds, contains('srv-cs1'));
+  });
+
+  testWidgets('fuel: giới hạn trung thực — không có "Sửa ngay" giả', (tester) async {
+    await _seedSeason();
+    _api.readinessResult = _missing([fuelIssue]);
+    await tester.pumpWidget(_screen());
+    await _settle(tester);
+    final card = find.byKey(const Key('carbon-issue-fuel_factor_unverified'));
+    expect(card, findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Sửa ngay')), findsNothing);
+    expect(find.byKey(const Key('carbon-limitation-note')), findsOneWidget);
+    expect(find.textContaining('Nhập thêm chi tiết'), findsOneWidget);
+    expect(find.byKey(const Key('carbon-calculate')), findsNothing);
+  });
+
+  testWidgets('viewer: thấy mục thiếu + kết quả, KHÔNG nút sửa/tính', (tester) async {
+    await _seedSeason();
+    _api.byScenario[kScenarioAsRecorded] = _result();
+    _api.readinessResult = _missing(seasonIssues);
+    await tester.pumpWidget(_screen(writableFarmIds: {'some-other-farm'}));
+    await _settle(tester);
+    expect(find.byKey(const Key('carbon-read-only')), findsOneWidget);
+    expect(find.text('Thiếu chế độ nước trong vụ'), findsOneWidget);
+    expect(find.text('Sửa ngay'), findsNothing);
+    expect(find.byKey(const Key('carbon-calculate')), findsNothing);
+  });
+
+  testWidgets('viewer trên vụ đã đủ dữ liệu: không có nút tính', (tester) async {
+    await _seedSeason();
+    await tester.pumpWidget(_screen(writableFarmIds: const {}));
+    await _settle(tester);
+    expect(find.text('Đã đủ dữ liệu để tính phát thải.'), findsOneWidget);
+    expect(find.byKey(const Key('carbon-calculate')), findsNothing);
+  });
+
+  testWidgets('writer của đúng farm: có nút sửa và nút tính', (tester) async {
+    await _seedSeason();
+    await tester.pumpWidget(_screen(writableFarmIds: {'f1'}));
+    await _settle(tester);
+    expect(find.byKey(const Key('carbon-calculate')), findsOneWidget);
+  });
+
+  testWidgets('offline: không giả kết quả — "Cần kết nối mạng..."', (tester) async {
+    await _seedSeason();
+    await tester.pumpWidget(_screen(online: false));
+    await _settle(tester);
+    expect(find.textContaining('Cần kết nối mạng'), findsWidgets);
+    expect(find.byKey(const Key('carbon-calculate')), findsNothing);
+    expect(_api.readinessCalls, 0);
+    expect(_api.calcCalls, 0);
+  });
+
+  testWidgets('đủ dữ liệu -> "Tính Carbon" gọi máy chủ; có kết quả -> "Tính lại Carbon"',
+      (tester) async {
+    await _seedSeason();
+    _api.byScenario[kScenarioAsRecorded] = null;
+    await tester.pumpWidget(_screen());
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('carbon-calculate')));
+    await _settle(tester);
+    expect(_api.calcCalls, 1);
+    expect(find.widgetWithText(ElevatedButton, 'Tính lại Carbon'), findsOneWidget);
+  });
+
+  testWidgets('sửa nhanh thông tin vụ: lưu trên máy (pending), gửi bằng lượt đồng bộ '
+      'sẵn có, rồi hỏi lại readiness', (tester) async {
+    await _seedSeason();
+    _api.readinessResult = _missing(seasonIssues);
+    var syncs = 0;
+    await tester.pumpWidget(_screen(syncNow: () async {
+      syncs++;
+      _api.readinessResult = _ready; // máy chủ đã nhận giá trị
+    }));
+    await _settle(tester);
+    final callsBefore = _api.readinessCalls;
+
+    await tester.tap(find.byKey(const Key('fix-season-water_regime')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('methodology-ipcc')));
+    await _settle(tester);
+    await tester.tap(find.text('Chủ động tưới, rút nước nhiều lần (gồm AWD)').last);
+    await _settle(tester);
+    await tester.enterText(
+        find.descendant(of: find.byKey(const Key('methodology-days')), matching: find.byType(TextField)),
+        '100');
+    await tester.tap(find.byKey(const Key('methodology-save')));
+    await _settle(tester);
+
+    final stored = await _db.getCropSeasonByClientId('cs1');
+    expect(stored!.ipccWaterRegime?.wire, 'irrigated_multiple_drainage');
+    expect(stored.cultivationDays, 100);
+    expect(stored.syncState, SyncState.pending); // đi theo hàng đợi, không ghi thẳng
+    expect(syncs, 1);
+    expect(_api.readinessCalls, greaterThan(callsBefore));
+    expect(find.text('Đã đủ dữ liệu để tính phát thải.'), findsOneWidget);
+  });
+
+  testWidgets('sửa nhanh thông tin vụ: số ngày không hợp lệ bị chặn, KHÔNG thành null',
+      (tester) async {
+    await _seedSeason();
+    var syncs = 0;
+    _api.readinessResult = _missing(seasonIssues);
+    await tester.pumpWidget(_screen(syncNow: () async => syncs++));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('fix-season-cultivation_days')));
+    await _settle(tester);
+    await tester.enterText(
+        find.descendant(of: find.byKey(const Key('methodology-days')), matching: find.byType(TextField)),
+        '0');
+    await tester.tap(find.byKey(const Key('methodology-save')));
+    await _settle(tester);
+    expect(find.text('Số ngày canh tác phải lớn hơn 0.'), findsOneWidget);
+    expect((await _db.getCropSeasonByClientId('cs1'))!.cultivationDays, isNull);
+    expect(syncs, 0);
+  });
+
+  testWidgets('"Sửa ngay" mở ĐÚNG hoạt động theo server id', (tester) async {
+    await _seedSeason();
+    final now = DateTime(2026, 3);
+    for (final id in ['srv-a', 'srv-b']) {
+      await _db.saveActivity(Activity(
+        clientEventId: 'local-$id', cropSeasonId: 'cs1', type: 'fertilizer',
+        occurredAt: now, payload: const {'fertilizer_name': 'NPK', 'amount_kg': 80.0},
+        createdAt: now, syncState: SyncState.synced, serverActivityId: id,
+      ));
+    }
+    _api.readinessResult = _missing([nitrogenIssue('srv-b')]);
+    Activity? opened;
+    await tester.pumpWidget(_screen(editActivity: (a) async => opened = a));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('fix-activity-srv-b-fertilizer_nitrogen')));
+    await _settle(tester);
+    expect(opened?.clientEventId, 'local-srv-b');
+  });
+
+  testWidgets('bản ghi không có trên máy: nói thật, không có nút sửa', (tester) async {
+    await _seedSeason();
+    _api.readinessResult = _missing([nitrogenIssue('srv-web-only')]);
+    await tester.pumpWidget(_screen(editActivity: (a) async {}));
+    await _settle(tester);
+    expect(find.byKey(const Key('record-not-on-device-srv-web-only')), findsOneWidget);
+    expect(find.text('Sửa ngay'), findsNothing);
+  });
+
+  testWidgets('kết quả cũ: dữ liệu sửa SAU calculated_at -> "cần tính lại"', (tester) async {
+    await _seedSeason();
+    _api.byScenario[kScenarioAsRecorded] = _result(); // calculated 2026-09-08
+    await _db.markCarbonInputsChanged('cs1'); // bây giờ > 2026-09-08
+    await tester.pumpWidget(_screen());
+    await _settle(tester);
+    expect(find.byKey(const Key('carbon-stale')), findsOneWidget);
+  });
+
+  testWidgets('kết quả mới hơn lần sửa cuối: không báo cũ', (tester) async {
+    await _seedSeason();
+    _api.byScenario[kScenarioAsRecorded] = _result();
+    await tester.pumpWidget(_screen());
+    await _settle(tester);
+    expect(find.byKey(const Key('carbon-stale')), findsNothing);
+  });
+
 }
 
 class _SlowCarbon extends CarbonApiService {

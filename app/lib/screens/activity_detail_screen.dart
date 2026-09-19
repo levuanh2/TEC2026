@@ -77,6 +77,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     } else {
       await widget.services.db.hardDeleteActivity(a.clientEventId);
     }
+    await widget.services.db.markCarbonInputsChanged(a.cropSeasonId);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

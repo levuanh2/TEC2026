@@ -19,7 +19,7 @@ enum AdaptiveFieldKind {
   /// Chọn 1 trong danh sách [AdaptiveFormField.options].
   select,
 
-  /// 3 trạng thái: Có / Không / Chưa rõ. `value` là `'true'` / `'false'` /
+  /// 3 trạng thái: Có / Không / Chưa chọn. `value` là `'true'` / `'false'` /
   /// `null`. Dùng cho input phương pháp luận KHÔNG được tự mặc định `false`
   /// (xem CARBON_METHOD.md — `returned_to_field`, ...).
   tristate,
@@ -162,7 +162,7 @@ class _Tristate extends StatelessWidget {
           spacing: AppSpacing.xs,
           children: [
             _chip(
-                context, 'Chưa rõ', value == null, () => onChanged?.call(null)),
+                context, 'Chưa chọn', value == null, () => onChanged?.call(null)),
             _chip(
                 context, 'Có', value == 'true', () => onChanged?.call('true')),
             _chip(context, 'Không', value == 'false',

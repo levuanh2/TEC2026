@@ -576,6 +576,14 @@ class LocalDatabase {
         await _firstRow('crop_seasons',
             where: 'plot_id = ? and season_code = ?',
             args: [parentPlot.clientId, serverRow['season_code']]);
+    // Vụ đã đồng bộ nhưng đang có thay đổi CHƯA GỬI (sửa offline chế độ nước /
+    // số ngày canh tác...): bản server là bản cũ — ghi đè ở đây sẽ làm mất thay
+    // đổi của người dùng trước khi nó kịp lên. Lượt push kế tiếp gửi bản local;
+    // lượt pull sau đó mới nhận lại từ server.
+    final localState = existing?['sync_state'] as String?;
+    if (existing != null && localState != null && localState != SyncState.synced.value) {
+      return;
+    }
     final now = DateTime.now().toIso8601String();
     await _require.insert(
       'crop_seasons',
@@ -858,6 +866,18 @@ class LocalDatabase {
     final rows = await _require.query('meta',
         where: 'key = ?', whereArgs: [key], limit: 1);
     return rows.isEmpty ? null : rows.first['value'] as String?;
+  }
+
+  /// Mốc người dùng vừa sửa dữ liệu làm thay đổi đầu vào Carbon của vụ (lưu /
+  /// xoá hoạt động, sửa thông tin phương pháp tính). Màn Carbon so với
+  /// `calculated_at` của kết quả để báo "Dữ liệu đã thay đổi — cần tính lại";
+  /// KHÔNG so công thức. Không dùng `updated_at` vì đồng bộ cũng ghi cột đó.
+  Future<void> markCarbonInputsChanged(String cropSeasonClientId) =>
+      setMeta('carbon.changed.$cropSeasonClientId', DateTime.now().toUtc().toIso8601String());
+
+  Future<DateTime?> carbonInputsChangedAt(String cropSeasonClientId) async {
+    final raw = await getMeta('carbon.changed.$cropSeasonClientId');
+    return raw == null ? null : DateTime.tryParse(raw);
   }
 
   Future<void> setMeta(String key, String? value) async {

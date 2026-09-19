@@ -219,6 +219,9 @@ class _ActivityFormState extends State<ActivityForm> {
           );
 
     await widget.db.saveActivity(activity); // transaction, không gọi mạng
+    // Kết quả Carbon đã lưu (nếu có) giờ có thể đã cũ — màn Carbon so mốc này
+    // với `calculated_at` để nhắc "cần tính lại"; không so công thức.
+    await widget.db.markCarbonInputsChanged(widget.cropSeasonClientId);
     if (!mounted) return;
     setState(() => _saving = false);
     await widget.onSaved();

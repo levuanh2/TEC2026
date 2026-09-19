@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:agricarbon_app/db/local_database.dart';
 import 'package:agricarbon_app/models/activity.dart';
 import 'package:agricarbon_app/models/crop_season.dart';
+import 'package:agricarbon_app/models/methodology_enums.dart';
 import 'package:agricarbon_app/models/plot.dart';
 import 'package:agricarbon_app/services/device_service.dart';
 import 'package:agricarbon_app/services/sync_errors.dart';
@@ -33,8 +34,13 @@ class _FakeGateway implements SyncGateway {
   @override
   Future<String> upsertPlot(Map<String, dynamic> row) async => 'srv-plot';
 
+  final seasonUpserts = <Map<String, dynamic>>[];
+
   @override
-  Future<String> upsertCropSeason(Map<String, dynamic> row) async => 'srv-cs';
+  Future<String> upsertCropSeason(Map<String, dynamic> row) async {
+    seasonUpserts.add(row);
+    return 'srv-cs1';
+  }
 
   @override
   Future<String> ensureDefaultBatch(String cropSeasonServerId) async => 'batch';
@@ -472,6 +478,87 @@ void main() {
       // Local vẫn 1 hàng.
       final rows = await _db.listActivitiesByCropSeasonClientId('cs1');
       expect(rows, hasLength(1));
+    });
+  });
+
+  group('Carbon parity — methodology đi theo hàng đợi sẵn có, không mất khi offline',
+      () {
+    Future<void> editOffline({int? days, IpccWaterRegime? ipcc}) async {
+      final s = (await _db.getCropSeasonByClientId('cs1'))!;
+      await _db.upsertCropSeason(s.copyWith(
+        cultivationDays: days,
+        ipccWaterRegime: ipcc,
+        syncState: SyncState.pending,
+        updatedAt: DateTime.now(),
+      ));
+    }
+
+    test('sửa offline -> lưu trên máy (pending) -> 1 upsert khi có mạng -> đồng bộ lại '
+        'không gửi thêm', () async {
+      await editOffline(days: 100, ipcc: IpccWaterRegime.irrigatedMultipleDrainage);
+      final pending = (await _db.getCropSeasonByClientId('cs1'))!;
+      expect(pending.syncState, SyncState.pending);
+      expect(pending.cultivationDays, 100);
+
+      await _sync.syncAll();
+      expect(_gw.seasonUpserts, hasLength(1));
+      final row = _gw.seasonUpserts.single;
+      expect(row['cultivation_days'], 100);
+      expect(row['ipcc_water_regime'], 'irrigated_multiple_drainage');
+      // Chưa biết thì gửi null TƯỜNG MINH (không bỏ key, không đoán).
+      expect(row.containsKey('pre_season_water_regime'), isTrue);
+      expect(row['pre_season_water_regime'], isNull);
+      expect((await _db.getCropSeasonByClientId('cs1'))!.syncState, SyncState.synced);
+
+      await _sync.syncAll(); // chạy lại: không có gì chờ -> không gửi trùng
+      expect(_gw.seasonUpserts, hasLength(1));
+    });
+
+    test('lượt kéo từ server KHÔNG ghi đè thay đổi chưa gửi', () async {
+      await editOffline(days: 100);
+      await _db.mergeServerCropSeason({
+        'id': 'srv-cs1', 'plot_id': 'srv-p1', 'season_code': 'S',
+        'crop_type': 'rice', 'status': 'active', 'cultivation_days': null,
+      });
+      final kept = (await _db.getCropSeasonByClientId('cs1'))!;
+      expect(kept.cultivationDays, 100);
+      expect(kept.syncState, SyncState.pending);
+    });
+
+    test('vụ đã đồng bộ, không có thay đổi chờ -> lượt kéo cập nhật từ server', () async {
+      await _db.mergeServerCropSeason({
+        'id': 'srv-cs1', 'plot_id': 'srv-p1', 'season_code': 'S',
+        'crop_type': 'rice', 'status': 'active', 'cultivation_days': 95,
+        'ipcc_water_regime': 'irrigated_single_drainage',
+      });
+      final s = (await _db.getCropSeasonByClientId('cs1'))!;
+      expect(s.cultivationDays, 95);
+      expect(s.ipccWaterRegime, IpccWaterRegime.irrigatedSingleDrainage);
+    });
+
+    test('rơm: false / 0 / null giữ nguyên tới bảng chi tiết', () async {
+      await _db.saveActivity(_act(id: 'straw-1', type: 'straw_management', payload: const {
+        'method': 'composted',
+        'straw_mass_kg': 0.0,
+        'days_before_cultivation': 0,
+        'returned_to_field': false,
+      }));
+      final local = await _db.getActivity('straw-1');
+      expect(local!.payload['returned_to_field'], isFalse); // không thành null
+      expect(local.payload['days_before_cultivation'], 0);
+
+      await _sync.syncAll();
+      final detail = _gw.detailUpserts.singleWhere((d) => d.table == 'straw_management_events').row;
+      expect(detail['returned_to_field'], isFalse);
+      expect(detail['days_before_cultivation'], 0);
+      expect(detail['straw_mass_kg'], 0.0);
+      // Cột không nhập gửi null tường minh (xoá giá trị cũ khi sửa).
+      expect(detail.containsKey('dry_matter_fraction'), isTrue);
+      expect(detail['dry_matter_fraction'], isNull);
+      // Khoá idempotent của activity không đổi.
+      final up = _gw.activityUpserts.single;
+      expect(up['device_id'], 'dev-1');
+      expect(up['client_event_id'], 'straw-1');
     });
   });
 }
