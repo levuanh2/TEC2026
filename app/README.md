@@ -367,8 +367,11 @@ scenario** (`meta['carbon.v2.<sid>.<scenario>']`), lưu FULL `CarbonResult` +
 
 **Màn 25** (`screens/carbon_result_screen.dart`):
 - **Tiền điều kiện** trước khi gọi API: vụ tồn tại · đã đồng bộ (`server_id` khác
-  null — KHÔNG gọi API bằng local UUID) · KHÔNG còn Activity `pending`/`failed`
-  của vụ. Thiếu → chặn + CTA **"Đi tới Gửi dữ liệu"** (`onOpenSync`).
+  null — KHÔNG gọi API bằng local UUID). Chưa đồng bộ → chặn + CTA **"Đi tới Gửi
+  dữ liệu"** (`onOpenSync`). Còn thay đổi chưa gửi (vụ hoặc hoạt động
+  `pending`/`failed`) → màn vẫn mở nhưng báo rõ và **không cho tính** trên dữ liệu
+  cũ của máy chủ (nút "Gửi ngay" chạy lượt đồng bộ sẵn có).
+- Xem thêm mục **"Carbon readiness & sửa nhanh"** ngay dưới.
 - Header "Kết quả phát thải" · "Ruộng `<mã thửa>` · Vụ `<season_code>`" THẬT.
 - Kịch bản: từ `scenarios()` (fallback 3 enum), nhãn tiếng Việt.
 - Hero `co2e_per_kg` — `null` → "Chưa có sản lượng nên chưa tính được CO₂e/kg",
@@ -390,6 +393,64 @@ scenario** (`meta['carbon.v2.<sid>.<scenario>']`), lưu FULL `CarbonResult` +
 - Mọi `setState` sau `await` có check `mounted`.
 - Là route push chồng shell (như các màn phân cấp khác) → có nút Back, không có
   bottom nav riêng (bottom nav thuộc shell).
+
+## Carbon readiness & sửa nhanh (Carbon UX parity với Farmer Web)
+
+App **không chứa luật phương pháp luận nào** (EFc, SFw, SFp, SFo, GWP, N₂O,
+"thiếu gì thì chặn"): danh sách đầu vào còn thiếu lấy nguyên từ
+`GET /v1/crop-seasons/{server_id}/carbon/readiness` — cùng nguồn Farmer Web.
+App chỉ thu thập giá trị, hiển thị readiness và kết quả máy chủ tính.
+
+**Đầu vào Carbon người dùng nhập được trên mobile**
+
+| Đầu vào | Nhập ở đâu | Đi lên server bằng |
+|---|---|---|
+| Chế độ nước trong vụ, chế độ nước trước vụ, số ngày canh tác | form Vụ canh tác, hoặc "Sửa ngay" trên màn Carbon (sheet) | upsert `crop_seasons` (hàng đợi sẵn có) |
+| Lượng phân, % đạm | form Bón phân | `activities` + `fertilizer_applications` |
+| Cách xử lý rơm, khối lượng rơm, tỷ lệ chất khô, số ngày vùi trước khi làm đất, rơm có trả lại ruộng (Có / Không / Chưa chọn) | form Rơm rạ | `activities` + `straw_management_events` |
+| Sản lượng thu hoạch (mẫu số CO₂e/kg) | form Thu hoạch | `activities` + `harvest_events` |
+| Diện tích thửa | màn Ruộng → thửa | `plots` |
+
+Bộ hệ số đang dùng do máy chủ quản lý — không nhập trên máy.
+
+**Màn Carbon**
+- Mỗi mục thiếu hiện đúng câu chữ máy chủ gửi, và hành động theo `flow`:
+  `carbon_methodology` → sheet 3 ô của vụ; `activity` → "Sửa ngay" mở **đúng**
+  bản ghi theo `activity_id` của máy chủ (bản ghi không có trên máy này → nói thật
+  "sửa trên Farmer Web", không có nút giả); `plot` → chỉ chỗ nhập diện tích;
+  `factor_unavailable` (nhiên liệu) → **giới hạn**, không có "Sửa ngay".
+- **Nhiên liệu**: bộ hệ số chưa có hệ số nhiên liệu đã xác minh, nên vụ có ghi
+  nhiên liệu thì tính phát thải bị chặn (fail-closed). Nhập thêm chi tiết nhiên
+  liệu không giải quyết được; máy chủ không lặng lẽ bỏ qua nhiên liệu.
+- **Chi phí không phải đầu vào Carbon** — chi phí chỉ dùng cho Chi phí/kg.
+- Đủ dữ liệu → "Đã đủ dữ liệu để tính phát thải." + **"Tính Carbon"** (đã có kết
+  quả → **"Tính lại Carbon"**), gọi `POST /v1/carbon/calculate`.
+- **Tính phát thải cần mạng.** Offline: không tính, không giả số —
+  "Cần kết nối mạng để tính phát thải."; kết quả đã lưu vẫn xem được. Sửa vụ /
+  hoạt động vẫn lưu trên máy và gửi khi có mạng; gửi xong mới hỏi lại readiness.
+- **Quyền**: chỉ farm `owner`/`editor` (từ `/v1/me` `farm_memberships`, như Web)
+  thấy nút sửa và nút tính; người chỉ xem vẫn thấy mục thiếu và kết quả. RLS /
+  backend vẫn là nơi chặn thật.
+- **Kết quả cũ**: khi người dùng sửa đầu vào Carbon SAU `calculated_at` của kết
+  quả đang xem → "Dữ liệu đã thay đổi — cần tính lại" (mốc
+  `meta['carbon.changed.<vụ>']`, không so công thức). Chỉ biết thay đổi làm trên
+  máy này.
+
+**Số và giá trị rỗng** (cùng quy ước Farmer Web): số thập phân nhận `0,85` và
+`0.85`; `85` cho tỷ lệ chất khô là lỗi (không tự đổi thành 0,85); `1e3`,
+`1.000,5`, chữ → lỗi, không bao giờ thành rỗng. Để trống → `null`. `false` (rơm
+không trả lại ruộng) và `0` (0 ngày) đi nguyên tới bảng chi tiết. Thông tin
+phương pháp tính của vụ luôn gửi kể cả `null`, để xoá được giá trị cũ.
+
+**Offline**: sửa vụ đã đồng bộ → `pending`; lượt kéo từ máy chủ **không ghi đè**
+vụ đang có thay đổi chưa gửi. Hoạt động giữ khoá idempotent
+`(device_id, client_event_id)`.
+
+**Nghiệm thu trên emulator + hosted dev**:
+`python backend/scripts/hosted_flutter_carbon_parity_e2e.py` (backend chạy ở
+`127.0.0.1:8010`, emulator `emulator-5554`) — tạo tenant QA riêng, chạy
+`integration_test/hosted_carbon_parity_test.dart`, tắt/bật mạng emulator, kiểm DB
+rồi xoá sạch.
 
 ## Điểm chạm CV & màn "Kiểm tra ảnh lá lúa" (Prompt 10 — SVG 24)
 
