@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from . import pg_pool
 from .config import Settings
@@ -70,6 +70,10 @@ class PostgresCvRepository:
             object_path, file_bytes, {"content-type": mime_type},
         )
         return object_path
+
+    def delete_image_object(self, object_path: str) -> None:
+        """Best-effort cleanup of an uploaded image whose row was never written."""
+        self._storage.storage.from_(STORAGE_BUCKET).remove([object_path])
 
     def find_image_by_sha(self, *, crop_season_id: str, sha256: str) -> dict[str, Any] | None:
         with self._connection() as conn, conn.cursor() as cur:
@@ -130,7 +134,8 @@ class PostgresCvRepository:
 
     def create_inference(
         self, *, image_id: str, model_version_id: str, predicted_label: str, confidence: float, threshold_used: float,
-    ) -> dict[str, Any]:
+        prepare: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
         with self._connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """insert into public.cv_inferences (image_id, model_version_id, predicted_label, confidence, threshold_used)
@@ -139,7 +144,9 @@ class PostgresCvRepository:
             )
             inference_id = cur.fetchone()["id"]
             cur.execute(self._inference_select_sql("where ci.id = %s"), [inference_id])
-            return _normalize(cur.fetchone())
+            row = _normalize(cur.fetchone())
+            # Before commit: an unrepresentable result rolls the row back.
+            return prepare(row) if prepare is not None else row
 
     def get_inference(self, inference_id: str) -> dict[str, Any]:
         with self._connection() as conn, conn.cursor() as cur:

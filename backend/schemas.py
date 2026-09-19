@@ -32,6 +32,18 @@ class ApiErrorResponse(BaseModel):
     error: ApiError
 
 
+def success_payload(model: type[BaseModel], raw: Any) -> dict[str, Any]:
+    """Validate AND JSON-serialize a write's success representation.
+
+    Write repositories call this (through a `prepare` callback) *inside* their
+    transaction, before it commits. FastAPI's `response_model` check runs only
+    after the route returns — after the commit — so a representation it rejects
+    used to surface as a 500 for data that had already been saved. What this
+    returns is plain JSON data, so the route's own later check cannot fail on it.
+    """
+    return model.model_validate(raw).model_dump(mode="json")
+
+
 class ItemsResponse(BaseModel, Generic[T]):
     items: list[T]
 

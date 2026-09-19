@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from . import pg_pool
 from .config import Settings
@@ -40,6 +40,13 @@ _DETAILS: dict[str, tuple[str, tuple[str, ...]]] = {
         ("method", "straw_mass_kg", "total_cost_vnd", "days_before_cultivation", "dry_matter_fraction", "returned_to_field"),
     ),
 }
+
+
+def _prepared(prepare: Callable[[Any], Any] | None, result: Any) -> Any:
+    """Build the caller's success representation while the transaction is still
+    open: if it raises, the `with` block rolls the write back instead of the
+    route answering 500 for a row that was already committed."""
+    return prepare(result) if prepare is not None else result
 
 
 class PostgresActivityWriteRepository:
@@ -143,7 +150,9 @@ class PostgresActivityWriteRepository:
         self, *, crop_season_id: str, production_batch_id: str, actor_id: str,
         idempotency_key: str, activity_type: str, occurred_at: datetime,
         note: str | None, data: dict[str, Any],
-    ) -> tuple[dict[str, Any], bool]:
+        prepare: Callable[[tuple[dict[str, Any], bool]], Any] | None = None,
+    ) -> Any:
+        """Returns `(row, replay)`, or `prepare((row, replay))` computed before commit."""
         table, columns = self._detail_spec(activity_type)
         with self._connection() as conn, conn.cursor() as cur:
             # Before the idempotent-replay lookup too: a read-only member gets the
@@ -165,7 +174,7 @@ class PostgresActivityWriteRepository:
                 comparable = {key: existing[key] for key in requested}
                 if comparable != requested:
                     raise IdempotencyConflictError()
-                return existing, True
+                return _prepared(prepare, (existing, True))
 
             cur.execute(
                 """insert into public.activities
@@ -178,12 +187,13 @@ class PostgresActivityWriteRepository:
                 f"insert into public.{table} (activity_id, {', '.join(columns)}) values (%s, {', '.join(['%s'] * len(columns))})",  # noqa: S608 -- static specs
                 [activity_id, *[data.get(column) for column in columns]],
             )
-            return self._view(cur, activity_id, actor_id=actor_id), False
+            return _prepared(prepare, (self._view(cur, activity_id, actor_id=actor_id), False))
 
     def update(
         self, *, activity_id: str, actor_id: str, occurred_at: datetime | None,
         note: str | None, update_note: bool, data: dict[str, Any] | None,
-    ) -> dict[str, Any]:
+        prepare: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
         with self._connection() as conn, conn.cursor() as cur:
             existing = self._view(cur, activity_id, actor_id=actor_id, allow_unattributed=True)
             self._assert_can_write_activity(cur, activity_id=activity_id, actor_id=actor_id)
@@ -205,11 +215,12 @@ class PostgresActivityWriteRepository:
                     # No detail row means the write did not land; never report
                     # success for it (the whole transaction rolls back).
                     raise ActivityNotFoundError()
-            return self._view(cur, activity_id, actor_id=actor_id, allow_unattributed=True)
+            return _prepared(prepare, self._view(cur, activity_id, actor_id=actor_id, allow_unattributed=True))
 
     def update_crop_season_methodology(
-        self, *, crop_season_id: str, actor_id: str, fields: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, *, crop_season_id: str, actor_id: str, fields: dict[str, Any],
+        prepare: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
         """Set the IPCC methodology inputs the Carbon engine reads off the season.
 
         `fields` holds only the keys the caller actually sent, so an omitted key
@@ -255,7 +266,7 @@ class PostgresActivityWriteRepository:
                    from public.crop_seasons where id=%s""",
                 [crop_season_id],
             )
-            return dict(cur.fetchone())
+            return _prepared(prepare, dict(cur.fetchone()))
 
     @staticmethod
     def _assert_can_write_crop(cur: Any, *, crop_season_id: str, actor_id: str) -> None:

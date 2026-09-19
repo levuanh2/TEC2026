@@ -9,7 +9,7 @@ from an HTTP payload.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 from . import pg_pool, profiling
 from .config import Settings
@@ -52,7 +52,10 @@ class PostgresRecommendationRepository:
         # dwarfed the statements themselves (see infrastructure/pg_pool).
         return pg_pool.connection(self._settings.require_db())
 
-    def save_generated(self, *, crop_season_id: str, recs: list[Any]) -> list[dict[str, Any]]:
+    def save_generated(
+        self, *, crop_season_id: str, recs: list[Any],
+        prepare: Callable[[list[dict[str, Any]]], Any] | None = None,
+    ) -> Any:
         """Persist one whole generation run in a single transaction.
 
         Same rows as upserting each rule then pruning, with two differences
@@ -65,7 +68,9 @@ class PostgresRecommendationRepository:
         with profiling.observe("recommendation save_generated"), self._connection() as conn, conn.cursor() as cur:
             rows = [self._upsert(cur, crop_season_id=crop_season_id, rec=rec) for rec in recs]
             self._prune(cur, crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in recs])
-            return rows
+            # Built before the `with` commits: a representation that cannot be
+            # produced rolls the run back rather than 500ing a saved one.
+            return prepare(rows) if prepare is not None else rows
 
     def upsert(self, *, crop_season_id: str, rec: Any) -> dict[str, Any]:
         """Insert or refresh one rule's row for a season.
@@ -124,7 +129,10 @@ class PostgresRecommendationRepository:
                 raise RecommendationNotFoundError()
             return _normalize(row)
 
-    def set_status(self, recommendation_id: str, status: str) -> dict[str, Any]:
+    def set_status(
+        self, recommendation_id: str, status: str,
+        prepare: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
         column = "accepted_at" if status == "accepted" else "dismissed_at"
         with profiling.observe("recommendation set_status"), self._connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -136,4 +144,5 @@ class PostgresRecommendationRepository:
             row = cur.fetchone()
             if row is None:
                 raise RecommendationNotFoundError()
-            return _normalize(row)
+            row = _normalize(row)
+            return prepare(row) if prepare is not None else row

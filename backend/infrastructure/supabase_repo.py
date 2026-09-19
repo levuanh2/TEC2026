@@ -159,10 +159,22 @@ class SupabaseCarbonRepository:
             return existing
         calc_id = inserted[0]["id"]
         if breakdowns:
-            with profiling.observe("carbon insert carbon_breakdowns"):
-                self.client.table("carbon_breakdowns").insert(
-                    [{**b, "calculation_id": calc_id} for b in breakdowns]
-                ).execute()
+            try:
+                with profiling.observe("carbon insert carbon_breakdowns"):
+                    self.client.table("carbon_breakdowns").insert(
+                        [{**b, "calculation_id": calc_id} for b in breakdowns]
+                    ).execute()
+            except Exception:
+                # The two inserts are separate PostgREST requests, not one
+                # transaction. A "succeeded" calculation without its breakdown
+                # must not survive: a retry with the same input_hash would
+                # otherwise reuse it forever. Best-effort; the original error
+                # is the one reported (breakdowns cascade on delete).
+                try:
+                    self.client.table("carbon_calculations").delete().eq("id", calc_id).execute()
+                except Exception:  # noqa: BLE001
+                    pass
+                raise
         return calc_id
 
     def _existing_calculation_id(self, calculation: dict[str, Any]) -> str | None:

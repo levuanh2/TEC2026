@@ -60,7 +60,7 @@ class FakeWrite:
         self.row = dict(STORED)
         self.calls: list[dict] = []
 
-    def update_crop_season_methodology(self, *, crop_season_id, actor_id, fields):
+    def update_crop_season_methodology(self, *, crop_season_id, actor_id, fields, prepare=None):
         allowed_keys = ("ipcc_water_regime", "pre_season_water_regime", "cultivation_days")
         unknown = sorted(set(fields) - set(allowed_keys))
         if unknown:
@@ -69,7 +69,7 @@ class FakeWrite:
             raise ActivityNotFoundError()
         self.calls.append(dict(fields))
         self.row.update(fields)
-        return dict(self.row)
+        return prepare(dict(self.row)) if prepare is not None else dict(self.row)
 
 
 def client(read: FakeRead, write: FakeWrite) -> TestClient:

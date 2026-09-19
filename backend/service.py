@@ -12,7 +12,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from carbon import CarbonResult, ParameterSet, calculate_carbon
 from carbon.errors import CarbonEngineError
@@ -59,6 +59,9 @@ class CalculationOutcome:
     result: CarbonResult
     calculation_id: str | None
     persisted: bool
+    #: What `calculate(prepare=...)` built from the result BEFORE anything was
+    #: written; None when no `prepare` was given.
+    prepared: Any = None
 
 
 class CarbonService:
@@ -77,7 +80,8 @@ class CarbonService:
         return self._params
 
     def calculate(
-        self, crop_season_id: str, scenario: str = "as_recorded", *, persist: bool = True
+        self, crop_season_id: str, scenario: str = "as_recorded", *, persist: bool = True,
+        prepare: Callable[[CarbonResult], Any] | None = None,
     ) -> CalculationOutcome:
         bundle = self._repo.get_crop_bundle(crop_season_id)
         activity_data = map_crop_activity_data(bundle)
@@ -85,8 +89,14 @@ class CarbonService:
         # Mọi lỗi phương pháp luận/thiếu hệ số nổ ra từ đây — fail closed, không nuốt.
         result = calculate_carbon(activity_data, scenario, self._params)
 
+        # The success representation is built before the first write: a result
+        # the API cannot serialize must fail here, with nothing saved, rather
+        # than after `save_calculation` has stored it (an HTTP 500 for a saved
+        # calculation, which a retry would then silently reuse).
+        prepared = prepare(result) if prepare is not None else None
+
         if not persist:
-            return CalculationOutcome(result=result, calculation_id=None, persisted=False)
+            return CalculationOutcome(result=result, calculation_id=None, persisted=False, prepared=prepared)
 
         factor_set_id = self._repo.resolve_factor_set_id(result.ef_config_version)
         factor_ids = self._repo.factor_ids_by_code(factor_set_id)
@@ -103,7 +113,7 @@ class CarbonService:
             breakdown_rows(result, factor_ids),
         )
         return CalculationOutcome(
-            result=result, calculation_id=calculation_id, persisted=True
+            result=result, calculation_id=calculation_id, persisted=True, prepared=prepared
         )
 
     def latest(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
@@ -191,15 +201,16 @@ class ActivityWriteService:
             # The repository re-checks write permission (farm owner/editor or
             # cooperative manager) inside its transaction; a read-only farm
             # member is normalized to the same 404 as an out-of-scope season.
-            row, replay = self._write_repository.create(
+            return self._write_repository.create(
                 crop_season_id=crop_season_id, production_batch_id=batch_id,
                 actor_id=actor_id, idempotency_key=str(request.idempotency_key),
                 activity_type=request.activity_type, occurred_at=request.occurred_at,
                 note=request.note, data=data,
+                prepare=lambda out: schemas.success_payload(
+                    schemas.ActivityWriteResponse, self._response(out[0], replay=out[1])),
             )
         except ActivityNotFoundError as exc:
             raise ActivityWriteAccessError() from exc
-        return self._response(row, replay=replay)
 
     def update(
         self, *, read_repository: SupabaseReadRepository, activity_id: str,
@@ -221,13 +232,13 @@ class ActivityWriteService:
                 existing["activity_type"], {**existing["data"], **request.data}
             ).model_dump()
         try:
-            row = self._write_repository.update(
+            return self._write_repository.update(
                 activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
                 note=request.note, update_note="note" in request.model_fields_set, data=data,
+                prepare=lambda row: schemas.success_payload(schemas.ActivityWriteResponse, self._response(row)),
             )
         except ActivityNotFoundError as exc:
             raise ActivityWriteAccessError() from exc
-        return self._response(row)
 
     def delete(self, *, read_repository: SupabaseReadRepository, activity_id: str) -> None:
         actor_id = self._actor_and_farmer_scope(read_repository)
@@ -265,6 +276,7 @@ class ActivityWriteService:
             read_repository.season(crop_season_id)
             return self._write_repository.update_crop_season_methodology(
                 crop_season_id=crop_season_id, actor_id=actor_id, fields=fields,
+                prepare=lambda row: schemas.success_payload(schemas.CropSeasonResponse, row),
             )
         except (ReadNotFoundError, ActivityNotFoundError) as exc:
             raise ActivityWriteAccessError() from exc
@@ -306,7 +318,10 @@ class RecommendationService:
         # One transaction for the whole run: same rows as upserting each rule
         # then pruning, but a single DB connection and no window in which a
         # reader could see half of this run applied.
-        return self._write_repository.save_generated(crop_season_id=crop_season_id, recs=candidates)
+        return self._write_repository.save_generated(
+            crop_season_id=crop_season_id, recs=candidates,
+            prepare=lambda rows: [schemas.success_payload(schemas.RecommendationResponse, row) for row in rows],
+        )
 
     def set_status(
         self, *, read_repository: SupabaseReadRepository, recommendation_id: str, status: str,
@@ -317,7 +332,10 @@ class RecommendationService:
             read_repository.season(str(existing["crop_season_id"]))
         except (ReadNotFoundError, RecommendationNotFoundError) as exc:
             raise RecommendationAccessError() from exc
-        return self._write_repository.set_status(recommendation_id, status)
+        return self._write_repository.set_status(
+            recommendation_id, status,
+            prepare=lambda row: schemas.success_payload(schemas.RecommendationResponse, row),
+        )
 
 
 class CvAccessError(Exception):
@@ -428,21 +446,30 @@ class CvService:
                 farm_id=farm_id, crop_season_id=crop_season_id, file_bytes=file_bytes,
                 mime_type=content_type, extension=extension,
             )
-            image_id = self._write_repository.create_image(
-                crop_season_id=crop_season_id, uploaded_by=actor_id, storage_object_path=storage_path,
-                mime_type=content_type, file_size_bytes=len(file_bytes), sha256=sha256,
-            )
+            try:
+                image_id = self._write_repository.create_image(
+                    crop_season_id=crop_season_id, uploaded_by=actor_id, storage_object_path=storage_path,
+                    mime_type=content_type, file_size_bytes=len(file_bytes), sha256=sha256,
+                )
+            except Exception:
+                # Same compensation as the MRV renderer: best-effort removal of
+                # the object the failed row would have pointed at.
+                try:
+                    self._write_repository.delete_image_object(storage_path)
+                except Exception:  # noqa: BLE001 - the original failure is the one to report
+                    pass
+                raise
 
         predicted = predict_with_model(image, self._model, self._config, self._threshold, self._temperature)
         # public.disease_label has no NULL state — 'unknown' is the schema's
         # own sentinel for "confidence below threshold" (brief FW M03 §17);
         # the API response maps it back to `label: null` below.
         predicted_label = predicted["label"] or "unknown"
-        row = self._write_repository.create_inference(
+        return self._write_repository.create_inference(
             image_id=image_id, model_version_id=model_version_id,
             predicted_label=predicted_label, confidence=predicted["confidence"], threshold_used=self._threshold,
+            prepare=lambda row: schemas.success_payload(schemas.CvInferenceResponse, self._to_response(row)),
         )
-        return self._to_response(row)
 
     def list(self, *, read_repository: SupabaseReadRepository, crop_season_id: str) -> list[dict[str, Any]]:
         try:
@@ -566,12 +593,14 @@ class MrvExportService:
             raise UnsupportedExportFormatError(fmt)
 
         view, row, manifest = self._create_snapshot(
-            read_repository=read_repository, mrv_case_id=mrv_case_id
+            read_repository=read_repository, mrv_case_id=mrv_case_id,
+            response_model=schemas.MrvExportCreatedResponse if fmt == "json" else None,
         )
         if fmt == "json":
             return view
         return self._render_from(
             read_repository=read_repository, snapshot_row=row, manifest=manifest, fmt=fmt,
+            response_model=schemas.MrvExportCreatedResponse,
         )
 
     def render(
@@ -602,10 +631,12 @@ class MrvExportService:
             manifest=row["export_payload"],
             fmt=fmt,
             actor=actor,
+            response_model=schemas.MrvArtifactResponse,
         )
 
     def _create_snapshot(
         self, *, read_repository: SupabaseReadRepository, mrv_case_id: str,
+        response_model: type[schemas.BaseModel] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Assemble and persist one canonical snapshot.
 
@@ -703,8 +734,15 @@ class MrvExportService:
                 str(row["id"]) for row in carbon_by_season.values()
                 if row and row.get("id")
             ],
+            # When this snapshot IS the response (json), its representation is
+            # validated before the row commits; the raw row is kept for callers
+            # that go on to render it.
+            prepare=lambda stored: (stored, schemas.success_payload(
+                response_model, self._export_view(stored) | {"manifest": manifest},
+            ) if response_model is not None else None),
         )
-        return self._export_view(row) | {"manifest": manifest}, row, manifest
+        row, view = row
+        return (view if view is not None else self._export_view(row) | {"manifest": manifest}), row, manifest
 
     def download(
         self, *, read_repository: SupabaseReadRepository, export_id: str,
@@ -753,6 +791,7 @@ class MrvExportService:
     def _render_from(
         self, *, read_repository: SupabaseReadRepository, snapshot_row: dict[str, Any],
         manifest: dict[str, Any], fmt: str, actor: dict[str, Any] | None = None,
+        response_model: type[schemas.BaseModel] = schemas.MrvArtifactResponse,
     ) -> dict[str, Any]:
         """Render one stored manifest into an artifact and persist it.
 
@@ -786,11 +825,16 @@ class MrvExportService:
         # orphaned object, because the row promises a retrievable artifact.
         self._exports.put_artifact(object_path, data, self.ARTIFACT_MEDIA_TYPES[fmt])
         try:
-            row = self._create_rendered_row(
+            # The response is validated inside the row's transaction, so a
+            # representation failure rolls the row back and lands in the
+            # object cleanup below instead of 500ing a committed export.
+            return self._create_rendered_row(
                 export_id=export_id, mrv_case_id=mrv_case_id, organization_id=organization_id,
                 fmt=fmt, snapshot_row=snapshot_row, object_path=object_path,
                 artifact_sha256=artifact_sha256, manifest=manifest, payload_sha256=payload_sha256,
                 snapshot_id=snapshot_id, actor=actor, rendered_at=rendered_at,
+                prepare=lambda row: schemas.success_payload(
+                    response_model, {**self._export_view(row), "byte_size": len(data)}),
             )
         except Exception:
             # Best effort: do not leave an object no row points at. If this delete
@@ -801,14 +845,14 @@ class MrvExportService:
             except Exception:  # noqa: BLE001 - the original failure is the one to report
                 pass
             raise
-        return {**self._export_view(row), "byte_size": len(data)}
 
     def _create_rendered_row(
         self, *, export_id: str, mrv_case_id: str, organization_id: str, fmt: str,
         snapshot_row: dict[str, Any], object_path: str, artifact_sha256: str,
         manifest: dict[str, Any], payload_sha256: str | None, snapshot_id: str,
         actor: dict[str, Any], rendered_at: datetime,
-    ) -> dict[str, Any]:
+        prepare: Any = None,
+    ) -> Any:
         return self._exports.create(
             export_id=export_id,
             mrv_case_id=mrv_case_id,
@@ -826,6 +870,7 @@ class MrvExportService:
             generated_by=str(actor["user_id"]),
             generated_at=rendered_at,
             calculation_ids=[],
+            prepare=prepare,
         )
         return {**self._export_view(row), "byte_size": len(data)}
 

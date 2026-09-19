@@ -91,7 +91,7 @@ class FakeCvRepository:
                 return dict(row)
         return None
 
-    def create_inference(self, *, image_id, model_version_id, predicted_label, confidence, threshold_used):
+    def create_inference(self, *, image_id, model_version_id, predicted_label, confidence, threshold_used, prepare=None):
         inference_id = f"inf-{self._next}"
         self._next += 1
         crop_season_id = self.images[image_id]["crop_season_id"]
@@ -103,7 +103,7 @@ class FakeCvRepository:
             "version_code": self.model_version_codes.get(model_version_id, "unknown-version"),
         }
         self.inferences[inference_id] = row
-        return dict(row)
+        return prepare(dict(row)) if prepare is not None else dict(row)
 
     def get_inference(self, inference_id):
         if inference_id not in self.inferences:

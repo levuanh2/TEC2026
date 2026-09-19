@@ -57,13 +57,14 @@ class RecordingCarbon:
     def __init__(self):
         self.calculated: list[str] = []
 
-    def calculate(self, crop_season_id, scenario="as_recorded", *, persist=True):
+    def calculate(self, crop_season_id, scenario="as_recorded", *, persist=True, prepare=None):
         self.calculated.append(crop_season_id)
         result = SimpleNamespace(
             to_dict=lambda: {"scenario": scenario, "total_co2e_kg": 1.0},
             ef_config_version="test", engine_version="test",
         )
-        return CalculationOutcome(result=result, calculation_id="calc-1", persisted=persist)
+        prepared = prepare(result) if prepare is not None else None
+        return CalculationOutcome(result=result, calculation_id="calc-1", persisted=persist, prepared=prepared)
 
     def latest(self, crop_season_id, scenario=None):
         return {"id": "calc-1", "crop_season_id": crop_season_id, "status": "succeeded"}
