@@ -96,6 +96,27 @@ Mục nhắc chi phí ghi rõ **"Chi phí không ảnh hưởng tới kết qu�
 Nếu thiếu sản lượng thu hoạch, đó **không** phải lỗi chặn: vẫn có tổng CO₂e, chỉ chưa có
 cường độ trên mỗi kg — giao diện nói đúng như vậy thay vì báo là chưa tính được.
 
+## 3c. Tab Carbon là nơi sửa tại chỗ
+
+Mỗi mục thiếu trên tab Carbon của vụ có đúng một hành động, làm ngay trên trang đó — không
+phải sang Nhật ký tìm bản ghi:
+
+| `flow` (máy chủ trả về) | Ví dụ | Hành động trên tab Carbon |
+|---|---|---|
+| `carbon_methodology` | Thiếu số ngày canh tác / chế độ nước trong vụ / trước vụ | Ô nhập hoặc danh sách chọn ngay trong mục, nút **Lưu** (`PATCH …/methodology`, chỉ gửi đúng trường đó) |
+| `activity` | Thiếu hàm lượng Nitơ, thiếu tỷ lệ chất khô của rơm | **Sửa ngay** trên từng bản ghi (`records[].activity_id`) — mở đúng biểu mẫu sửa của Nhật ký, phần *Thông tin bổ sung* đã mở sẵn |
+| `plot` | Thiếu diện tích thửa | **Cập nhật diện tích** → trang thửa (diện tích do HTX quản lý) |
+| `factor_unavailable` | Vụ có nhiên liệu | Cảnh báo, **không** có ô nhập: đây là giới hạn của bộ hệ số, nhập thêm không làm tính được. Nút **Xem bản ghi nhiên liệu** |
+
+Sau mỗi lần lưu, danh sách thiếu được tải lại và mục đã xong tự biến mất. Khi hết mục chặn,
+trang hiện **"Đã đủ dữ liệu để tính phát thải."** cùng nút **Tính Carbon** (hoặc **Tính lại
+Carbon** nếu đã có kết quả). Người chỉ có quyền xem thấy đủ danh sách nhưng không có ô nhập hay
+nút tính.
+
+`records` là danh tính bản ghi đi kèm, **không** nằm trong dữ liệu đầu vào của engine
+(`CropActivityData` được băm để tái lập kết quả). Nếu danh sách bản ghi không khớp thứ tự với
+dữ liệu engine, máy chủ không gắn bản ghi nào, thay vì gắn nhầm.
+
 ---
 
 ## 4. Bảng tổng hợp: dữ liệu nào dùng cho cái gì
