@@ -13,7 +13,8 @@ bảng 1-n cùng lúc sẽ nhân bản hàng và làm phồng tổng sản lư�
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import Any, Callable
 
 from carbon import SCENARIO_TO_DB
 
@@ -21,6 +22,19 @@ from . import profiling
 from .config import Settings
 from .mapping import RawCropBundle
 from .repository import CropNotFoundError, FactorSetNotFoundError
+
+try:  # httpx ships with supabase; a fake-client test never needs it
+    import httpx
+    _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (httpx.TransportError,)
+except Exception:  # noqa: BLE001 - absence just disables the retry below
+    _TRANSPORT_ERRORS = ()
+
+# Same policy as `read_repo.SupabaseReadRepository`: enough to ride out a
+# keep-alive connection the server closed while idle ("Server disconnected"),
+# not enough to paper over Supabase being down. READS ONLY -- writes are never
+# retried (the commit state of a failed write is unknown).
+_READ_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.15
 
 # activity_type -> (tên bảng chi tiết)
 DETAIL_TABLES = {
@@ -51,6 +65,19 @@ class SupabaseCarbonRepository:
         return self._client
 
     # -- đọc ---------------------------------------------------------------
+
+    def _read(self, run: Callable[[Any], Any]) -> Any:
+        """Run one idempotent read; on a dead connection drop the client (a new
+        one is created lazily) and try again. Never used for inserts/deletes."""
+        for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
+            try:
+                return run(self.client)
+            except _TRANSPORT_ERRORS:
+                if remaining == 0 or self._settings is None:
+                    raise
+                time.sleep(_RETRY_BACKOFF_SECONDS)
+                self._client = None
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def get_crop_bundle(self, crop_season_id: str) -> RawCropBundle:
         crop = self._one("crop_seasons", {"id": crop_season_id})
@@ -90,9 +117,9 @@ class SupabaseCarbonRepository:
             if not table or not ids:
                 continue
             with profiling.observe(f"carbon select {table} in"):
-                rows = (
-                    self.client.table(table).select("*").in_("activity_id", ids).execute().data or []
-                )
+                rows = self._read(
+                    lambda c, t=table, i=ids: c.table(t).select("*").in_("activity_id", i).execute()
+                ).data or []
             for row in rows:
                 detail_by_activity[row["activity_id"]] = row
 
@@ -103,14 +130,10 @@ class SupabaseCarbonRepository:
 
     def resolve_factor_set_id(self, version_code: str) -> str:
         with profiling.observe("carbon select emission_factor_sets"):
-            rows = (
-                self.client.table("emission_factor_sets")
-                .select("id,status")
-                .eq("version_code", version_code)
-                .execute()
-                .data
-                or []
-            )
+            rows = self._read(
+                lambda c: c.table("emission_factor_sets").select("id,status")
+                .eq("version_code", version_code).execute()
+            ).data or []
         published = [r for r in rows if r.get("status") == "published"]
         if not published:
             raise FactorSetNotFoundError(
@@ -123,14 +146,10 @@ class SupabaseCarbonRepository:
 
     def factor_ids_by_code(self, factor_set_id: str) -> dict[str, str]:
         with profiling.observe("carbon select emission_factors"):
-            rows = (
-                self.client.table("emission_factors")
-                .select("id,factor_code")
-                .eq("factor_set_id", factor_set_id)
-                .execute()
-                .data
-                or []
-            )
+            rows = self._read(
+                lambda c: c.table("emission_factors").select("id,factor_code")
+                .eq("factor_set_id", factor_set_id).execute()
+            ).data or []
         return {r["factor_code"]: r["id"] for r in rows}
 
     # -- ghi ---------------------------------------------------------------
@@ -178,41 +197,41 @@ class SupabaseCarbonRepository:
         return calc_id
 
     def _existing_calculation_id(self, calculation: dict[str, Any]) -> str | None:
-        query = self.client.table("carbon_calculations").select("id").is_("production_batch_id", "null")
-        for column in ("crop_season_id", "scenario", "factor_set_id", "input_hash"):
-            query = query.eq(column, calculation[column])
+        def run(client: Any) -> Any:
+            query = client.table("carbon_calculations").select("id").is_("production_batch_id", "null")
+            for column in ("crop_season_id", "scenario", "factor_set_id", "input_hash"):
+                query = query.eq(column, calculation[column])
+            return query.limit(1).execute()
         with profiling.observe("carbon select carbon_calculations"):
-            rows = query.limit(1).execute().data or []
+            rows = self._read(run).data or []
         return rows[0]["id"] if rows else None
 
     def latest_calculation(
         self, crop_season_id: str, scenario: str | None = None
     ) -> dict[str, Any] | None:
-        query = (
-            self.client.table("carbon_calculations")
-            .select("*")
-            .eq("crop_season_id", crop_season_id)
-            .eq("status", "succeeded")  # không trả bản tính thất bại như kết quả thành công
-            .order("calculated_at", desc=True)
-            .limit(1)
-        )
-        if scenario:
-            query = query.eq("scenario", SCENARIO_TO_DB.get(scenario, scenario))
+        def run(client: Any) -> Any:
+            query = (
+                client.table("carbon_calculations")
+                .select("*")
+                .eq("crop_season_id", crop_season_id)
+                .eq("status", "succeeded")  # không trả bản tính thất bại như kết quả thành công
+                .order("calculated_at", desc=True)
+                .limit(1)
+            )
+            if scenario:
+                query = query.eq("scenario", SCENARIO_TO_DB.get(scenario, scenario))
+            return query.execute()
         with profiling.observe("carbon select carbon_calculations"):
-            rows = query.execute().data or []
+            rows = self._read(run).data or []
         if not rows:
             return None
 
         latest = rows[0]
         with profiling.observe("carbon select carbon_breakdowns"):
-            latest["breakdown"] = (
-                self.client.table("carbon_breakdowns")
-                .select("*")
-                .eq("calculation_id", latest["id"])
-                .execute()
-                .data
-                or []
-            )
+            latest["breakdown"] = self._read(
+                lambda c: c.table("carbon_breakdowns").select("*")
+                .eq("calculation_id", latest["id"]).execute()
+            ).data or []
         return latest
 
     # -- tiện ích ----------------------------------------------------------
@@ -222,8 +241,10 @@ class SupabaseCarbonRepository:
         return rows[0] if rows else None
 
     def _many(self, table: str, filters: dict[str, Any]) -> list[dict[str, Any]]:
-        query = self.client.table(table).select("*")
-        for column, value in filters.items():
-            query = query.eq(column, value)
+        def run(client: Any) -> Any:
+            query = client.table(table).select("*")
+            for column, value in filters.items():
+                query = query.eq(column, value)
+            return query.execute()
         with profiling.observe(f"carbon select {table}"):
-            return query.execute().data or []
+            return self._read(run).data or []
