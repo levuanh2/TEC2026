@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  blankToNumber, validateFertilizer, validateHarvest, validateIrrigation,
+  blankToNumber, numberFormatErrors, validateFertilizer, validateHarvest, validateIrrigation,
   validatePesticide, validateSeeding, validateStrawManagement,
 } from './activityValidation'
 
@@ -129,5 +129,26 @@ describe('blankToNumber (blank vs zero semantics, brief §12)', () => {
   })
   it('parses a normal number', () => {
     expect(blankToNumber('32.5')).toBe(32.5)
+  })
+})
+
+describe('number text parsing', () => {
+  it('accepts a decimal comma and a decimal point alike', () => {
+    expect(blankToNumber('0,85')).toBe(0.85)
+    expect(blankToNumber('0.85')).toBe(0.85)
+  })
+  it('turns unparseable text into NaN, never into null (unknown)', () => {
+    for (const bad of ['abc', '1,2,3', '1.000,5', '1e3', '0x10', 'Infinity']) {
+      expect(Number.isNaN(blankToNumber(bad))).toBe(true)
+    }
+  })
+  it('never rescales a percentage into a fraction', () => {
+    expect(blankToNumber('85')).toBe(85)
+  })
+  it('numberFormatErrors flags bad text and non-integers where the backend wants an int', () => {
+    expect(numberFormatErrors({ a: '', b: '12', c: '0,5' })).toEqual({})
+    expect(Object.keys(numberFormatErrors({ a: 'abc' }))).toEqual(['a'])
+    expect(Object.keys(numberFormatErrors({ d: '1.5' }, ['d']))).toEqual(['d'])
+    expect(numberFormatErrors({ d: '15' }, ['d'])).toEqual({})
   })
 })

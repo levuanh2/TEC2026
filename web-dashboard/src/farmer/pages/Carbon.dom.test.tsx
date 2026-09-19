@@ -124,6 +124,20 @@ describe('activity direct edit', () => {
     expect(mutations.openEdit).toHaveBeenCalledWith(straw, writeCtx, { revealMore: true })
   })
 
+  it('both straw cards open the same record by id, even beside another straw record on the same date', () => {
+    const sameDay: Activity = { ...straw, id: 'act-straw-other' }
+    const days = issue({
+      code: 'straw_days_before_cultivation', label: 'Thiếu số ngày vùi rơm trước khi làm đất', flow: 'activity',
+      activity_type: 'straw_management', records: [{ activity_id: 'act-straw', occurred_on: '2026-03-01', label: 'incorporated' }],
+    })
+    readinessState.data = readiness(days, dryMatter)
+    const { mutations } = renderTab({ activities: [sameDay, npk, straw] })
+    const buttons = screen.getAllByRole('button', { name: /Sửa ngay/ })
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) fireEvent.click(button)
+    expect(mutations.openEdit.mock.calls.map((c) => c[0].id)).toEqual(['act-straw', 'act-straw'])
+  })
+
   it('never sends the user to search the journal when the record is known', () => {
     readinessState.data = readiness(nitrogen, dryMatter)
     renderTab()

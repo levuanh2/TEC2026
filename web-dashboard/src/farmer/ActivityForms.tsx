@@ -5,7 +5,7 @@ import {
   type ActivityInput, type ActivityWriteResult, type IrrigationMethod, type StrawManagementMethod, type SupportedActivityType,
 } from '../api/activities'
 import {
-  blankToNumber, validateFertilizer, validateHarvest, validateIrrigation,
+  blankToNumber, numberFormatErrors, validateFertilizer, validateHarvest, validateIrrigation,
   validatePesticide, validateSeeding, validateStrawManagement, type FieldErrors,
 } from './activityValidation'
 import { mapActivityError, type ActivityErrorPresentation } from './activityErrors'
@@ -110,7 +110,10 @@ function NumberField({ label, value, onChange, unit, required, error, hint, inte
     <div className={`form-field fw-num${big ? ' fw-num--big' : ''}`} aria-invalid={error ? 'true' : undefined}>
       <label htmlFor={id}><LabelText label={label} required={required} hint={hint} /></label>
       <span className="fw-num__box">
-        <input id={id} type="number" inputMode={integer ? 'numeric' : 'decimal'} step={integer ? '1' : 'any'}
+        {/* Text, not type="number": a number input reports "" for "0,85" or a
+          * typo, so the entry would silently become blank. The raw text goes
+          * to `blankToNumber` / `numberFormatErrors` instead. */}
+        <input id={id} type="text" inputMode={integer ? 'numeric' : 'decimal'} autoComplete="off"
           value={value} aria-describedby={described} onChange={(e) => onChange(e.target.value)} />
         {unit && <span className="fw-num__unit" id={unitId}>{unit}</span>}
       </span>
@@ -311,30 +314,30 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
   let errors: FieldErrors
   if (activityType === 'fertilizer') {
     const draft = { fertilizerName: fName, amountKg: blankToNumber(fAmount), nitrogenPercent: blankToNumber(fN), phosphorusPercent: blankToNumber(fP), potassiumPercent: blankToNumber(fK), totalCostVnd: blankToNumber(fCost) }
-    errors = validateFertilizer(draft)
+    errors = { ...validateFertilizer(draft), ...numberFormatErrors({ amountKg: fAmount, nitrogenPercent: fN, phosphorusPercent: fP, potassiumPercent: fK, totalCostVnd: fCost }) }
     input = { activityType: 'fertilizer', data: { fertilizerName: draft.fertilizerName, amountKg: draft.amountKg ?? 0, nitrogenPercent: draft.nitrogenPercent, phosphorusPercent: draft.phosphorusPercent, potassiumPercent: draft.potassiumPercent, totalCostVnd: draft.totalCostVnd } }
   } else if (activityType === 'irrigation') {
     const draft = { method: iMethod, waterVolumeM3: blankToNumber(iWater), durationMinutes: blankToNumber(iDuration), waterLevelCm: blankToNumber(iLevel), pumpEnergyKwh: iPump ? blankToNumber(iPumpEnergy) : null, totalCostVnd: blankToNumber(iCost) }
-    errors = validateIrrigation(draft)
+    errors = { ...validateIrrigation(draft), ...numberFormatErrors({ waterVolumeM3: iWater, durationMinutes: iDuration, waterLevelCm: iLevel, pumpEnergyKwh: iPump ? iPumpEnergy : '', totalCostVnd: iCost }, ['durationMinutes']) }
     input = { activityType: 'irrigation', data: { method: (draft.method || 'other') as IrrigationMethod, waterVolumeM3: draft.waterVolumeM3, durationMinutes: draft.durationMinutes, waterLevelCm: draft.waterLevelCm, pumpEnergyKwh: draft.pumpEnergyKwh, totalCostVnd: draft.totalCostVnd } }
   } else if (activityType === 'harvest') {
     const draft = { yieldKg: blankToNumber(hYield), harvestedAreaHa: blankToNumber(hArea), moisturePercent: blankToNumber(hMoisture), totalCostVnd: blankToNumber(hCost) }
-    errors = validateHarvest(draft)
+    errors = { ...validateHarvest(draft), ...numberFormatErrors({ yieldKg: hYield, harvestedAreaHa: hArea, moisturePercent: hMoisture, totalCostVnd: hCost }) }
     input = { activityType: 'harvest', data: { yieldKg: draft.yieldKg ?? 0, harvestedAreaHa: draft.harvestedAreaHa, moisturePercent: draft.moisturePercent, totalCostVnd: draft.totalCostVnd } }
   } else if (activityType === 'seeding') {
     const draft = { seedKg: blankToNumber(sSeedKg), costVnd: blankToNumber(sCost) }
-    errors = validateSeeding(draft)
+    errors = { ...validateSeeding(draft), ...numberFormatErrors({ seedKg: sSeedKg, costVnd: sCost }) }
     input = { activityType: 'seeding', data: { varietyName: sVariety.trim() || null, seedKg: draft.seedKg ?? 0, seedingMethod: sMethod.trim() || null, costVnd: draft.costVnd } }
   } else if (activityType === 'pesticide') {
     const draft = { productName: pName, amount: blankToNumber(pAmount), unit: pUnit, totalCostVnd: blankToNumber(pCost) }
-    errors = validatePesticide(draft)
+    errors = { ...validatePesticide(draft), ...numberFormatErrors({ amount: pAmount, totalCostVnd: pCost }) }
     input = { activityType: 'pesticide', data: { productName: draft.productName, activeIngredient: pTarget.trim() || null, amount: draft.amount ?? 0, unit: draft.unit, totalCostVnd: draft.totalCostVnd } }
   } else {
     const draft = {
       method: wMethod, strawMassKg: blankToNumber(wMass), totalCostVnd: blankToNumber(wCost),
       daysBeforeCultivation: blankToNumber(wDays), dryMatterFraction: blankToNumber(wDry),
     }
-    errors = validateStrawManagement(draft)
+    errors = { ...validateStrawManagement(draft), ...numberFormatErrors({ strawMassKg: wMass, totalCostVnd: wCost, daysBeforeCultivation: wDays, dryMatterFraction: wDry }, ['daysBeforeCultivation']) }
     input = { activityType: 'straw_management', data: {
       method: (draft.method || 'other') as StrawManagementMethod,
       strawMassKg: draft.strawMassKg, totalCostVnd: draft.totalCostVnd,
@@ -409,7 +412,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     extra = <>
       <div className="form-grid">
         <NumberField label="Thời gian tưới" unit="phút" value={iDuration} onChange={setIDuration} error={err('durationMinutes')} hint={OPTIONAL} integer />
-        <NumberField label="Mực nước ruộng" unit="cm" value={iLevel} onChange={setILevel} hint={OPTIONAL} />
+        <NumberField label="Mực nước ruộng" unit="cm" value={iLevel} onChange={setILevel} hint={OPTIONAL} error={err('waterLevelCm')} />
       </div>
       <CheckboxField label="Có dùng máy bơm" checked={iPump} onChange={setIPump} />
       {iPump && <NumberField label="Năng lượng bơm" unit="kWh" value={iPumpEnergy} onChange={setIPumpEnergy} error={err('pumpEnergyKwh')} hint={OPTIONAL} />}
