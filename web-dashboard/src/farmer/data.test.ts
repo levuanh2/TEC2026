@@ -55,6 +55,7 @@ describe('Farmer read cache (stale-while-revalidate)', () => {
       recsGen: vi.fn().mockResolvedValue(1),
       cv: vi.fn().mockResolvedValue('cv'),
       carbon: vi.fn().mockResolvedValue('c'),
+      carbonReadiness: vi.fn().mockResolvedValue('cr'),
       org: vi.fn().mockResolvedValue('o'),
       otherSeasonMetrics: vi.fn().mockResolvedValue('m2'),
     }
@@ -66,6 +67,7 @@ describe('Farmer read cache (stale-while-revalidate)', () => {
       await fetchQuery(keys.recsGen('s1'), fetchers.recsGen, { staleMs: 60_000 })
       await fetchQuery(keys.cv('s1'), fetchers.cv, { staleMs: 60_000 })
       await fetchQuery(keys.carbon('s1'), fetchers.carbon, { staleMs: 60_000 })
+      await fetchQuery(keys.carbonReadiness('s1'), fetchers.carbonReadiness, { staleMs: 60_000 })
       await fetchQuery(keys.org('org-1'), fetchers.org, { staleMs: 60_000 })
       await fetchQuery(keys.metrics('s2'), fetchers.otherSeasonMetrics, { staleMs: 60_000 })
     }
@@ -79,6 +81,8 @@ describe('Farmer read cache (stale-while-revalidate)', () => {
     expect(fetchers.metrics).toHaveBeenCalledTimes(2)
     expect(fetchers.recs).toHaveBeenCalledTimes(2)
     expect(fetchers.recsGen).toHaveBeenCalledTimes(2)
+    // Which Carbon inputs are missing can change with a record edit (Nitơ, rơm).
+    expect(fetchers.carbonReadiness).toHaveBeenCalledTimes(2)
     // Untouched: writing an activity changes none of these, and re-reading the
     // viewer's hierarchy or organization identity on every save is pure waste.
     expect(fetchers.scope).toHaveBeenCalledTimes(1)

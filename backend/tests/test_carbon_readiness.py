@@ -22,7 +22,7 @@ from carbon.models import (  # noqa: E402
     CropActivityData, FertilizerApplication, FuelUsage, Harvest, StrawEvent,
 )
 from carbon.readiness import (  # noqa: E402
-    FLOW_ACTIVITY, FLOW_METHODOLOGY, missing_inputs, readiness,
+    FLOW_ACTIVITY, FLOW_FACTOR_UNAVAILABLE, FLOW_METHODOLOGY, RecordRef, missing_inputs, readiness,
 )
 
 REAL = ParameterSet.load(BACKEND_DIR / "config" / "emission_factors.yaml")
@@ -123,6 +123,8 @@ def test_fuel_is_reported_as_a_factor_limitation_and_blocks():
     data = season(fuel=[FuelUsage("diesel", 50)])
     entry = next(m for m in missing_inputs(data) if m.code == "fuel_factor_unverified")
     assert "không phải do bạn nhập thiếu" in entry.detail
+    # Its own flow, so no client can render it as a form that would "fix" it.
+    assert entry.flow == FLOW_FACTOR_UNAVAILABLE
     assert engine_fails(data)
 
 
@@ -145,7 +147,7 @@ def test_every_missing_input_names_a_flow_the_client_can_route_to():
                   straw=[StrawEvent(method="burned", mass_kg=1, dry_matter_fraction=None)],
                   harvest=Harvest(yield_kg=None))
     entries = missing_inputs(data)
-    assert {m.flow for m in entries} <= {FLOW_METHODOLOGY, FLOW_ACTIVITY, "plot"}
+    assert {m.flow for m in entries} <= {FLOW_METHODOLOGY, FLOW_ACTIVITY, "plot", FLOW_FACTOR_UNAVAILABLE}
     for m in entries:
         if m.flow == FLOW_ACTIVITY:
             assert m.activity_type, f"{m.code} routes to an activity form but names none"
@@ -170,7 +172,54 @@ def test_readiness_payload_is_json_serializable_and_shaped_for_the_api():
     payload = readiness(season(water_regime=None))
     assert set(payload) == {"can_calculate", "missing_inputs", "blocking_count"}
     entry = payload["missing_inputs"][0]
-    assert set(entry) == {"code", "label", "detail", "flow", "activity_type", "blocking"}
+    assert set(entry) == {"code", "label", "detail", "flow", "activity_type", "blocking", "records"}
+    assert entry["records"] == []
+
+
+# -- record identity: which stored record to open ------------------------------
+
+def _refs(prefix: str, n: int) -> list[RecordRef]:
+    return [RecordRef(activity_id=f"{prefix}-{i}", occurred_on="2026-03-0{}".format(i + 1)) for i in range(n)]
+
+
+def test_records_name_exactly_the_offending_fertilizer_applications():
+    data = season(fertilizer=[
+        FertilizerApplication("Urea", 100, n_content_pct=46),
+        FertilizerApplication("NPK", 80, n_content_pct=None),
+        FertilizerApplication("DAP", 50, n_content_pct=None),
+    ])
+    [entry] = [m for m in missing_inputs(data, {"fertilizer": _refs("f", 3)}) if m.code == "fertilizer_nitrogen"]
+    assert [r.activity_id for r in entry.records] == ["f-1", "f-2"]
+
+
+def test_straw_records_are_merged_per_missing_field():
+    data = season(straw=[
+        StrawEvent(method="burned", mass_kg=1000, dry_matter_fraction=None),
+        StrawEvent(method="removed", mass_kg=500),
+        StrawEvent(method="incorporated", mass_kg=900, dry_matter_fraction=None, days_before_cultivation=None),
+    ])
+    by_code = {m.code: m for m in missing_inputs(data, {"straw_management": _refs("s", 3)})}
+    assert [r.activity_id for r in by_code["straw_dry_matter"].records] == ["s-0", "s-2"]
+    assert [r.activity_id for r in by_code["straw_days_before_cultivation"].records] == ["s-2"]
+
+
+def test_refs_never_change_which_issues_are_reported():
+    data = season(water_regime=None, fertilizer=[FertilizerApplication("NPK", 80, n_content_pct=None)])
+    without = [(m.code, m.flow, m.blocking) for m in missing_inputs(data)]
+    with_refs = [(m.code, m.flow, m.blocking) for m in missing_inputs(data, {"fertilizer": _refs("f", 1)})]
+    assert without == with_refs
+
+
+def test_misaligned_refs_attach_no_record_rather_than_a_wrong_one():
+    data = season(fertilizer=[FertilizerApplication("NPK", 80, n_content_pct=None)])
+    [entry] = [m for m in missing_inputs(data, {"fertilizer": _refs("f", 2)}) if m.code == "fertilizer_nitrogen"]
+    assert entry.records == ()
+
+
+def test_fuel_limitation_lists_the_fuel_records_to_view():
+    data = season(fuel=[FuelUsage("diesel", 50), FuelUsage("gasoline", 5)])
+    [entry] = [m for m in missing_inputs(data, {"fuel": _refs("u", 2)}) if m.code == "fuel_factor_unverified"]
+    assert [r.activity_id for r in entry.records] == ["u-0", "u-1"]
 
 
 # -- when the row mapper refuses before the engine sees anything ---------------
@@ -206,6 +255,30 @@ def test_missing_plot_area_routes_to_the_plot_not_the_water_regime_panel():
     assert payload["can_calculate"] is False
     [entry] = payload["missing_inputs"]
     assert (entry["code"], entry["flow"]) == ("area", "plot")
+
+
+def test_service_readiness_names_the_stored_record_ids_through_the_real_mapper():
+    """End to end over the real mapper: ids come from the bundle rows, in the
+    order the mapper feeds the engine, and a deleted row never shows up."""
+    def act(id_, type_, detail, deleted=None):
+        return {"id": id_, "activity_type": type_, "occurred_at": "2026-03-05T00:00:00Z",
+                "deleted_at": deleted, "detail": detail}
+    bundle = RawCropBundle(
+        crop_season={"id": "ready-001", "ipcc_water_regime": "irrigated_continuous_flooding",
+                      "pre_season_water_regime": "non_flooded_pre_season_lt_180d", "cultivation_days": 100},
+        plot={"area_ha": 1.0},
+        activities=[
+            act("gone", "fertilizer", {"fertilizer_name": "Cũ", "amount_kg": 10}, deleted="2026-03-06"),
+            act("urea", "fertilizer", {"fertilizer_name": "Urê", "amount_kg": 100, "nitrogen_percent": 46}),
+            act("npk", "fertilizer", {"fertilizer_name": "NPK", "amount_kg": 80}),
+            act("burn", "straw_management", {"method": "burned", "straw_mass_kg": 900}),
+        ],
+    )
+    payload = CarbonService(_BundleRepo(bundle), REAL).readiness("ready-001")
+    by_code = {m["code"]: m for m in payload["missing_inputs"]}
+    assert by_code["fertilizer_nitrogen"]["records"] == [
+        {"activity_id": "npk", "occurred_on": "2026-03-05", "label": "NPK"}]
+    assert [r["activity_id"] for r in by_code["straw_dry_matter"]["records"]] == ["burn"]
 
 
 def test_unmappable_irrigation_routes_to_the_water_regime_panel():

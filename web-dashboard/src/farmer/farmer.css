@@ -352,6 +352,27 @@
 .fw-missing span { display: block; color: var(--fw-muted); font-size: var(--fw-text-sm); max-width: var(--fw-measure); }
 .fw-cta-row { display: flex; flex-wrap: wrap; gap: var(--fw-space-8); margin-top: var(--fw-space-12); }
 .fw-cta-row .fw-btn { text-decoration: none; }
+/* Carbon repair hub: one card per missing input, each with its own action. */
+.fw-repair { display: grid; gap: var(--fw-space-12); margin-bottom: var(--fw-space-20); padding: var(--fw-space-20); border: 1px solid var(--fw-rule-2); border-radius: var(--fw-radius-lg); background: var(--fw-raise); }
+.fw-repair h2 { font-family: var(--fw-display); font-size: var(--fw-text-lg); font-weight: 600; line-height: 1.3; }
+.fw-repair--ready { border-color: var(--fw-accent); background: var(--fw-accent-soft); }
+.fw-repair__list { display: grid; gap: var(--fw-space-12); margin: 0; padding: 0; list-style: none; }
+.fw-repair__item { display: grid; gap: var(--fw-space-6); padding: var(--fw-space-12) var(--fw-space-16); border-left: 3px solid var(--fw-amber); border-radius: var(--fw-radius); background: var(--fw-paper); }
+.fw-repair__item.is-limit { border-left-color: var(--fw-rule-3); }
+.fw-repair__item h3 { font-size: 15px; font-weight: 650; }
+.fw-repair__item > p { color: var(--fw-muted); font-size: var(--fw-text-sm); max-width: var(--fw-measure); }
+.fw-repair__status { display: flex; align-items: center; gap: var(--fw-space-6); font-size: var(--fw-text-xs); font-weight: 650; color: var(--fw-ink-2); text-transform: uppercase; letter-spacing: .02em; }
+.fw-repair__status svg { width: 14px; height: 14px; }
+.fw-repair .fw-btn { justify-self: start; text-decoration: none; }
+.fw-repair__records { display: grid; gap: var(--fw-space-6); margin: 0; padding: 0; list-style: none; }
+.fw-repair__records li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--fw-space-8); padding: var(--fw-space-8) 0; border-top: 1px solid var(--fw-rule); font-size: var(--fw-text-sm); }
+.fw-repair__fix { display: grid; gap: var(--fw-space-6); }
+.fw-repair__fix label { font-size: var(--fw-text-sm); font-weight: 600; }
+.fw-repair__fix small { color: var(--fw-muted); font-size: var(--fw-text-xs); }
+.fw-repair__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-8); }
+.fw-repair__row select { flex: 1 1 240px; min-width: 0; min-height: 40px; }
+.fw-repair__unit { display: inline-flex; align-items: center; gap: var(--fw-space-6); }
+.fw-repair__unit input { width: 7em; min-height: 40px; }
 
 /* ------------------------------------------------- performance / metrics */
 /* Not four interchangeable KPI cards: a ruled table of four readings, each with

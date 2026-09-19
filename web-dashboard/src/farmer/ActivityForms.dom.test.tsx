@@ -296,3 +296,42 @@ describe('multi-season targeting', () => {
     expect(createActivity.mock.calls[0][0]).toBe(OTHER_SEASON.id)
   })
 })
+
+/* ------------------------------------------ Carbon quick-fix entry points */
+
+describe('opened from the Carbon repair hub', () => {
+  const fertilizer: Activity = {
+    id: 'act-npk', cropSeasonId: SEASON.id, occurredAt: '2026-03-05T00:00:00Z', type: 'fertilizer',
+    detail: JSON.stringify({ fertilizer_name: 'NPK', amount_kg: 80 }), recorder: 'u', source: 'web',
+  }
+
+  it('revealMore opens the disclosure so the blank Nitơ field is in view', () => {
+    renderForm({ mode: 'edit', activity: fertilizer, revealMore: true })
+    expect(disclosureIsOpen()).toBe(true)
+    expect(screen.getByLabelText(/Hàm lượng đạm/)).toBeTruthy()
+  })
+
+  it('without revealMore a record with no methodology values keeps it closed', () => {
+    renderForm({ mode: 'edit', activity: fertilizer })
+    expect(disclosureIsOpen()).toBe(false)
+  })
+
+  it('editing Nitơ from the hub writes to that exact record', async () => {
+    renderForm({ mode: 'edit', activity: fertilizer, revealMore: true })
+    fill(/Hàm lượng đạm/, '16')
+    save()
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled())
+    expect(updateActivity.mock.calls[0][0]).toBe('act-npk')
+    expect(updateActivity.mock.calls[0][1].data.nitrogenPercent).toBe(16)
+  })
+
+  it('straw can say "not returned to the field" — false, distinct from unrecorded null', async () => {
+    renderForm({ activityType: 'straw_management' })
+    fireEvent.change(screen.getByLabelText(/Cách xử lý rơm rạ/), { target: { value: 'composted' } })
+    openMore()
+    fireEvent.change(screen.getByLabelText(/Rơm có được trả lại ruộng không/), { target: { value: 'no' } })
+    save()
+    await waitFor(() => expect(createActivity).toHaveBeenCalled())
+    expect(payload().returnedToField).toBe(false)
+  })
+})

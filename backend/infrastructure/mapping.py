@@ -25,6 +25,7 @@ from carbon import (
     assert_consistent_water_records,
 )
 from carbon.errors import MethodologyGapError, MissingActivityDataError
+from carbon.readiness import RecordRef
 
 
 # --- Chế độ nước ------------------------------------------------------------
@@ -286,6 +287,33 @@ def _map_pesticide(bundle: RawCropBundle) -> list[PesticideApplication]:
         )
         for d in ((a.get("detail") or {}) for a in bundle.by_type("pesticide"))
     ]
+
+
+def record_refs(bundle: RawCropBundle) -> dict[str, list[RecordRef]]:
+    """Storage identity of the records behind each engine list, for Carbon readiness.
+
+    One list per activity type, built from the SAME `bundle.by_type(...)` call
+    the matching `_map_*` uses, so index i here is record i there. Kept out of the
+    engine model on purpose: that model is hashed for reproducibility.
+    """
+    def label(activity_type: str, detail: dict[str, Any]) -> str | None:
+        if activity_type == "fertilizer":
+            return detail.get("fertilizer_name") or detail.get("fertilizer_type")
+        if activity_type == "fuel":
+            return detail.get("fuel_type")
+        return detail.get("method")
+
+    return {
+        activity_type: [
+            RecordRef(
+                activity_id=str(a.get("id")),
+                occurred_on=_as_date_str(a.get("occurred_at")),
+                label=label(activity_type, a.get("detail") or {}),
+            )
+            for a in bundle.by_type(activity_type)
+        ]
+        for activity_type in ("fertilizer", "straw_management", "fuel")
+    }
 
 
 # --- Kết quả -> hàng Supabase ----------------------------------------------

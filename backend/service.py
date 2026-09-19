@@ -22,6 +22,7 @@ from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
     map_crop_activity_data,
+    record_refs,
 )
 from infrastructure.repository import CarbonRepository
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
@@ -122,7 +123,8 @@ class CarbonService:
             # irrigation records cannot be mapped to an IPCC class. Each has a
             # different fix, so name the one that actually applies.
             return mapping_refused(area_missing=bundle.plot.get("area_ha") is None, detail=str(exc))
-        return carbon_readiness(data)
+        # Record identity rides alongside, so the client can open the exact record.
+        return carbon_readiness(data, record_refs(bundle))
 
 
 class ActivityWriteAccessError(Exception):
