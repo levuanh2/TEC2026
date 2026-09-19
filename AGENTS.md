@@ -455,3 +455,16 @@ Follow-ups (chỉ ghi nhận):
 - Chạy các hosted smoke in-process (`hosted_carbon_factor/p0/p1/input_ux/cost_carbon`) từ thư mục `backend/` (đọc `config/emission_factors.yaml` theo đường dẫn tương đối).
 - Carry-forward: `docs/openapi.json` drift; Flutter methodology / fuel-warning parity.
 
+## Flutter Carbon UX parity (2026-09-20)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `app/lib/models/carbon_readiness.dart` (new), `app/lib/screens/carbon_readiness_section.dart` (new), `app/lib/screens/season_methodology_sheet.dart` (new), `app/lib/screens/carbon_result_screen.dart`, `app/lib/services/carbon_api_service.dart` (`readiness`), `me_service.dart` (`writableFarmIds`), `app/lib/models/crop_season.dart` (methodology null tường minh), `activity_validation.dart`, `activity_field_spec.dart`, `app/lib/db/local_database.dart` (merge không ghi đè vụ pending; mốc `carbon.changed`), `app/lib/shell/routes.dart`, `activity_form.dart`, `activity_detail_screen.dart`, `crop_season_form_screen.dart`, `app/lib/design/components/adaptive_form_field.dart`, tests + `integration_test/hosted_carbon_parity_test.dart`, `backend/scripts/hosted_flutter_carbon_parity_e2e.py`, `backend/infrastructure/supabase_repo.py` (retry ĐỌC), `app/README.md` | — (released) | Màn Carbon mobile dùng readiness máy chủ, sửa nhanh methodology/phân/rơm, fuel là giới hạn, viewer chỉ xem, offline không tính, báo kết quả cũ. Không có công thức/luật Carbon trong Dart; ghi vẫn qua Supabase + hàng đợi sẵn có. Branch `feature/flutter-carbon-parity`. | CHƯA MERGE — chờ user. Backend 702; web Vitest 232, tsc + build; flutter analyze sạch, flutter test 394; emulator + hosted E2E 20/20 (online + offline/restart, dọn sạch); debug + release APK build được; release ký bằng debug key (chưa có keystore). Codex NO BLOCKER. |
+
+Follow-ups (chỉ ghi nhận):
+- Release signing: `android/app/build.gradle.kts` dùng `signingConfigs.debug` cho release — cần keystore thật (release-hardening).
+- Kết quả cũ chỉ biết thay đổi làm trên CHÍNH máy này (mốc local); sửa trên Web / máy khác không làm mobile báo "cần tính lại". Tín hiệu từ server (vd. hash đầu vào hiện tại trong readiness) nếu cần.
+- Sheet sửa nhanh không xoá được giá trị methodology về trống (form vụ đầy đủ thì được).
+- Mobile chỉ sửa được hoạt động có trên máy; bản ghi tạo từ Web/seed báo "sửa trên Farmer Web".
+- Cảnh báo AWD thiếu số lần rút nước (có sẵn, không chặn) vẫn nằm trong Dart.
+
