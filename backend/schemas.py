@@ -450,11 +450,19 @@ class CarbonScenarioResponse(BaseModel):
     scenarios: list[str]
 
 
+class CarbonMissingRecord(BaseModel):
+    """The stored activity record an issue is about, so the client can open it."""
+    activity_id: str
+    occurred_on: str | None = None
+    label: str | None = None
+
+
 class CarbonMissingInput(BaseModel):
     """One Carbon input the season lacks, plus where the user supplies it.
 
     `flow` is what the client routes on ("carbon_methodology" | "activity" |
-    "plot"); it never has to decide which input belongs to which screen.
+    "plot" | "factor_unavailable"); it never has to decide which input belongs
+    to which screen. "factor_unavailable" is a limitation, not a form.
     """
     code: str
     label: str
@@ -463,6 +471,7 @@ class CarbonMissingInput(BaseModel):
     activity_type: str | None = None
     #: False when the input only costs the per-kg intensity, not the whole result.
     blocking: bool
+    records: list[CarbonMissingRecord] = []
 
 
 class CarbonReadinessResponse(BaseModel):

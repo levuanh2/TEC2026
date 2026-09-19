@@ -16,7 +16,8 @@ requiring something new, that test fails rather than this list quietly going sta
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, asdict, replace
 from typing import Any
 
 from .models import CropActivityData
@@ -24,8 +25,29 @@ from .models import CropActivityData
 # Where the user goes to supply a missing input. The client maps these to routes;
 # it does not decide which input needs which flow.
 FLOW_METHODOLOGY = "carbon_methodology"   # season "Thông tin phương pháp tính" panel
-FLOW_ACTIVITY = "activity"                # the journal form named by `activity_type`
+FLOW_ACTIVITY = "activity"                # edit the exact records listed in `records`
 FLOW_PLOT = "plot"                        # plot record (area), not a farmer journal form
+#: Not fixable by entering data: the verified factor set lacks what the record
+#: needs. Clients must show this as a limitation, never as a form to fill.
+FLOW_FACTOR_UNAVAILABLE = "factor_unavailable"
+
+
+@dataclass(frozen=True)
+class RecordRef:
+    """Which stored activity record an issue is about.
+
+    Deliberately NOT a field on the engine's input model: `CropActivityData` is
+    hashed for reproducibility and must not carry storage identity. The service
+    passes these alongside, one list per activity type, in the same order the
+    mapper emitted the engine's records.
+    """
+    activity_id: str
+    occurred_on: str | None = None   # YYYY-MM-DD
+    label: str | None = None         # what the farmer called it (fertilizer name, …)
+
+
+#: activity_type -> refs, parallel to the matching `CropActivityData` list.
+RecordRefs = Mapping[str, Sequence[RecordRef]]
 
 
 @dataclass(frozen=True)
@@ -38,29 +60,58 @@ class MissingInput:
     #: False when the input only costs precision (intensity) rather than blocking
     #: the calculation outright.
     blocking: bool = True
+    #: The records to open, for activity-level issues. Empty when the caller had
+    #: no record identity (pure engine-model checks) — the issue is still named.
+    records: tuple[RecordRef, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        out["records"] = [asdict(r) for r in self.records]
+        return out
 
 
-def _fertilizer(data: CropActivityData) -> list[MissingInput]:
-    if any(a.n_content_pct is None for a in data.fertilizer):
-        return [MissingInput(
+def _ref(refs: RecordRefs | None, activity_type: str, index: int, expected: int) -> tuple[RecordRef, ...]:
+    """The ref for record `index`, or nothing when refs are absent or do not line
+    up with the engine's list — a wrong record is worse than no record."""
+    seq = (refs or {}).get(activity_type)
+    if seq is None or len(seq) != expected:
+        return ()
+    return (seq[index],)
+
+
+def _merge(entries: list[MissingInput]) -> list[MissingInput]:
+    """Several records missing the same field are one user task listing them all."""
+    merged: dict[str, MissingInput] = {}
+    for m in entries:
+        prior = merged.get(m.code)
+        merged[m.code] = m if prior is None else replace(prior, records=prior.records + m.records)
+    return list(merged.values())
+
+
+def _fertilizer(data: CropActivityData, refs: RecordRefs | None) -> list[MissingInput]:
+    n = len(data.fertilizer)
+    return _merge([
+        MissingInput(
             code="fertilizer_nitrogen",
             label="Thiếu hàm lượng Nitơ của lần bón phân",
             detail="Một hoặc nhiều lần bón phân chưa có hàm lượng đạm (%). Không có giá trị này thì "
                    "không tính được N₂O — engine không đoán 46 %.",
             flow=FLOW_ACTIVITY, activity_type="fertilizer",
-        )]
-    return []
+            records=_ref(refs, "fertilizer", i, n),
+        )
+        for i, a in enumerate(data.fertilizer) if a.n_content_pct is None
+    ])
 
 
-def _straw(data: CropActivityData) -> list[MissingInput]:
+def _straw(data: CropActivityData, refs: RecordRefs | None) -> list[MissingInput]:
     """Mirrors the branches in `methodology.classify_straw`, presence-only."""
     out: list[MissingInput] = []
-    add = lambda code, label, detail: out.append(MissingInput(  # noqa: E731
-        code=code, label=label, detail=detail, flow=FLOW_ACTIVITY, activity_type="straw_management"))
-    for event in data.straw:
+    n = len(data.straw)
+    for i, event in enumerate(data.straw):
+        record = _ref(refs, "straw_management", i, n)
+        add = lambda code, label, detail: out.append(MissingInput(  # noqa: E731
+            code=code, label=label, detail=detail, flow=FLOW_ACTIVITY,
+            activity_type="straw_management", records=record))
         if event.method == "removed":
             continue
         if event.method == "burned":
@@ -87,9 +138,7 @@ def _straw(data: CropActivityData) -> list[MissingInput]:
             if event.dry_matter_fraction is None:
                 add("straw_dry_matter", "Thiếu tỷ lệ chất khô của rơm",
                     "Lượng rơm trả lại ruộng tính theo khối lượng khô, nên cần tỷ lệ chất khô (0–1).")
-    # One record missing a field and another missing the same field is one user task.
-    seen: set[str] = set()
-    return [m for m in out if not (m.code in seen or seen.add(m.code))]
+    return _merge(out)
 
 
 def _area(detail: str = "Thửa ruộng của vụ này chưa có diện tích (ha).") -> MissingInput:
@@ -103,8 +152,12 @@ def _water_regime(
                         detail=detail, flow=FLOW_METHODOLOGY)
 
 
-def missing_inputs(data: CropActivityData) -> list[MissingInput]:
-    """Every Carbon input the season still lacks, in the order a user would fix them."""
+def missing_inputs(data: CropActivityData, refs: RecordRefs | None = None) -> list[MissingInput]:
+    """Every Carbon input the season still lacks, in the order a user would fix them.
+
+    `refs` only adds record identity to activity-level issues; it never changes
+    which issues are reported.
+    """
     out: list[MissingInput] = []
 
     if not data.area_ha:
@@ -124,15 +177,17 @@ def missing_inputs(data: CropActivityData) -> list[MissingInput]:
             flow=FLOW_METHODOLOGY,
         ))
 
-    out.extend(_fertilizer(data))
-    out.extend(_straw(data))
+    out.extend(_fertilizer(data, refs))
+    out.extend(_straw(data, refs))
 
     if data.fuel:
+        n = len(data.fuel)
         out.append(MissingInput(
             code="fuel_factor_unverified", label="Vụ có ghi nhiên liệu nhưng chưa có hệ số đã xác minh",
             detail="Hệ số phát thải nhiên liệu chưa được xác minh, nên vụ có bản ghi nhiên liệu "
                    "chưa tính được. Đây là giới hạn của bộ hệ số, không phải do bạn nhập thiếu.",
-            flow=FLOW_ACTIVITY, activity_type="fuel",
+            flow=FLOW_FACTOR_UNAVAILABLE, activity_type="fuel",
+            records=tuple(r for i in range(n) for r in _ref(refs, "fuel", i, n)),
         ))
 
     # Not blocking: the total is still produced, only the per-kg intensity is not.
@@ -154,9 +209,9 @@ def _summary(missing: list[MissingInput]) -> dict[str, Any]:
     }
 
 
-def readiness(data: CropActivityData) -> dict[str, Any]:
+def readiness(data: CropActivityData, refs: RecordRefs | None = None) -> dict[str, Any]:
     """Serializable readiness summary for the API."""
-    return _summary(missing_inputs(data))
+    return _summary(missing_inputs(data, refs))
 
 
 def mapping_refused(*, area_missing: bool, detail: str) -> dict[str, Any]:
@@ -171,5 +226,5 @@ def mapping_refused(*, area_missing: bool, detail: str) -> dict[str, Any]:
     return _summary([_area(detail) if area_missing else _water_regime(detail)])
 
 
-__all__ = ["MissingInput", "missing_inputs", "readiness", "mapping_refused",
-           "FLOW_METHODOLOGY", "FLOW_ACTIVITY", "FLOW_PLOT"]
+__all__ = ["MissingInput", "RecordRef", "RecordRefs", "missing_inputs", "readiness", "mapping_refused",
+           "FLOW_METHODOLOGY", "FLOW_ACTIVITY", "FLOW_PLOT", "FLOW_FACTOR_UNAVAILABLE"]
