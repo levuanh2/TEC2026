@@ -53,6 +53,7 @@ def test_a_connection_killed_by_the_server_is_replaced_before_the_next_request(f
     # dodge the problem by picking a different, healthy one.
     held = [pool.getconn() for _ in range(pool.get_stats()["pool_available"])]
     pids = [conn.execute("select pg_backend_pid() as pid").fetchone()["pid"] for conn in held]
+    assert pids, "the pool held no idle connection, so nothing would be killed"
     for conn in held:
         conn.rollback()
         pool.putconn(conn)
