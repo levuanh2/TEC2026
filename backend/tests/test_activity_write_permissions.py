@@ -255,3 +255,43 @@ def test_repository_allowed_writer_proceeds_to_the_update():
     )
     writes = mutating(cursor)
     assert len(writes) == 1 and writes[0].startswith("update public.activities set occurred_at")
+
+
+def _base_view_sql(cursor: ScriptedCursor) -> str:
+    return next(sql for sql, _ in cursor.statements if "from public.activities a" in sql.lower())
+
+
+def test_repository_update_accepts_unattributed_rows_like_the_update_policy():
+    """`activities_update` WITH CHECK allows `recorded_by is null`; the service
+    must not be stricter, or a seeded record can never be completed."""
+    cursor = ScriptedCursor(allowed=True, activity={**_OWN_ACTIVITY, "created_by": None})
+    repository_with(cursor).update(
+        activity_id="act-1", actor_id="user-1", occurred_at=None, note="x", update_note=True, data=None,
+    )
+    assert "(a.recorded_by = %s or a.recorded_by is null)" in _base_view_sql(cursor)
+
+
+def test_repository_soft_delete_stays_own_only():
+    cursor = ScriptedCursor(allowed=True, activity=_OWN_ACTIVITY)
+    repository_with(cursor).soft_delete(activity_id="act-1", actor_id="user-1")
+    assert "recorded_by is null" not in _base_view_sql(cursor)
+    delete_sql = next(sql for sql in mutating(cursor) if "deleted_at=now()" in sql)
+    assert "recorded_by=%s" in delete_sql and "recorded_by is null" not in delete_sql
+
+
+def test_repository_update_writes_every_detail_column_and_fails_when_no_detail_row():
+    cursor = ScriptedCursor(allowed=True, activity=_OWN_ACTIVITY)
+    data = {"method": "awd", "water_volume_m3": 3, "duration_minutes": None,
+            "water_level_cm": None, "pump_energy_kwh": None, "total_cost_vnd": None}
+    repository_with(cursor).update(
+        activity_id="act-1", actor_id="user-1", occurred_at=None, note=None, update_note=False, data=data,
+    )
+    detail_sql, params = next((sql, p) for sql, p in cursor.statements if sql.startswith("update public.irrigation_events"))
+    assert params == [*data.values(), "act-1"]
+
+    cursor = ScriptedCursor(allowed=True, activity=_OWN_ACTIVITY)
+    cursor.rowcount = 0  # detail row missing: the write did not land
+    with pytest.raises(ActivityNotFoundError):
+        repository_with(cursor).update(
+            activity_id="act-1", actor_id="user-1", occurred_at=None, note=None, update_note=False, data=data,
+        )

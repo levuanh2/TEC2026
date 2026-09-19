@@ -259,7 +259,9 @@ class ActivityWriteResponse(BaseModel):
     occurred_at: datetime
     note: str | None = None
     data: dict[str, Any]
-    created_by: str
+    # NULL for a seeded/imported record the caller completed: editing does not
+    # claim authorship (see `write_repo._view(allow_unattributed=...)`).
+    created_by: str | None = None
     created_at: datetime
     updated_at: datetime
     idempotent_replay: bool = False
