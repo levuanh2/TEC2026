@@ -335,3 +335,85 @@ describe('opened from the Carbon repair hub', () => {
     expect(payload().returnedToField).toBe(false)
   })
 })
+
+/* -------------------------------- straw quick-fix: save and read back */
+
+describe('straw quick-fix persistence', () => {
+  // The seeded record from the reproduced bug: incorporated, mass known,
+  // methodology fields blank.
+  const straw: Activity = {
+    id: 'act-straw', cropSeasonId: SEASON.id, occurredAt: '2026-09-06T06:00:00Z', type: 'straw_management',
+    detail: JSON.stringify({ method: 'incorporated', straw_mass_kg: 800, total_cost_vnd: null,
+      days_before_cultivation: null, dry_matter_fraction: null, returned_to_field: null }),
+    recorder: '', source: 'web',
+  }
+  const sentBody = async () => {
+    const { activityDataPayload } = await import('../api/activities')
+    return activityDataPayload(updateActivity.mock.calls[0][1])
+  }
+
+  it('sends the entered days and dry matter to that exact record, keeping the rest', async () => {
+    renderForm({ mode: 'edit', activityType: 'straw_management', activity: straw, revealMore: true })
+    fill(/Số ngày trước khi làm đất/, '20')
+    fill(/Tỷ lệ chất khô của rơm/, '0.85')
+    save()
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled())
+    expect(updateActivity.mock.calls[0][0]).toBe('act-straw')
+    expect(await sentBody()).toEqual({
+      method: 'incorporated', straw_mass_kg: 800, total_cost_vnd: null,
+      days_before_cultivation: 20, dry_matter_fraction: 0.85, returned_to_field: null,
+    })
+  })
+
+  it('accepts the decimal comma its own hint shows ("0,85")', async () => {
+    renderForm({ mode: 'edit', activityType: 'straw_management', activity: straw, revealMore: true })
+    fill(/Tỷ lệ chất khô của rơm/, '0,85')
+    save()
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled())
+    expect((await sentBody()).dry_matter_fraction).toBe(0.85)
+  })
+
+  it.each([
+    ['85', /không quá 1/],
+    ['0', /lớn hơn 0/],
+    ['abc', /số hợp lệ/],
+  ])('refuses dry matter "%s" instead of saving or rescaling it', async (value, message) => {
+    renderForm({ mode: 'edit', activityType: 'straw_management', activity: straw, revealMore: true })
+    fill(/Tỷ lệ chất khô của rơm/, value)
+    save()
+    expect(await screen.findByText(message)).toBeTruthy()
+    expect(updateActivity).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['-1', /không thể là số âm/],
+    ['1.5', /số nguyên/],
+  ])('refuses days "%s"', async (value, message) => {
+    renderForm({ mode: 'edit', activityType: 'straw_management', activity: straw, revealMore: true })
+    fill(/Số ngày trước khi làm đất/, value)
+    save()
+    expect(await screen.findByText(message)).toBeTruthy()
+    expect(updateActivity).not.toHaveBeenCalled()
+  })
+
+  it('a real 0 days survives; blank stays null', async () => {
+    renderForm({ mode: 'edit', activityType: 'straw_management', activity: straw, revealMore: true })
+    fill(/Số ngày trước khi làm đất/, '0')
+    save()
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled())
+    const body = await sentBody()
+    expect(body.days_before_cultivation).toBe(0)
+    expect(body.dry_matter_fraction).toBeNull()
+  })
+
+  it('reopening from the server response shows the persisted values', () => {
+    // The write response serializes numeric columns as strings ("0.850").
+    const saved: Activity = { ...straw, detail: JSON.stringify({ method: 'incorporated', straw_mass_kg: '800.000',
+      total_cost_vnd: null, days_before_cultivation: 20, dry_matter_fraction: '0.850', returned_to_field: true }) }
+    renderForm({ mode: 'edit', activityType: 'straw_management', activity: saved })
+    expect(disclosureIsOpen()).toBe(true)
+    expect((screen.getByLabelText(/Số ngày trước khi làm đất/) as HTMLInputElement).value).toBe('20')
+    expect((screen.getByLabelText(/Tỷ lệ chất khô của rơm/) as HTMLInputElement).value).toBe('0.85')
+    expect((screen.getByLabelText(/Rơm có được trả lại ruộng không/) as HTMLSelectElement).value).toBe('yes')
+  })
+})

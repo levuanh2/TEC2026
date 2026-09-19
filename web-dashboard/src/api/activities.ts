@@ -81,7 +81,8 @@ export interface ActivityWriteResult {
   occurredAt: string
   note: string | null
   data: Record<string, unknown>
-  createdBy: string
+  /** null for a seeded/imported record with no author. */
+  createdBy: string | null
   createdAt: string
   updatedAt: string
   idempotentReplay: boolean
@@ -173,7 +174,7 @@ const mapWriteResult = (x: any): ActivityWriteResult => ({
   occurredAt: x.occurred_at,
   note: x.note ?? null,
   data: x.data,
-  createdBy: x.created_by,
+  createdBy: x.created_by ?? null,
   createdAt: x.created_at,
   updatedAt: x.updated_at,
   idempotentReplay: Boolean(x.idempotent_replay),

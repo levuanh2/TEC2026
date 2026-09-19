@@ -121,10 +121,30 @@ export function validateStrawManagement(draft: StrawManagementDraft): FieldError
 /**
  * Number input -> number | null respecting the blank-vs-zero rule (brief §12):
  * an empty string must stay `null` (unknown), never become 0.
+ *
+ * A decimal comma is accepted ("0,85" — the hint the form itself shows a
+ * farmer). Anything else that is not a plain decimal is `NaN`, never `null`: a
+ * typo must surface as an error through `numberFormatErrors`, not be saved as
+ * "unknown" without the farmer noticing.
  */
 export function blankToNumber(raw: string): number | null {
   const trimmed = raw.trim()
   if (trimmed === '') return null
-  const n = Number(trimmed)
-  return Number.isNaN(n) ? null : n
+  if (!/^[+-]?(\d+([.,]\d+)?|[.,]\d+)$/.test(trimmed)) return Number.NaN
+  return Number(trimmed.replace(',', '.'))
+}
+
+/**
+ * Format errors for the raw text of number fields, keyed like the validators'
+ * errors. `integers` lists the keys the backend types as `int`.
+ */
+export function numberFormatErrors(raw: Record<string, string>, integers: readonly string[] = []): FieldErrors {
+  const errors: FieldErrors = {}
+  for (const [key, text] of Object.entries(raw)) {
+    const n = blankToNumber(text)
+    if (n == null) continue
+    if (Number.isNaN(n)) errors[key] = 'Vui lòng nhập một số hợp lệ, ví dụ 12 hoặc 0,85.'
+    else if (integers.includes(key) && !Number.isInteger(n)) errors[key] = 'Vui lòng nhập số nguyên.'
+  }
+  return errors
 }

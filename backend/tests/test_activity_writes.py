@@ -51,14 +51,18 @@ class FakeTransactionalWriteRepository:
         self.keys: dict[tuple[str, str], str] = {}
         self._next = 1
 
-    def _view(self, activity_id, *, actor_id=None):
+    def _view(self, activity_id, *, actor_id=None, allow_unattributed=False):
         row = self.rows.get(activity_id)
-        if not row or row.get("deleted") or (actor_id and row["created_by"] != actor_id):
+        if not row or row.get("deleted"):
+            raise ActivityNotFoundError()
+        # Same rule as the real repository / `activities_update` RLS: an
+        # unattributed (seeded) row is editable, another author's never is.
+        if actor_id and row["created_by"] != actor_id and not (allow_unattributed and row["created_by"] is None):
             raise ActivityNotFoundError()
         return deepcopy(row)
 
-    def get_for_actor(self, activity_id, actor_id):
-        return self._view(activity_id, actor_id=actor_id)
+    def get_for_actor(self, activity_id, actor_id, *, allow_unattributed=False):
+        return self._view(activity_id, actor_id=actor_id, allow_unattributed=allow_unattributed)
 
     def create(self, **payload):
         key = (payload["actor_id"], payload["idempotency_key"])
@@ -84,13 +88,12 @@ class FakeTransactionalWriteRepository:
 
     def update(self, *, activity_id, actor_id, occurred_at, note, update_note, data):
         row = self.rows[activity_id]
-        if row["created_by"] != actor_id or row["deleted"]:
-            raise ActivityNotFoundError()
+        self._view(activity_id, actor_id=actor_id, allow_unattributed=True)
         if occurred_at is not None: row["occurred_at"] = occurred_at
         if update_note: row["note"] = note
         if data is not None: row["data"] = deepcopy(data)
         row["updated_at"] = datetime(2026, 9, 11, tzinfo=timezone.utc)
-        return self._view(activity_id, actor_id=actor_id)
+        return self._view(activity_id, actor_id=actor_id, allow_unattributed=True)
 
     def soft_delete(self, *, activity_id, actor_id):
         row = self.rows.get(activity_id)
@@ -177,6 +180,112 @@ def test_harvest_update_changes_the_same_denominator_source_and_soft_delete_excl
     write.delete(read_repository=FakeRead(), activity_id=created["id"])
     with pytest.raises(ActivityNotFoundError):
         repo.get_for_actor(created["id"], ACTOR)
+
+
+def _seed_straw(repo, *, author=None, **detail):
+    """A straw record as the demo seed writes it: `recorded_by` NULL by default."""
+    now = datetime(2026, 9, 8, tzinfo=timezone.utc)
+    data = {
+        "method": "incorporated", "straw_mass_kg": 800.0, "total_cost_vnd": None,
+        "days_before_cultivation": None, "dry_matter_fraction": None, "returned_to_field": None,
+        **detail,
+    }
+    repo.rows["seeded-straw"] = {
+        "id": "seeded-straw", "crop_season_id": SEASON, "activity_type": "straw_management",
+        "occurred_at": now, "note": None, "data": data, "created_by": author,
+        "created_at": now, "updated_at": now, "deleted": False,
+    }
+    return "seeded-straw"
+
+
+def test_straw_quickfix_edit_persists_on_an_unattributed_seeded_record():
+    """The reproduced bug: PATCH on a seeded straw record (recorded_by NULL)
+    returned 404, so the Carbon quick-fix never saved anything."""
+    repo = FakeTransactionalWriteRepository(); write = service(repo)
+    activity_id = _seed_straw(repo)
+    updated = write.update(
+        read_repository=FakeRead(), activity_id=activity_id,
+        request=schemas.ActivityUpdateRequest(data={"days_before_cultivation": 20}),
+    )
+    assert updated["data"]["days_before_cultivation"] == 20
+    assert updated["data"]["dry_matter_fraction"] is None  # omitted: untouched
+    updated = write.update(
+        read_repository=FakeRead(), activity_id=activity_id,
+        request=schemas.ActivityUpdateRequest(data={"dry_matter_fraction": 0.85, "returned_to_field": True}),
+    )
+    stored = repo.rows[activity_id]
+    assert stored["data"]["days_before_cultivation"] == 20  # survived the second edit
+    assert stored["data"]["dry_matter_fraction"] == 0.85
+    assert stored["data"]["returned_to_field"] is True
+    assert stored["created_by"] is None  # editing does not claim authorship
+
+
+def test_patch_route_serializes_an_unattributed_record_instead_of_a_500_after_commit():
+    """Second half of the reproduced bug: once the edit was allowed, the response
+    model's `created_by: str` rejected the NULL author, so the committed write
+    came back as a 500 and the UI reported it as unsaved."""
+    repo = FakeTransactionalWriteRepository()
+    activity_id = _seed_straw(repo)
+    response = write_client(write=service(repo)).patch(
+        f"/v1/activities/{activity_id}",
+        json={"data": {"days_before_cultivation": 20, "dry_matter_fraction": 0.85, "returned_to_field": True}},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["created_by"] is None
+    assert body["data"]["days_before_cultivation"] == 20
+    assert body["data"]["dry_matter_fraction"] == 0.85
+    assert body["data"]["returned_to_field"] is True
+
+
+def test_straw_edit_explicit_null_clears_and_omitted_keeps():
+    repo = FakeTransactionalWriteRepository(); write = service(repo)
+    activity_id = _seed_straw(repo, days_before_cultivation=20, dry_matter_fraction=0.85, returned_to_field=False)
+    write.update(
+        read_repository=FakeRead(), activity_id=activity_id,
+        request=schemas.ActivityUpdateRequest(data={"dry_matter_fraction": None}),
+    )
+    data = repo.rows[activity_id]["data"]
+    assert data["dry_matter_fraction"] is None
+    assert data["days_before_cultivation"] == 20
+    assert data["returned_to_field"] is False
+
+
+def test_another_farmers_record_stays_uneditable():
+    repo = FakeTransactionalWriteRepository(); write = service(repo)
+    activity_id = _seed_straw(repo, author="farmer-b")
+    with pytest.raises(ActivityWriteAccessError):
+        write.update(
+            read_repository=FakeRead(), activity_id=activity_id,
+            request=schemas.ActivityUpdateRequest(data={"days_before_cultivation": 20}),
+        )
+    assert repo.rows[activity_id]["data"]["days_before_cultivation"] is None
+
+
+@pytest.mark.parametrize("read", [
+    FakeRead(role="cooperative_manager"), FakeRead(role="enterprise_viewer"),
+    FakeRead(role="regulator"), FakeRead(visible=False),
+])
+def test_unattributed_record_is_not_editable_by_non_farmers_or_out_of_scope_callers(read):
+    """The `recorded_by is null` allowance widens *whose* rows a writer may
+    complete, never *who* is a writer."""
+    repo = FakeTransactionalWriteRepository(); write = service(repo)
+    activity_id = _seed_straw(repo)
+    with pytest.raises(ActivityWriteAccessError):
+        write.update(
+            read_repository=read, activity_id=activity_id,
+            request=schemas.ActivityUpdateRequest(data={"days_before_cultivation": 20}),
+        )
+    assert repo.rows[activity_id]["data"]["days_before_cultivation"] is None
+
+
+def test_unattributed_record_still_cannot_be_deleted():
+    """Only edit follows the RLS `recorded_by is null` allowance; delete stays own-only."""
+    repo = FakeTransactionalWriteRepository(); write = service(repo)
+    activity_id = _seed_straw(repo)
+    with pytest.raises(ActivityWriteAccessError):
+        write.delete(read_repository=FakeRead(), activity_id=activity_id)
+    assert repo.rows[activity_id]["deleted"] is False
 
 
 @pytest.mark.parametrize("bad", [

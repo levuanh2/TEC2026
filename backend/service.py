@@ -209,7 +209,9 @@ class ActivityWriteService:
         try:
             # RLS first: an out-of-scope ID and a nonexistent ID look identical.
             read_repository.activity(activity_id)
-            existing = self._write_repository.get_for_actor(activity_id, actor_id)
+            # Own records plus unattributed (seeded/imported) ones, exactly as
+            # the `activities_update` RLS policy allows; delete stays own-only.
+            existing = self._write_repository.get_for_actor(activity_id, actor_id, allow_unattributed=True)
             self._write_batch(read_repository, str(existing["crop_season_id"]))
         except (ReadNotFoundError, ActivityNotFoundError) as exc:
             raise ActivityWriteAccessError() from exc

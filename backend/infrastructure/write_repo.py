@@ -63,7 +63,10 @@ class PostgresActivityWriteRepository:
         except KeyError as exc:
             raise ValueError("Unsupported activity type.") from exc
 
-    def _view(self, cur: Any, activity_id: str, *, actor_id: str | None = None) -> dict[str, Any]:
+    def _view(
+        self, cur: Any, activity_id: str, *, actor_id: str | None = None,
+        allow_unattributed: bool = False,
+    ) -> dict[str, Any]:
         base_sql = """
           select a.id::text, pb.crop_season_id::text, a.activity_type::text,
                  a.occurred_at, a.note, a.recorded_by::text as created_by,
@@ -74,7 +77,14 @@ class PostgresActivityWriteRepository:
         """
         args: list[Any] = [activity_id]
         if actor_id is not None:
-            base_sql += " and a.recorded_by = %s"
+            # `allow_unattributed` mirrors the `activities_update` RLS WITH CHECK
+            # (`recorded_by is null or recorded_by = auth.uid()`): a seeded or
+            # imported record has no author, and any writer of its batch may
+            # complete it. Batch write permission is still checked separately.
+            base_sql += (
+                " and (a.recorded_by = %s or a.recorded_by is null)" if allow_unattributed
+                else " and a.recorded_by = %s"
+            )
             args.append(actor_id)
         cur.execute(base_sql, args)
         row = cur.fetchone()
@@ -123,9 +133,11 @@ class PostgresActivityWriteRepository:
             raise ActivityNotFoundError()
         self._assert_can_write_batch(cur, production_batch_id=row["production_batch_id"], actor_id=actor_id)
 
-    def get_for_actor(self, activity_id: str, actor_id: str) -> dict[str, Any]:
+    def get_for_actor(
+        self, activity_id: str, actor_id: str, *, allow_unattributed: bool = False,
+    ) -> dict[str, Any]:
         with self._connection() as conn, conn.cursor() as cur:
-            return self._view(cur, activity_id, actor_id=actor_id)
+            return self._view(cur, activity_id, actor_id=actor_id, allow_unattributed=allow_unattributed)
 
     def create(
         self, *, crop_season_id: str, production_batch_id: str, actor_id: str,
@@ -173,7 +185,7 @@ class PostgresActivityWriteRepository:
         note: str | None, update_note: bool, data: dict[str, Any] | None,
     ) -> dict[str, Any]:
         with self._connection() as conn, conn.cursor() as cur:
-            existing = self._view(cur, activity_id, actor_id=actor_id)
+            existing = self._view(cur, activity_id, actor_id=actor_id, allow_unattributed=True)
             self._assert_can_write_activity(cur, activity_id=activity_id, actor_id=actor_id)
             if occurred_at is not None or update_note:
                 cur.execute(
@@ -189,7 +201,11 @@ class PostgresActivityWriteRepository:
                     f"update public.{table} set {assignments}, updated_at=now() where activity_id=%s",  # noqa: S608 -- static specs
                     [*[data.get(column) for column in columns], activity_id],
                 )
-            return self._view(cur, activity_id, actor_id=actor_id)
+                if cur.rowcount != 1:
+                    # No detail row means the write did not land; never report
+                    # success for it (the whole transaction rolls back).
+                    raise ActivityNotFoundError()
+            return self._view(cur, activity_id, actor_id=actor_id, allow_unattributed=True)
 
     def update_crop_season_methodology(
         self, *, crop_season_id: str, actor_id: str, fields: dict[str, Any]
