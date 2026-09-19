@@ -16,7 +16,7 @@ from typing import Any
 
 from carbon import CarbonResult, ParameterSet, calculate_carbon
 from carbon.errors import CarbonEngineError
-from carbon.readiness import FLOW_METHODOLOGY, readiness as carbon_readiness
+from carbon.readiness import mapping_refused, readiness as carbon_readiness
 from infrastructure import memberships
 from infrastructure.mapping import (
     breakdown_rows,
@@ -118,18 +118,10 @@ class CarbonService:
         try:
             data = map_crop_activity_data(bundle)
         except CarbonEngineError as exc:
-            # The mapper itself refuses (e.g. irrigation records that cannot be
-            # mapped to an IPCC class). That IS the actionable answer: the season
-            # needs its water regime declared explicitly.
-            return {
-                "can_calculate": False,
-                "blocking_count": 1,
-                "missing_inputs": [{
-                    "code": "water_regime", "label": "Thiếu chế độ nước trong vụ",
-                    "detail": str(exc), "flow": FLOW_METHODOLOGY,
-                    "activity_type": None, "blocking": True,
-                }],
-            }
+            # The mapper itself refuses: either the plot has no area, or
+            # irrigation records cannot be mapped to an IPCC class. Each has a
+            # different fix, so name the one that actually applies.
+            return mapping_refused(area_missing=bundle.plot.get("area_ha") is None, detail=str(exc))
         return carbon_readiness(data)
 
 

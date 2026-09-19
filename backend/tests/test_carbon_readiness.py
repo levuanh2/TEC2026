@@ -171,3 +171,45 @@ def test_readiness_payload_is_json_serializable_and_shaped_for_the_api():
     assert set(payload) == {"can_calculate", "missing_inputs", "blocking_count"}
     entry = payload["missing_inputs"][0]
     assert set(entry) == {"code", "label", "detail", "flow", "activity_type", "blocking"}
+
+
+# -- when the row mapper refuses before the engine sees anything ---------------
+#
+# `CarbonService.readiness` runs the real mapper. The mapper refuses for two
+# different reasons with two different fixes; each must route to its own fix.
+
+from infrastructure.mapping import RawCropBundle  # noqa: E402
+from service import CarbonService  # noqa: E402
+
+
+class _BundleRepo:
+    def __init__(self, bundle: RawCropBundle):
+        self._bundle = bundle
+
+    def get_crop_bundle(self, crop_season_id: str) -> RawCropBundle:
+        return self._bundle
+
+
+def _service_readiness(*, area_ha, irrigation_methods=()):
+    bundle = RawCropBundle(
+        crop_season={"id": "ready-001", "pre_season_water_regime": "non_flooded_pre_season_lt_180d",
+                     "cultivation_days": 100},
+        plot={"area_ha": area_ha},
+        activities=[{"activity_type": "irrigation", "deleted_at": None, "detail": {"method": m}}
+                    for m in irrigation_methods],
+    )
+    return CarbonService(_BundleRepo(bundle), REAL).readiness("ready-001")
+
+
+def test_missing_plot_area_routes_to_the_plot_not_the_water_regime_panel():
+    payload = _service_readiness(area_ha=None, irrigation_methods=["continuous_flooding"])
+    assert payload["can_calculate"] is False
+    [entry] = payload["missing_inputs"]
+    assert (entry["code"], entry["flow"]) == ("area", "plot")
+
+
+def test_unmappable_irrigation_routes_to_the_water_regime_panel():
+    payload = _service_readiness(area_ha=1.0, irrigation_methods=["alternate"])
+    [entry] = payload["missing_inputs"]
+    assert (entry["code"], entry["flow"]) == ("water_regime", FLOW_METHODOLOGY)
+    assert "ipcc_water_regime" in entry["detail"]
