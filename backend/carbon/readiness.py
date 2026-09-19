@@ -92,22 +92,25 @@ def _straw(data: CropActivityData) -> list[MissingInput]:
     return [m for m in out if not (m.code in seen or seen.add(m.code))]
 
 
+def _area(detail: str = "Thửa ruộng của vụ này chưa có diện tích (ha).") -> MissingInput:
+    return MissingInput(code="area", label="Thiếu diện tích thửa", detail=detail, flow=FLOW_PLOT)
+
+
+def _water_regime(
+    detail: str = "Cách giữ nước trong vụ quyết định lượng khí CH₄ phát thải.",
+) -> MissingInput:
+    return MissingInput(code="water_regime", label="Thiếu chế độ nước trong vụ",
+                        detail=detail, flow=FLOW_METHODOLOGY)
+
+
 def missing_inputs(data: CropActivityData) -> list[MissingInput]:
     """Every Carbon input the season still lacks, in the order a user would fix them."""
     out: list[MissingInput] = []
 
     if not data.area_ha:
-        out.append(MissingInput(
-            code="area", label="Thiếu diện tích thửa",
-            detail="Thửa ruộng của vụ này chưa có diện tích (ha).",
-            flow=FLOW_PLOT,
-        ))
+        out.append(_area())
     if data.water_regime is None:
-        out.append(MissingInput(
-            code="water_regime", label="Thiếu chế độ nước trong vụ",
-            detail="Cách giữ nước trong vụ quyết định lượng khí CH₄ phát thải.",
-            flow=FLOW_METHODOLOGY,
-        ))
+        out.append(_water_regime())
     if data.pre_season_water_regime is None:
         out.append(MissingInput(
             code="pre_season_water_regime", label="Thiếu chế độ nước trước vụ",
@@ -142,9 +145,7 @@ def missing_inputs(data: CropActivityData) -> list[MissingInput]:
     return out
 
 
-def readiness(data: CropActivityData) -> dict[str, Any]:
-    """Serializable readiness summary for the API."""
-    missing = missing_inputs(data)
+def _summary(missing: list[MissingInput]) -> dict[str, Any]:
     blocking = [m for m in missing if m.blocking]
     return {
         "can_calculate": not blocking,
@@ -153,5 +154,22 @@ def readiness(data: CropActivityData) -> dict[str, Any]:
     }
 
 
-__all__ = ["MissingInput", "missing_inputs", "readiness",
+def readiness(data: CropActivityData) -> dict[str, Any]:
+    """Serializable readiness summary for the API."""
+    return _summary(missing_inputs(data))
+
+
+def mapping_refused(*, area_missing: bool, detail: str) -> dict[str, Any]:
+    """Readiness when the row mapper refuses before a `CropActivityData` exists.
+
+    The mapper refuses for exactly two user-fixable reasons: the plot has no
+    area (fixed on the plot record), or irrigation records cannot be mapped to
+    an IPCC class (fixed by declaring the water regime, which the mapper
+    prefers over inference). Routing both to the water-regime panel would send
+    a farmer with a missing area to a form that cannot fix it.
+    """
+    return _summary([_area(detail) if area_missing else _water_regime(detail)])
+
+
+__all__ = ["MissingInput", "missing_inputs", "readiness", "mapping_refused",
            "FLOW_METHODOLOGY", "FLOW_ACTIVITY", "FLOW_PLOT"]
