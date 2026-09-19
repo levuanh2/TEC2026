@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from . import pg_pool
 from .config import Settings
@@ -79,7 +79,8 @@ class PostgresMrvExportRepository:
         calculation_ids: list[str],
         payload_sha256: str | None = None,
         source_snapshot_export_id: str | None = None,
-    ) -> dict[str, Any]:
+        prepare: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
         """One transaction: the snapshot row and the calculations it covers.
 
         `is_finalized` stays false and `contains_sample_data` false, which is why
@@ -115,7 +116,9 @@ class PostgresMrvExportRepository:
                        on conflict do nothing""",
                     [export_id, calculation_id],
                 )
-            return dict(row)
+            # Before commit: if the client representation cannot be built, the
+            # row rolls back (and the caller removes any object it uploaded).
+            return prepare(dict(row)) if prepare is not None else dict(row)
 
     def payload(self, export_id: str, *, authorized_case_ids: list[str]) -> dict[str, Any]:
         """Read one stored snapshot back.

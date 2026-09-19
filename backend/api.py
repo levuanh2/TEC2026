@@ -12,12 +12,14 @@ mọi request phải qua `CropAccessChecker` — replay JWT của người gọi
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 from carbon import SCENARIOS
@@ -164,6 +166,19 @@ def _require_persist_authority(
         ) from exc
 
 
+def _json_ready(body: dict[str, Any]) -> dict[str, Any]:
+    """Exactly what the route's JSONResponse will do to `body`, done early.
+
+    The Carbon route has no `response_model`; FastAPI runs `jsonable_encoder`
+    and Starlette `json.dumps(..., allow_nan=False)` after the route returns.
+    Doing both here, before the calculation is stored, means a NaN/inf or an
+    unencodable value fails the request with nothing saved.
+    """
+    encoded = jsonable_encoder(body)
+    json.dumps(encoded, ensure_ascii=False, allow_nan=False)
+    return encoded
+
+
 def _payload(result, calculation_id: str | None) -> dict[str, Any]:
     body = result.to_dict()
     body["water_regime_scenario"] = body["scenario"]  # tên cũ trong SRS §4.2
@@ -221,7 +236,12 @@ def calculate_carbon_endpoint(
     _require_persist_authority(authorization, persist_checker, payload.crop_season_id)
 
     try:
-        outcome = service.calculate(payload.crop_season_id, payload.water_regime_scenario)
+        # Serialized before `save_calculation` writes anything; only the new id
+        # is added afterwards, which cannot make valid JSON invalid.
+        outcome = service.calculate(
+            payload.crop_season_id, payload.water_regime_scenario,
+            prepare=lambda result: _json_ready(_payload(result, None)),
+        )
     except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
         logger.info(
             "carbon_calculate_failed request_id=%s crop_season_id=%s scenario=%s "
@@ -239,7 +259,7 @@ def calculate_carbon_endpoint(
         outcome.calculation_id, outcome.result.ef_config_version, outcome.result.engine_version,
         (time.monotonic() - started) * 1000,
     )
-    return _payload(outcome.result, outcome.calculation_id)
+    return {**outcome.prepared, "calculation_id": outcome.calculation_id}
 
 
 @router.get("/crop-seasons/{crop_season_id}/carbon", tags=['Carbon'])

@@ -64,7 +64,21 @@ class FakeTransactionalWriteRepository:
     def get_for_actor(self, activity_id, actor_id, *, allow_unattributed=False):
         return self._view(activity_id, actor_id=actor_id, allow_unattributed=allow_unattributed)
 
-    def create(self, **payload):
+    def _in_transaction(self, prepare, work):
+        """Like the real repository: `prepare` runs before commit, and if it
+        raises every change made by `work` is rolled back."""
+        saved = (deepcopy(self.rows), dict(self.keys), self._next)
+        try:
+            result = work()
+            return prepare(result) if prepare is not None else result
+        except Exception:
+            self.rows, self.keys, self._next = saved
+            raise
+
+    def create(self, *, prepare=None, **payload):
+        return self._in_transaction(prepare, lambda: self._create(**payload))
+
+    def _create(self, **payload):
         key = (payload["actor_id"], payload["idempotency_key"])
         if key in self.keys:
             if self.rows[self.keys[key]].get("deleted"):
@@ -86,7 +100,10 @@ class FakeTransactionalWriteRepository:
         self.rows[activity_id] = row; self.keys[key] = activity_id
         return self._view(activity_id, actor_id=payload["actor_id"]), False
 
-    def update(self, *, activity_id, actor_id, occurred_at, note, update_note, data):
+    def update(self, *, prepare=None, **kwargs):
+        return self._in_transaction(prepare, lambda: self._update(**kwargs))
+
+    def _update(self, *, activity_id, actor_id, occurred_at, note, update_note, data):
         row = self.rows[activity_id]
         self._view(activity_id, actor_id=actor_id, allow_unattributed=True)
         if occurred_at is not None: row["occurred_at"] = occurred_at

@@ -178,8 +178,10 @@ class FakeExportStore:
             # a serialization round trip rather than aliasing a live dict.
             "export_payload": json.loads(json.dumps(kw["payload"])),
         }
+        prepare = kw.get("prepare")
+        prepared = prepare(dict(row)) if prepare is not None else row  # raises -> nothing stored
         self.rows[kw["export_id"]] = row
-        return row
+        return prepared
 
     def artifact_row(self, export_id, *, authorized_case_ids):
         row = self.rows.get(export_id)

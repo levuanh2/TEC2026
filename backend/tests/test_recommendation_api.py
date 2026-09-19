@@ -96,10 +96,10 @@ class FakeRecommendationRepository:
         self.by_key[key] = row_id
         return deepcopy(row)
 
-    def save_generated(self, *, crop_season_id, recs):
+    def save_generated(self, *, crop_season_id, recs, prepare=None):
         rows = [self.upsert(crop_season_id=crop_season_id, rec=rec) for rec in recs]
         self.prune_missing(crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in recs])
-        return rows
+        return prepare(rows) if prepare is not None else rows
 
     def prune_missing(self, *, crop_season_id, keep_rule_codes):
         keep = set(keep_rule_codes)
@@ -116,13 +116,14 @@ class FakeRecommendationRepository:
             raise RecommendationNotFoundError()
         return deepcopy(self.rows[recommendation_id])
 
-    def set_status(self, recommendation_id, status):
+    def set_status(self, recommendation_id, status, prepare=None):
         if recommendation_id not in self.rows:
             raise RecommendationNotFoundError()
         column = "accepted_at" if status == "accepted" else "dismissed_at"
         self.rows[recommendation_id]["status"] = status
         self.rows[recommendation_id][column] = "2026-09-11T01:00:00Z"
-        return deepcopy(self.rows[recommendation_id])
+        row = deepcopy(self.rows[recommendation_id])
+        return prepare(row) if prepare is not None else row
 
 
 def service(repo: FakeRecommendationRepository | None = None) -> RecommendationService:
