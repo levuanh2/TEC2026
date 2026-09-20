@@ -816,6 +816,7 @@
 .fw-farm__go:focus-visible { outline: none; }
 .fw-farm:has(.fw-farm__go:focus-visible) { outline: 2px solid var(--fw-focus); outline-offset: 2px; }
 .fw-area-attn, .fw-area-perf, .fw-area-recs, .fw-area-journal, .fw-area-cv { min-width: 0; }
+.fw-home-top { display: contents; }
 
 /* The Home reading order is deliberate (§2): what is running → what to record
  * → is the data sound → anything to notice → what I did lately. Two columns on
@@ -834,6 +835,14 @@
   .fw-topbar { padding: 0 var(--fw-space-24); }
   .fw-grid-2, .fw-home-grid { grid-template-columns: minmax(0, 1fr); gap: var(--fw-space-32); }
   .fw-home-col { display: contents; }
+  /* The single instruction for today must not sit below a full-height season
+   * card on a 390px screen: on phones the context line comes first, then the
+   * action, then the card. `order` and not `column-reverse`, because the hero
+   * is a fragment and reversing would send its context line to the bottom. */
+  .fw-home-top { display: flex; flex-direction: column; }
+  .fw-home-top > * { order: 3; }
+  .fw-home-top > .fw-ctxbar { order: 1; }
+  .fw-home-top > .fw-next { order: 2; }
   .fw-area-perf { order: 1; } .fw-area-attn { order: 2; } .fw-area-journal { order: 3; }
   .fw-area-recs { order: 4; } .fw-area-cv { order: 5; }
   .fw-ledger__top { grid-template-columns: minmax(0, 1fr); }
@@ -870,16 +879,22 @@
   .fw-cvhist__item { grid-template-columns: auto minmax(0, 1fr) auto; }
   .fw-cvhist__item .fw-conf { display: none; }
   .fw-ws-head__facts { gap: var(--fw-space-12) var(--fw-space-24); }
-  /* True 5-item bottom navigation — same navbar blue as the desktop sidebar. */
+  /* Six destinations on one row — a bar that wraps to two rows eats a sixth of
+   * a phone screen and stops reading as a bar. The labels are short for the
+   * same reason; the sidebar keeps the full ones. */
   .fw-bottom {
     position: fixed; z-index: 40; left: 0; right: 0; bottom: 0;
-    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-    padding: var(--fw-space-4) var(--fw-space-4) calc(var(--fw-space-4) + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    padding: var(--fw-space-4) 2px calc(var(--fw-space-4) + env(safe-area-inset-bottom));
     background: linear-gradient(180deg, var(--fw-navbar), var(--fw-navbar-2)); border-top: 1px solid rgb(255 255 255 / .12);
   }
-  .fw-bottom a { display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 54px; padding: var(--fw-space-4) 2px; color: rgb(255 255 255 / .62); text-decoration: none; font-size: 11px; font-weight: 600; }
-  .fw-bottom__ico { display: grid; place-items: center; height: 24px; }
-  .fw-bottom__ico svg { width: 21px; height: 21px; }
+  .fw-bottom a {
+    display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 52px;
+    padding: var(--fw-space-4) 1px; color: rgb(255 255 255 / .62); text-decoration: none;
+    font-size: 10px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap;
+  }
+  .fw-bottom__ico { display: grid; place-items: center; height: 22px; }
+  .fw-bottom__ico svg { width: 20px; height: 20px; }
   .fw-bottom a[aria-current="page"] { color: #fff; font-weight: 700; }
   .fw-bottom a[aria-current="page"] .fw-bottom__ico { border-bottom: 2px solid var(--fw-leaf); }
   .fw-overlay { padding: 0; align-items: flex-end; }

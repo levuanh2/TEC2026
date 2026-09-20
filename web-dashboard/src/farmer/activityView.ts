@@ -173,15 +173,29 @@ export function buildAttention(
   }
 
   // Carbon: prefer the server's named missing inputs over any generic wording.
+  // A blocking input the farmer cannot supply (an unverified factor) is counted
+  // apart from the ones they can: telling someone to fill in 3 things when only
+  // 2 can be filled in is how a screen loses their trust.
   const blocking = (carbonMissing ?? []).filter((m) => m.blocking)
-  if (blocking.length) {
+  const fixable = blocking.filter((m) => m.flow !== 'factor_unavailable')
+  const limits = blocking.filter((m) => m.flow === 'factor_unavailable')
+  if (fixable.length) {
     items.push({
       id: 'carbon', tone: 'warning', group: 'carbon',
-      title: blocking.length === 1 ? blocking[0].label : `Thiếu ${blocking.length} dữ liệu để tính Carbon`,
-      body: blocking.length === 1 ? blocking[0].detail : blocking.map((m) => m.label).join(' · '),
+      title: fixable.length === 1 ? fixable[0].label : `Thiếu ${fixable.length} dữ liệu để tính Carbon`,
+      body: fixable.length === 1 ? fixable[0].detail : fixable.map((m) => m.label).join(' · '),
       link: CARBON_CTA,
     })
-  } else if (metrics && !metrics.completeness.carbon) {
+  }
+  if (limits.length) {
+    items.push({
+      id: 'carbon-limit', tone: 'info', group: 'carbon',
+      title: limits.length === 1 ? limits[0].label : `${limits.length} giới hạn của bộ hệ số`,
+      // No CTA: no amount of data entry resolves a factor the set does not have.
+      body: `${limits.map((m) => m.detail || m.label).join(' · ')} Không thể bổ sung bằng cách nhập dữ liệu.`,
+    })
+  }
+  if (!blocking.length && metrics && !metrics.completeness.carbon) {
     // Readiness unavailable (or every input present but no calculation stored yet).
     items.push({
       id: 'carbon', tone: 'info', group: 'carbon', title: 'Chưa có kết quả Carbon cho vụ này',

@@ -70,7 +70,12 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
   const byId = new Map((activities ?? []).map((a) => [a.id, a]))
   return (
     <section className="fw-repair" aria-labelledby={titleId}>
-      <h2 id={titleId}>Cần bổ sung {blocking.length} thông tin để tính phát thải</h2>
+      {/* Count only what a form can fix. A factor the set does not carry is
+        * listed below as a limitation, and counting it here would promise the
+        * farmer two more fields than this screen has. */}
+      <h2 id={titleId}>
+        Cần bổ sung {blocking.filter((m) => m.flow !== 'factor_unavailable').length} thông tin để tính phát thải
+      </h2>
       <p className="fw-note">
         {writeCtx ? 'Sửa trực tiếp tại đây — mục đã xong sẽ tự biến mất.' : 'Bạn chỉ có quyền xem. Hãy liên hệ chủ hộ hoặc cán bộ hợp tác xã để bổ sung.'}
       </p>

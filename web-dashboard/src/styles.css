@@ -677,5 +677,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .ops-table tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
   .ops-table td { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 2px 0; border: 0; align-items: baseline; }
   .ops-table td::before { content: attr(data-label); font-size: var(--fs-caption); color: var(--text-muted); }
+  /* A season code broken across two lines reads as two codes. */
+  .ops-table td[data-label="Nông hộ / Vụ mùa"] small { white-space: nowrap; }
   .ops-table td .btn { margin-top: 4px; }
 }

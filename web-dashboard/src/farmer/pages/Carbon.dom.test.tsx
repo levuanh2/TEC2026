@@ -165,6 +165,19 @@ describe('plot and fuel', () => {
     expect(screen.getByRole('link', { name: 'Xem bản ghi nhiên liệu' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Sửa ngay|Lưu/ })).toBeNull()
   })
+
+  it('does not count the factor limitation as something to fill in', () => {
+    // Two blocking inputs, one of which no form can resolve: the heading has to
+    // agree with the number of editable rows below it, or the farmer goes
+    // looking for a field that is not there.
+    readinessState.data = readiness(issue(), issue({
+      code: 'fuel_factor_unverified', label: 'Vụ có ghi nhiên liệu nhưng chưa có hệ số đã xác minh',
+      detail: 'Đây là giới hạn của bộ hệ số.', flow: 'factor_unavailable', activity_type: 'fuel',
+    }))
+    renderTab()
+    expect(screen.getByText('Cần bổ sung 1 thông tin để tính phát thải')).toBeTruthy()
+    expect(screen.getByText(/nhập thêm không giúp tính được/)).toBeTruthy()
+  })
 })
 
 describe('resolution and ready state', () => {

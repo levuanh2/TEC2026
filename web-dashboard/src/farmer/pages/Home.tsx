@@ -68,14 +68,16 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
       {/* The farmer's four questions, in order: which season · what to do next ·
         * how is it running · what did I record. One primary action only —
         * everything else on this page is a link. */}
-      <HomeHero scope={scope} primary={primary} />
+      <div className="fw-home-top">
+        <HomeHero scope={scope} primary={primary} />
 
-      <PrimaryNextAction
-        loading={scope.loading || (Boolean(sid) && (activities.loading || carbonReadiness.loading))}
-        action={action}
-        to={action?.kind === 'fix-data' || action?.kind === 'calculate' ? '/farmer/carbon' : undefined}
-        onAct={action?.kind === 'record' && primaryWriteCtx ? () => mutations.openCreate('irrigation', primaryWriteCtx) : undefined}
-      />
+        <PrimaryNextAction
+          loading={scope.loading || (Boolean(sid) && (activities.loading || carbonReadiness.loading))}
+          action={action}
+          to={action?.kind === 'fix-data' || action?.kind === 'calculate' ? '/farmer/carbon' : undefined}
+          onAct={action?.kind === 'record' && primaryWriteCtx ? () => mutations.openCreate('irrigation', primaryWriteCtx) : undefined}
+        />
+      </div>
 
       {sid && (
         <Section className="fw-area-summary" title="Tổng quan vụ này" action={<MoreLink to="/farmer/performance">Xem chi tiết</MoreLink>}>
