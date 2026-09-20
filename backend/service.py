@@ -49,9 +49,19 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from PIL import Image  # noqa: E402
-from ml.class_mapping import LABEL_VI  # noqa: E402
-from ml.infer import predict_with_model  # noqa: E402
+from ml.class_mapping import LABEL_VI  # noqa: E402 - thuần Python, không kéo torch
+
+# CV (M03) cần Pillow + torch, KHÔNG nằm trong backend/requirements.txt (xem
+# ml/requirements.txt): một môi trường nhỏ — ví dụ Render Free 512 MB — cài
+# backend mà không cài CV. Thiếu thì API vẫn khởi động bình thường và các route
+# CV trả 503 `backend_not_configured` (main._build_cv_service trả None), thay vì
+# cả tiến trình chết lúc import.
+try:  # noqa: E402
+    from PIL import Image  # noqa: E402
+    from ml.infer import predict_with_model  # noqa: E402
+except Exception:  # noqa: BLE001 - môi trường không có CV
+    Image = None  # type: ignore[assignment]
+    predict_with_model = None  # type: ignore[assignment]
 
 
 @dataclass

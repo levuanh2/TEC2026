@@ -1,0 +1,86 @@
+# Render Blueprint — STAGING trên gói FREE.
+#
+# Đây là môi trường thử nghiệm giống production, KHÔNG phải hạ tầng production:
+# web service Free bị ngủ khi không có request và lần gọi kế tiếp phải chờ khởi
+# động lại (cold start, vài chục giây). Không dùng số đo hiệu năng ở đây để kết
+# luận về production.
+#
+# Chỉ 2 service, đều miễn phí:
+#   * agricarbon-api-staging  — FastAPI (backend/), plan free
+#   * agricarbon-web-staging  — Vite build tĩnh (web-dashboard/)
+#
+# KHÔNG tạo Render Postgres / Redis / worker / cron / disk: dữ liệu vẫn ở
+# Supabase hosted (Postgres + Auth + Storage) đúng như kiến trúc hiện tại.
+# Flutter (app/) không deploy ở đây.
+#
+# Mọi giá trị bí mật để `sync: false` — nhập trong Render Dashboard, không nằm
+# trong repo. Xem README.md mục "Render free staging".
+
+services:
+  # ---------------------------------------------------------------- backend
+  - type: web
+    name: agricarbon-api-staging
+    runtime: python
+    plan: free
+    branch: main
+    rootDir: backend
+    # Bật deploy tay trong lúc còn kiểm thử; chưa tự động deploy theo commit.
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements.txt
+    # Một tiến trình uvicorn, không worker (Free: 512 MB RAM, CPU thấp).
+    # Cổng do Render cấp qua $PORT — 8010 chỉ là quy ước chạy máy cá nhân.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    # /health chỉ đọc file YAML hệ số, KHÔNG truy vấn DB (giữ nguyên chủ ý của
+    # đợt P1: health nói tiến trình sống, không phải DB sống).
+    healthCheckPath: /health
+    envVars:
+      # Khớp bộ Python đang chạy test dưới máy (backend/README.md).
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # backend/infrastructure/config.py::load_settings đọc đúng 4 biến dưới đây.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
+      # Danh sách origin cho CORS, ngăn cách bằng dấu phẩy. Phải có URL của
+      # static site (https://agricarbon-web-staging.onrender.com) — điền sau khi
+      # Render cấp tên miền thật; giữ thêm origin local nếu vẫn dev dưới máy.
+      - key: AGRICARBON_CORS_ORIGINS
+        sync: false
+
+  # --------------------------------------------------------------- frontend
+  - type: web
+    name: agricarbon-web-staging
+    runtime: static
+    branch: main
+    rootDir: web-dashboard
+    autoDeployTrigger: "off"
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # SPA: điều hướng bằng History API (src/App.tsx), nên mọi đường dẫn sâu
+      # (/farmer/..., /login, /crop-seasons/...) phải trả index.html thay vì 404.
+      # Đây là rewrite của chính static site; request API vẫn đi thẳng tới
+      # backend qua VITE_API_BASE_URL, không đi vòng qua đây.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # VITE_* là biến BUILD-TIME: đổi giá trị thì phải deploy lại static site.
+      # URL backend (https://agricarbon-api-staging.onrender.com).
+      - key: VITE_API_BASE_URL
+        sync: false
+      # Supabase ở trình duyệt CHỈ dùng cho đăng nhập/phiên; dữ liệu nghiệp vụ
+      # đi qua FastAPI. Vì vậy chỉ có publishable key ở đây — KHÔNG bao giờ đặt
+      # service role key hay chuỗi kết nối DB vào biến VITE_*.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      # Dữ liệu thật, không phải dữ liệu giả lập.
+      - key: VITE_USE_MOCK_DATA
+        value: "false"

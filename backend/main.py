@@ -186,10 +186,13 @@ def _build_cv_service() -> CvService | None:
     """
     import json
 
-    from ml.infer import find_latest_run, resolve_temperature, resolve_threshold
-    from ml.model import load_checkpoint
-
     try:
+        # torch/Pillow chỉ có khi môi trường cài ml/requirements.txt. Thiếu thì
+        # CV tắt (503), phần còn lại của API vẫn chạy — quan trọng cho môi
+        # trường nhỏ như Render Free.
+        from ml.infer import find_latest_run, resolve_temperature, resolve_threshold
+        from ml.model import load_checkpoint
+
         run_dir = find_latest_run()
         model, model_config = load_checkpoint(str(run_dir / "model.pt"), device="cpu")
         threshold = resolve_threshold(run_dir, None)
