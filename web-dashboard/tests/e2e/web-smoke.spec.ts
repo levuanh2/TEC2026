@@ -6,7 +6,8 @@ import { expect, test } from '@playwright/test'
 
 test('redesigned IA: no dead sidebar links, domain states, hierarchy drill-down', async ({ page }) => {
   await page.goto('/dashboard')
-  await expect(page.getByRole('heading', { name: 'Tổng quan', level: 1 })).toBeVisible()
+  // The landing screen is the operations queue now, not a second dashboard.
+  await expect(page.getByRole('heading', { name: 'Hôm nay cần xử lý gì?', level: 1 })).toBeVisible()
 
   // No hardcoded hierarchy ids leak into the sidebar before the user is in context.
   const navHrefs = await page.locator('nav.nav a').evaluateAll((els) => els.map((e) => e.getAttribute('href')))

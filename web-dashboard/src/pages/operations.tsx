@@ -44,15 +44,6 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
     limited: rows.filter((r) => r.carbon === 'limited').length,
   }
 
-  if (!organizationId) {
-    return (
-      <div className="state">
-        <p className="state__title">Chưa gắn với hợp tác xã nào</p>
-        <p className="state__body">Tài khoản này chưa thuộc tổ chức nào nên chưa có việc cần xử lý.</p>
-      </div>
-    )
-  }
-
   return (
     <section className="ops">
       <header className="ops__head">
@@ -60,10 +51,22 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
           <h1>Hôm nay cần xử lý gì?</h1>
           <p className="ops__sub">Toàn bộ việc cần chú ý của hợp tác xã, xếp theo mức độ.</p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={ops.reload} disabled={ops.loading}>
-          <Ico name="refresh" size={14} />{ops.loading ? 'Đang tải…' : 'Tải lại'}
-        </button>
+        {organizationId && (
+          <button type="button" className="btn btn--ghost" onClick={ops.reload} disabled={ops.loading}>
+            <Ico name="refresh" size={14} />{ops.loading ? 'Đang tải…' : 'Tải lại'}
+          </button>
+        )}
       </header>
+
+      {/* The page keeps its heading without an organisation: a screen with no
+        * h1 is a screen a screen-reader user cannot place. */}
+      {!organizationId ? (
+        <div className="state">
+          <p className="state__title">Chưa gắn với hợp tác xã nào</p>
+          <p className="state__body">Tài khoản này chưa thuộc tổ chức nào nên chưa có việc cần xử lý.</p>
+        </div>
+      ) : (
+        <>
 
       <div className="ops-sum">
         <SumTile role="attention" icon="warning" value={counts.missing} label="Vụ thiếu dữ liệu" to="/data-gaps" loading={ops.loading} />
@@ -84,6 +87,8 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
         <p className="ops-note"><Ico name="check" size={14} />Không có việc nào cần xử lý lúc này.</p>
       ) : (
         <ExceptionTable queue={queue} />
+      )}
+        </>
       )}
     </section>
   )

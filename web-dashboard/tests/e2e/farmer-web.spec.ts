@@ -29,11 +29,11 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
 
   // V2 shell: grouped desktop nav with one icon family (SVG, no emoji glyphs).
   const nav = page.getByRole('navigation', { name: 'Điều hướng nông hộ', exact: true })
-  for (const label of ['Tổng quan', 'Nhật ký', 'Ruộng', 'Hiệu suất', 'Tôi']) {
+  for (const label of ['Tổng quan', 'Nhật ký', 'Ruộng / Vụ mùa', 'Hiệu suất', 'Carbon', 'Tôi']) {
     await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible()
   }
   await expect(nav.getByRole('link', { name: 'Tổng quan', exact: true })).toHaveAttribute('aria-current', 'page')
-  await expect(nav.locator('svg')).toHaveCount(5)
+  await expect(nav.locator('svg')).toHaveCount(6)
   await expect(page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })).toBeHidden()
 
   for (const label of ['Gieo sạ', 'Bón phân', 'Tưới nước', 'Thuốc BVTV', 'Rơm rạ', 'Thu hoạch']) {
@@ -117,7 +117,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByRole('heading', { name: 'Nhật ký canh tác', level: 1 })).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Nhật ký', exact: true })).toHaveAttribute('aria-current', 'page')
 
-  await nav.getByRole('link', { name: 'Ruộng', exact: true }).click()
+  await nav.getByRole('link', { name: 'Ruộng / Vụ mùa', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Các ruộng trong phạm vi của bạn', level: 1 })).toBeVisible()
   await expect(page.getByText(/thửa$/).first()).toBeVisible()
   await page.getByRole('link', { name: 'Xem ruộng' }).first().click()
@@ -131,7 +131,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByRole('tab', { name: 'Nhật ký' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Tổng quan' })).toHaveAttribute('aria-current', 'page')
   // Season pages keep the "Ruộng" nav destination active.
-  await expect(nav.getByRole('link', { name: 'Ruộng', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(nav.getByRole('link', { name: 'Ruộng / Vụ mùa', exact: true })).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('heading', { name: 'Mức đầy đủ dữ liệu' })).toBeVisible()
 
   await page.getByRole('tab', { name: 'Nhật ký' }).click()
@@ -176,7 +176,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   const bottom = page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })
   await expect(bottom).toBeVisible()
   await expect(nav).toBeHidden()
-  await expect(bottom.getByRole('link')).toHaveCount(5)
+  await expect(bottom.getByRole('link')).toHaveCount(6)
   await expect(bottom.getByRole('link', { name: 'Tổng quan' })).toHaveAttribute('aria-current', 'page')
   await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
   await page.screenshot({ path: 'test-results/farmer-v2-home-390.png', fullPage: true })
