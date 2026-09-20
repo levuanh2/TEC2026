@@ -120,6 +120,59 @@ Toàn bộ scaffold hiện chỉ là entrypoint có TODO — **chưa có logic n
 
 ---
 
+## Render free staging (`render.yaml`)
+
+Blueprint ở gốc repo tạo **2 service miễn phí** để thử nghiệm giống production:
+
+| Service | Loại | Thư mục | Lệnh |
+|---|---|---|---|
+| `agricarbon-api-staging` | web, runtime `python`, **plan `free`** | `backend/` | build `pip install -r requirements.txt` · start `uvicorn main:app --host 0.0.0.0 --port $PORT` · health `/health` |
+| `agricarbon-web-staging` | web, runtime `static` | `web-dashboard/` | build `npm ci && npm run build` · publish `dist` · rewrite `/*` → `/index.html` |
+
+**Đây là môi trường thử nghiệm, không phải hạ tầng production.** Web service
+Free ngủ khi không có request; lần gọi kế tiếp phải chờ khởi động lại (cold
+start). Deploy chạy được không có nghĩa là dùng được cho người dùng thật.
+
+Không tạo Render Postgres/Redis/worker/cron/disk: dữ liệu vẫn ở Supabase hosted.
+`autoDeployTrigger: "off"` — deploy bằng tay trong giai đoạn kiểm thử.
+
+CV (M03) **không chạy** trên bản cài này: `backend/requirements.txt` không có
+torch/Pillow (chúng ở `ml/requirements.txt`), nên các route `/v1/.../cv/*` trả
+503 `backend_not_configured`, phần còn lại của API chạy bình thường. Muốn có CV
+thì cần instance lớn hơn (PyTorch CPU ~1 GB, vượt 512 MB của Free).
+
+### Biến phải nhập trong Render Dashboard
+
+`render.yaml` chỉ khai báo TÊN biến (`sync: false`) — không chứa giá trị bí mật.
+
+Backend (`agricarbon-api-staging`):
+
+| Biến | Giá trị |
+|---|---|
+| `SUPABASE_URL` | URL project Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | service role key (chỉ ở backend) |
+| `SUPABASE_PUBLISHABLE_KEY` | publishable key (backend replay JWT người gọi để RLS quyết định) |
+| `SUPABASE_DB_URL` | chuỗi kết nối Postgres (pooler) |
+| `AGRICARBON_CORS_ORIGINS` | `https://agricarbon-web-staging.onrender.com` (thêm `http://localhost:5173` nếu vẫn dev dưới máy) |
+
+Frontend (`agricarbon-web-staging`, build-time — đổi thì phải deploy lại):
+
+| Biến | Giá trị |
+|---|---|
+| `VITE_API_BASE_URL` | `https://agricarbon-api-staging.onrender.com` |
+| `VITE_SUPABASE_URL` | URL project Supabase |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | publishable key |
+| `VITE_USE_MOCK_DATA` | `false` (đã đặt sẵn trong blueprint) |
+
+TUYỆT ĐỐI không đặt `SUPABASE_SERVICE_ROLE_KEY` hay `SUPABASE_DB_URL` thành
+biến `VITE_*`: mọi biến `VITE_*` nằm công khai trong bundle trình duyệt.
+
+Supabase Dashboard: luồng đăng nhập web hiện chỉ có email/mật khẩu, không dùng
+redirect, nên **không cần** đổi Site URL / redirect URLs cho lần deploy này. Chỉ
+cần cập nhật nếu sau này bật reset mật khẩu / magic link / OAuth từ web.
+
+---
+
 ## Ba nguyên tắc không được vi phạm
 
 1. **Không hardcode hệ số phát thải.** Mọi hệ số nằm ở `backend/config/emission_factors.yaml`

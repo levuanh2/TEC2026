@@ -6,6 +6,11 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.7
 supabase>=2.6
+# Bat buoc cho route upload anh CV (`UploadFile`/`File`): FastAPI kiem tra ngay
+# luc DINH NGHIA route, nen thieu package nay la ca tien trinh khong khoi dong
+# duoc — ke ca khi CV tat. Phat hien khi thu dung lenh cua Render trong mot venv
+# sach (chi co requirements.txt nay).
+python-multipart>=0.0.9
 
 # M07 part 2: render the MRV evidence package as a workbook. openpyxl is the
 # mature, pure-Python xlsx writer with no native build step and no reporting
@@ -18,6 +23,10 @@ openpyxl>=3.1
 # for a dense audit report without a browser or native GTK stack (WeasyPrint).
 # The Vietnamese font is bundled in backend/mrv/fonts (SIL OFL 1.1).
 reportlab>=4.2
+
+# CV (M03) KHONG nam o day: torch/torchvision/Pillow o ml/requirements.txt.
+# Moi truong chi cai file nay (vi du Render Free 512 MB) van chay duoc API —
+# cac route CV tra 503 `backend_not_configured`, xem main._build_cv_service.
 
 # Test
 pytest>=8.0
