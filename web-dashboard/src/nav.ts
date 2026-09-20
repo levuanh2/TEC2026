@@ -9,21 +9,31 @@ export interface NavItem { to: string; label: string; icon: IconName }
 export interface NavGroup { label?: string; items: NavItem[] }
 
 const STATIC: NavGroup[] = [
-  { items: [{ to: '/dashboard', label: 'Tổng quan', icon: 'overview' }] },
+  { items: [{ to: '/dashboard', label: 'Tổng quan vận hành', icon: 'overview' }] },
   {
     label: 'Quản lý',
     items: [
-      { to: '/organizations', label: 'Tổ chức / HTX', icon: 'organization' },
-      { to: '/farms', label: 'Nông hộ', icon: 'farms' },
+      { to: '/farms', label: 'Nông hộ & ruộng', icon: 'farms' },
+      { to: '/seasons', label: 'Vụ mùa', icon: 'season' },
+      { to: '/data-gaps', label: 'Dữ liệu thiếu', icon: 'warning' },
     ],
   },
   {
+    // Kept as "Hiệu suất" so a season being viewed still docks here as a
+    // context link (see ContextLink below) instead of disappearing.
     label: 'Hiệu suất',
-    items: [{ to: '/performance', label: 'Hiệu suất vùng', icon: 'analytics' }],
+    items: [
+      { to: '/carbon', label: 'Carbon', icon: 'carbon' },
+      { to: '/performance', label: 'Hiệu suất vùng', icon: 'analytics' },
+    ],
   },
   {
     label: 'MRV',
-    items: [{ to: '/mrv', label: 'Hồ sơ MRV', icon: 'mrv' }],
+    items: [{ to: '/mrv', label: 'MRV', icon: 'mrv' }],
+  },
+  {
+    label: 'Khác',
+    items: [{ to: '/organizations', label: 'Tổ chức / HTX', icon: 'organization' }],
   },
 ]
 

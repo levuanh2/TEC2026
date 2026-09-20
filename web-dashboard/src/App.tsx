@@ -13,6 +13,7 @@ import { OrganizationsPage, FarmsPage, FarmPage, PlotPage } from './pages/direct
 import { PerformancePage } from './pages/performance'
 import { SeasonHub, type SeasonTab } from './pages/season'
 import { MrvPage } from './pages/mrv'
+import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
 import { FarmerExperience } from './farmer/FarmerExperience'
 import { prefetchFarmerScope } from './farmer/scope'
 
@@ -184,6 +185,12 @@ function render(path: string, viewer: CurrentUser): ReactNode {
       return <PerformancePage organizationId={viewer.organizationId} />
     case 'farms':
       return <FarmsPage />
+    case 'seasons':
+      return <SeasonsWorkspace organizationId={viewer.organizationId} />
+    case 'data-gaps':
+      return <SeasonsWorkspace organizationId={viewer.organizationId} focus="missing" />
+    case 'ops-carbon':
+      return <SeasonsWorkspace organizationId={viewer.organizationId} focus="carbon" />
     case 'farm':
       return <FarmPage id={id} />
     case 'plot':
@@ -216,7 +223,9 @@ function render(path: string, viewer: CurrentUser): ReactNode {
         </div>
       )
     default:
-      return <DashboardPage organizationId={viewer.organizationId} />
+      // The operations queue is the Management home; the old KPI dashboard
+      // stays available as the organisation overview under "Tổ chức / HTX".
+      return <OperationsOverview organizationId={viewer.organizationId} />
   }
 }
 
