@@ -11,6 +11,7 @@ import type { QueryState } from '../data'
 import { Ico } from '../icons'
 import { MiniTimeline } from '../journal'
 import { Chip, Empty, ErrorPanel, Flash, IconTile, MoreLink, Section, Sk, SkBlock } from '../kit'
+import { CostPanel, PrimaryNextAction, SeasonContextBar, SummaryStrip, nextAction } from '../hybrid'
 import { metricViews } from '../metricsView'
 import { RecommendationsSection } from '../Recommendations'
 import { useCanWriteFarm, useWritableSeason } from '../writeAccess'
@@ -40,6 +41,15 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   const primaryCtx = primary ? toSeasonContext(primary.season, primary.plot) : null
   const primaryWriteCtx = useWritableSeason(primary)
   const name = viewer.fullName?.trim()
+  /* One next action, derived from this season's own state (missing Carbon
+   * inputs → today's field work → a calculation that is now possible). */
+  const action = nextAction({
+    hasSeason: Boolean(sid),
+    canWrite: Boolean(primaryWriteCtx),
+    readiness: carbonReadiness.data,
+    activities: activities.data,
+    hasCarbonResult: metrics.data?.co2ePerKg != null,
+  })
 
   return (
     <>
@@ -55,10 +65,29 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
       </header>
       <Flash message={mutations.flash} />
 
+      {/* The farmer's four questions, in order: which season · what to do next ·
+        * how is it running · what did I record. One primary action only —
+        * everything else on this page is a link. */}
       <HomeHero scope={scope} primary={primary} />
 
+      <PrimaryNextAction
+        loading={scope.loading || (Boolean(sid) && (activities.loading || carbonReadiness.loading))}
+        action={action}
+        to={action?.kind === 'fix-data' || action?.kind === 'calculate' ? '/farmer/carbon' : undefined}
+        onAct={action?.kind === 'record' && primaryWriteCtx ? () => mutations.openCreate('irrigation', primaryWriteCtx) : undefined}
+      />
+
+      {sid && (
+        <Section className="fw-area-summary" title="Tổng quan vụ này" action={<MoreLink to="/farmer/performance">Xem chi tiết</MoreLink>}>
+          <SummaryStrip activities={pending(activities, scope.loading)} metrics={pending(metrics, scope.loading)} readiness={pending(carbonReadiness, scope.loading)} />
+          {/* Cost is deliberately below the season figures and carries its own
+            * sentence: it is not an input to any emission factor. */}
+          <CostPanel metrics={pending(metrics, scope.loading)} />
+        </Section>
+      )}
+
       {!readOnly && (
-        <Section title="Ghi nhanh" description="Chọn việc bạn vừa làm để ghi vào nhật ký của vụ đang canh tác.">
+        <Section title="Ghi nhanh" description="Chọn việc bạn vừa làm để ghi vào nhật ký của vụ đang canh tác." action={<MoreLink to="/farmer/journal">Mở nhật ký</MoreLink>}>
           <QuickActions seasons={writable} mutations={mutations} loading={scope.loading} />
         </Section>
       )}
@@ -105,7 +134,7 @@ function HomeHero({ scope, primary }: { scope: QueryState<{ farms: unknown[] }>;
   if (!primary) {
     return <Empty icon="seeding" tone="leaf" title="Chưa có vụ đang canh tác" body="Bạn vẫn có thể xem các ruộng và vụ đã ghi nhận." action={<Link to="/farmer/farms" className="fw-btn fw-btn--soft">Xem ruộng của tôi</Link>} />
   }
-  return <SeasonHero ctx={primary} />
+  return <><SeasonContextBar ctx={primary} /><SeasonHero ctx={primary} compact /></>
 }
 
 export function HeroSkeleton() {
@@ -127,7 +156,7 @@ export function HeroSkeleton() {
  * counts, and the season identity sits directly under it. When there is no
  * planting date there is no figure: the slot states that plainly rather than
  * inventing a number to fill the shape. */
-export function SeasonHero({ ctx }: { ctx: SeasonCtx }) {
+export function SeasonHero({ ctx, compact }: { ctx: SeasonCtx; compact?: boolean }) {
   const { season, plot, farm } = ctx
   const days = season.harvestDate ? null : daysSince(season.plantingDate)
   return (
@@ -140,11 +169,15 @@ export function SeasonHero({ ctx }: { ctx: SeasonCtx }) {
               : <span className="is-empty">{season.harvestDate ? 'Vụ đã thu hoạch' : 'Chưa ghi nhận ngày gieo sạ'}</span>}
           </p>
           <h2 id="fw-hero-title">{season.name}</h2>
-          <p className="fw-ledger__place">
-            <span><Ico name="plot" />{plot?.name ?? 'Thửa ruộng'}</span>
-            {farm && <span><Ico name="farm" />{farm.name} · {farm.code}</span>}
-          </p>
-          <p className="fw-ledger__meta">
+          {/* On Home the context bar above already states farm · plot · status ·
+            * days, so the ledger head does not repeat them. */}
+          {!compact && (
+            <p className="fw-ledger__place">
+              <span><Ico name="plot" />{plot?.name ?? 'Thửa ruộng'}</span>
+              {farm && <span><Ico name="farm" />{farm.name} · {farm.code}</span>}
+            </p>
+          )}
+          <p className="fw-ledger__meta" hidden={compact}>
             <span className="fw-chip fw-chip--dot">{seasonStatusLabel(season.status)}</span>
             {plot?.areaHa != null && <span className="fw-chip"><Ico name="area" />{ha(plot.areaHa)}</span>}
             {season.variety && <span className="fw-chip"><Ico name="seeding" />Giống {season.variety}</span>}

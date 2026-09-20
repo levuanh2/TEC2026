@@ -24,11 +24,13 @@ import { Ico } from './icons'
  * Validation stays where it already is: the shared activity form and the API.
  */
 
-export function CarbonRepairHub({ seasonId, readiness, hasResult, plotId, writeCtx, activities, mutations, onSeasonSaved }: {
+export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId, writeCtx, activities, mutations, onSeasonSaved }: {
   seasonId: string
   readiness: CarbonReadiness
   /** A stored Carbon result exists, so the ready-state action is "Tính lại". */
   hasResult: boolean
+  /** The stored result predates the farmer's latest edit. */
+  stale?: boolean
   plotId?: string | null
   /** The season as a write target; null for a viewer, who gets no edit controls. */
   writeCtx: SeasonContext | null
@@ -42,9 +44,21 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, plotId, writeC
 
   if (!blocking.length) {
     return (
-      <section className="fw-repair fw-repair--ready" aria-labelledby={titleId} data-testid="carbon-ready">
-        <p className="fw-repair__status"><Ico name="check" />Sẵn sàng</p>
-        <h2 id={titleId}>Đã đủ dữ liệu để tính phát thải.</h2>
+      <section
+        className={`fw-repair fw-repair--ready fw-role fw-role--${stale ? 'attention' : hasResult ? 'positive' : 'info'}`}
+        aria-labelledby={titleId} data-testid="carbon-ready"
+      >
+        {/* Three of the five states live here — ready to calculate, already
+          * calculated, and calculated-but-out-of-date — each named in words. */}
+        <p className="fw-repair__status">
+          <Ico name={stale ? 'warning' : 'check'} />
+          {stale ? 'Cần tính lại' : hasResult ? 'Đã tính' : 'Sẵn sàng tính'}
+        </p>
+        <h2 id={titleId}>
+          {stale
+            ? 'Dữ liệu đã thay đổi sau lần tính gần nhất.'
+            : hasResult ? 'Vụ này đã có kết quả phát thải.' : 'Đã đủ dữ liệu để tính phát thải.'}
+        </h2>
         {optional.map((m) => <p key={m.code} className="fw-note">{m.label} — {m.detail}</p>)}
         {writeCtx
           ? <CalculateAction seasonId={seasonId} again={hasResult} />
@@ -110,7 +124,7 @@ function RepairItem({ issue, seasonId, plotId, writeCtx, byId, mutations, onSeas
   }
 
   return (
-    <li className={`fw-repair__item${limitation ? ' is-limit' : ''}`} aria-labelledby={titleId}>
+    <li className={`fw-repair__item fw-role fw-role--${limitation ? 'info' : 'attention'}${limitation ? ' is-limit' : ''}`} aria-labelledby={titleId}>
       {/* State in words, not only colour. */}
       <p className="fw-repair__status">
         <Ico name={limitation ? 'info' : 'warning'} />

@@ -11,24 +11,29 @@ import { FarmerAccountPage } from './pages/Account'
 import { FarmerFarmPage, FarmerFarmsPage, FarmerPlotPage } from './pages/Farms'
 import { FarmerHome } from './pages/Home'
 import { FarmerJournalPage } from './pages/Journal'
+import { FarmerCarbonPage } from './pages/FarmerCarbon'
 import { FarmerPerformancePage } from './pages/Performance'
 import { SeasonWorkspace } from './pages/Season'
 import { prefetchNav, prefetchSeason, primarySeason, useScope } from './scope'
 import { FarmWriteAccess } from './writeAccess'
 
-type NavItem = { to: string; label: string; icon: IconName }
+/** `short` is the phone label: six tabs at 390px cannot carry 'Ruộng / Vụ mùa'. */
+type NavItem = { to: string; label: string; icon: IconName; short?: string }
 
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Tổng quan', items: [{ to: '/farmer', label: 'Tổng quan', icon: 'home' }] },
-  { group: 'Canh tác', items: [{ to: '/farmer/journal', label: 'Nhật ký', icon: 'journal' }, { to: '/farmer/farms', label: 'Ruộng', icon: 'farm' }] },
-  { group: 'Theo dõi', items: [{ to: '/farmer/performance', label: 'Hiệu suất', icon: 'performance' }] },
+  { group: 'Canh tác', items: [{ to: '/farmer/journal', label: 'Nhật ký', icon: 'journal' }, { to: '/farmer/farms', label: 'Ruộng / Vụ mùa', icon: 'farm', short: 'Ruộng' }] },
+  // Carbon is a destination of its own, not a tab a farmer has to find inside
+  // a season: /farmer/carbon resolves to the season they are working on.
+  { group: 'Theo dõi', items: [{ to: '/farmer/performance', label: 'Hiệu suất', icon: 'performance' }, { to: '/farmer/carbon', label: 'Carbon', icon: 'carbon' }] },
   { group: 'Tài khoản', items: [{ to: '/farmer/account', label: 'Tôi', icon: 'account' }] },
 ]
 const TABS = NAV.flatMap((g) => g.items)
 
 function isCurrent(to: string, path: string): boolean {
   if (to === '/farmer') return path === '/farmer'
-  if (to === '/farmer/farms') return /^\/farmer\/(farms|plots|crop-seasons)(\/|$)/.test(path)
+  if (to === '/farmer/carbon') return path === '/farmer/carbon' || /^\/farmer\/crop-seasons\/[^/]+\/carbon$/.test(path)
+  if (to === '/farmer/farms') return /^\/farmer\/(farms|plots|crop-seasons)(\/|$)/.test(path) && !path.endsWith('/carbon')
   return path === to || path.startsWith(`${to}/`)
 }
 
@@ -89,7 +94,7 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
       <nav className="fw-bottom" aria-label="Điều hướng nông hộ trên điện thoại">
         {TABS.map((item) => (
           <Link key={item.to} to={item.to} aria-current={isCurrent(item.to, path) ? 'page' : undefined} onFocus={warm(item.to)} onTouchStart={warm(item.to)}>
-            <span className="fw-bottom__ico"><Ico name={item.icon} /></span>{item.label}
+            <span className="fw-bottom__ico"><Ico name={item.icon} /></span>{item.short ?? item.label}
           </Link>
         ))}
       </nav>
@@ -115,6 +120,7 @@ export function FarmerExperience({ session, viewer, path }: { session: Session |
     case 'season-performance': content = <SeasonWorkspace id={id!} tab="performance" />; break
     case 'season-carbon': content = <SeasonWorkspace id={id!} tab="carbon" />; break
     case 'performance': content = <FarmerPerformancePage />; break
+    case 'carbon': content = <FarmerCarbonPage />; break
     case 'account': content = <FarmerAccountPage session={session} viewer={viewer} />; break
     default: content = <Empty icon="search" title="Không tìm thấy trang" body="Đường dẫn này không thuộc khu vực nông hộ." action={<Link to="/farmer" className="fw-btn fw-btn--soft">Về Tổng quan</Link>} />
   }
@@ -125,12 +131,13 @@ export function FarmerExperience({ session, viewer, path }: { session: Session |
   )
 }
 
-type FarmerRoute = 'home' | 'journal' | 'farms' | 'farm' | 'plot' | 'season' | 'season-journal' | 'season-performance' | 'season-carbon' | 'performance' | 'account' | 'not-found'
+type FarmerRoute = 'home' | 'journal' | 'farms' | 'farm' | 'plot' | 'season' | 'season-journal' | 'season-performance' | 'season-carbon' | 'performance' | 'carbon' | 'account' | 'not-found'
 function farmerRoute(path: string): FarmerRoute {
   if (path === '/farmer') return 'home'
   if (path === '/farmer/journal') return 'journal'
   if (path === '/farmer/farms') return 'farms'
   if (path === '/farmer/performance') return 'performance'
+  if (path === '/farmer/carbon') return 'carbon'
   if (path === '/farmer/account') return 'account'
   if (/^\/farmer\/farms\/[^/]+$/.test(path)) return 'farm'
   if (/^\/farmer\/plots\/[^/]+$/.test(path)) return 'plot'

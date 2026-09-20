@@ -110,12 +110,20 @@ export function setQueryData<T>(key: string, data: T): void {
  * of date regardless of its age — a farmer who has just recorded something
  * should not wait 6h for the advice to catch up. */
 const changedSeasons = new Set<string>()
+/* When the farmer last changed something a Carbon calculation reads. Separate
+ * from `changedSeasons` on purpose: that flag is consumed (and cleared) by the
+ * recommendation flow, while "the stored result predates my last edit" has to
+ * survive until a NEW calculation replaces the result. In-memory, so it says
+ * "changed in this session" and never claims to know about another device. */
+const carbonInputsChanged = new Map<string, string>()
+export const carbonInputsChangedAt = (seasonId: string): string | null => carbonInputsChanged.get(seasonId) ?? null
 export const seasonDataChanged = (seasonId: string) => changedSeasons.has(seasonId)
 export const clearSeasonDataChanged = (seasonId: string) => { changedSeasons.delete(seasonId) }
 
 export function clearFarmerCache(): void {
   store.clear()
   changedSeasons.clear()
+  carbonInputsChanged.clear()
   for (const key of listeners.keys()) notify(key)
 }
 
@@ -195,5 +203,6 @@ export const keys = {
  * calculation changes it. */
 export function markSeasonDataChanged(seasonId: string): void {
   changedSeasons.add(seasonId)
+  carbonInputsChanged.set(seasonId, new Date().toISOString())
   invalidateQueries(keys.activities(seasonId), keys.metrics(seasonId), keys.recs(seasonId), keys.recsGen(seasonId), keys.carbonReadiness(seasonId))
 }

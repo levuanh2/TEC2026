@@ -7,7 +7,7 @@ import { fmtNumber } from '../activityView'
 import { CarbonRepairHub } from '../CarbonRepair'
 import { Ico } from '../icons'
 import { Chip, ErrorPanel, IconTile, Section, Sk, SkBlock } from '../kit'
-import { invalidateQueries, keys } from '../data'
+import { carbonInputsChangedAt, invalidateQueries, keys } from '../data'
 import { useCarbon, useCarbonReadiness } from '../scope'
 
 const SCENARIO: Record<string, string> = {
@@ -30,13 +30,18 @@ export function SeasonCarbon({ seasonId, season, plotId, writeCtx = null, activi
   const state = useCarbon(seasonId)
   const readiness = useCarbonReadiness(seasonId)
   const hasResult = state.data?.kind === 'result'
+  /* "Cần tính lại": the farmer changed an input after this result was
+   * calculated. Timestamps only — nothing here re-derives an emission. */
+  const changedAt = carbonInputsChangedAt(seasonId)
+  const calculatedAt = state.data?.kind === 'result' ? state.data.result.calculated_at : null
+  const stale = Boolean(hasResult && changedAt && calculatedAt && changedAt > calculatedAt)
   // A saved season field can resolve a readiness item, from either editor.
   const seasonSaved = () => { invalidateQueries(keys.carbonReadiness(seasonId)); onSaved?.() }
   /* Repair hub first: what is missing and the one action that supplies each.
    * Absent when readiness is unavailable — the page still renders calmly. */
   const hub = readiness.data ? (
     <CarbonRepairHub
-      seasonId={seasonId} readiness={readiness.data} hasResult={hasResult} plotId={plotId}
+      seasonId={seasonId} readiness={readiness.data} hasResult={hasResult} stale={stale} plotId={plotId}
       writeCtx={writeCtx} activities={activities} mutations={mutations} onSeasonSaved={seasonSaved}
     />
   ) : null
@@ -57,7 +62,7 @@ export function SeasonCarbon({ seasonId, season, plotId, writeCtx = null, activi
   if (!state.data || state.data.kind === 'none') {
     return <>{hub}<CarbonEmpty reason={state.data?.kind === 'none' ? state.data.reason : null} />{inputs}</>
   }
-  return <>{hub}<CarbonSuccess result={state.data.result} />{inputs}</>
+  return <>{hub}<CarbonSuccess result={state.data.result} stale={stale} />{inputs}</>
 }
 
 /** No stored result yet. What is missing, and how to supply it, is the repair
@@ -82,22 +87,42 @@ function CarbonEmpty({ reason }: { reason: 'no_calculation' | null }) {
   )
 }
 
-function CarbonSuccess({ result }: { result: CarbonResult }) {
+/** Plain Vietnamese for the engine's source codes. Display only — the code
+ * itself stays visible so a result can still be matched to the methodology. */
+const SOURCE_LABEL: Record<string, string> = {
+  ch4_rice_cultivation: 'Khí mê-tan từ ruộng lúa',
+  ch4_straw_burning: 'Đốt rơm rạ (CH₄)',
+  n2o_straw_burning: 'Đốt rơm rạ (N₂O)',
+  n2o_fertilizer_direct: 'Phân đạm — phát thải trực tiếp',
+  n2o_fertilizer_indirect: 'Phân đạm — phát thải gián tiếp',
+  co2_fuel_combustion: 'Nhiên liệu máy móc',
+}
+
+function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolean }) {
   const total = result.total_co2e_kg ?? result.co2e_total_kg ?? null
   const scenario = result.water_regime_scenario ?? result.scenario
   const sources = [...result.breakdown].sort((a, b) => b.co2e_kg - a.co2e_kg)
   return (
     <>
+      {/* The farmer's question first ("how much did this season emit?"), then
+        * the comparable figure, then where it came from. The scientific detail
+        * stays available but never leads. */}
+      {stale && (
+        <p className="fw-restale fw-role fw-role--attention" data-testid="carbon-stale">
+          <Ico name="warning" />
+          <span><b>Cần tính lại.</b> Bạn đã thay đổi dữ liệu sau lần tính gần nhất, nên số dưới đây là kết quả cũ.</span>
+        </p>
+      )}
       <div className="fw-carbon-hero">
         <div>
-          <small>Carbon trên mỗi kg lúa</small>
-          <b className={result.co2e_per_kg == null ? 'is-empty' : undefined}>{result.co2e_per_kg == null ? 'Chưa đủ dữ liệu' : perKg(result.co2e_per_kg, '')}</b>
-          <span>{result.co2e_per_kg == null ? 'Cần sản lượng hợp lệ để tính CO₂e/kg' : 'kg CO₂e / kg lúa'}</span>
-        </div>
-        <div>
-          <small>Tổng phát thải của vụ</small>
+          <small>Tổng phát thải vụ này</small>
           <b className={total == null ? 'is-empty' : undefined}>{total == null ? 'Chưa đủ dữ liệu' : fmtNumber(total)}</b>
           <span>kg CO₂e</span>
+        </div>
+        <div>
+          <small>Phát thải trên mỗi kg lúa</small>
+          <b className={result.co2e_per_kg == null ? 'is-empty' : undefined}>{result.co2e_per_kg == null ? 'Chưa đủ dữ liệu' : perKg(result.co2e_per_kg, '')}</b>
+          <span>{result.co2e_per_kg == null ? 'Cần sản lượng hợp lệ để tính CO₂e/kg' : 'kg CO₂e / kg lúa'}</span>
         </div>
         <div>
           <small>Tính lúc</small>
@@ -111,7 +136,7 @@ function CarbonSuccess({ result }: { result: CarbonResult }) {
             const share = total && total > 0 ? Math.max(0, item.co2e_kg) / total : null
             return (
               <div key={index} className="fw-source">
-                <span>{item.source}</span>
+                <span>{SOURCE_LABEL[item.source] ?? item.source}<small>{item.source}</small></span>
                 <span className="fw-source__bar" aria-hidden="true"><i style={{ width: `${(share ?? 0) * 100}%` }} /></span>
                 <b>{perKg(item.co2e_kg, 'kg CO₂e')}</b>
               </div>
