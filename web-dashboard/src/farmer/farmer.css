@@ -169,7 +169,8 @@
  * resting label silently inherits the app's dark ink instead of staying
  * white — invisible against navy, which is exactly the bug reported. */
 .fw-side .fw-nav__item {
-  display: flex; align-items: center; gap: var(--fw-space-12); min-height: 40px;
+  position: relative; display: flex; align-items: center; gap: var(--fw-space-12);
+  min-height: var(--ac-control-h-sm); padding-inline: var(--fw-space-10); margin-left: 3px;
   color: rgb(255 255 255 / .86); font-weight: 550; font-size: 14.5px; text-decoration: none;
   border-bottom: 1px solid transparent;
   transform-origin: left center;
@@ -178,8 +179,18 @@
 .fw-nav__item svg { width: 18px; height: 18px; color: rgb(255 255 255 / .68); transition: color var(--fw-dur) var(--fw-ease-out); }
 .fw-nav__item:hover { color: #fff; font-weight: 700; border-bottom-color: rgb(255 255 255 / .35); transform: scale(1.1); }
 .fw-nav__item:hover svg { color: #fff; }
-.fw-nav__item[aria-current="page"] { color: #fff; font-weight: 700; border-bottom-color: var(--fw-leaf); }
-.fw-nav__item[aria-current="page"] svg { color: var(--fw-leaf); }
+.fw-nav__item[aria-current="page"] {
+  color: #fff; font-weight: 700; border-bottom-color: transparent;
+  background: var(--ac-sidebar-active); border-radius: var(--ac-radius-sm);
+}
+/* The active item is marked three ways — a bar, the icon and the weight — so
+ * it never depends on colour alone (WCAG 1.4.1). */
+.fw-nav__item[aria-current="page"]::before {
+  content: ""; position: absolute; left: calc(var(--fw-space-10) * -1); top: 50%;
+  transform: translateY(-50%); width: 3px; height: 18px; border-radius: 2px;
+  background: var(--ac-sidebar-marker);
+}
+.fw-nav__item[aria-current="page"] svg { color: var(--ac-sidebar-marker); }
 
 .fw-profile { display: flex; align-items: center; gap: var(--fw-space-8); padding-top: var(--fw-space-16); border-top: 1px solid rgb(255 255 255 / .16); }
 .fw-side .fw-avatar {
@@ -357,8 +368,16 @@
 .fw-repair h2 { font-family: var(--fw-display); font-size: var(--fw-text-lg); font-weight: 600; line-height: 1.3; }
 .fw-repair--ready { border-color: var(--fw-accent); background: var(--fw-accent-soft); }
 .fw-repair__list { display: grid; gap: var(--fw-space-12); margin: 0; padding: 0; list-style: none; }
-.fw-repair__item { display: grid; gap: var(--fw-space-6); padding: var(--fw-space-12) var(--fw-space-16); border-left: 3px solid var(--fw-amber); border-radius: var(--fw-radius); background: var(--fw-paper); }
-.fw-repair__item.is-limit { border-left-color: var(--fw-rule-3); }
+/* Missing data is attention; an unverified factor is information. The tint
+ * carries its paired ink and a border, so the meaning survives greyscale. */
+.fw-repair__item {
+  display: grid; gap: var(--fw-space-6); padding: var(--fw-space-12) var(--fw-space-16);
+  border: 1px solid var(--role-line, var(--fw-rule)); border-left-width: 3px;
+  border-radius: var(--ac-radius); background: var(--role-bg, var(--fw-paper));
+  color: var(--role-ink, var(--fw-ink));
+}
+.fw-repair__item p, .fw-repair__item h3, .fw-repair__item .fw-repair__status { color: inherit; }
+.fw-repair__item .fw-repair__records { color: inherit; }
 .fw-repair__item h3 { font-size: 15px; font-weight: 650; }
 .fw-repair__item > p { color: var(--fw-muted); font-size: var(--fw-text-sm); max-width: var(--fw-measure); }
 .fw-repair__status { display: flex; align-items: center; gap: var(--fw-space-6); font-size: var(--fw-text-xs); font-weight: 650; color: var(--fw-ink-2); text-transform: uppercase; letter-spacing: .02em; }
@@ -797,6 +816,7 @@
 .fw-farm__go:focus-visible { outline: none; }
 .fw-farm:has(.fw-farm__go:focus-visible) { outline: 2px solid var(--fw-focus); outline-offset: 2px; }
 .fw-area-attn, .fw-area-perf, .fw-area-recs, .fw-area-journal, .fw-area-cv { min-width: 0; }
+.fw-home-top { display: contents; }
 
 /* The Home reading order is deliberate (§2): what is running → what to record
  * → is the data sound → anything to notice → what I did lately. Two columns on
@@ -815,6 +835,14 @@
   .fw-topbar { padding: 0 var(--fw-space-24); }
   .fw-grid-2, .fw-home-grid { grid-template-columns: minmax(0, 1fr); gap: var(--fw-space-32); }
   .fw-home-col { display: contents; }
+  /* The single instruction for today must not sit below a full-height season
+   * card on a 390px screen: on phones the context line comes first, then the
+   * action, then the card. `order` and not `column-reverse`, because the hero
+   * is a fragment and reversing would send its context line to the bottom. */
+  .fw-home-top { display: flex; flex-direction: column; }
+  .fw-home-top > * { order: 3; }
+  .fw-home-top > .fw-ctxbar { order: 1; }
+  .fw-home-top > .fw-next { order: 2; }
   .fw-area-perf { order: 1; } .fw-area-attn { order: 2; } .fw-area-journal { order: 3; }
   .fw-area-recs { order: 4; } .fw-area-cv { order: 5; }
   .fw-ledger__top { grid-template-columns: minmax(0, 1fr); }
@@ -851,16 +879,22 @@
   .fw-cvhist__item { grid-template-columns: auto minmax(0, 1fr) auto; }
   .fw-cvhist__item .fw-conf { display: none; }
   .fw-ws-head__facts { gap: var(--fw-space-12) var(--fw-space-24); }
-  /* True 5-item bottom navigation — same navbar blue as the desktop sidebar. */
+  /* Six destinations on one row — a bar that wraps to two rows eats a sixth of
+   * a phone screen and stops reading as a bar. The labels are short for the
+   * same reason; the sidebar keeps the full ones. */
   .fw-bottom {
     position: fixed; z-index: 40; left: 0; right: 0; bottom: 0;
-    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-    padding: var(--fw-space-4) var(--fw-space-4) calc(var(--fw-space-4) + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    padding: var(--fw-space-4) 2px calc(var(--fw-space-4) + env(safe-area-inset-bottom));
     background: linear-gradient(180deg, var(--fw-navbar), var(--fw-navbar-2)); border-top: 1px solid rgb(255 255 255 / .12);
   }
-  .fw-bottom a { display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 54px; padding: var(--fw-space-4) 2px; color: rgb(255 255 255 / .62); text-decoration: none; font-size: 11px; font-weight: 600; }
-  .fw-bottom__ico { display: grid; place-items: center; height: 24px; }
-  .fw-bottom__ico svg { width: 21px; height: 21px; }
+  .fw-bottom a {
+    display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 52px;
+    padding: var(--fw-space-4) 1px; color: rgb(255 255 255 / .62); text-decoration: none;
+    font-size: 10px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap;
+  }
+  .fw-bottom__ico { display: grid; place-items: center; height: 22px; }
+  .fw-bottom__ico svg { width: 20px; height: 20px; }
   .fw-bottom a[aria-current="page"] { color: #fff; font-weight: 700; }
   .fw-bottom a[aria-current="page"] .fw-bottom__ico { border-bottom: 2px solid var(--fw-leaf); }
   .fw-overlay { padding: 0; align-items: flex-end; }
@@ -907,3 +941,114 @@
 .fw-destroy { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; justify-self: start; }
 .fw-destroy:hover { color: var(--fw-danger); }
 .fw-detail__actions { align-items: center; }
+
+/* =========================================================================
+   Hybrid surface — season context · ONE next action · summary · cost
+   Pastel is background only; every tint carries its paired ink and a hairline
+   so a tint is never the only signal (WCAG 1.4.1).
+   ========================================================================= */
+.fw-role--positive { --role-bg: var(--ac-role-positive-bg); --role-ink: var(--ac-role-positive-ink); --role-line: var(--ac-role-positive-line); }
+.fw-role--water { --role-bg: var(--ac-role-water-bg); --role-ink: var(--ac-role-water-ink); --role-line: var(--ac-role-water-line); }
+.fw-role--attention { --role-bg: var(--ac-role-attention-bg); --role-ink: var(--ac-role-attention-ink); --role-line: var(--ac-role-attention-line); }
+.fw-role--error { --role-bg: var(--ac-role-error-bg); --role-ink: var(--ac-role-error-ink); --role-line: var(--ac-role-error-line); }
+.fw-role--info { --role-bg: var(--ac-role-info-bg); --role-ink: var(--ac-role-info-ink); --role-line: var(--ac-role-info-line); }
+.fw-role--neutral { --role-bg: var(--fw-paper-2); --role-ink: var(--fw-ink-2); --role-line: var(--fw-rule); }
+
+.fw-role-badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px;
+  border-radius: 999px; font-size: var(--fw-text-xs); font-weight: 650;
+  background: var(--role-bg); color: var(--role-ink); border: 1px solid var(--role-line);
+}
+.fw-role-badge svg { width: 14px; height: 14px; }
+
+/* -- season context row --------------------------------------------------- */
+.fw-ctxbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-8) var(--fw-space-16);
+  padding-bottom: var(--fw-space-10); border-bottom: 1px solid var(--fw-rule);
+}
+.fw-ctxbar__place, .fw-ctxbar__season { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-8) var(--fw-space-12); margin: 0; }
+.fw-ctxbar__place span, .fw-ctxbar__days { display: inline-flex; align-items: center; gap: 6px; color: var(--fw-muted); font-size: var(--fw-text-sm); }
+.fw-ctxbar__place svg, .fw-ctxbar__days svg { width: 15px; height: 15px; }
+.fw-ctxbar__season b { font-size: var(--fw-text-md); font-weight: 700; color: var(--fw-ink); }
+.fw-ctxbar__season a { text-decoration: none; }
+.fw-ctxbar__season a:hover b { text-decoration: underline; }
+.fw-ctxbar .fw-role--positive {
+  padding: 2px 9px; border-radius: 999px; font-size: var(--fw-text-xs); font-weight: 650;
+  background: var(--role-bg); color: var(--role-ink); border: 1px solid var(--role-line);
+}
+
+/* -- the one next action -------------------------------------------------- */
+.fw-next {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+  gap: var(--fw-space-16); padding: var(--fw-space-20) var(--fw-space-24);
+  background: var(--role-bg); border: 1px solid var(--role-line); border-radius: var(--ac-radius-lg);
+}
+.fw-next--sk { grid-template-columns: auto minmax(0, 1fr); background: var(--fw-paper-2); border-color: var(--fw-rule); }
+.fw-next__ico { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--ac-radius); background: rgb(255 255 255 / .62); color: var(--role-ink); }
+.fw-next__ico svg { width: 22px; height: 22px; }
+.fw-next__text h2 { margin: 0; font-family: var(--fw-display); font-size: var(--fw-text-xl); font-weight: 600; color: var(--role-ink); }
+.fw-next__text p { margin: 2px 0 0; font-size: var(--fw-text-sm); color: var(--role-ink); opacity: .86; }
+.fw-next__cta { min-height: var(--ac-control-h); }
+@media (max-width: 640px) {
+  .fw-next { grid-template-columns: auto minmax(0, 1fr); }
+  .fw-next__cta { grid-column: 1 / -1; justify-content: center; }
+}
+
+/* -- season summary tiles -------------------------------------------------- */
+.fw-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--fw-space-12); }
+.fw-summary__item {
+  display: grid; gap: 4px; align-content: start; padding: var(--fw-space-12) var(--fw-space-16);
+  background: var(--role-bg); border: 1px solid var(--role-line); border-radius: var(--ac-radius);
+  min-height: 92px;
+}
+.fw-summary__label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fw-text-xs); font-weight: 650; color: var(--role-ink); }
+.fw-summary__label svg { width: 15px; height: 15px; }
+.fw-summary__value { font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--role-ink); font-variant-numeric: tabular-nums; }
+.fw-summary__value small { display: block; font-size: var(--fw-text-xs); font-weight: 600; opacity: .8; }
+.fw-summary__value.is-empty { font-size: var(--fw-text-sm); font-weight: 650; }
+.fw-summary__note { font-size: var(--fw-text-xs); color: var(--role-ink); opacity: .85; }
+
+/* -- cost: its own block, away from Carbon --------------------------------- */
+.fw-cost {
+  display: grid; gap: 4px; margin-top: var(--fw-space-12); padding: var(--fw-space-12) var(--fw-space-16);
+  border: 1px dashed var(--fw-rule-2); border-radius: var(--ac-radius); background: var(--fw-paper-2);
+}
+.fw-cost__label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fw-text-xs); font-weight: 650; color: var(--fw-muted); }
+.fw-cost__label svg { width: 15px; height: 15px; }
+.fw-cost__value { font-size: 20px; font-weight: 700; color: var(--fw-ink); font-variant-numeric: tabular-nums; }
+.fw-cost__value small { font-size: var(--fw-text-xs); font-weight: 600; color: var(--fw-muted); margin-left: 4px; }
+.fw-cost__value.is-empty { font-size: var(--fw-text-sm); color: var(--fw-muted); }
+.fw-cost__note { margin: 0; font-size: var(--fw-text-xs); color: var(--fw-muted); max-width: 70ch; }
+.fw-cost__note b { color: var(--fw-ink-2); }
+
+/* -- record flow: three steps, stated ------------------------------------- */
+.fw-record { display: grid; gap: var(--fw-space-12); padding: var(--fw-space-16) 0; border-bottom: 1px solid var(--fw-rule); }
+.fw-record__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--fw-space-12); }
+.fw-record__head h2 { margin: 0; font-family: var(--fw-display); font-size: var(--fw-text-lg); font-weight: 600; }
+.fw-steps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-8); margin: 0 0 var(--fw-space-4); padding: 0; list-style: none; }
+.fw-steps__item { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fw-text-xs); font-weight: 600; color: var(--fw-muted); }
+.fw-steps__item + .fw-steps__item::before { content: ""; width: 18px; height: 1px; background: var(--fw-rule-2); margin-right: 2px; }
+.fw-steps__n {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px;
+  background: var(--fw-paper-3); color: var(--fw-ink-2); font-size: 12px; font-weight: 700;
+  border: 1px solid var(--fw-rule-2);
+}
+.fw-steps__n svg { width: 13px; height: 13px; }
+.fw-steps__item.is-current { color: var(--fw-ink); }
+.fw-steps__item.is-current .fw-steps__n { background: var(--ac-role-info-bg); border-color: var(--ac-role-info-line); color: var(--ac-role-info-ink); }
+.fw-steps__item.is-done .fw-steps__n { background: var(--ac-role-positive-bg); border-color: var(--ac-role-positive-line); color: var(--ac-role-positive-ink); }
+.fw-steps__item.is-done { color: var(--ac-role-positive-ink); }
+
+.fw-repair--ready.fw-role {
+  background: var(--role-bg); border: 1px solid var(--role-line); color: var(--role-ink);
+  border-radius: var(--ac-radius-lg);
+}
+.fw-repair--ready.fw-role h2, .fw-repair--ready.fw-role .fw-repair__status { color: inherit; }
+.fw-restale {
+  display: flex; align-items: flex-start; gap: var(--fw-space-8); margin: 0 0 var(--fw-space-12);
+  padding: var(--fw-space-12) var(--fw-space-16); border-radius: var(--ac-radius);
+  background: var(--role-bg); border: 1px solid var(--role-line); color: var(--role-ink);
+  font-size: var(--fw-text-sm);
+}
+.fw-restale svg { width: 18px; height: 18px; flex: none; }
+.fw-source span small { display: block; font-size: var(--fw-text-xs); color: var(--fw-muted); font-variant-numeric: tabular-nums; }

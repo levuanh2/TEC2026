@@ -99,8 +99,8 @@
 
   /* navbar — sidebar/bottom-nav ground, requested as a solid brand blue,
      an explicit carve-out from the paper-only shell below. */
-  --fw-navbar: #0d3c78;
-  --fw-navbar-2: #0a2f5e;
+  --fw-navbar: var(--ac-sidebar);
+  --fw-navbar-2: var(--ac-sidebar-2);
 
   /* quick-entry tiles — one pastel per operation, requested left-to-right
      to match the six-verb row order (seeding → fertilizer → irrigation →

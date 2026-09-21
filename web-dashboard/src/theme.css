@@ -20,8 +20,8 @@
    ========================================================================= */
 :root {
   /* --- ground & surfaces ------------------------------------------------ */
-  --ac-paper: oklch(97.2% 0.005 165);      /* Farmer's sheet — the lightest ground */
-  --ac-ground: oklch(96.2% 0.006 165);     /* Management's desk */
+  --ac-paper: oklch(97.6% 0.005 80);       /* Farmer's sheet — warm off-white */
+  --ac-ground: oklch(96.4% 0.006 80);      /* Management's desk — same family, a step down */
   --ac-subtle: oklch(94.5% 0.007 165);     /* recessed band, table zebra, inert fill */
   --ac-band: oklch(92.5% 0.008 165);       /* hover / pressed / deeper band */
   --ac-elevated: oklch(99.5% 0.003 165);   /* the sheet content sits on */
@@ -60,6 +60,48 @@
   --ac-straw: oklch(48% 0.09 85);
   --ac-leaf: oklch(48% 0.12 140);
   --ac-carbon: oklch(42% 0.05 195);
+
+  /* --- institutional green: the left navigation only ---------------------
+         TDMU green anchors the app in the sidebar and nowhere else. The
+         workspace never gets a dark green panel: content stays on light,
+         warm paper so Vietnamese text at 14-15px keeps its contrast. ------- */
+  --ac-sidebar: oklch(31% 0.068 160);
+  --ac-sidebar-2: oklch(25.5% 0.055 161);
+  --ac-sidebar-ink: oklch(99% 0.004 165);
+  --ac-sidebar-ink-2: oklch(88% 0.02 160);
+  --ac-sidebar-rule: oklch(42% 0.06 160);
+  --ac-sidebar-active: oklch(38% 0.085 160);
+  --ac-sidebar-marker: oklch(78% 0.16 140);
+
+  /* --- warm off-white workspace ----------------------------------------- */
+  --ac-workspace: oklch(97.6% 0.005 80);
+
+  /* --- semantic roles. Pastel is a BACKGROUND only; every pastel has a
+         paired ink dark enough to read on it, and a border for the times a
+         tint alone would be the only signal. Never use a pastel as text. --- */
+  --ac-role-positive-bg: #E2F0CB;   /* healthy, completed, crop, positive */
+  --ac-role-positive-ink: #294B16;
+  --ac-role-positive-line: #B9D394;
+  --ac-role-water-bg: #B5EAD7;      /* water, resource efficiency, environment */
+  --ac-role-water-ink: #14564A;
+  --ac-role-water-line: #86CDB6;
+  --ac-role-attention-bg: #FFDAC1;  /* attention, incomplete, upcoming */
+  --ac-role-attention-ink: #70401D;
+  --ac-role-attention-line: #EAB68D;
+  --ac-role-error-bg: #FFB7B2;      /* error, blocker */
+  --ac-role-error-bg-strong: #FF9AA2;
+  --ac-role-error-ink: #742B31;
+  --ac-role-error-line: #E99089;
+  --ac-role-info-bg: #C7CEEA;       /* information, methodology, neutral */
+  --ac-role-info-ink: #33406A;
+  --ac-role-info-line: #A3ADD8;
+
+  /* --- geometry: 8-12px radii, a 4/8 spacing rhythm, 44px controls ------- */
+  --ac-radius-sm: 8px;
+  --ac-radius: 10px;
+  --ac-radius-lg: 12px;
+  --ac-control-h: 44px;
+  --ac-control-h-sm: 40px;
 
   /* --- type ------------------------------------------------------------- */
   --ac-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;

@@ -227,6 +227,29 @@ const DATE_LABEL: Record<SupportedActivityType, string> = {
   pesticide: 'Ngày phun', straw_management: 'Ngày xử lý', fertilizer: 'Ngày bón',
 }
 
+/** Where the farmer is in the three steps of recording one activity.
+ *
+ * The steps are the real ones — the type was picked to open this sheet (1),
+ * the essential fields are being filled (2), and saving is the confirmation
+ * (3). Nothing here adds a screen; it tells the farmer how much is left. */
+export function ActivitySteps({ current }: { current: 1 | 2 | 3 }) {
+  const steps = ['Chọn hoạt động', 'Nhập thông tin', 'Xác nhận'] as const
+  return (
+    <ol className="fw-steps" aria-label="Các bước ghi hoạt động">
+      {steps.map((label, i) => {
+        const n = (i + 1) as 1 | 2 | 3
+        const state = n < current ? 'done' : n === current ? 'current' : 'todo'
+        return (
+          <li key={label} className={`fw-steps__item is-${state}`} aria-current={state === 'current' ? 'step' : undefined}>
+            <span className="fw-steps__n" aria-hidden="true">{state === 'done' ? <Ico name="check" /> : n}</span>
+            <span className="fw-steps__label">{label}</span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
 /* --------------------------------------------------------- the form sheet */
 
 export function ActivitySheetForm({ mode, activityType, season, activity, revealMore = false, onClose, onSaved }: {
@@ -476,6 +499,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
   return (
     <FarmerSheet title={TITLES[activityType][mode]} subtitle={season.label} icon={look.icon} tone={look.tone} onClose={onClose} busy={pending}>
       <form className="activity-form" ref={formRef} onSubmit={handleSubmit} noValidate>
+        {mode === 'create' && <ActivitySteps current={pending ? 3 : 2} />}
         {/* The field note's head: which season this is written to, and when it
           * happened. No farmer should have to wonder about the target, and the
           * date is a first-class row rather than a section of its own. */}

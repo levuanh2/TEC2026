@@ -4,6 +4,9 @@ export type RouteName =
   | 'organizations'
   | 'performance'
   | 'farms'
+  | 'seasons'
+  | 'data-gaps'
+  | 'ops-carbon'
   | 'farm'
   | 'plot'
   | 'season'
@@ -22,6 +25,11 @@ export function routeName(path: string): RouteName {
   if (path === '/organizations') return 'organizations'
   if (path === '/performance') return 'performance'
   if (path === '/farms') return 'farms'
+  // Management entry points into the season workspace. The per-season URLs
+  // (/crop-seasons/:id/...) are unchanged and still resolve below.
+  if (path === '/seasons') return 'seasons'
+  if (path === '/data-gaps') return 'data-gaps'
+  if (path === '/carbon') return 'ops-carbon'
   if (/^\/farms\/[^/]+$/.test(path)) return 'farm'
   if (/^\/plots\/[^/]+$/.test(path)) return 'plot'
   if (/^\/crop-seasons\/[^/]+\/carbon$/.test(path)) return 'carbon'

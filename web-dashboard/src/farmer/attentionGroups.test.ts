@@ -93,6 +93,21 @@ describe('Carbon message uses the server-named missing input', () => {
     expect(carbon.body).toContain('Thiếu số ngày canh tác')
   })
 
+  it('counts only what the farmer can supply, and names the factor limit apart', () => {
+    // A verified factor the set does not have is blocking, but no data entry
+    // fixes it: counting it as "missing data" sends the farmer looking for a
+    // form that does not exist.
+    const items = buildAttention(metrics(), [], [
+      missing(),
+      missing({ code: 'fuel_factor_unverified', label: 'Hệ số nhiên liệu chưa xác minh', detail: 'Bộ hệ số chưa có giá trị đã xác minh cho nhiên liệu.', flow: 'factor_unavailable', activity_type: 'fuel' }),
+    ])
+    expect(byId(items, 'carbon')!.title).toBe('Thiếu chế độ nước trước vụ')
+    const limit = byId(items, 'carbon-limit')!
+    expect(limit.tone).toBe('info')
+    expect(limit.link).toBeUndefined() // nothing to fill in
+    expect(limit.body).toContain('Không thể bổ sung bằng cách nhập dữ liệu.')
+  })
+
   it('ignores non-blocking inputs when deciding the Carbon message', () => {
     // A missing yield costs the intensity, not the calculation — it must not be
     // presented as the reason Carbon is unavailable.

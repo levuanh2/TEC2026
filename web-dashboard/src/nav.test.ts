@@ -4,7 +4,8 @@ import { buildNav } from './nav'
 describe('sidebar IA', () => {
   it('groups reflect the product domain, not the DB hierarchy', () => {
     const labels = buildNav('cooperative_manager', []).map((g) => g.label)
-    expect(labels).toEqual([undefined, 'Quản lý', 'Hiệu suất', 'MRV'])
+    // Operations IA: the work comes first (Quản lý), then results, then MRV.
+    expect(labels).toEqual([undefined, 'Quản lý', 'Hiệu suất', 'MRV', 'Khác'])
   })
 
   it('a farmer never sees the MRV group', () => {
