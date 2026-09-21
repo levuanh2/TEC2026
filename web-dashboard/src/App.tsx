@@ -6,7 +6,7 @@ import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
 import { Ico } from './icons'
 import { routeName, routeParam } from './routes'
-import { buildNav, type ContextLink } from './nav'
+import { buildNav } from './nav'
 import { go, Link, Notice } from './ui'
 import { DashboardPage } from './pages/dashboard'
 import { OrganizationsPage, FarmsPage, FarmPage, PlotPage } from './pages/directory'
@@ -75,34 +75,31 @@ function Login({ done }: { done: (s: Session) => void }) {
 function AppShell({ session, viewer, path, children }: { session: Session | null; viewer: CurrentUser; path: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [orgName, setOrgName] = useState<string | null>(null)
+  /* "Chưa gán tổ chức" is a statement of fact about the account, so it must
+   * not appear while the organisation's name is merely still being read —
+   * which is what the audit saw for the first seconds of every load. The two
+   * cases are now distinct: no organisation at all, versus one whose name has
+   * not arrived yet. */
+  const [orgLoading, setOrgLoading] = useState(Boolean(viewer.organizationId))
 
   useEffect(() => {
     if (!viewer.organizationId) {
       setOrgName(null)
+      setOrgLoading(false)
       return
     }
     let alive = true
+    setOrgLoading(true)
     void getOrganization(viewer.organizationId)
       .then((o) => alive && setOrgName(o.name))
       .catch(() => alive && setOrgName(null))
+      .finally(() => { if (alive) setOrgLoading(false) })
     return () => {
       alive = false
     }
   }, [viewer.organizationId])
 
-  const context = useMemo<ContextLink[]>(() => {
-    const id = routeParam(path)
-    if (!id) return []
-    if (path.startsWith('/plots/')) return [{ to: `/plots/${id}`, label: 'Thửa ruộng', group: 'Quản lý' }]
-    if (path.startsWith('/crop-seasons/'))
-      return [
-        { to: `/crop-seasons/${id}`, label: 'Vụ canh tác', group: 'Quản lý' },
-        { to: `/crop-seasons/${id}/carbon`, label: 'Carbon vụ', group: 'Hiệu suất' },
-      ]
-    return []
-  }, [path])
-
-  const groups = buildNav(viewer.role, context)
+  const groups = buildNav(viewer.role)
   const email = session?.user.email ?? 'Chế độ demo'
 
   return (
@@ -158,7 +155,9 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
               <Ico name="menu" size={20} />
             </button>
             <span className="org-chip">
-              {orgName ?? 'Chưa gán tổ chức'}
+              {orgLoading
+                ? <span className="skeleton" style={{ display: 'inline-block', width: 168, height: 13, borderRadius: 5 }} aria-label="Đang tải tổ chức" />
+                : orgName ?? (viewer.organizationId ? 'Không đọc được tên tổ chức' : 'Chưa gán tổ chức')}
               {orgName && <small> · phạm vi hiện tại</small>}
             </span>
           </div>

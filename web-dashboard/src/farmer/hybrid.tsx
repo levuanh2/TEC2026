@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { CarbonReadiness } from '../api/carbon'
+import { carbonView } from '../carbon/readiness'
 import type { SeasonMetrics } from '../api/metrics'
 import { daysSince, ha } from '../format'
 import type { Activity } from '../types'
@@ -70,13 +71,14 @@ export function nextAction(input: {
   today?: string
 }): NextAction | null {
   if (!input.hasSeason || !input.canWrite) return null
-  const blocking = input.readiness?.missing_inputs.filter((m) => m.blocking) ?? []
-  const fixable = blocking.filter((m) => m.flow !== 'factor_unavailable')
-  if (fixable.length) {
+  // Same grouping as Management and the Carbon screen: an unverified factor is
+  // never counted as something the farmer forgot to type in.
+  const view = carbonView({ readiness: input.readiness })
+  if (view.userFixableGaps.length) {
     return {
       kind: 'fix-data',
       title: 'Bổ sung dữ liệu còn thiếu',
-      body: `Còn ${fixable.length} thông tin để tính phát thải cho vụ này.`,
+      body: `Còn ${view.userFixableGaps.length} thông tin để tính phát thải cho vụ này.`,
       cta: 'Bổ sung ngay',
     }
   }
@@ -90,7 +92,7 @@ export function nextAction(input: {
       cta: 'Ghi hoạt động',
     }
   }
-  if (input.readiness?.can_calculate && !input.hasCarbonResult) {
+  if (view.isReady && !input.hasCarbonResult) {
     return {
       kind: 'calculate',
       title: 'Tính Carbon cho vụ này',
@@ -145,18 +147,20 @@ export function SummaryStrip({ activities, metrics, readiness, loading }: {
   }
   const m = metrics.data
   const count = activities.data?.length ?? 0
-  const blocking = readiness.data?.missing_inputs.filter((x) => x.blocking) ?? []
-  // Count what the farmer can actually supply, exactly as the primary action
-  // does; an unverified factor is named separately, never as "missing data".
-  const fixable = blocking.filter((x) => x.flow !== 'factor_unavailable').length
-  const limits = blocking.length - fixable
+  // The one view model, so this tile cannot say "Sẵn sàng tính" while the
+  // Carbon screen next door says a factor is missing.
+  const view = carbonView({
+    readiness: readiness.data,
+    hasResult: m?.co2ePerKg != null,
+  })
+  const fixable = view.userFixableGaps.length
+  const limits = view.methodologyLimitations.length
+  const TONE: Record<string, Role> = {
+    attention: 'attention', methodology: 'info', info: 'water', positive: 'positive', neutral: 'neutral',
+  }
   const carbon: { label: string; role: Role } = readiness.loading
     ? { label: 'Đang kiểm tra', role: 'neutral' }
-    : m?.co2ePerKg != null
-      ? { label: 'Đã tính', role: 'positive' }
-      : readiness.data?.can_calculate
-        ? { label: 'Sẵn sàng tính', role: 'info' }
-        : { label: 'Chưa sẵn sàng', role: 'attention' }
+    : { label: view.label, role: TONE[view.tone] ?? 'neutral' }
   return (
     <div className="fw-summary">
       <Tile role="positive" icon="journal" label="Hoạt động đã ghi" value={`${count}`} unit="hoạt động" />

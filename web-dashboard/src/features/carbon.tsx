@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { ApiError } from '../api/client'
 import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '../api/carbon'
 import { num, kg, perKg, dateTime } from '../format'
-import { Async, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
+import { Async, Badge, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
+import { useCarbonView } from '../carbon/useCarbonView'
 
 const SCENARIOS: { value: Scenario; label: string }[] = [
   { value: 'as_recorded', label: 'Theo ghi nhận' },
@@ -12,6 +13,10 @@ const SCENARIOS: { value: Scenario; label: string }[] = [
 ]
 
 const FACTOR_GAP_CODES = new Set(['missing_emission_factor', 'factor_set_not_imported'])
+
+/** Semantic tone → the pastel role class in styles.css. */
+const toneClass = (tone: string) =>
+  tone === 'methodology' ? 'methodology' : tone === 'attention' ? 'attention' : tone === 'positive' ? 'positive' : tone === 'info' ? 'water' : 'neutral'
 
 function sourceLabel(source: string): string {
   const s = source.toLowerCase()
@@ -40,6 +45,13 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
   const [scenario, setScenario] = useState<Scenario>('as_recorded')
   const state = useAsync(() => getCarbon(id, scenario), [id, scenario])
   const [recalc, setRecalc] = useState<{ busy: boolean; error?: string }>({ busy: false })
+  /* The same readiness answer the Farmer sees and the Carbon list shows. This
+   * panel used to consult nothing at all: it offered "Tính lại theo kịch bản"
+   * for every season, including ones whose factor set cannot produce a number,
+   * so the button's only possible outcome was an error. */
+  const readiness = useCarbonView(id, { resultTarget: `/crop-seasons/${id}/carbon` })
+  const view = readiness.view
+  const blocked = Boolean(view && !view.isReady && view.calculationStatus !== 'calculated' && view.calculationStatus !== 'stale')
 
   async function recalculate() {
     setRecalc({ busy: true })
@@ -72,11 +84,36 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
             {/* Persisting a calculation needs write authority on the crop (B4);
               * read-only management roles only view results. */}
             {canRecalculate && (
-              <button className="btn btn--ghost" onClick={recalculate} disabled={recalc.busy || state.loading}>
+              <button
+                className="btn btn--ghost"
+                onClick={recalculate}
+                // Error prevention: an action that cannot succeed is disabled
+                // before it is pressed, and says why.
+                disabled={recalc.busy || state.loading || readiness.loading || blocked}
+                title={blocked && view ? view.detail : undefined}
+              >
                 {recalc.busy ? 'Đang tính…' : 'Tính lại theo kịch bản'}
               </button>
             )}
           </div>
+
+          {/* One readiness statement, identical in wording to every other
+            * Carbon surface, above the result it explains. */}
+          {view && !readiness.loading && (
+            <div className={`carbon-readiness role--${toneClass(view.tone)}`}>
+              <Badge tone={view.tone === 'positive' ? 'success' : view.tone === 'attention' ? 'warning' : 'neutral'}>
+                <Ico name={view.icon === 'check' ? 'check' : view.icon === 'warning' ? 'warning' : 'info'} size={13} />{view.label}
+              </Badge>
+              <p>{view.detail}</p>
+              {view.userFixableGaps.length > 0 && (
+                <ul>{view.userFixableGaps.map((g) => <li key={g.code}><b>{g.label}</b> — {g.detail}</li>)}</ul>
+              )}
+              {view.methodologyLimitations.length > 0 && (
+                <ul>{view.methodologyLimitations.map((g) => <li key={g.code}><b>{g.label}</b> — {g.detail}</li>)}</ul>
+              )}
+            </div>
+          )}
+
           {recalc.error && <Notice kind="warning">{recalc.error}</Notice>}
 
           <CarbonBody state={state} canRecalculate={canRecalculate} />

@@ -597,6 +597,10 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .role--error { --role-bg: var(--ac-role-error-bg); --role-ink: var(--ac-role-error-ink); --role-line: var(--ac-role-error-line); }
 .role--info { --role-bg: var(--ac-role-info-bg); --role-ink: var(--ac-role-info-ink); --role-line: var(--ac-role-info-line); }
 .role--neutral { --role-bg: var(--ac-subtle); --role-ink: var(--text-secondary); --role-line: var(--border); }
+/* A methodology/factor limitation is lavender (#C7CEEA), the same tint as
+   `info`. It has its own name so a call site reads as what it means, and so
+   the two can diverge later without hunting for every usage. */
+.role--methodology { --role-bg: var(--ac-role-info-bg); --role-ink: var(--ac-role-info-ink); --role-line: var(--ac-role-info-line); }
 
 .ops { display: grid; gap: 18px; align-content: start; }
 .ops__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
@@ -681,3 +685,17 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .ops-table td[data-label="Nông hộ / Vụ mùa"] small { white-space: nowrap; }
   .ops-table td .btn { margin-top: 4px; }
 }
+
+/* One readiness statement, shared by the season Carbon tab and the season hub.
+   Pastel background, ink text — the pastel is never used as a text colour. */
+.carbon-readiness {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--role-line, var(--border));
+  border-radius: 10px;
+  background: var(--role-bg, var(--ac-subtle));
+  color: var(--text-primary);
+}
+.carbon-readiness p { margin: 0; font-size: var(--fs-sm); }
+.carbon-readiness ul { margin: 2px 0 0; padding-left: 18px; font-size: var(--fs-caption); display: grid; gap: 4px; }

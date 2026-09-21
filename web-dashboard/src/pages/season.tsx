@@ -1,10 +1,13 @@
 import { Ico } from '../icons'
+import { useCarbonView } from '../carbon/useCarbonView'
+import { label, seasonStatus } from '../vocab'
 import { getCropSeason, getActivities, getProductionBatches } from '../api/crops'
 import { getPlot } from '../api/farms'
 import { getResourceMetrics } from '../api/metrics'
 import { ha, kg, date, perKg } from '../format'
 import {
   Async,
+  Badge,
   Breadcrumb,
   DataTable,
   DL,
@@ -78,7 +81,7 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
                 <>
                   {plot ? plot.name : 'Thửa —'} · <b>{plot?.areaHa == null ? '—' : ha(plot.areaHa)}</b>
                 </>,
-                <>Trạng thái: {season.status ?? '—'}</>,
+                <>Trạng thái: {seasonStatus(season.status)}</>,
               ]}
               actions={
                 <button className="btn" onClick={() => go(`${base}/carbon`)}>
@@ -151,7 +154,6 @@ function Overview({
 }) {
   const m = metrics.data
   const acts = activities.data ?? []
-  const hasHarvest = acts.some((a) => a.type === 'harvest') || m?.yieldKg != null
 
   return (
     <div className="stack">
@@ -191,17 +193,12 @@ function Overview({
           </button>
         </div>
 
-        <div className="card card--pad stack">
-          <span className="kpi__label">Bước tiếp theo</span>
-          <p style={{ fontSize: 'var(--fs-sm)' }}>
-            {!hasHarvest
-              ? 'Chưa có bản ghi thu hoạch — CO₂e/kg và chi phí/kg sẽ tính được sau khi nhập sản lượng.'
-              : 'Đã đủ dữ liệu vụ. Chạy Carbon Engine để xem phát thải và chuẩn bị hồ sơ MRV.'}
-          </p>
-          <button className="btn btn--ghost" onClick={() => go(`${base}/carbon`)}>
-            Mở màn hình Carbon <Ico name="arrow" size={14} />
-          </button>
-        </div>
+        {/* "Bước tiếp theo" used to be decided by whether a harvest record
+          * existed, which is how this card came to say "Đã đủ dữ liệu vụ"
+          * about a season whose Carbon screen was naming a missing straw
+          * input and an unverified fuel factor. It now reads from the same
+          * view model as every other Carbon surface. */}
+        <CarbonNextStep seasonId={season.id} base={base} />
       </div>
 
       {(batches.data?.length ?? 0) > 0 && (
@@ -212,7 +209,7 @@ function Overview({
             columns={[
               { label: 'Mã lô', render: (b) => <span className="col-key">{b.batchCode}</span> },
               { label: 'Tên', render: (b) => b.name ?? '—' },
-              { label: 'Trạng thái', render: (b) => b.status },
+              { label: 'Trạng thái', render: (b) => label('cropStatus', b.status) },
               { label: 'Bắt đầu', render: (b) => date(b.startedOn) },
             ]}
           />
@@ -260,12 +257,50 @@ function SeasonMrv({ batches }: { batches: Batches }) {
           rowKey={(b) => b.id}
           columns={[
             { label: 'Mã lô', render: (b) => <span className="col-key">{b.batchCode}</span> },
-            { label: 'Trạng thái', render: (b) => b.status },
+            { label: 'Trạng thái', render: (b) => label('cropStatus', b.status) },
             { label: 'Bắt đầu', render: (b) => date(b.startedOn) },
             { label: 'Kết thúc', render: (b) => date(b.closedOn) },
           ]}
         />
       )}
     </Section>
+  )
+}
+
+
+/** What this season actually needs next, from the one shared Carbon view.
+ *
+ * Shows the same wording as the Carbon tab, the Carbon list and the Farmer's
+ * own screen, and offers an action only when that action can succeed. */
+function CarbonNextStep({ seasonId, base }: { seasonId: string; base: string }) {
+  const { view, loading } = useCarbonView(seasonId, {
+    fixTarget: base,
+    resultTarget: `${base}/carbon`,
+  })
+  return (
+    <div className="card card--pad stack">
+      <span className="kpi__label">Bước tiếp theo</span>
+      {loading || !view ? (
+        <p className="skeleton sk-line" style={{ height: 16, width: '80%' }} aria-label="Đang đọc trạng thái Carbon" />
+      ) : (
+        <>
+          <p>
+            <Badge tone={view.tone === 'positive' ? 'success' : view.tone === 'attention' ? 'warning' : 'neutral'}>
+              <Ico name={view.icon === 'check' ? 'check' : view.icon === 'warning' ? 'warning' : 'info'} size={13} />{view.label}
+            </Badge>
+          </p>
+          <p style={{ fontSize: 'var(--fs-sm)' }}>{view.detail}</p>
+          {view.userFixableGaps.length > 0 && (
+            <ul className="stack" style={{ fontSize: 'var(--fs-caption)', margin: 0, paddingLeft: 18 }}>
+              {view.userFixableGaps.map((g) => <li key={g.code}>{g.label}</li>)}
+            </ul>
+          )}
+        </>
+      )}
+      {/* One link out of this card, and only to a screen that can help. */}
+      <button className="btn btn--ghost" onClick={() => go(`${base}/carbon`)}>
+        Mở màn hình Carbon <Ico name="arrow" size={14} />
+      </button>
+    </div>
   )
 }
