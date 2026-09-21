@@ -186,6 +186,12 @@ status !== 'exported'` — **hai giá trị không hề tồn tại** trong
 | `npx vitest run` | 33 file / 245 test pass | **35 file / 298 test pass** |
 | `npm run build` | pass | **pass** (cảnh báo chunk >500 kB có sẵn từ trước) |
 | `npx playwright test redesign-qa` (thật, 2 vai trò, 4 viewport) | — | **15/15 pass** (11,1 phút) |
+| `npx playwright test web-smoke farmer-web` (mock, suite có sẵn) | 2/2 pass | **2/2 pass** |
+
+`farmer-web.spec.ts` phải sửa một assertion: nó khẳng định `.fw-ledger` — đúng
+cái hero mà brief yêu cầu bỏ. Nay kiểm tra context bar thay thế, và khẳng định
+thêm `.fw-ledger` **không còn tồn tại**. Các spec `farmer-real-*` và
+`web-real-data` vẫn tự skip khi không có `REAL_E2E=true`, không đụng tới.
 
 Test mới bắt buộc theo brief, đều có:
 

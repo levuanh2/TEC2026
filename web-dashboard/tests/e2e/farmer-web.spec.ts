@@ -17,15 +17,17 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/farmer')
   await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
-  // The Stat-Led ledger head. The figure never stands alone: it is paired with
-  // the words that say what it counts, and with the season it belongs to. (The
-  // old dark-green hero and its 'Vụ đang canh tác' eyebrow are gone.)
-  const ledger = page.locator('.fw-ledger')
-  await expect(ledger).toBeVisible()
-  await expect(ledger.getByText('ngày kể từ gieo sạ')).toBeVisible()
+  // One context bar states which season this is — farm, plot, season, status,
+  // day count and both dates. (Round 2 removed the separate ledger hero: it
+  // repeated the season a third time and its 62px day count outweighed the
+  // page's one action. The figure still never stands alone.)
+  const ctx = page.locator('.fw-ctxbar')
+  await expect(ctx).toHaveCount(1)
+  await expect(ctx.getByText('ngày kể từ gieo sạ')).toBeVisible()
+  await expect(page.locator('.fw-ledger')).toHaveCount(0)
   // Which of the two mock seasons is primary is business logic covered by the
-  // unit tests; here it only has to be one of them, rendered as the ledger head.
-  await expect(ledger.locator('#fw-hero-title')).toHaveText(/Hè Thu 2026|Thu Đông 2026/)
+  // unit tests; here it only has to be one of them, named once.
+  await expect(ctx.locator('#fw-ctxbar-season')).toHaveText(/Hè Thu 2026|Thu Đông 2026/)
 
   // V2 shell: grouped desktop nav with one icon family (SVG, no emoji glyphs).
   const nav = page.getByRole('navigation', { name: 'Điều hướng nông hộ', exact: true })
