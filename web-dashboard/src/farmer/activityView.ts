@@ -36,17 +36,32 @@ function parse(detail: string): Payload | null {
   try { const v: unknown = JSON.parse(detail); return v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null } catch { return null }
 }
 
+/** The demo seed writes English scaffolding into free-text fields — a product
+ *  called "Demo pesticide", a note reading "Demo harvest". It names the raw
+ *  activity type in English, which is exactly what a farmer must never read.
+ *
+ *  Matched narrowly, on the seeder's own shape, so a real product name or a
+ *  farmer's own note is never swallowed: only "Demo <known activity type>".
+ */
+const DEMO_PLACEHOLDER = /^demo[\s_-]+(seeding|fertilizer|irrigation|pesticide|fuel|straw[\s_-]?management|harvest|other)$/i
+export const isDemoPlaceholder = (v: string | null | undefined): boolean =>
+  typeof v === 'string' && DEMO_PLACEHOLDER.test(v.trim())
+
+/** Free text as a farmer should see it: seed scaffolding becomes a short badge. */
+export const humanText = (v: string | null | undefined): string | null =>
+  v == null || v === '' ? null : isDemoPlaceholder(v) ? 'Dữ liệu minh họa' : v
+
 export function viewActivity(activity: Pick<Activity, 'type' | 'detail'>): ActivityView {
   const title = ACTIVITY_TITLE[activity.type] ?? activity.type
   const p = parse(activity.detail)
   if (!p) return { title, value: null, meta: activity.detail ? [activity.detail] : [], note: null }
   const meta = (...items: (string | null)[]) => items.filter((x): x is string => Boolean(x))
-  const note = text(p.note)
+  const note = humanText(text(p.note))
   switch (activity.type) {
     case 'seeding':
-      return { title, value: qty(p.seed_kg, 'kg giống'), meta: meta(text(p.variety_name) && `Giống ${text(p.variety_name)}`, text(p.seeding_method), money(p.cost_vnd)), note }
+      return { title, value: qty(p.seed_kg, 'kg giống'), meta: meta(humanText(text(p.variety_name)) && `Giống ${humanText(text(p.variety_name))}`, text(p.seeding_method), money(p.cost_vnd)), note }
     case 'fertilizer':
-      return { title, value: qty(p.amount_kg, 'kg'), meta: meta(text(p.fertilizer_name) ?? text(p.fertilizer_type), toNumber(p.nitrogen_percent) != null ? `Đạm ${nf.format(toNumber(p.nitrogen_percent)!)}%` : null, money(p.total_cost_vnd)), note }
+      return { title, value: qty(p.amount_kg, 'kg'), meta: meta(humanText(text(p.fertilizer_name) ?? text(p.fertilizer_type)), toNumber(p.nitrogen_percent) != null ? `Đạm ${nf.format(toNumber(p.nitrogen_percent)!)}%` : null, money(p.total_cost_vnd)), note }
     case 'irrigation': {
       const method = text(p.water_regime) ?? text(p.irrigation_method) ?? text(p.method)
       // `duration_minutes` is a storage field, not something a farmer reads on
@@ -55,7 +70,7 @@ export function viewActivity(activity: Pick<Activity, 'type' | 'detail'>): Activ
     }
     case 'pesticide': {
       const amount = toNumber(p.amount)
-      return { title, value: amount == null ? null : `${nf.format(amount)} ${text(p.unit) ?? ''}`.trim(), meta: meta(text(p.product_name), text(p.active_ingredient), money(p.total_cost_vnd)), note }
+      return { title, value: amount == null ? null : `${nf.format(amount)} ${text(p.unit) ?? ''}`.trim(), meta: meta(humanText(text(p.product_name)), humanText(text(p.active_ingredient)), money(p.total_cost_vnd)), note }
     }
     case 'straw_management': {
       const method = text(p.management_method) ?? text(p.method)
@@ -65,7 +80,7 @@ export function viewActivity(activity: Pick<Activity, 'type' | 'detail'>): Activ
       return { title, value: qty(p.yield_kg, 'kg thóc'), meta: meta(qty(p.harvested_area_ha, 'ha'), toNumber(p.moisture_percent) != null ? `Độ ẩm ${nf.format(toNumber(p.moisture_percent)!)}%` : null, money(p.total_cost_vnd)), note }
     case 'fuel':
       // `diesel` reached the farmer's home screen before this.
-      return { title, value: qty(p.amount_liter ?? p.amount_litre, 'L'), meta: meta(text(p.fuel_type) && label('fuelType', text(p.fuel_type)), text(p.equipment_name)), note }
+      return { title, value: qty(p.amount_liter ?? p.amount_litre, 'L'), meta: meta(text(p.fuel_type) && label('fuelType', text(p.fuel_type)), humanText(text(p.equipment_name))), note }
     default:
       return { title, value: null, meta: [], note }
   }

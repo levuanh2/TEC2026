@@ -328,13 +328,23 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
                   </tr>
                 )
               })}
+              {/* Three distinct states, never one blank table: still reading,
+                * nothing matched the filter, or nothing to show at all. */}
+              {!filtered.length && ops.loading && (
+                <tr><td colSpan={7} className="ops-empty" aria-live="polite">
+                  <p>Đang đọc danh sách vụ…</p>
+                  <Sk w={180} h={14} />
+                </td></tr>
+              )}
               {!filtered.length && !ops.loading && (
                 <tr><td colSpan={7} className="ops-empty">
-                  <p>Không có vụ nào khớp bộ lọc.</p>
-                  <button
-                    type="button" className="btn btn--ghost btn--sm"
-                    onClick={() => { setQ(''); setDataFilter('all'); setCarbonFilter('all'); setMrvFilter('all') }}
-                  >Xóa bộ lọc</button>
+                  <p>{rows.length ? 'Không có vụ nào khớp bộ lọc.' : 'Chưa có vụ nào trong phạm vi này.'}</p>
+                  {rows.length > 0 && (
+                    <button
+                      type="button" className="btn btn--ghost btn--sm"
+                      onClick={() => { setQ(''); setDataFilter('all'); setCarbonFilter('all'); setMrvFilter('all') }}
+                    >Xóa bộ lọc</button>
+                  )}
                 </td></tr>
               )}
             </tbody>

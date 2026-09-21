@@ -132,9 +132,12 @@ test('no raw enum, id or ISO timestamp reaches a farmer', async ({ page }) => {
     await settle(page, 1200)
     const text = await page.evaluate(() => document.body.innerText)
     for (const raw of ['active', 'planned', 'draft', 'incorporated', 'awd', 'continuous_flooding',
-      'straw_management', 'activity_id', 'created_at', 'updated_at', 'duration_minutes', 'diesel', 'pesticide']) {
+      'straw_management', 'activity_id', 'created_at', 'updated_at', 'duration_minutes', 'pesticide']) {
       expect(text, `${path} shows the raw value "${raw}"`).not.toMatch(new RegExp(`\\b${raw}\\b`))
     }
+    // `diesel` is a loanword inside the Vietnamese label "Dầu diesel", which is
+    // what a farmer should read; only the bare stored value is a leak.
+    expect(text, `${path} shows the raw value "diesel"`).not.toMatch(/(?<!Dầu )\bdiesel\b/)
     // A stored id or an ISO timestamp is storage, not something a farmer reads.
     expect(text, `${path} shows a raw UUID`).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/)
     expect(text, `${path} shows a raw ISO timestamp`).not.toMatch(/\d{4}-\d{2}-\d{2}T[\d:]/)
@@ -190,6 +193,9 @@ test('every farmer control is at least 40px tall', async ({ page }) => {
 /* ------------------------------------------------------------ Management */
 
 test('management workspace across four viewports', async ({ page }) => {
+  // 13 routes x 4 widths against a backend whose per-season readiness read
+  // costs 10-16s (see the loading blocker in the round-2 report).
+  test.setTimeout(1_200_000)
   const errors: string[] = []
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
 
@@ -348,6 +354,11 @@ test('empty, loading and error states are distinct', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1024 })
   await page.goto('/seasons')
   await expect(page.locator('.ops-table--seasons tbody tr').first()).toBeVisible({ timeout: 60_000 })
+  // While rows are still resolving each one shows a skeleton; wait for the
+  // last of them to go, so the filter's own empty state is what gets asserted
+  // rather than the "đang đọc" one. (Polling the count text races: it reads
+  // "no pending" both before the reads start and after they finish.)
+  await expect(page.locator('.ops-table--seasons .skeleton')).toHaveCount(0, { timeout: 240_000 })
 
   // A filter that matches nothing offers the way out, rather than a dead end.
   await page.getByLabel('Tìm nông hộ hoặc vụ mùa').fill('zzz-không-có-gì')
