@@ -468,3 +468,11 @@ Follow-ups (chỉ ghi nhận):
 - Mobile chỉ sửa được hoạt động có trên máy; bản ghi tạo từ Web/seed báo "sửa trên Farmer Web".
 - Cảnh báo AWD thiếu số lần rút nước (có sẵn, không chặn) vẫn nằm trong Dart.
 
+
+## Hybrid redesign round 2 — Web UX audit fixes (2026-09-21)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `web-dashboard/src/carbon/**` (new), `web-dashboard/src/vocab.ts` (new), `web-dashboard/src/api/engine.ts` (new), `web-dashboard/src/utils/mrvPresentation.ts`, `web-dashboard/src/pages/{ops.ts,operations.tsx,season.tsx,mrv.tsx}`, `web-dashboard/src/features/carbon.tsx`, `web-dashboard/src/farmer/{hybrid.tsx,activityView.ts,Recommendations.tsx,scope.ts,pages/Home.tsx,farmer.css}`, `web-dashboard/src/utils/activityPresentation.ts`, `web-dashboard/src/{App.tsx,nav.ts,ui.tsx,styles.css}`, `web-dashboard/tests/e2e/redesign-qa.spec.ts` | **Claude** (đang giữ) | Round 2 của redesign sau audit UX trên staging: thống nhất Carbon readiness về một view model dùng chung, tách MRV case status khỏi step status và suy trạng thái tổng từ 6 bước, thêm định danh thửa vào mọi hàng vụ của Management, dịch toàn bộ raw enum, bỏ nav động khỏi sidebar, sửa overflow 390px và kích thước control. **Không** đổi công thức/hệ số/logic Carbon, không đổi backend, không đổi route công khai. Branch `fix/hybrid-redesign-round2`. | ĐANG LÀM — chưa merge/push/deploy. |
+
+Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trước qua Herdr.

@@ -692,8 +692,12 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .ops-table td .btn { margin-top: 4px; }
 
   /* The generic data table gets the same treatment rather than a sideways
-     scroll: a 680px table inside a 390px phone is not a usable row. */
-  .table-wrap { border: 0; background: none; overflow: visible; }
+     scroll: a 680px table inside a 390px phone is not a usable row.
+     `overflow-x: auto` stays: it is the safety net for any table that is NOT
+     `table.data` (farm performance, organisation rollups, the MRV batch list),
+     and removing it let those escape their wrapper and push the whole page
+     sideways by ~306px — measured, not guessed. */
+  .table-wrap:has(table.data) { border: 0; background: none; }
   table.data thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   table.data tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
   table.data td { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; padding: 2px 0; border: 0; align-items: baseline; text-align: left; }

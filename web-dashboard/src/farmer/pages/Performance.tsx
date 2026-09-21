@@ -5,7 +5,7 @@ import { useActivityMutations, type ActivityMutations, type SeasonContext } from
 import type { QueryState } from '../data'
 import { Ico } from '../icons'
 import { ACTIVITY_ICON, Chip, Empty, ErrorPanel, Flash, IconTile, PageHeader, Sk, SkBlock } from '../kit'
-import { metricViews } from '../metricsView'
+import { metricGroups } from '../metricsView'
 import { prefetchSeason, primarySeason, seasonStatusLabel, useMetrics, useScope } from '../scope'
 import { useWritableSeason } from '../writeAccess'
 
@@ -26,8 +26,14 @@ export function MetricCards({ state, season, mutations, loading }: { state: Quer
   const m = state.data
   return (
     <>
-      <div className="fw-metrics">
-        {metricViews(m).map((v) => (
+      {/* Three groups, not one flat row: cost used to sit directly above
+        * CO₂e/kg, which reads as though spending less lowers emissions. */}
+      {metricGroups(m).map((g) => (
+        <section key={g.key} className={`fw-mgroup fw-mgroup--${g.key}`} aria-labelledby={`fw-mgroup-${g.key}`}>
+          <h3 id={`fw-mgroup-${g.key}`} className="fw-mgroup__title">{g.title}</h3>
+          <p className="fw-mgroup__desc">{g.description}</p>
+          <div className="fw-metrics">
+        {g.items.map((v) => (
           <article key={v.key} className="fw-metric" aria-labelledby={`fw-metric-${v.key}`}>
             <div className="fw-metric__head">
               <IconTile name={v.icon} tone={v.tone} size="lg" />
@@ -53,7 +59,9 @@ export function MetricCards({ state, season, mutations, loading }: { state: Quer
             )}
           </article>
         ))}
-      </div>
+          </div>
+        </section>
+      ))}
       <div className="fw-basis">
         <Chip icon="harvest" tone="amber">{m.yieldKg != null ? `Sản lượng đã ghi: ${fmtNumber(m.yieldKg)} kg thóc` : 'Chưa ghi nhận sản lượng'}</Chip>
         {m.waterM3 != null && <Chip icon="irrigation" tone="water">Nước đã ghi: {fmtNumber(m.waterM3)} m³</Chip>}

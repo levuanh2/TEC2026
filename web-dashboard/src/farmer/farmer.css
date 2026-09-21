@@ -1082,3 +1082,16 @@
   .fw-btn, .fw-btn--sm, .fw-btn--soft, .fw-btn--ghost, .fw-btn--danger,
   .fw-link, .fw-link-btn, .fw-topbar__brand, .fw-ctx, .fw-avatar { min-height: 44px; }
 }
+
+/* -- metric groups: resource · cost · carbon ------------------------------ */
+/* Cost sat directly above CO₂e/kg, which reads as though spending less
+   lowers emissions. Three titled groups keep money away from carbon. */
+.fw-mgroup { margin-top: var(--fw-space-20); }
+.fw-mgroup:first-of-type { margin-top: 0; }
+.fw-mgroup__title { margin: 0 0 2px; font-family: var(--fw-display); font-size: var(--fw-text-md); font-weight: 650; color: var(--fw-ink); }
+.fw-mgroup__desc { margin: 0 0 var(--fw-space-12); font-size: var(--fw-text-sm); color: var(--fw-muted); }
+/* A rule under the cost group makes the separation visible, not just stated. */
+.fw-mgroup--cost { padding-bottom: var(--fw-space-16); border-bottom: 1px solid var(--fw-rule-2); }
+
+.fw-snap-group + .fw-snap-group { margin-top: var(--fw-space-16); padding-top: var(--fw-space-12); border-top: 1px solid var(--fw-rule-2); }
+.fw-snap-group__title { margin: 0 0 var(--fw-space-8); font-size: var(--fw-text-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--fw-muted); }

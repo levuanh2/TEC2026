@@ -7,8 +7,16 @@ import type { Tone } from './kit'
 /* View model for the four resource metrics. Values come straight from the
  * backend MetricResponse; nothing is estimated, graded or benchmarked here. */
 
+/* Three groups, in this order, so money never sits beside CO₂e.
+ *
+ * A farmer reading "chi phí/kg" directly above "CO₂e/kg" concludes that
+ * spending less lowers their emissions. Cost is not an input to any emission
+ * factor, and the layout has to say so before the words do. */
+export type MetricGroupKey = 'resource' | 'cost' | 'carbon'
+
 export interface MetricView {
   key: 'water' | 'fertilizer' | 'cost' | 'carbon'
+  group: MetricGroupKey
   label: string
   icon: IconName
   tone: Tone
@@ -32,25 +40,25 @@ export function metricViews(m: SeasonMetrics): MetricView[] {
     : { emptyHint: own, shortHint: short, cta }
   return [
     {
-      key: 'water', label: 'Nước tưới', icon: 'irrigation', tone: 'water', unit: 'm³ / kg lúa', value: ratio(m.waterPerKg),
+      key: 'water', group: 'resource', label: 'Nước tưới', icon: 'irrigation', tone: 'water', unit: 'm³ / kg lúa', value: ratio(m.waterPerKg),
       explain: 'Tổng lượng nước tưới đã ghi nhận chia cho sản lượng thóc.',
       basis: m.waterM3 != null && yieldText ? `Dựa trên ${fmtNumber(m.waterM3)} m³ nước và ${yieldText} đã ghi nhận` : null,
       ...missing('Hãy ghi nhận hoạt động tưới (có lượng nước) để xem chỉ số này.', 'Cần ghi lượng nước tưới', 'irrigation'),
     },
     {
-      key: 'fertilizer', label: 'Phân bón', icon: 'fertilizer', tone: 'earth', unit: 'kg / kg lúa', value: ratio(m.fertilizerPerKg),
+      key: 'fertilizer', group: 'resource', label: 'Phân bón', icon: 'fertilizer', tone: 'earth', unit: 'kg / kg lúa', value: ratio(m.fertilizerPerKg),
       explain: 'Khối lượng phân bón vật lý đã ghi nhận chia cho sản lượng thóc.',
       basis: m.fertilizerKg != null && yieldText ? `Dựa trên ${fmtNumber(m.fertilizerKg)} kg phân và ${yieldText} đã ghi nhận` : null,
       ...missing('Hãy ghi nhận các lần bón phân để xem chỉ số này.', 'Cần ghi lần bón phân', 'fertilizer'),
     },
     {
-      key: 'cost', label: 'Chi phí vật tư', icon: 'money', tone: 'straw', unit: '₫ / kg lúa', value: m.costPerKg == null ? null : money.format(m.costPerKg),
+      key: 'cost', group: 'cost', label: 'Chi phí vật tư', icon: 'money', tone: 'straw', unit: '₫ / kg lúa', value: m.costPerKg == null ? null : money.format(m.costPerKg),
       explain: 'Chi phí vật tư đã nhập trong các hoạt động chia cho sản lượng — không phải tổng chi phí sản xuất.',
       basis: m.costPerKg != null && yieldText ? `Dựa trên ${yieldText} đã ghi nhận` : null,
       ...missing('Nhập chi phí vật tư khi ghi hoạt động để xem chỉ số này.', 'Cần nhập chi phí vật tư'),
     },
     {
-      key: 'carbon', label: 'Carbon', icon: 'carbon', tone: 'carbon', unit: 'kg CO₂e / kg lúa', value: ratio(m.co2ePerKg),
+      key: 'carbon', group: 'carbon', label: 'Carbon', icon: 'carbon', tone: 'carbon', unit: 'kg CO₂e / kg lúa', value: ratio(m.co2ePerKg),
       explain: 'Phát thải ước tính từ kết quả tính Carbon hợp lệ của vụ.',
       basis: m.totalCo2eKg != null ? `Tổng ${fmtNumber(m.totalCo2eKg)} kg CO₂e của vụ` : null,
       ...(m.completeness.carbon
@@ -58,4 +66,24 @@ export function metricViews(m: SeasonMetrics): MetricView[] {
         : { emptyHint: 'Chỉ hiển thị khi vụ có kết quả tính phát thải hợp lệ.', shortHint: 'Chưa có kết quả hợp lệ' }),
     },
   ]
+}
+
+
+export interface MetricGroupView {
+  key: MetricGroupKey
+  title: string
+  description: string
+  items: MetricView[]
+}
+
+const GROUPS: { key: MetricGroupKey; title: string; description: string }[] = [
+  { key: 'resource', title: 'Hiệu quả tài nguyên', description: 'Lượng nước và phân bón đã dùng trên mỗi kg lúa.' },
+  { key: 'cost', title: 'Chi phí ghi nhận trực tiếp', description: 'Chi phí vật tư bạn đã nhập khi ghi hoạt động. Không dùng để tính CO₂e.' },
+  { key: 'carbon', title: 'Phát thải carbon', description: 'Tính từ dữ liệu canh tác theo phương pháp IPCC — không liên quan tới chi phí.' },
+]
+
+/** The same four metrics, grouped so cost and Carbon are visibly separate. */
+export function metricGroups(m: SeasonMetrics): MetricGroupView[] {
+  const views = metricViews(m)
+  return GROUPS.map((g) => ({ ...g, items: views.filter((v) => v.group === g.key) }))
 }

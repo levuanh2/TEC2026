@@ -12,7 +12,7 @@ import { Ico } from '../icons'
 import { MiniTimeline } from '../journal'
 import { Chip, Empty, ErrorPanel, Flash, IconTile, MoreLink, Section, Sk, SkBlock } from '../kit'
 import { CostPanel, PrimaryNextAction, SeasonContextBar, SummaryStrip, nextAction } from '../hybrid'
-import { metricViews } from '../metricsView'
+import { metricGroups } from '../metricsView'
 import { RecommendationsSection } from '../Recommendations'
 import { useCanWriteFarm, useWritableSeason } from '../writeAccess'
 import {
@@ -213,14 +213,23 @@ function PerformanceSnapshot({ state, hasSeason }: { state: QueryState<SeasonMet
   if (!hasSeason) return <Empty icon="performance" title="Chưa có vụ đang canh tác" body="Chỉ số xuất hiện khi một vụ đang hoạt động có dữ liệu ghi nhận." />
   if (state.error || !state.data) return <ErrorPanel error={state.error ?? 'Không có dữ liệu.'} onRetry={state.reload} />
   return (
-    <div className="fw-snap">
-      {metricViews(state.data).map((v) => (
-        <div key={v.key} className="fw-snap__item">
-          <span className="fw-snap__label"><IconTile name={v.icon} tone={v.tone} size="sm" />{v.label}</span>
-          <span className={`fw-snap__value${v.value ? '' : ' is-empty'}`}>{v.value ?? 'Chưa đủ dữ liệu'}{v.value && <small>{v.unit}</small>}</span>
-          <span className={`fw-status ${v.value ? 'is-ok' : 'is-missing'}`}>{v.value ? 'Đã đủ dữ liệu' : v.shortHint}</span>
+    <>
+      {/* Grouped here too, so the home summary and the performance page tell
+        * the same story about what cost has to do with CO₂e: nothing. */}
+      {metricGroups(state.data).map((g) => (
+        <div key={g.key} className="fw-snap-group">
+          <p className="fw-snap-group__title">{g.title}</p>
+          <div className="fw-snap">
+            {g.items.map((v) => (
+              <div key={v.key} className="fw-snap__item">
+                <span className="fw-snap__label"><IconTile name={v.icon} tone={v.tone} size="sm" />{v.label}</span>
+                <span className={`fw-snap__value${v.value ? '' : ' is-empty'}`}>{v.value ?? 'Chưa đủ dữ liệu'}{v.value && <small>{v.unit}</small>}</span>
+                <span className={`fw-status ${v.value ? 'is-ok' : 'is-missing'}`}>{v.value ? 'Đã đủ dữ liệu' : v.shortHint}</span>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
-    </div>
+    </>
   )
 }
