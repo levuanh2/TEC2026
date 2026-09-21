@@ -136,64 +136,15 @@ function HomeHero({ scope, primary }: { scope: QueryState<{ farms: unknown[] }>;
   if (!primary) {
     return <Empty icon="seeding" tone="leaf" title="Chưa có vụ đang canh tác" body="Bạn vẫn có thể xem các ruộng và vụ đã ghi nhận." action={<Link to="/farmer/farms" className="fw-btn fw-btn--soft">Xem ruộng của tôi</Link>} />
   }
-  return <><SeasonContextBar ctx={primary} /><SeasonHero ctx={primary} compact /></>
+  // One statement of which season this is — see SeasonContextBar.
+  return <SeasonContextBar ctx={primary} />
 }
 
 export function HeroSkeleton() {
   return (
-    <SkBlock label="Đang tải vụ đang canh tác" className="fw-ledger">
-      <div className="fw-ledger__top">
-        <div className="fw-ledger__title"><Sk w={180} h={62} /><Sk w="55%" h={26} /><Sk w="42%" h={15} /></div>
-        <div className="fw-ledger__dates"><Sk w={200} h={16} /><Sk w={200} h={16} /></div>
-      </div>
+    <SkBlock label="Đang tải vụ đang canh tác" className="fw-ctxbar">
+      <Sk w={220} h={16} /><Sk w="55%" h={22} /><Sk w="42%" h={14} />
     </SkBlock>
-  )
-}
-
-/** The season ledger — the Stat-Led head of the Farmer app.
- *
- * The figure is the one number a farmer already keeps in their head: how many
- * days this season has been in the ground. It is real (derived from the planting
- * date we hold) and it is never shown alone — the words beside it say what it
- * counts, and the season identity sits directly under it. When there is no
- * planting date there is no figure: the slot states that plainly rather than
- * inventing a number to fill the shape. */
-export function SeasonHero({ ctx, compact }: { ctx: SeasonCtx; compact?: boolean }) {
-  const { season, plot, farm } = ctx
-  const days = season.harvestDate ? null : daysSince(season.plantingDate)
-  return (
-    <section className="fw-ledger" aria-labelledby="fw-hero-title">
-      <div className="fw-ledger__top">
-        <div className="fw-ledger__title">
-          <p className="fw-ledger__figure">
-            {days != null
-              ? <><b>{days}</b><span>ngày kể từ gieo sạ</span></>
-              : <span className="is-empty">{season.harvestDate ? 'Vụ đã thu hoạch' : 'Chưa ghi nhận ngày gieo sạ'}</span>}
-          </p>
-          <h2 id="fw-hero-title">{season.name}</h2>
-          {/* On Home the context bar above already states farm · plot · status ·
-            * days, so the ledger head does not repeat them. */}
-          {!compact && (
-            <p className="fw-ledger__place">
-              <span><Ico name="plot" />{plot?.name ?? 'Thửa ruộng'}</span>
-              {farm && <span><Ico name="farm" />{farm.name} · {farm.code}</span>}
-            </p>
-          )}
-          <p className="fw-ledger__meta" hidden={compact}>
-            <span className="fw-chip fw-chip--dot">{seasonStatusLabel(season.status)}</span>
-            {plot?.areaHa != null && <span className="fw-chip"><Ico name="area" />{ha(plot.areaHa)}</span>}
-            {season.variety && <span className="fw-chip"><Ico name="seeding" />Giống {season.variety}</span>}
-          </p>
-          <p className="fw-ledger__actions">
-            <Link className="fw-btn" to={`/farmer/crop-seasons/${season.id}`} onMouseEnter={() => prefetchSeason(season.id)} onFocus={() => prefetchSeason(season.id)}>Xem vụ<Ico name="arrow" /></Link>
-          </p>
-        </div>
-        <div className="fw-ledger__dates">
-          <p className="fw-ledger__date"><span><Ico name="calendar" />Gieo sạ</span><b className={season.plantingDate ? undefined : 'is-empty'}>{season.plantingDate ? date(season.plantingDate) : 'Chưa ghi nhận'}</b></p>
-          <p className="fw-ledger__date"><span><Ico name="harvest" />Thu hoạch</span><b className={season.harvestDate ? undefined : 'is-empty'}>{season.harvestDate ? date(season.harvestDate) : 'Chưa ghi nhận'}</b></p>
-        </div>
-      </div>
-    </section>
   )
 }
 

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { CarbonReadiness } from '../api/carbon'
 import { carbonView } from '../carbon/readiness'
 import type { SeasonMetrics } from '../api/metrics'
-import { daysSince, ha } from '../format'
+import { date, daysSince, ha } from '../format'
 import type { Activity } from '../types'
 import { Link } from '../ui'
 import { fmtNumber, localDay } from './activityView'
@@ -20,7 +20,14 @@ import { seasonStatusLabel, type SeasonCtx } from './scope'
  * answers: which season, what to do next, what is missing, how it is running.
  */
 
-/** Row 1 — which season am I looking at. Farm · plot · season · status · days. */
+/** Row 1 — the single statement of which season this is.
+ *
+ * Home used to say it three times: this bar, then a hero with a 62px day
+ * count and the season name again, and the shell's topbar chip above both.
+ * The hero is gone; this bar carries everything it held — farm, plot, season,
+ * status, day count and the two dates — and its only action is a quiet link,
+ * so the page has exactly one primary button (the next action below it).
+ */
 export function SeasonContextBar({ ctx, loading }: { ctx: SeasonCtx | null; loading?: boolean }) {
   if (loading) {
     return (
@@ -33,17 +40,27 @@ export function SeasonContextBar({ ctx, loading }: { ctx: SeasonCtx | null; load
   const { season, plot, farm } = ctx
   const days = season.harvestDate ? null : daysSince(season.plantingDate)
   return (
-    <div className="fw-ctxbar">
+    <section className="fw-ctxbar" aria-labelledby="fw-ctxbar-season">
       <p className="fw-ctxbar__place">
         {farm && <span><Ico name="farm" />{farm.name}</span>}
         {plot && <span><Ico name="plot" />{plot.name}{plot.areaHa != null && <small> · {ha(plot.areaHa)}</small>}</span>}
+        {season.variety && <span><Ico name="seeding" />Giống {season.variety}</span>}
       </p>
       <p className="fw-ctxbar__season">
-        <Link to={`/farmer/crop-seasons/${season.id}`}><b>{season.name}</b></Link>
+        <b id="fw-ctxbar-season">{season.name}</b>
         <span className="fw-role fw-role--positive">{seasonStatusLabel(season.status)}</span>
+        {/* The day count is a fact, not the headline: it reads at body size
+          * beside the season, instead of as the largest thing on the page. */}
         {days != null && <span className="fw-ctxbar__days"><Ico name="calendar" />{days} ngày kể từ gieo sạ</span>}
       </p>
-    </div>
+      <p className="fw-ctxbar__dates">
+        <span><Ico name="calendar" />Gieo sạ: <b className={season.plantingDate ? undefined : 'is-empty'}>{season.plantingDate ? date(season.plantingDate) : 'Chưa ghi nhận'}</b></span>
+        <span><Ico name="harvest" />Thu hoạch: <b className={season.harvestDate ? undefined : 'is-empty'}>{season.harvestDate ? date(season.harvestDate) : 'Chưa ghi nhận'}</b></span>
+      </p>
+      <p className="fw-ctxbar__go">
+        <Link className="fw-link" to={`/farmer/crop-seasons/${season.id}`}>Xem chi tiết vụ<Ico name="arrow" /></Link>
+      </p>
+    </section>
   )
 }
 

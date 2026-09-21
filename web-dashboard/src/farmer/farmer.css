@@ -1052,3 +1052,33 @@
 }
 .fw-restale svg { width: 18px; height: 18px; flex: none; }
 .fw-source span small { display: block; font-size: var(--fw-text-xs); color: var(--fw-muted); font-variant-numeric: tabular-nums; }
+
+/* -- season context bar: the one place Home states which season this is ---- */
+/* It absorbed the old hero, so it now carries the dates and the quiet link
+   out to the season. The bar wraps into rows rather than a single long line,
+   which is what let a phone scroll sideways before. */
+.fw-ctxbar { flex-direction: column; align-items: stretch; gap: var(--fw-space-8); }
+.fw-ctxbar__dates {
+  display: flex; flex-wrap: wrap; gap: var(--fw-space-8) var(--fw-space-20); margin: 0;
+  font-size: var(--fw-text-sm); color: var(--fw-muted);
+}
+.fw-ctxbar__dates span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.fw-ctxbar__dates svg { width: 15px; height: 15px; flex: none; }
+.fw-ctxbar__dates b { font-family: inherit; font-size: var(--fw-text-sm); font-weight: 650; color: var(--fw-ink); }
+.fw-ctxbar__dates b.is-empty { color: var(--fw-muted); font-weight: 500; }
+.fw-ctxbar__go { margin: 0; }
+/* A long season code wraps under control instead of widening the row. */
+.fw-ctxbar__season b { overflow-wrap: anywhere; }
+
+/* -- control sizing ------------------------------------------------------- */
+/* Same rule as the workspace: 40px on a desktop pointer, 44px on touch. The
+   farmer shell is used on phones first, so its topbar and inline links count. */
+.fw-btn, .fw-btn--sm, .fw-btn--soft, .fw-btn--ghost, .fw-btn--danger { min-height: 40px; }
+.fw-link, .fw-link-btn { min-height: 40px; display: inline-flex; align-items: center; gap: 6px; }
+.fw-topbar__brand, .fw-ctx, .fw-avatar { min-height: 40px; display: inline-flex; align-items: center; }
+.fw-ctxbar__go .fw-link { min-height: 40px; }
+
+@media (max-width: 860px), (pointer: coarse) {
+  .fw-btn, .fw-btn--sm, .fw-btn--soft, .fw-btn--ghost, .fw-btn--danger,
+  .fw-link, .fw-link-btn, .fw-topbar__brand, .fw-ctx, .fw-avatar { min-height: 44px; }
+}

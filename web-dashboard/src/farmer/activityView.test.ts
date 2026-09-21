@@ -18,7 +18,9 @@ describe('viewActivity (Farmer journal presentation)', () => {
     const v = viewActivity(act('irrigation', { method: 'awd', water_volume_m3: 320, note: 'sáng' }))
     expect(v.title).toBe('Tưới nước')
     expect(v.value).toBe('320 m³')
-    expect(v.meta).toContain('Ướt khô xen kẽ (AWD)')
+    expect(v.meta).toContain('Tưới ngập–khô xen kẽ (AWD)')
+    // A raw enum must never survive into the meta line.
+    expect(v.meta.join(' ')).not.toContain('awd')
     expect(v.note).toBe('sáng')
   })
 

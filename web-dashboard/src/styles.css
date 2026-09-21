@@ -525,7 +525,12 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .dl dt { font-size: var(--fs-caption); color: var(--text-muted); font-weight: 600; }
 .dl dd { margin: 0; font-size: var(--fs-body); font-weight: 650; color: var(--text-primary); }
 
-.stack { display: grid; gap: 14px; }
+/* An implicit grid track is `auto`, so it grows to its widest child and the
+   children then fill THAT, not the container — which is how the season hub
+   came to be 682px wide inside a 390px phone. One explicit, shrinkable
+   column keeps every child bounded by the viewport. */
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.stack > * { min-width: 0; }
 .muted { color: var(--text-muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
@@ -682,8 +687,18 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .ops-table td { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 2px 0; border: 0; align-items: baseline; }
   .ops-table td::before { content: attr(data-label); font-size: var(--fs-caption); color: var(--text-muted); }
   /* A season code broken across two lines reads as two codes. */
-  .ops-table td[data-label="Nông hộ / Vụ mùa"] small { white-space: nowrap; }
+  .ops-table td[data-label="Vụ mùa"] small,
+  .ops-table td[data-label="Thửa / Vụ mùa"] small { white-space: nowrap; }
   .ops-table td .btn { margin-top: 4px; }
+
+  /* The generic data table gets the same treatment rather than a sideways
+     scroll: a 680px table inside a 390px phone is not a usable row. */
+  .table-wrap { border: 0; background: none; overflow: visible; }
+  table.data thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  table.data tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
+  table.data td { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; padding: 2px 0; border: 0; align-items: baseline; text-align: left; }
+  table.data td::before { content: attr(data-label); font-size: var(--fs-caption); color: var(--text-muted); }
+  table.data td.num { text-align: left; }
 }
 
 /* One readiness statement, shared by the season Carbon tab and the season hub.
@@ -699,3 +714,23 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 }
 .carbon-readiness p { margin: 0; font-size: var(--fs-sm); }
 .carbon-readiness ul { margin: 2px 0 0; padding-left: 18px; font-size: var(--fs-caption); display: grid; gap: 4px; }
+
+/* -- control sizing ------------------------------------------------------- */
+/* Measured on the rendered page, the workspace's buttons came out at 38px and
+   several links and the search input well under that. Desktop controls are at
+   least 40px and touch controls 44px, from the tokens that already existed. */
+.btn, .btn--sm, .btn--ghost, .btn--danger { min-height: var(--ac-control-h-sm); }
+.btn--link { min-height: var(--ac-control-h-sm); padding-block: 0; }
+select.select, input.search { min-height: var(--ac-control-h-sm); }
+/* The search wrapper is the visible control; its input must fill it so the
+   hit area and the thing a pointer lands on are the same rectangle. */
+.ops-search input { align-self: stretch; min-height: var(--ac-control-h-sm); }
+.ops-filter select { min-height: var(--ac-control-h-sm); }
+/* Sign-out is a real action, not a footnote. */
+.sidebar__id .link { min-height: var(--ac-control-h-sm); display: inline-flex; align-items: center; }
+
+@media (max-width: 860px), (pointer: coarse) {
+  .btn, .btn--sm, .btn--ghost, .btn--danger, .btn--link,
+  select.select, input.search, .ops-search input, .ops-filter select,
+  .sidebar__id .link { min-height: var(--ac-control-h); }
+}

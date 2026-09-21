@@ -1,4 +1,5 @@
 import type { IconName } from '../icons'
+import { label as vocab } from '../vocab'
 type Payload = Record<string, unknown>
 
 export interface ActivityPresentation { label: string; summary: string; detail?: string }
@@ -13,6 +14,13 @@ const quantity = (payload: Payload, keys: string[], unit: string): string => {
   const key = keys.find(candidate => candidate in payload)
   return key ? value(payload, key, unit) : missing
 }
+/** A stored enum, always read through the shared dictionary — `awd` and
+ *  `incorporated` used to be printed straight onto the screen from here. */
+const enumOf = (payload: Payload, kind: Parameters<typeof vocab>[0], ...keys: string[]): string => {
+  const key = keys.find((candidate) => candidate in payload)
+  if (!key || payload[key] == null) return missing
+  return vocab(kind, String(payload[key]))
+}
 const parse = (detail: string): Payload | null => {
   try { const value: unknown = JSON.parse(detail); return value != null && typeof value === 'object' && !Array.isArray(value) ? value as Payload : null } catch { return null }
 }
@@ -23,10 +31,10 @@ export function presentActivity(type: string, detail: string): ActivityPresentat
   switch (type) {
     case 'seeding': return { label: 'Gieo sạ', summary: `${value(payload, 'variety_name')} · ${value(payload, 'seed_kg', 'kg')}`, detail: `Phương pháp: ${value(payload, 'seeding_method')}` }
     case 'fertilizer': return { label: 'Phân bón', summary: `${first(payload, 'fertilizer_name', 'fertilizer_type')} · ${value(payload, 'amount_kg', 'kg')}`, detail: `N: ${value(payload, 'nitrogen_percent', '%')}` }
-    case 'irrigation': return { label: 'Nước tưới', summary: `${first(payload, 'water_regime', 'irrigation_method', 'method')} · ${value(payload, 'water_volume_m3', 'm³')}` }
+    case 'irrigation': return { label: 'Nước tưới', summary: `${enumOf(payload, 'irrigationMethod', 'water_regime', 'irrigation_method', 'method')} · ${value(payload, 'water_volume_m3', 'm³')}` }
     case 'pesticide': return { label: 'Thuốc bảo vệ thực vật', summary: `${value(payload, 'product_name')} · ${value(payload, 'amount')}`, detail: `Đơn vị: ${value(payload, 'unit')}` }
-    case 'fuel': return { label: 'Nhiên liệu', summary: `${value(payload, 'fuel_type')} · ${quantity(payload, ['amount_liter', 'amount_litre'], 'L')}`, detail: `Thiết bị: ${value(payload, 'equipment_name')}` }
-    case 'straw_management': return { label: 'Quản lý rơm rạ', summary: `${first(payload, 'management_method', 'method')} · ${quantity(payload, ['straw_amount_kg', 'straw_mass_kg'], 'kg')}` }
+    case 'fuel': return { label: 'Nhiên liệu', summary: `${enumOf(payload, 'fuelType', 'fuel_type')} · ${quantity(payload, ['amount_liter', 'amount_litre'], 'L')}`, detail: `Thiết bị: ${value(payload, 'equipment_name')}` }
+    case 'straw_management': return { label: 'Quản lý rơm rạ', summary: `${enumOf(payload, 'strawMethod', 'management_method', 'method')} · ${quantity(payload, ['straw_amount_kg', 'straw_mass_kg'], 'kg')}` }
     case 'harvest': return { label: 'Thu hoạch', summary: value(payload, 'yield_kg', 'kg'), detail: `Diện tích thu hoạch: ${value(payload, 'harvested_area_ha', 'ha')}` }
     default: return { label: type, summary: missing }
   }

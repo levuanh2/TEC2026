@@ -94,6 +94,10 @@ export interface RecommendationsState extends QueryState<Recommendation[]> {
   generateError?: string
   /** Explicit "Cập nhật khuyến nghị" — always runs, even if not out of date. */
   regenerate: () => void
+  /** How many the last completed generation produced, or undefined if none has
+   *  run. `0` means the engine has already looked at this season's data and had
+   *  nothing to say — pressing refresh again cannot change that. */
+  lastGeneratedCount?: number
 }
 
 export function useRecommendations(id: string | null): RecommendationsState {
@@ -121,6 +125,7 @@ export function useRecommendations(id: string | null): RecommendationsState {
     ...list,
     generating: Boolean(id) && (gen.loading || gen.refreshing),
     generateError: gen.error,
+    lastGeneratedCount: gen.data,
     regenerate: () => { if (id) fetchQuery(keys.recsGen(id), run, { force: true }).catch(() => undefined) },
   }
 }

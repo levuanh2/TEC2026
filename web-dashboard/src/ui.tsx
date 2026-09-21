@@ -186,8 +186,10 @@ export function DataTable<T>({
         <tbody>
           {rows.map((row) => (
             <tr key={rowKey(row)} className={onRowClick ? 'is-clickable' : undefined} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+              {/* The label travels with each cell so a phone can render the
+                * row as a card instead of scrolling the table sideways. */}
               {columns.map((c, i) => (
-                <td key={i} className={c.align === 'num' ? 'num' : undefined}>
+                <td key={i} data-label={c.label} className={c.align === 'num' ? 'num' : undefined}>
                   {c.render(row)}
                 </td>
               ))}
