@@ -10,7 +10,7 @@ liệu giả.
 | | |
 |---|---|
 | Branch | `fix/hybrid-redesign-round2` (nhánh từ `main` @ `2d1c50e`) |
-| Commit | `5e1b511` → `8baff05` → `59c90f7` → `d0dea19` (4 commit) |
+| Commit | `5e1b511` → `59c90f7` → `8baff05` → `d0dea19` → `9b06b61` → `13e2d85` (6 commit) |
 | Merge / push / deploy | **Chưa** — xem §12 |
 
 ## 2. Cách đo (không đánh giá bằng source code)
@@ -286,10 +286,11 @@ control trong `main` của Farmer.
 ## 11. Diffstat
 
 ```
-33 files changed, 1890 insertions(+), 314 deletions(-)
+35 files changed, 2202 insertions(+), 322 deletions(-)
 ```
 
-`AGENTS.md` (khai báo ownership round này) + 32 tệp trong `web-dashboard/`.
+`AGENTS.md` (khai báo ownership round này), `docs/WEB_UX_REDESIGN_ROUND2.md`
+(báo cáo này) + phần còn lại trong `web-dashboard/`.
 Không có tệp backend, migration, Flutter hay `docs/openapi.json` nào bị sửa.
 Bốn tệp untracked không liên quan trong worktree (`.mcp.json`, 4 ảnh trong
 `docs/`) được giữ nguyên, không commit.
