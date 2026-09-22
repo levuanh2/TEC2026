@@ -36,16 +36,10 @@ function parse(detail: string): Payload | null {
   try { const v: unknown = JSON.parse(detail); return v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null } catch { return null }
 }
 
-/** The demo seed writes English scaffolding into free-text fields — a product
- *  called "Demo pesticide", a note reading "Demo harvest". It names the raw
- *  activity type in English, which is exactly what a farmer must never read.
- *
- *  Matched narrowly, on the seeder's own shape, so a real product name or a
- *  farmer's own note is never swallowed: only "Demo <known activity type>".
- */
-const DEMO_PLACEHOLDER = /^demo[\s_-]+(seeding|fertilizer|irrigation|pesticide|fuel|straw[\s_-]?management|harvest|other)$/i
-export const isDemoPlaceholder = (v: string | null | undefined): boolean =>
-  typeof v === 'string' && DEMO_PLACEHOLDER.test(v.trim())
+/** One definition, shared with the Management timeline: both surfaces read the
+ *  same seeded rows, and only one of them used to hide the scaffolding. */
+export { isDemoPlaceholder } from '../utils/activityPresentation'
+import { isDemoPlaceholder } from '../utils/activityPresentation'
 
 /** Free text as a farmer should see it: seed scaffolding becomes a short badge. */
 export const humanText = (v: string | null | undefined): string | null =>
