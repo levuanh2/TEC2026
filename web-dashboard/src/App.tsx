@@ -104,6 +104,9 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
 
   return (
     <div className="shell">
+      {/* First stop for a keyboard or screen-reader user: the sidebar is a
+        * long list of links to walk past on every page. */}
+      <a className="skip-link" href="#main">Bỏ qua điều hướng, tới nội dung chính</a>
       <aside className={`sidebar${open ? ' is-open' : ''}`}>
         <Link to="/dashboard" className="brand">
           AgriCarbon
@@ -163,7 +166,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
           </div>
           <span className="role-chip">{ROLE_LABEL[viewer.role] ?? viewer.role}</span>
         </header>
-        <main className="content">
+        <main className="content" id="main" tabIndex={-1}>
           {usingMockData && <Notice kind="warning">MOCK DATA — NOT PRODUCTION.</Notice>}
           {children}
         </main>

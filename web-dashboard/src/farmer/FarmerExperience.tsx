@@ -47,6 +47,9 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
 
   return (
     <div className="fw fw-shell">
+      {/* First stop for a keyboard or screen-reader user: the sidebar is a
+        * long list of links to walk past on every page. */}
+      <a className="skip-link" href="#main">Bỏ qua điều hướng, tới nội dung chính</a>
       <aside className="fw-side">
         <Link to="/farmer" className="fw-brand">
           <b>AgriCarbon</b><small>Nông hộ</small>
@@ -88,7 +91,7 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
           <span className="fw-topbar__meta"><Ico name="pin" />{primary?.farm ? primary.farm.name : 'Khu vực nông hộ'}</span>
           <Link to="/farmer/account" className="fw-avatar" aria-label="Tài khoản của bạn">{avatar}</Link>
         </header>
-        <main className="fw-content">{children}</main>
+        <main className="fw-content" id="main" tabIndex={-1}>{children}</main>
       </div>
 
       <nav className="fw-bottom" aria-label="Điều hướng nông hộ trên điện thoại">

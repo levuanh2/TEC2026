@@ -1,3 +1,4 @@
+import { errorKind, friendlyError, isRetryable } from '../utils/errorPresentation'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Link } from '../ui'
 import { Ico, type IconName } from './icons'
@@ -100,16 +101,27 @@ export function Empty({ icon = 'leaf', title, body, action, tone = 'sage' }: { i
 }
 
 const NEUTRAL_404 = 'Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.'
+/** A farmer never reads the transport's English. Every failure arrives here
+ * as one Vietnamese sentence, and the retry button only appears when trying
+ * again is something that could actually work. */
 export function ErrorPanel({ error, onRetry }: { error: string; onRetry?: () => void }) {
-  const notFound = /không tìm thấy|not[_ ]?found|404|phạm vi truy cập/i.test(error)
+  const kind = errorKind(error)
+  const notFound = kind === 'not-found'
+  const TITLE: Record<typeof kind, string> = {
+    auth: 'Bạn cần đăng nhập lại',
+    'not-found': 'Không tìm thấy',
+    offline: 'Không có kết nối',
+    unavailable: 'Tạm thời chưa dùng được',
+    unknown: 'Không tải được dữ liệu',
+  }
   return (
     <div className={`fw-error${notFound ? ' is-notfound' : ''}`} role="alert">
       <IconTile name={notFound ? 'search' : 'warning'} tone={notFound ? 'sage' : 'terracotta'} />
       <div>
-        <p className="fw-error__title">{notFound ? 'Không tìm thấy' : 'Không tải được dữ liệu'}</p>
-        <p className="fw-error__body">{notFound ? NEUTRAL_404 : error}</p>
+        <p className="fw-error__title">{TITLE[kind]}</p>
+        <p className="fw-error__body">{notFound ? NEUTRAL_404 : friendlyError(error)}</p>
       </div>
-      {onRetry && !notFound && <button type="button" className="fw-btn fw-btn--soft" onClick={onRetry}><Ico name="refresh" />Thử lại</button>}
+      {onRetry && isRetryable(error) && <button type="button" className="fw-btn fw-btn--soft" onClick={onRetry}><Ico name="refresh" />Thử lại</button>}
     </div>
   )
 }

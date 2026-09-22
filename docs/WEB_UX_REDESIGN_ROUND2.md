@@ -10,7 +10,9 @@ liệu giả.
 | | |
 |---|---|
 | Branch | `fix/hybrid-redesign-round2` (nhánh từ `main` @ `2d1c50e`) |
-| Commit | `5e1b511` → `59c90f7` → `8baff05` → `d0dea19` → `9b06b61` → `13e2d85` (6 commit) |
+| Commit mã nguồn (5) | `5e1b511` → `59c90f7` → `8baff05` → `d0dea19` → `13e2d85` |
+| Commit tài liệu | `9b06b61` (báo cáo này), `b01404f` + commit sửa tính toàn vẹn này |
+| Tổng `main..HEAD` | 8 commit tại thời điểm chốt báo cáo |
 | Merge / push / deploy | **Chưa** — xem §12 |
 
 ## 2. Cách đo (không đánh giá bằng source code)
@@ -286,18 +288,29 @@ control trong `main` của Farmer.
 ## 11. Diffstat
 
 ```
-35 files changed, 2202 insertions(+), 322 deletions(-)
+git diff --stat main...HEAD -- web-dashboard
+33 files changed, 1892 insertions(+), 322 deletions(-)
+
+git diff --stat main...HEAD            # kểm cả AGENTS.md + báo cáo này
+35 files changed, 2203 insertions(+), 322 deletions(-)
 ```
+
+Số dòng của diffstat tổng thay đổi mỗi lần chính file này được sửa; con số
+`web-dashboard` là con số để đối chiếu.
 
 `AGENTS.md` (khai báo ownership round này), `docs/WEB_UX_REDESIGN_ROUND2.md`
 (báo cáo này) + phần còn lại trong `web-dashboard/`.
 Không có tệp backend, migration, Flutter hay `docs/openapi.json` nào bị sửa.
-Bốn tệp untracked không liên quan trong worktree (`.mcp.json`, 4 ảnh trong
-`docs/`) được giữ nguyên, không commit.
+Năm tệp untracked không liên quan trong worktree được giữ nguyên, không commit:
+`.mcp.json`, `docs/ChatGPT Image Sep 21, 2026, 12_17_37 AM.png`,
+`docs/ChatGPT Image Sep 21, 2026, 12_18_09 AM-1.png`,
+`docs/ChatGPT Image Sep 21, 2026, 12_18_10 AM-2.png`,
+`docs/ChatGPT Image Sep 21, 2026, 12_18_11 AM-3.png`.
 
 ## 12. Xác nhận
 
 - **Chưa merge** vào `main`.
 - **Chưa push** lên remote.
 - **Chưa deploy**.
-- Toàn bộ nằm trên `fix/hybrid-redesign-round2`, 4 commit, chờ người dùng duyệt.
+- Toàn bộ nằm trên `fix/hybrid-redesign-round2` (5 commit mã nguồn + commit tài
+  liệu), chờ người dùng duyệt.

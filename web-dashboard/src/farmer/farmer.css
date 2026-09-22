@@ -75,15 +75,15 @@
 .fw-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--fw-space-8);
   min-height: 44px; padding: 0 var(--fw-space-20); border-radius: var(--fw-radius);
-  border: 1px solid var(--fw-accent); background: var(--fw-accent); color: var(--fw-accent-ink);
+  border: 1px solid var(--ac-cta); background: var(--ac-cta); color: var(--ac-cta-ink);
   font-family: var(--fw-body); font-weight: 650; font-size: 14.5px; text-decoration: none; white-space: nowrap;
   transition: background var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out);
 }
-.fw-btn:hover { background: var(--fw-accent-deep); border-color: var(--fw-accent-deep); }
-.fw-btn:active { background: var(--fw-accent-deep); }
+.fw-btn:hover { background: var(--ac-cta-hover); border-color: var(--ac-cta-hover); }
+.fw-btn:active { background: var(--ac-cta-hover); }
 .fw-btn svg { width: 17px; height: 17px; }
-.fw-btn--soft { background: transparent; color: var(--fw-accent-deep); border-color: var(--fw-rule-2); }
-.fw-btn--soft:hover { background: var(--fw-accent-soft); border-color: var(--fw-rule-3); }
+.fw-btn--soft { background: transparent; color: var(--fw-ink); border-color: var(--fw-rule-2); }
+.fw-btn--soft:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
 .fw-btn--ghost { background: transparent; color: var(--fw-ink); border-color: var(--fw-rule-2); }
 .fw-btn--ghost:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
 .fw-btn--danger { background: var(--fw-danger); border-color: var(--fw-danger); color: var(--fw-raise); }
@@ -93,7 +93,9 @@
 .fw-btn--block { width: 100%; }
 
 .fw-iconbtn {
-  width: 40px; height: 40px; display: grid; place-items: center; flex: none;
+  /* 44px, not 40: edit and delete sit side by side in a journal row and a
+   * thumb has to hit the right one of the two. */
+  width: 44px; height: 44px; display: grid; place-items: center; flex: none;
   border-radius: var(--fw-radius); border: 1px solid transparent; background: transparent; color: var(--fw-muted);
   transition: color var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out);
 }
@@ -118,7 +120,10 @@
 .fw-sk-block { display: grid; gap: var(--fw-space-8); }
 @keyframes fw-fade { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
 
-.fw-empty { display: grid; justify-items: start; gap: var(--fw-space-8); padding: var(--fw-space-24) 0; border-top: 1px solid var(--fw-rule); }
+/* An empty state is a designed state, not the absence of one: it sits on a
+ * bordered panel so the page reads as finished rather than as a sentence
+ * stranded in a field of white. */
+.fw-empty { display: grid; justify-items: start; gap: var(--fw-space-8); padding: var(--fw-space-32) var(--fw-space-24); border: 1px solid var(--fw-rule); border-radius: var(--fw-radius); background: var(--fw-paper-2); }
 .fw-empty .fw-tile { color: var(--fw-rule-3); }
 .fw-empty__title { font-family: var(--fw-display); font-size: var(--fw-text-md); font-weight: 600; }
 .fw-empty__body { color: var(--fw-muted); font-size: 14px; max-width: 52ch; }
@@ -312,22 +317,23 @@
   transition: background-color var(--fw-dur) var(--fw-ease-out), transform var(--fw-dur) var(--fw-ease-out), box-shadow var(--fw-dur) var(--fw-ease-out);
 }
 .fw-qa .fw-tile svg { width: 22px; height: 22px; }
+.fw-qa .fw-tile { border: 1px solid var(--fw-rule); }
+.fw-qa.tone-leaf .fw-tile svg { color: var(--fw-leaf); }
+.fw-qa.tone-earth .fw-tile svg { color: var(--fw-soil); }
+.fw-qa.tone-water .fw-tile svg { color: var(--fw-water); }
+.fw-qa.tone-terracotta .fw-tile svg { color: var(--fw-terracotta); }
+.fw-qa.tone-straw .fw-tile svg { color: var(--fw-straw); }
+.fw-qa.tone-amber .fw-tile svg { color: var(--fw-grain); }
 .fw-qa.tone-leaf .fw-tile { background: var(--fw-qa-seeding); }
 .fw-qa.tone-earth .fw-tile { background: var(--fw-qa-fertilizer); }
 .fw-qa.tone-water .fw-tile { background: var(--fw-qa-irrigation); }
 .fw-qa.tone-terracotta .fw-tile { background: var(--fw-qa-pesticide); }
 .fw-qa.tone-straw .fw-tile { background: var(--fw-qa-straw); }
 .fw-qa.tone-amber .fw-tile { background: var(--fw-qa-harvest); }
-.fw-qa:hover:not(:disabled) { border-bottom-color: var(--fw-rule-3); color: var(--fw-accent-deep); }
+.fw-qa:hover:not(:disabled) { border-bottom-color: var(--fw-rule-3); color: var(--fw-ink); }
 /* The whole cell washes with the operation's own pastel on hover, not just the tile. */
-.fw-qa.tone-leaf:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-seeding) 22%, transparent); }
-.fw-qa.tone-earth:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-fertilizer) 22%, transparent); }
-.fw-qa.tone-water:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-irrigation) 26%, transparent); }
-.fw-qa.tone-terracotta:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-pesticide) 32%, transparent); }
-.fw-qa.tone-straw:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-straw) 26%, transparent); }
-.fw-qa.tone-amber:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-harvest) 26%, transparent); }
-.fw-qa:hover:not(:disabled) .fw-tile { transform: translateY(-3px); box-shadow: 0 10px 18px -10px oklch(24% 0.03 165 / 0.45); filter: saturate(1.15); }
-.fw-qa:active:not(:disabled) .fw-tile { transform: translateY(-1px); filter: saturate(1.15) brightness(.94); }
+.fw-qa:hover:not(:disabled) .fw-tile { background: var(--fw-paper-3); border-color: var(--fw-rule-2); }
+.fw-qa:active:not(:disabled) .fw-tile { background: var(--fw-paper-3); }
 .fw-qa__label { display: grid; gap: 1px; min-width: 0; }
 .fw-qa__label b { font-size: 14.5px; font-weight: 650; }
 .fw-qa__label small { font-size: var(--fw-text-xs); color: var(--fw-muted); font-weight: 500; line-height: 1.35; }
@@ -519,7 +525,7 @@
 }
 .fw-pill svg { width: 15px; height: 15px; }
 .fw-pill:hover { color: var(--fw-ink); }
-.fw-pill[aria-pressed="true"] { color: var(--fw-accent-deep); border-bottom-color: var(--fw-accent); }
+.fw-pill[aria-pressed="true"] { color: var(--fw-ink); border-bottom-color: var(--ac-marker); }
 .fw-pill small { font-weight: 550; opacity: .7; }
 .fw-summary { display: flex; flex-wrap: wrap; gap: var(--fw-space-24); }
 .fw-summary__item { display: flex; align-items: baseline; gap: var(--fw-space-6); }
@@ -938,7 +944,7 @@
 .fw-area-cv .fw-cvcard > .fw-btn { grid-column: 1 / -1; justify-self: start; margin-top: var(--fw-space-8); }
 
 /* Destructive, but not a primary action competing with Save/Edit. */
-.fw-destroy { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; justify-self: start; }
+.fw-destroy { background: none; border: 0; padding: 0 var(--fw-space-4); min-height: 44px; display: inline-flex; align-items: center; font: inherit; font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; justify-self: start; }
 .fw-destroy:hover { color: var(--fw-danger); }
 .fw-detail__actions { align-items: center; }
 

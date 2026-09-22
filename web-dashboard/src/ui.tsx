@@ -1,3 +1,4 @@
+import { errorKind, friendlyError, isRetryable } from './utils/errorPresentation'
 import { Ico, type IconName } from './icons'
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
@@ -160,16 +161,27 @@ export function Hero({
 
 /** Shared table chrome (wrap/scroll/empty) so pages stop re-declaring the
  * same .table-wrap + <table class="data"> boilerplate per page. */
+/** A navigable row is a real link, not a `<tr>` with a click handler.
+ *
+ * `rowHref` turns the FIRST cell into an anchor that is stretched over the
+ * whole row by CSS, so the row keeps its large click target while the thing
+ * being activated is an `<a>`: it takes tab focus, Enter follows it, the
+ * browser offers open-in-new-tab, and a screen reader announces a link with
+ * the row's key as its name. Nothing is clickable that cannot be reached
+ * from the keyboard. */
 export function DataTable<T>({
   columns,
   rows,
   rowKey,
-  onRowClick,
+  rowHref,
+  rowLabel,
 }: {
   columns: { label: string; align?: 'num'; render: (row: T) => ReactNode; headClassName?: string }[]
   rows: T[]
   rowKey: (row: T) => string
-  onRowClick?: (row: T) => void
+  rowHref?: (row: T) => string
+  /** Accessible name for the row link, when the first cell alone is too terse. */
+  rowLabel?: (row: T) => string
 }) {
   return (
     <div className="table-wrap">
@@ -185,12 +197,14 @@ export function DataTable<T>({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={rowKey(row)} className={onRowClick ? 'is-clickable' : undefined} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+            <tr key={rowKey(row)} className={rowHref ? 'has-rowlink' : undefined}>
               {/* The label travels with each cell so a phone can render the
                 * row as a card instead of scrolling the table sideways. */}
               {columns.map((c, i) => (
                 <td key={i} data-label={c.label} className={c.align === 'num' ? 'num' : undefined}>
-                  {c.render(row)}
+                  {rowHref && i === 0
+                    ? <Link to={rowHref(row)} className="rowlink" aria-label={rowLabel?.(row)}>{c.render(row)}</Link>
+                    : c.render(row)}
                 </td>
               ))}
             </tr>
@@ -423,16 +437,26 @@ export function EmptyState({ title, body, icon = 'task', action }: { title: stri
 }
 
 export function ErrorState({ error, onRetry, kind = 'error' }: { error: string; onRetry?: () => void; kind?: 'error' | 'warning' }) {
-  const notFound = /không tìm thấy|not[_ ]?found|404/i.test(error)
-  const denied = /quyền|unauthor|forbidden|401|403/i.test(error)
+  // Never the transport's own words: "Thiếu header Authorization." told the
+  // reader nothing they could act on and read as a crash.
+  const failure = errorKind(error)
+  const notFound = failure === 'not-found'
+  const denied = failure === 'auth'
+  const TITLE: Record<ReturnType<typeof errorKind>, string> = {
+    auth: 'Phiên đăng nhập đã hết hạn',
+    'not-found': 'Không tìm thấy',
+    offline: 'Mất kết nối máy chủ',
+    unavailable: 'Tạm thời chưa dùng được',
+    unknown: 'Không tải được dữ liệu',
+  }
   return (
     <div className={`state state--${kind}`}>
       <div className="state__icon">
         <Ico name={notFound ? 'search' : denied ? 'denied' : 'warning'} size={18} />
       </div>
-      <p className="state__title">{notFound ? 'Không tìm thấy' : denied ? 'Không có quyền truy cập' : 'Không tải được dữ liệu'}</p>
-      <p className="state__body">{error}</p>
-      {onRetry && !notFound && !denied && (
+      <p className="state__title">{TITLE[failure]}</p>
+      <p className="state__body">{friendlyError(error)}</p>
+      {onRetry && isRetryable(error) && (
         <div className="state__actions">
           <button className="btn btn--ghost" onClick={onRetry}>
             Thử lại

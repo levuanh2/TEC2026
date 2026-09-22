@@ -57,7 +57,10 @@
   --fw-danger-soft: var(--ac-danger-soft);
 
   /* type ----------------------------------------------------------------- */
-  --fw-display: var(--ac-serif);
+  /* One sans family for the whole app. The Fraunces display face had no
+   * Vietnamese diacritic coverage worth the name and left headings in a
+   * different voice from the tables under them. */
+  --fw-display: var(--ac-sans);
   --fw-body: var(--ac-sans);
 
   --fw-text-xs: 12px;
@@ -86,8 +89,8 @@
   --fw-rail: 104px;        /* the date rail in the left margin */
   --fw-top: 56px;
   --fw-measure: 68ch;
-  --fw-radius: 3px;        /* controls only — the sheet itself is square */
-  --fw-radius-lg: 4px;
+  --fw-radius: var(--ac-radius-sm);   /* 8px — controls, chips, panels */
+  --fw-radius-lg: var(--ac-radius-lg); /* 12px — sheets, drawers */
 
   /* motion — one primitive, no decoration -------------------------------- */
   --fw-ease-out: var(--ac-ease);
@@ -106,10 +109,15 @@
      to match the six-verb row order (seeding → fertilizer → irrigation →
      pesticide → straw → harvest). Another explicit carve-out: see the note
      by .fw-quick in farmer.css. */
-  --fw-qa-seeding: #ff9aa2;
-  --fw-qa-fertilizer: #ffb7b2;
-  --fw-qa-irrigation: #ffdac1;
-  --fw-qa-pesticide: #e2f0cb;
-  --fw-qa-straw: #b5ead7;
-  --fw-qa-harvest: #c7ceea;
+  /* Activity identity is carried by the icon's ink, as the note at the top
+   * of this file always said it should be. The six tiles used to be six
+   * unrelated pastels (pink / peach / mint / periwinkle) picked for variety
+   * rather than meaning; they now share one recessed surface. */
+  --fw-qa-surface: var(--ac-subtle);
+  --fw-qa-seeding: var(--fw-qa-surface);
+  --fw-qa-fertilizer: var(--fw-qa-surface);
+  --fw-qa-irrigation: var(--fw-qa-surface);
+  --fw-qa-pesticide: var(--fw-qa-surface);
+  --fw-qa-straw: var(--fw-qa-surface);
+  --fw-qa-harvest: var(--fw-qa-surface);
 }

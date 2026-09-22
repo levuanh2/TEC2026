@@ -73,6 +73,21 @@
   --ac-sidebar-active: oklch(38% 0.085 160);
   --ac-sidebar-marker: oklch(78% 0.16 140);
 
+  /* --- workspace controls ------------------------------------------------
+         The institutional green stops at the sidebar, so the three places a
+         workspace would reach for it — a primary CTA, the active tab's
+         underline, a selected row — are drawn here instead. CTA and marker
+         are neutral ink; the selection tint is lavender, because a selected
+         row is usually a row with something still missing and a healthy
+         green would say the opposite. ------------------------------------- */
+  --ac-cta: oklch(26% 0.022 165);
+  --ac-cta-hover: oklch(19% 0.018 165);
+  --ac-cta-ink: oklch(99.5% 0.003 165);
+  --ac-marker: oklch(30% 0.02 165);
+  --ac-select: oklch(94% 0.022 292);
+  --ac-select-rule: oklch(76% 0.055 292);
+  --ac-select-ink: oklch(34% 0.09 292);
+
   /* --- warm off-white workspace ----------------------------------------- */
   --ac-workspace: oklch(97.6% 0.005 80);
 
@@ -115,3 +130,16 @@
   --ac-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ac-dur: 140ms;
 }
+
+/* Skip-to-content. Off-screen until focused, then a real, visible control at
+ * the top-left of the workspace — both apps mount it as the first node. */
+.skip-link {
+  position: fixed; top: 0; left: 0; z-index: 200;
+  transform: translateY(-120%); transition: transform 120ms var(--ac-ease);
+  background: var(--ac-cta); color: var(--ac-cta-ink);
+  min-height: 44px; display: inline-flex; align-items: center;
+  padding: 0 20px; border-radius: 0 0 var(--ac-radius-sm) 0;
+  font-weight: 650; font-size: 14px; text-decoration: none;
+}
+.skip-link:focus-visible, .skip-link:focus { transform: translateY(0); outline: 2px solid var(--ac-focus); outline-offset: -4px; }
+:where(main):focus { outline: none; }
