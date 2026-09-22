@@ -25,7 +25,11 @@
   -webkit-font-smoothing: antialiased;
 }
 .fw :where(h1, h2, h3, h4, p, figure) { margin: 0; }
-.fw a { color: inherit; }
+/* `:where()` keeps this at one class, so a later class rule wins the tie.
+ * As `.fw a` it was (0,1,1) and outranked `.fw-btn` (0,1,0): an anchor styled
+ * as the primary button inherited body ink instead of the CTA ink, and the
+ * Farmer Home next action measured 1.05:1 — dark text on the dark button. */
+.fw :where(a) { color: inherit; }
 .fw svg { flex: none; }
 .fw :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--fw-focus);
