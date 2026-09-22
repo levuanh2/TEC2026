@@ -163,17 +163,26 @@ h1, h2, h3, p { margin: 0; }
 .nav a.is-context { margin-left: 18px; font-size: var(--fs-caption); color: oklch(84% 0.02 160 / .78); padding-block: 5px; }
 .nav a.is-context::before { content: "└"; opacity: .45; margin-right: 4px; }
 
-.sidebar__foot { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px; display: flex; align-items: center; gap: 10px; }
+/* The footer sits INSIDE the dark green sidebar, so it takes the sidebar's
+ * ink scale. It used to be styled with the workspace tokens — near-black text
+ * and a light hairline on a dark green ground, which rendered the signed-in
+ * address and the role as all but invisible. */
+.sidebar__foot { margin-top: 14px; border-top: 1px solid var(--ac-sidebar-rule); padding-top: 14px; display: flex; align-items: center; gap: 10px; }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; flex: none; background: none;
-  border: 1px solid var(--border-strong); color: var(--brand-strong); font-weight: 650;
+  border: 1px solid var(--ac-sidebar-rule); color: var(--ac-sidebar-ink); font-weight: 650;
   display: grid; place-items: center; font-size: var(--fs-sm);
 }
 .sidebar__id { display: grid; gap: 1px; min-width: 0; }
-.sidebar__id b { font-size: var(--fs-sm); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar__id small { font-size: var(--fs-caption); color: var(--text-muted); }
-.sidebar__id .link { border: 0; background: none; color: var(--text-muted); padding: 3px 0 0; text-align: left; text-decoration: underline; text-underline-offset: 3px; font-size: var(--fs-caption); }
-.sidebar__id .link:hover { color: var(--danger); }
+.sidebar__id b { font-size: var(--fs-sm); color: var(--ac-sidebar-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar__id small { font-size: var(--fs-caption); color: var(--ac-sidebar-ink-2); }
+.sidebar__id .link {
+  border: 0; background: none; color: var(--ac-sidebar-ink-2);
+  /* 40px, like every other control: it was a 12px underlined word. */
+  min-height: 40px; display: inline-flex; align-items: center;
+  padding: 0; text-align: left; text-decoration: underline; text-underline-offset: 3px; font-size: var(--fs-sm);
+}
+.sidebar__id .link:hover { color: var(--ac-sidebar-ink); }
 
 /* ---------------------------------------------------------------- Topbar */
 .main { min-width: 0; display: flex; flex-direction: column; }
@@ -184,12 +193,14 @@ h1, h2, h3, p { margin: 0; }
 }
 .topbar__ctx { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .menu-btn { display: none; background: none; border: 0; color: var(--text-primary); font-size: 20px; padding: 4px; }
+/* Which role is signed in is a fact about the account, not a brand moment.
+ * It was the one piece of institutional green left in the top bar. */
 .role-chip {
-  font-size: var(--fs-caption); font-weight: 650; color: var(--brand-strong);
+  font-size: var(--fs-caption); font-weight: 650; color: var(--text-muted);
   background: none; padding: 0; border: 0; white-space: nowrap;
 }
 .org-chip { font-size: var(--fs-sm); font-weight: 650; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 6px; }
-.org-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.org-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ac-rule-3); flex: none; }
 .org-chip small { color: var(--text-muted); font-weight: 500; }
 
 /* --------------------------------------------------------------- Content */
@@ -749,3 +760,30 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
   select.select, input.search, .ops-search input, .ops-filter select,
   .sidebar__id .link { min-height: var(--ac-control-h); }
 }
+
+/* Farm performance: a group header row that keeps resource efficiency, the
+ * cost the cooperative recorded, and the Carbon result visibly apart. */
+.perf-table thead tr.colgroups th { border-bottom: 0; padding-bottom: 2px; }
+.perf-table .colgroup {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-muted); text-align: left; border-bottom: 2px solid var(--border-strong);
+}
+.perf-table .colgroup--carbon { border-bottom-color: var(--ac-carbon); color: var(--ac-carbon); }
+.perf-table td.col-hi, .perf-table th.col-hi { background: var(--ac-subtle); }
+.perf-table .cell-empty { font-size: var(--fs-caption); font-style: normal; }
+@media (max-width: 720px) {
+  .perf-table thead tr.colgroups { display: none; }
+}
+
+/* Technical disclosure: ids, ISO timestamps and the write channel. Closed by
+ * default and visually quieter than the business facts above it. */
+.tech-detail { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+.tech-detail > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 8px;
+  min-height: 40px; font-size: var(--fs-sm); font-weight: 650; color: var(--text-muted);
+}
+.tech-detail > summary::-webkit-details-marker { display: none; }
+.tech-detail > summary::before { content: "▸"; font-size: 11px; transition: transform var(--ac-dur) var(--ac-ease); }
+.tech-detail[open] > summary::before { transform: rotate(90deg); }
+.tech-detail > summary:focus-visible { outline: 2px solid var(--ac-focus); outline-offset: 2px; border-radius: var(--radius-control); }
+.dl--tech dd code { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-muted); word-break: break-all; }

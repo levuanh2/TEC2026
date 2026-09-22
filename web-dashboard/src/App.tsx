@@ -167,7 +167,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
           <span className="role-chip">{ROLE_LABEL[viewer.role] ?? viewer.role}</span>
         </header>
         <main className="content" id="main" tabIndex={-1}>
-          {usingMockData && <Notice kind="warning">MOCK DATA — NOT PRODUCTION.</Notice>}
+          {usingMockData && <Notice kind="warning">Dữ liệu minh họa — không phải số liệu thật.</Notice>}
           {children}
         </main>
       </div>

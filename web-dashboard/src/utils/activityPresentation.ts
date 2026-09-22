@@ -25,9 +25,26 @@ const parse = (detail: string): Payload | null => {
   try { const value: unknown = JSON.parse(detail); return value != null && typeof value === 'object' && !Array.isArray(value) ? value as Payload : null } catch { return null }
 }
 
+/** The Vietnamese name of an activity type. Never the stored value.
+ *
+ * `presentActivity` used to fall back to `type` whenever the detail column was
+ * not JSON — which is exactly what the demo seed and every offline row written
+ * before the JSON contract look like — so the Management timeline printed
+ * `irrigation` where it meant "Nước tưới". */
+const TYPE_LABEL: Record<string, string> = {
+  seeding: 'Gieo sạ',
+  fertilizer: 'Phân bón',
+  irrigation: 'Nước tưới',
+  pesticide: 'Thuốc bảo vệ thực vật',
+  fuel: 'Nhiên liệu',
+  straw_management: 'Quản lý rơm rạ',
+  harvest: 'Thu hoạch',
+}
+export const activityTypeLabel = (type: string): string => TYPE_LABEL[type] ?? 'Hoạt động khác'
+
 export function presentActivity(type: string, detail: string): ActivityPresentation {
   const payload = parse(detail)
-  if (!payload) return { label: type, summary: detail || missing }
+  if (!payload) return { label: activityTypeLabel(type), summary: detail || missing }
   switch (type) {
     case 'seeding': return { label: 'Gieo sạ', summary: `${value(payload, 'variety_name')} · ${value(payload, 'seed_kg', 'kg')}`, detail: `Phương pháp: ${value(payload, 'seeding_method')}` }
     case 'fertilizer': return { label: 'Phân bón', summary: `${first(payload, 'fertilizer_name', 'fertilizer_type')} · ${value(payload, 'amount_kg', 'kg')}`, detail: `N: ${value(payload, 'nitrogen_percent', '%')}` }
@@ -36,7 +53,7 @@ export function presentActivity(type: string, detail: string): ActivityPresentat
     case 'fuel': return { label: 'Nhiên liệu', summary: `${enumOf(payload, 'fuelType', 'fuel_type')} · ${quantity(payload, ['amount_liter', 'amount_litre'], 'L')}`, detail: `Thiết bị: ${value(payload, 'equipment_name')}` }
     case 'straw_management': return { label: 'Quản lý rơm rạ', summary: `${enumOf(payload, 'strawMethod', 'management_method', 'method')} · ${quantity(payload, ['straw_amount_kg', 'straw_mass_kg'], 'kg')}` }
     case 'harvest': return { label: 'Thu hoạch', summary: value(payload, 'yield_kg', 'kg'), detail: `Diện tích thu hoạch: ${value(payload, 'harvested_area_ha', 'ha')}` }
-    default: return { label: type, summary: missing }
+    default: return { label: activityTypeLabel(type), summary: missing }
   }
 }
 

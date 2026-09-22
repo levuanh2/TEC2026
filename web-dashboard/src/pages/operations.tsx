@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ico } from '../icons'
 import { go, Link } from '../ui'
 import { exceptionsOf, useOperations, type Exception, type OpsRow, type Severity } from './ops'
@@ -195,7 +195,7 @@ export type SeasonsFocus = 'all' | 'missing' | 'carbon'
 
 const FOCUS_COPY: Record<SeasonsFocus, { title: string; sub: string }> = {
   all: { title: 'Danh sách nông hộ và vụ mùa', sub: 'Tìm kiếm, lọc và theo dõi tiến độ dữ liệu, Carbon, MRV.' },
-  missing: { title: 'Dữ liệu còn thiếu', sub: 'Các vụ chưa đủ dữ liệu để tính phát thải — bấm Xử lý để mở đúng vụ.' },
+  missing: { title: 'Dữ liệu còn thiếu', sub: 'Các vụ chưa đủ dữ liệu để tính phát thải — bấm Xử lý để mở đúng vụ và phần dữ liệu cần bổ sung.' },
   carbon: { title: 'Carbon theo vụ', sub: 'Trạng thái tính phát thải của từng vụ trong hợp tác xã.' },
 }
 
@@ -318,12 +318,17 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
                     <td data-label="Carbon">{r.loading ? <Sk w={92} h={20} /> : <Badge role={carbon.role}>{carbon.text}</Badge>}</td>
                     <td data-label="MRV">{r.mrv ? <Badge role="info">{r.mrv.caseCode}</Badge> : <span className="ops-dash">—</span>}</td>
                     <td data-label="Hành động">
+                      {/* The label is the work. /data-gaps told the officer to
+                        * "bấm Xử lý" next to a button that said "Chi tiết", so
+                        * the instruction pointed at a control that did not
+                        * exist. A row with something missing is handled; a row
+                        * with nothing missing is only inspected. */}
                       <button
                         type="button" className="btn btn--ghost btn--sm"
                         onClick={open}
                         aria-expanded={r.seasonId === selected}
-                        aria-label={`Chi tiết vụ ${r.seasonName}, thửa ${r.plotName ?? r.plotId}, ${r.farmName}`}
-                      >Chi tiết</button>
+                        aria-label={`${r.missing.length > 0 ? 'Xử lý' : 'Chi tiết'} vụ ${r.seasonName}, thửa ${r.plotName ?? r.plotId}, ${r.farmName}`}
+                      >{r.missing.length > 0 ? 'Xử lý' : 'Chi tiết'}</button>
                     </td>
                   </tr>
                 )
@@ -359,6 +364,14 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
 
 function SeasonDetailPanel({ row, onClose }: { row: OpsRow; onClose: () => void }) {
   const carbon = CARBON_LABEL[row.carbon]
+  // "Xử lý" has to land on the thing to be handled, not at the top of a panel
+  // whose first two sections are context the officer already read in the row.
+  const missingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (!row.missing.length) return
+    const id = requestAnimationFrame(() => missingRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [row.seasonId, row.missing.length])
   return (
     <aside className="ops-detail" aria-label={`Chi tiết vụ ${row.seasonName}`}>
       <header>
@@ -376,7 +389,7 @@ function SeasonDetailPanel({ row, onClose }: { row: OpsRow; onClose: () => void 
       {row.loading && <p className="ops-note" aria-live="polite">Đang đọc dữ liệu của vụ này…</p>}
 
       <section>
-        <h3>Dữ liệu còn thiếu</h3>
+        <h3 ref={missingRef} tabIndex={-1}>Dữ liệu còn thiếu</h3>
         {row.loading
           ? <p className="ops-note">Chưa đọc xong.</p>
           : row.missing.length === 0
