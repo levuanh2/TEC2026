@@ -15,8 +15,9 @@ nào của Round 2 nên không viết lại Carbon readiness hay MRV.
 | | |
 |---|---|
 | Branch | `fix/hybrid-redesign-round2` (nhánh từ `main` @ `2d1c50e`) |
-| HEAD | `e64fa07` |
-| Tổng `main..HEAD` | 11 commit (7 của Round 2 + 4 của Round 3) |
+| HEAD sau commit mã nguồn/test cuối | `e64fa07` |
+| HEAD sau commit báo cáo này | `db47f8a` |
+| Tổng `main..HEAD` | 12 commit — 7 của Round 2, 4 mã nguồn/test của Round 3, 1 commit tài liệu (chính báo cáo này) |
 | Merge / push / deploy | **Chưa** — xem §12 |
 
 ## 2. Commit của Round 3
@@ -29,11 +30,12 @@ Bốn commit, tính từ `b01404f` (HEAD cuối Round 2):
 | `243b53e` | `fix(farmer): a scope you can read, and each season stated once` |
 | `3edf092` | `fix(management): a blocker you can act on, and a label that matches the copy` |
 | `e64fa07` | `test(e2e): round-3 gates that run without a QA login` |
+| `db47f8a` | `docs: round-3 report, with the coverage matrix and what is not verified` (chính file này + AGENTS.md) |
 
 ## 3. Diffstat
 
 ```
-git diff --stat b01404f..HEAD          # chỉ Round 3
+git diff --stat b01404f..e64fa07       # Round 3, phần mã nguồn + test
 25 files changed, 944 insertions(+), 178 deletions(-)
 
 git diff --stat main...HEAD -- web-dashboard   # cả Round 2 + Round 3
@@ -532,7 +534,7 @@ docs/ChatGPT Image Sep 21, 2026, 12_18_10 AM-2.png
 docs/ChatGPT Image Sep 21, 2026, 12_18_11 AM-3.png
 ```
 
-(`git status --short` tại HEAD `e64fa07` — chính xác 5 dòng `??`.)
+(`git status --short` tại HEAD `db47f8a` — chính xác 5 dòng `??`.)
 
 ---
 
@@ -541,6 +543,6 @@ docs/ChatGPT Image Sep 21, 2026, 12_18_11 AM-3.png
 - **Chưa merge** vào `main`.
 - **Chưa push** lên remote.
 - **Chưa deploy**.
-- Toàn bộ nằm trên `fix/hybrid-redesign-round2`, HEAD `e64fa07`, chờ người dùng
+- Toàn bộ nằm trên `fix/hybrid-redesign-round2`, HEAD `db47f8a`, chờ người dùng
   kiểm tra staging/local.
 - Không sửa backend, không đổi công thức / hệ số / phương pháp Carbon.
