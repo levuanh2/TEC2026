@@ -550,7 +550,13 @@ docs/ChatGPT Image Sep 21, 2026, 12_18_11 AM-3.png
 
 ---
 
-## 15. Final Real-Data Gate (2026-09-22)
+## 15. Final Real-Data Gate — lần chạy bị chặn (2026-09-22)
+
+> **Đã bị thay thế.** Lần chạy này bị chặn vì thiếu credential; gate thật đã chạy
+> ngày 2026-09-23 và nằm ở **§16**. Giữ lại mục này vì phần chẩn đoán environment
+> và bảng contrast 49 cặp vẫn là bằng chứng của vòng đó. Mọi ô "BLOCKED" dưới đây
+> đã được §16 giải quyết; số liệu contrast dưới đây là số **trước** các bản sửa ở
+> §16.J, đừng đọc như kết quả cuối.
 
 Vòng cổng cuối được yêu cầu chạy trên tenant QA thật. Kết quả thật, không tô hồng:
 
@@ -816,3 +822,369 @@ Xác nhận:
 - Branch `fix/hybrid-redesign-round2`, HEAD `2fc319f`.
 - `:5173` đang chạy **real-data mode** và `:8010` backend đang chạy — mở
   **http://127.0.0.1:5173/** để xem. App sẽ hỏi đăng nhập vì đây là dữ liệu thật.
+
+---
+
+## 16. Final Real-Data Gate — đã chạy (2026-09-23)
+
+§15 ghi lại một gate **không** chạy được vì thiếu credential. Lần này credential
+có thật, mọi con số dưới đây đo trên hosted Supabase với hai tài khoản QA thật.
+
+### 16.A Phạm vi
+
+Frontend UX / state consistency và QA trên dữ liệu thật. **Backend không đổi** —
+đó là chủ ý, không phải bỏ sót. Không đụng công thức, hệ số, phương pháp Carbon,
+không đổi route công khai, không tạo dữ liệu giả, không ghi/xóa/tính lại/xuất.
+
+| | |
+|---|---|
+| Branch | `fix/hybrid-redesign-round2` |
+| HEAD khi bắt đầu gate | `235e53b` (**không phải** `5115699` như yêu cầu ghi — đã báo trước khi chạy) |
+| HEAD sau gate | xem §16.J |
+| Backend | `127.0.0.1:8010`, `/docs` → 200, **không sửa dòng nào** |
+| Frontend | `127.0.0.1:5173` real-data mode |
+| Merge / push / deploy | **Chưa** |
+
+Cách vào real-data mode: `npm run dev` đọc `web-dashboard/.env`, file này không có
+khóa `VITE_USE_MOCK_DATA` nên mặc định `false`. Xác minh bằng Chromium: `h1 =
+"Đăng nhập"`, **không** có banner "Dữ liệu minh họa", 0 console error.
+
+### 16.B Carbon state consistency — bảy surface, vụ `2e63e128-f53d-4f70-9bb4-62b9efc048e3`
+
+Cùng một câu chuyện, cùng **hai** thiếu sót người dùng sửa được, cùng tên gọi:
+
+| Surface | Hiển thị |
+|---|---|
+| Farmer Home | `Thiếu dữ liệu` · một primary action `Bổ sung ngay` |
+| Farmer Carbon | đúng hai gap được gọi tên, **cộng** giới hạn hệ số ở khối riêng |
+| Management Overview | `Thiếu 2 thông tin để tính phát thải` + tên hai gap |
+| `/seasons` | đủ cả năm từ trạng thái trên danh sách |
+| `/carbon` | đủ cả năm từ trạng thái trên danh sách |
+| Management season hub | `Thiếu dữ liệu` |
+| Management Carbon tab | `Thiếu dữ liệu — Còn 2 thông tin cần bổ sung` + tên hai gap |
+
+Hai gap, nguyên văn trên mọi surface:
+
+```text
+Thiếu số ngày vùi rơm trước khi làm đất
+Thiếu tỷ lệ chất khô của rơm
+```
+
+Năm lớp trạng thái phân biệt đúng:
+
+- **User-fixable gap** — gọi tên, có form sửa, `Sửa ngay` mở đúng bản ghi.
+- **Methodology / factor limitation** — tách hẳn thành khối
+  `GIỚI HẠN CỦA BỘ HỆ SỐ — NHẬP THÊM KHÔNG GIÚP TÍNH ĐƯỢC`, **không** có form
+  sửa; hành động duy nhất là `Xem bản ghi nhiên liệu` (chỉ để xem).
+- **Ready / Calculated / Stale** — là ba chip riêng trên `/seasons` và `/carbon`.
+
+Quick-fix mở đúng record và đúng field, đo trên DOM thật:
+
+```text
+sheet: "Chỉnh sửa rơm rạ — DEMO-HT-2026 · Thửa demo 1.1"
+focus: "Số ngày trước khi làm đất"
+```
+
+### 16.C Hai P0 cũ — có tái diễn không?
+
+| P0 | Kết quả |
+|---|---|
+| "Đã đủ dữ liệu" khi còn user-fixable gap | **KHÔNG tái diễn** |
+| "Sẵn sàng tính" khi factor limitation đang chặn | **KHÔNG tái diễn** |
+| CTA tính Carbon enable khi chắc chắn thất bại | **KHÔNG tái diễn** — đo được `Tính lại theo kịch bản` ở trạng thái `disabled` |
+
+Chuỗi "Đã đủ dữ liệu" **có** xuất hiện trên Farmer Home, nhưng không phải là kết
+luận Carbon. Nó là nhãn của **chỉ số tài nguyên**, và khối Carbon ngay dưới nó
+trên cùng màn hình đọc là "Chưa đủ dữ liệu · Chưa có kết quả hợp lệ":
+
+```text
+HIỆU QUẢ TÀI NGUYÊN  Nước tưới 0,063 m³/kg lúa  Đã đủ dữ liệu
+                     Phân bón  0,029 kg/kg lúa  Đã đủ dữ liệu
+CHI PHÍ GHI NHẬN     Chi phí vật tư             Chưa đủ dữ liệu
+PHÁT THẢI CARBON     Carbon                     Chưa đủ dữ liệu
+```
+
+Lần dò đầu tiên của tôi khớp chuỗi trần và báo nhầm đây là P0. Công cụ đo giờ ghi
+kèm khối chứa nó, nên khác biệt này hiện ra thay vì một giá trị boolean sai lệch.
+
+### 16.D Management row integrity
+
+| Route | Số row | Plot identifier | Chữ ký trùng |
+|---|---|---|---|
+| `/dashboard` | 7 | có trên mọi row | **0** |
+| `/seasons` | 6 | có | **0** |
+| `/carbon` | 6 | có | **0** |
+
+Ví dụ một row: `Hộ demo 1 · DEMO-FARM-01 · Thửa demo 1.1 · DEMO-HT-2026 · Đang canh tác`.
+
+### 16.E MRV
+
+```text
+case:          DEMO-MRV-2026 (KỲ 01/05/2026 – 30/09/2026)
+case status:   Đang thực hiện
+aggregate:     1/6 bước hoàn thành · 1 đang thực hiện
+current step:  Đăng ký — Đang thực hiện
+```
+
+- Dashboard action: `Mở hồ sơ MRV` ✓
+- `Duyệt MRV`: **không xuất hiện ở bất kỳ đâu** ✓ — màn hình nói thẳng "hệ thống
+  chưa có chức năng duyệt hoặc chuyển bước MRV"
+- Hành động khác chỉ là export: `Xuất PDF`, `Xuất Excel (.xlsx)`, `Xuất JSON`
+- Open exception queue giữ đúng case đang `Đang thực hiện`; **không** có hồ sơ
+  `verified`/`closed` nào lọt vào
+
+### 16.F Regression — kết quả chính xác
+
+| Gate | Kết quả |
+|---|---|
+| `redesign-qa` (real, lần 1) | **15 passed / 0 failed / 0 skipped** — 12,9 phút |
+| `redesign-qa` (real, chạy lại sau khi sửa CSS) | **15 passed / 0 failed / 0 skipped** — 11,6 phút |
+| Audit 27 route × 4 viewport (real) | **27/27**, overflow **0px** ở cả 4 viewport, raw enum/UUID/ISO/field name **0**, console error **0** |
+| Contrast (CSS đã commit) | **40 cặp đo / 40 pass / 0 fail** |
+| `npx tsc --noEmit` | pass |
+| `npx vitest run` | **35 file / 303 test passed** |
+| `npm run build` | pass |
+| `npx playwright test round3-qa` | **15 passed / 0 failed / 0 skipped** |
+| `npx playwright test web-smoke farmer-web` | **2 passed / 0 failed** (`web-smoke` 1, `farmer-web` 1) |
+
+**Không có test real-data nào bị skip.**
+
+#### Visual-system, đo trên 27 route
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Serif trong `main` | **0** |
+| Emoji trong `main` | **0** |
+| Institutional dark green trong `main` | **0** |
+| Overflow ngang > 1px | **0** / 108 lần đo |
+
+Heuristic màu bắt 6 lần `rgb(41, 75, 22)` trên `/farmer`. Đó **không** phải xanh
+TDMU: `#294B16` là `--ac-role-positive-ink`, mực đi kèm pastel positive đúng theo
+design system. Xanh institutional là `--ac-sidebar` = `rgb(3, 58, 36)`, màu khác
+hẳn, và nó không có mặt trong `main`. Sáu "lần" thực ra là một chip, đếm qua
+`span`/`svg`/`path` trên hai thuộc tính.
+
+#### Primary CTA — Farmer
+
+Cột CTA của bộ audit đếm `.btn` (lớp của Management) nên báo 0 cho toàn bộ route
+Farmer. Đó là lỗi của công cụ đo, không phải số liệu. Đo lại bằng `.fw-btn`:
+
+| Route | 1440 / 1280 / 768 / 390 | Nhãn |
+|---|---|---|
+| `/farmer` | 1 / 1 / 1 / 1 | `Bổ sung ngay` |
+| `/farmer/journal` | 1 / 1 / 1 / 1 | `Ghi hoạt động` |
+| `/farmer/farms` | 0 | — |
+| `/farmer/performance` | 0 | — |
+| `/farmer/carbon` | 2 / 2 / 2 / 2 | `Sửa ngay` × 2 |
+| `/farmer/account` | 0 | — |
+| `/farmer/farms/:id` | 1 | `Ghi hoạt động cho DEMO-HT-2026` |
+| `/farmer/plots/:id` | 1 | `Mở vụ` |
+| `/farmer/crop-seasons/:id` | 0 | — |
+| `…/journal` | 1 | `Ghi hoạt động` |
+| `…/performance` | 0 | — |
+| `…/carbon` | 2 / 2 / 2 / 2 | `Sửa ngay` × 2 |
+
+10/12 route có tối đa một primary action. Hai route Carbon có hai nút vì đó là
+danh sách sửa lỗi: **một nút cho mỗi gap**, và vụ này có đúng hai gap. Đây là
+pattern repair-list đã thiết kế ("mục đã xong sẽ tự biến mất"), không phải hai
+next action tranh nhau. Yêu cầu "một primary next action" áp cho Farmer Home,
+và `redesign-qa` test 2 khẳng định điều đó.
+
+### 16.G Benchmark loading trên dữ liệu thật — 3 lần mỗi route
+
+Đo khi không có tiến trình nào khác chạy. `first row` = lúc row đầu tiên xuất
+hiện; `fully settled` = `networkidle`.
+
+| Route | Số vụ | First row — median (min–max) | Fully settled — median (min–max) |
+|---|---|---|---|
+| `/dashboard` | 7 | **8 319 ms** (6 756 – 10 295) | **13 415 ms** (11 899 – 17 245) |
+| `/seasons` | 6 | **261 ms** (236 – 308) | **15 954 ms** (13 353 – 17 686) |
+| `/data-gaps` | 6 | **310 ms** (301 – 318) | **18 618 ms** (15 177 – 21 711) |
+| `/carbon` | 6 | **313 ms** (263 – 335) | **14 594 ms** (11 277 – 15 637) |
+
+Ba route sau đưa row đầu tiên lên trong khoảng một phần ba giây rồi mất 13–19 s
+giải quyết readiness **từng vụ một**. `/dashboard` khác hẳn: 8,3 s trước khi có
+bất cứ thứ gì hiển thị.
+
+Hai lưu ý để con số không bị đọc sai:
+
+1. Tenant này chỉ có **6 vụ**. Chi phí tăng tuyến tính theo số vụ, nên một HTX
+   thật sẽ **tệ hơn**, không tốt hơn.
+2. Con số "~32 s" ở các vòng trước lấy từ page-sweep có cửa sổ settle cố định,
+   **không** phải giá trị network/readiness đo được. Bảng trên là số đúng.
+
+### 16.H Diễn giải hiệu năng
+
+```text
+CHƯA SẴN SÀNG VẬN HÀNH (NOT OPERATIONAL-READY)
+```
+
+Hai lý do, cả hai đều đo được:
+
+- readiness tính theo từng vụ, chi phí tăng tuyến tính theo số vụ;
+- `/dashboard` mất ~8,3 s median trước khi có render có nghĩa đầu tiên.
+
+Round này **không** sửa hiệu năng, và cũng không che nó: không thêm delay giả,
+không giấu loading indicator, không cache readiness cũ ở client, không nhân bản
+logic readiness xuống frontend, không gom endpoint tùy tiện, không đổi contract
+backend.
+
+### 16.I Việc backend cần làm ở vòng sau
+
+**B1 — Bulk season readiness/state.** Hành vi mong muốn, không phải thiết kế chi
+tiết: danh sách vụ phải lấy được trạng thái readiness/Carbon cho **toàn bộ vụ
+đang hiển thị trong một request**, thay vì `danh sách vụ → N request readiness`.
+Hai hình dạng đều chấp nhận được:
+
+```text
+GET  <list endpoint>   → trả về row vụ + readiness/carbon state cần để render danh sách
+POST <bulk readiness>  → nhận/suy ra danh sách season id, trả readiness cho tất cả vụ đang hiển thị
+```
+
+Tiêu chí nghiệm thu: số request readiness không còn phụ thuộc số vụ.
+
+**B2 — Trace initial load của `/dashboard`, tách riêng.** Đây **không** phải cùng
+một triệu chứng với B1: ba route kia có row đầu ở 0,26–0,31 s còn `/dashboard` ở
+8,3 s. Vòng sau phải lần theo `/dashboard` → request đầu tiên → phụ thuộc chặn →
+lần paint row Management đầu tiên, rồi kết luận đó là độ trễ endpoint tổng hợp,
+phụ thuộc fetch tuần tự, bootstrap auth/session, waterfall readiness, hay tổ hợp.
+Bằng chứng hiện có chưa đủ để khẳng định, và báo cáo này không đoán thêm.
+
+**B3 — Một console error thoáng qua.** Lần audit đầu, `/dashboard` ghi một lỗi:
+
+```text
+GET /v1/crop-seasons/8681516d-…/carbon blocked by CORS: no Access-Control-Allow-Origin
+```
+
+Gọi thẳng endpoint đó trả `401` **kèm** `access-control-allow-origin`, nên header
+không thiếu do cấu hình. Hai lần audit sau: **0 console error**. Ghi lại như một
+quan sát dưới tải, chưa kết luận.
+
+### 16.J Sửa những gì — file và commit
+
+Ba commit, đều là frontend, đều do dữ liệu thật phát hiện:
+
+| Commit | Nội dung |
+|---|---|
+| `a2e566d` | `fix(farmer): a primary action you can actually read` |
+| `b360e33` | `fix(activities): no database column, uuid or raw enum in a detail drawer` |
+| `75e1a09` | `fix(a11y): every boundary the gate asks for, at the measured threshold` |
+
+**1. Primary action của Farmer Home không đọc được — 1,05:1.**
+`.fw a { color: inherit }` có specificity (0,1,1), thắng `.fw-btn` (0,1,0), nên
+một `<a>` mang dạng nút chính lấy mực thân bài thay vì `--ac-cta-ink`: `#11241C`
+trên `#1A2721`. Mock không lộ ra vì ở đó control tương đương là `<button>` và đo
+được 15,29:1. Sửa bằng `.fw :where(a)` — hạ selector xuống một class để rule
+`.fw-btn` phía sau thắng hòa. Đo lại: **15,29:1**.
+
+**2. Drawer chi tiết hoạt động in thẳng cột cơ sở dữ liệu.**
+`activityFields` map mọi khóa payload bằng `KEY_LABELS[k] ?? k`. Mở một bản ghi
+tưới trong nhật ký Farmer hiện nguyên văn `activity_id` kèm UUID, `awd` thay vì
+"Tưới ngập–khô xen kẽ (AWD)", `duration_minutes`, `water_level_cm`,
+`pump_energy_kwh`, và `created_at`/`updated_at` dạng ISO. Guard của round không
+bắt được vì guard đọc trang, còn cái này nằm sau một cú click. Ba quy tắc mới:
+bỏ cột bookkeeping; bỏ khóa không có nhãn tiếng Việt thay vì in tên cột; enum
+đọc qua từ điển dùng chung. Sáu khóa dữ liệu thật đang dùng được thêm nhãn.
+
+**3. `Demo pesticide` lọt lên timeline Management.**
+`product_name` của seed. Phía Farmer đã từ chối chuỗi này; Management in nguyên.
+Định nghĩa chuyển vào util dùng chung để `value()` phủ mọi trường free-text ở cả
+hai bên.
+
+**4. Hai lỗi contrast thật.**
+Nút ghost trong thẻ pastel Carbon đo 2,32:1 — token line chỉnh theo nền giấy
+(3,27:1) nhưng nền ở đây là xanh methodology `#C7CEEA`. Thêm
+`--ac-control-line-strong` (54% lightness) **chỉ** áp trong thẻ role: xấu nhất
+3,21:1. Năm viền chip Carbon đo 1,48–2,15:1; mỗi viền giờ là bậc tối nhất của
+**chính hue/saturation của nó** đủ qua 3:1 với cả nền giấy lẫn nền chip:
+positive 3,29 · water 3,62 · attention 3,55 · error 4,59 · info 4,24. Chip đọc
+như có viền rõ thay vì một mảng pastel mềm — đây là thay đổi thị giác thấy được,
+và là điểm duy nhất trong gate này đáng để bạn xem lại; muốn hoàn nguyên chỉ cần
+đổi lại năm giá trị hex.
+
+Diffstat `235e53b..HEAD`:
+
+```
+ web-dashboard/src/farmer/activityView.ts           | 14 ++---
+ web-dashboard/src/farmer/farmer.css                | 13 ++++-
+ web-dashboard/src/theme.css                        | 33 +++++++++---
+ .../src/utils/activityPresentation.test.ts         | 49 ++++++++++++++++-
+ web-dashboard/src/utils/activityPresentation.ts    | 63 ++++++++++++++++++++--
+ 5 files changed, 149 insertions(+), 23 deletions(-)
+```
+
+Không có file backend, migration, Flutter hay `docs/openapi.json` nào bị sửa.
+
+#### Ba lỗi của chính công cụ đo, đã sửa trước khi tin số liệu
+
+1. `page.evaluate` chỉ nhận một đối số — script P0 crash, phải gói vào object.
+2. `.nav a` có transition trên `color`. Tiêm `color: transparent` để chụp nền rồi
+   gỡ ra làm computed value đọc được ở giữa transition (`oklab(… / 0.306)`), và
+   pixel tâm của một mục nav rơi trúng icon. Ba cặp sidebar vì thế báo fail. Công
+   cụ giờ đọc màu chữ **trước** khi tiêm style, và lấy màu **mode** trên một lưới
+   điểm. Ba cặp đó đo được 9,52 · 9,32 · 9,56:1.
+3. Cột primary CTA đếm nhầm lớp cho Farmer (xem §16.F).
+
+### 16.K Ảnh và dữ liệu QA
+
+| Thư mục | Nội dung |
+|---|---|
+| `web-dashboard/.qa-screenshots/round3-real/` | 27 route × 4 viewport + P0 + task, kèm `_report.json`, `_p0.json`, `_tasks.json`, `_perf.json`, `_contrast.json`, `_farmer-cta.json` |
+| `web-dashboard/.qa-screenshots/redesign/` | ảnh của `redesign-qa` |
+
+Cả hai nằm dưới `.gitignore:25` (`.qa-screenshots/`) — **không commit ảnh**.
+
+### 16.L Môi trường test — vào mock rồi ra, không để lại dấu vết
+
+Cơ chế có sẵn của dự án, không sửa file nào:
+
+```
+playwright.config.ts
+  webServer: { command: 'npm run dev -- --host 127.0.0.1',
+               reuseExistingServer: true,
+               env: { VITE_USE_MOCK_DATA: 'true', VITE_SUPABASE_URL: '', VITE_SUPABASE_PUBLISHABLE_KEY: '' } }
+```
+
+| Bước | Đã làm |
+|---|---|
+| Vào mock mode | dừng tiến trình vite real-mode đang giữ `:5173` (pid 40384). `:5173` trống → Playwright tự dựng server của nó với `VITE_USE_MOCK_DATA=true`, chạy xong tự dọn |
+| Ra mock mode | chạy lại `npm run dev` không có biến mock; nó đọc `web-dashboard/.env`, file này **không** có khóa `VITE_USE_MOCK_DATA` nên mặc định `false` |
+| Thay đổi trên đĩa | **không có** — không sửa `playwright.config.ts`, không sửa `.env`, không có biến môi trường nào sống sót qua tiến trình |
+
+Xác minh sau khi khôi phục:
+
+```text
+final mode: real
+h1 = "Đăng nhập" · banner "Dữ liệu minh họa": không có · console error: 0
+backend 127.0.0.1:8010 /docs -> 200
+frontend http://127.0.0.1:5173
+```
+
+### 16.M Phân loại cuối
+
+```text
+UX/STATE CORRECTNESS:      PASS
+FRONTEND REGRESSION GATE:  PASS
+REAL-DATA PERFORMANCE:     BLOCKED
+OPERATIONAL READINESS:     NOT READY
+```
+
+- **UX/state correctness — PASS.** Bảy surface kể cùng một câu chuyện Carbon,
+  năm lớp trạng thái phân biệt đúng, không P0 nào tái diễn, row Management có
+  định danh thửa và không trùng chữ ký, MRV không bịa hành động.
+- **Frontend regression gate — PASS.** `redesign-qa` 15/15 trên dữ liệu thật
+  (hai lần), audit 27/27, contrast 40/40, mock gate 17/17, vitest 303, tsc và
+  build sạch. Ba lỗi tìm được trên dữ liệu thật đã sửa và đã đo lại.
+- **Real-data performance — BLOCKED.** Xem §16.G và §16.I. Không sửa trong round
+  này theo đúng yêu cầu.
+- **Operational readiness — NOT READY.** Readiness còn tính theo từng vụ và
+  `/dashboard` còn ~8,3 s trước render đầu tiên.
+
+### 16.N Git
+
+| | |
+|---|---|
+| Branch | `fix/hybrid-redesign-round2` |
+| Commit của gate này | `a2e566d`, `b360e33`, `75e1a09`, cộng commit tài liệu này |
+| `git status --short` | chỉ còn 5 file untracked có sẵn từ trước: `.mcp.json` và 4 ảnh `docs/ChatGPT Image …png` — không stage, không sửa |
+| Merge / push / deploy | **chưa làm** |
