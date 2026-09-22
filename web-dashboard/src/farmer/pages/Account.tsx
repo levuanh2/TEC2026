@@ -7,7 +7,7 @@ import { initials } from '../activityView'
 import { keys, STABLE_MS, useQuery } from '../data'
 import { Ico } from '../icons'
 import { Chip, Empty, ErrorPanel, IconTile, Section, Sk, SkBlock } from '../kit'
-import { plotsOfFarm, seasonsOfPlots, useScope } from '../scope'
+import { isActiveStatus, plotsOfFarm, seasonsOfPlots, seasonStatusLabel, useScope } from '../scope'
 
 export function FarmerAccountPage({ session, viewer }: { session: Session | null; viewer: CurrentUser }) {
   const scope = useScope()
@@ -20,10 +20,14 @@ export function FarmerAccountPage({ session, viewer }: { session: Session | null
         <span className="fw-avatar fw-avatar--lg" aria-hidden="true">{initials(name, email)}</span>
         <div className="fw-account__id">
           <p className="fw-head__eyebrow"><Ico name="account" />Tài khoản</p>
-          <h1>{name ?? email ?? 'Tài khoản nông hộ'}</h1>
+          {/* The page's largest type is never the sign-in address. Most farmer
+            * accounts carry no full name, so the email used to become the h1 —
+            * a login credential set as the title of the page. It is metadata,
+            * alongside the role and the cooperative. */}
+          <h1>{name ?? 'Tài khoản của tôi'}</h1>
           <div className="fw-account__chips">
             <Chip tone="leaf" icon="seeding">Vai trò: Nông hộ</Chip>
-            {name && email && <Chip>{email}</Chip>}
+            {email && <Chip icon="account">{email}</Chip>}
             {org.data && <Chip tone="info" icon="farm">{org.data.name}</Chip>}
           </div>
         </div>
@@ -48,10 +52,29 @@ export function FarmerAccountPage({ session, viewer }: { session: Session | null
                     <IconTile name="farm" tone="forest" size="sm" />
                     <span><b>{farm.name}</b><small>Mã hộ {farm.code} · {plots.length} thửa · {seasons.length} vụ</small></span>
                   </header>
+                  {/* Farm -> plot -> season, written out. The counts alone made
+                    * the reader open three pages to answer "which seasons am I
+                    * allowed to write to?". */}
                   {plots.length > 0 && (
-                    <div className="fw-scope__plots">
-                      {plots.map((p) => <Link key={p.id} to={`/farmer/plots/${p.id}`} className="fw-chip tone-leaf"><Ico name="plot" />{p.name}</Link>)}
-                    </div>
+                    <ul className="fw-scope__plots">
+                      {plots.map((p) => {
+                        const ps = seasons.filter((s) => s.plotId === p.id)
+                        return (
+                          <li key={p.id} className="fw-scope__plot">
+                            <Link to={`/farmer/plots/${p.id}`} className="fw-scope__plotname"><Ico name="plot" />{p.name}</Link>
+                            {ps.length ? (
+                              <span className="fw-scope__seasons">
+                                {ps.map((s) => (
+                                  <Link key={s.id} to={`/farmer/crop-seasons/${s.id}`} className={`fw-chip${isActiveStatus(s.status) ? ' tone-leaf' : ''}`}>
+                                    {s.name}<small>{seasonStatusLabel(s.status)}</small>
+                                  </Link>
+                                ))}
+                              </span>
+                            ) : <span className="fw-scope__seasons fw-note">Chưa có vụ canh tác</span>}
+                          </li>
+                        )
+                      })}
+                    </ul>
                   )}
                 </div>
               )

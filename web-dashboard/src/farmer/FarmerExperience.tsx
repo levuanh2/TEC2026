@@ -1,9 +1,8 @@
 import './farmer.css'
 import { useEffect, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { signOut } from '../api/auth'
 import type { CurrentUser } from '../api/me'
-import { go, Link } from '../ui'
+import { Link } from '../ui'
 import { initials } from './activityView'
 import { Ico, type IconName } from './icons'
 import { Empty, IconTile, Sk } from './kit'
@@ -66,15 +65,16 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
             </div>
           ))}
         </nav>
-        <div className="fw-profile">
+        {/* The sidebar names who is signed in and links to the one page that
+          * can act on it. Sign-out used to sit here as well as on that page,
+          * so both were on screen at once and neither was the obvious one. */}
+        <Link to="/farmer/account" className="fw-profile" aria-label={`Tài khoản của ${name}`}>
           <span className="fw-avatar" aria-hidden="true">{avatar}</span>
           <span className="fw-profile__id">
             <b title={name}>{name}</b>
-            {/* Logout is a written action, not an icon button that reads like a
-              * form control sitting next to the farmer's own name. */}
-            <button type="button" className="fw-signout" onClick={() => void signOut().then(() => go('/login'))}>Đăng xuất</button>
+            <small>Xem tài khoản</small>
           </span>
-        </div>
+        </Link>
       </aside>
 
       <div className="fw-main">

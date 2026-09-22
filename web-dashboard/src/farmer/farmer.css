@@ -1101,3 +1101,42 @@
 
 .fw-snap-group + .fw-snap-group { margin-top: var(--fw-space-16); padding-top: var(--fw-space-12); border-top: 1px solid var(--fw-rule-2); }
 .fw-snap-group__title { margin: 0 0 var(--fw-space-8); font-size: var(--fw-text-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--fw-muted); }
+
+/* Account scope: farm -> plot -> season as one scannable list. */
+.fw-scope__plots { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--fw-space-8); }
+.fw-scope__plot { display: grid; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); gap: var(--fw-space-12); align-items: center; padding: var(--fw-space-8) 0; border-top: 1px solid var(--fw-rule); }
+.fw-scope__plotname { display: inline-flex; align-items: center; gap: var(--fw-space-6); min-height: 40px; color: var(--fw-ink); font-weight: 650; text-decoration: none; }
+.fw-scope__plotname:hover { text-decoration: underline; text-underline-offset: 3px; }
+.fw-scope__plotname svg { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-scope__seasons { display: flex; flex-wrap: wrap; gap: var(--fw-space-8); align-items: center; }
+.fw-scope__seasons .fw-chip { min-height: 40px; }
+.fw-scope__seasons .fw-chip small { color: var(--fw-muted); font-weight: 550; }
+@media (max-width: 560px) {
+  .fw-scope__plot { grid-template-columns: minmax(0, 1fr); gap: var(--fw-space-4); }
+}
+
+/* Farms list: the farm card carries its plots and the season running on each. */
+.fw-farm__plots { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--fw-rule); }
+.fw-farm__plots > li + li { border-top: 1px solid var(--fw-rule); }
+.fw-farm__plot {
+  display: grid; grid-template-columns: minmax(120px, 1.1fr) 84px minmax(0, 1.6fr) 16px;
+  gap: var(--fw-space-12); align-items: center; min-height: 48px; padding: var(--fw-space-8) 0;
+  color: var(--fw-ink); text-decoration: none;
+}
+.fw-farm__plot:hover { background: var(--fw-paper-2); }
+.fw-farm__plot > svg:last-child { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-farm__plotname { display: inline-flex; align-items: center; gap: var(--fw-space-6); font-weight: 650; }
+.fw-farm__plotname svg { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-farm__plotarea { color: var(--fw-muted); font-size: var(--fw-text-sm); font-variant-numeric: tabular-nums; }
+.fw-farm__plotseason { display: inline-flex; align-items: center; gap: var(--fw-space-8); min-width: 0; }
+.fw-farm__plotseason b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fw-farm__foot { padding-top: var(--fw-space-12); border-top: 1px solid var(--fw-rule); }
+.fw-idcard__action { padding-top: var(--fw-space-16); border-top: 1px solid var(--fw-rule); }
+.fw-muted { color: var(--fw-muted); }
+@media (max-width: 700px) {
+  .fw-farm__plot { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name chev" "area area" "season season"; row-gap: var(--fw-space-4); }
+  .fw-farm__plotname { grid-area: name; }
+  .fw-farm__plot > svg:last-child { grid-area: chev; }
+  .fw-farm__plotarea { grid-area: area; }
+  .fw-farm__plotseason { grid-area: season; flex-wrap: wrap; }
+}
