@@ -657,7 +657,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .ops-search { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-height: var(--ac-control-h); padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--ac-radius-sm); background: var(--ac-elevated); color: var(--text-muted); }
 .ops-search input { flex: 1; border: 0; background: none; font: inherit; color: var(--text-primary); min-width: 0; }
 .ops-search input:focus { outline: none; }
-.ops-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ac-accent-soft); }
+.ops-search:focus-within { border-color: var(--ac-marker); box-shadow: 0 0 0 3px var(--ac-band); }
 .ops-filter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--text-muted); }
 .ops-filter select { min-height: var(--ac-control-h-sm); border: 1px solid var(--border-strong); border-radius: var(--ac-radius-sm); background: var(--ac-elevated); color: var(--text-primary); font: inherit; font-size: var(--fs-sm); padding: 0 8px; }
 .ops-count { margin: 0 0 0 auto; font-size: var(--fs-caption); color: var(--text-muted); }
@@ -787,3 +787,16 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
 .tech-detail[open] > summary::before { transform: rotate(90deg); }
 .tech-detail > summary:focus-visible { outline: 2px solid var(--ac-focus); outline-offset: 2px; border-radius: var(--radius-control); }
 .dl--tech dd code { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-muted); word-break: break-all; }
+
+.ops-filters + .table-wrap, .ops-filters + .state { margin-top: 14px; }
+
+@media (max-width: 720px) {
+  /* As a card, a navigable row needs to look navigable: the stretched link is
+   * still there, but nothing on screen said the card could be opened. */
+  table.data tbody tr.has-rowlink { position: relative; padding-right: 30px; }
+  table.data tbody tr.has-rowlink::before {
+    content: "›"; position: absolute; right: 12px; top: 12px;
+    font-size: 20px; line-height: 1; color: var(--text-muted);
+  }
+  table.data tbody tr.has-rowlink .rowlink { font-weight: 700; color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+}

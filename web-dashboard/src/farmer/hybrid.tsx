@@ -180,7 +180,8 @@ export function SummaryStrip({ activities, metrics, readiness, loading }: {
     : { label: view.label, role: TONE[view.tone] ?? 'neutral' }
   return (
     <div className="fw-summary">
-      <Tile role="positive" icon="journal" label="Hoạt động đã ghi" value={`${count}`} unit="hoạt động" />
+      {/* Zero activities recorded is not a completed state. */}
+      <Tile role={count > 0 ? 'positive' : 'neutral'} icon="journal" label="Hoạt động đã ghi" value={`${count}`} unit="hoạt động" />
       <Tile role="water" icon="irrigation" label="Nước" value={m?.waterPerKg != null ? fmtNumber(m.waterPerKg) : null} unit="m³ / kg lúa" empty="Chưa đủ dữ liệu" />
       <Tile role="positive" icon="fertilizer" label="Phân bón" value={m?.fertilizerPerKg != null ? fmtNumber(m.fertilizerPerKg) : null} unit="kg / kg lúa" empty="Chưa đủ dữ liệu" />
       <Tile
@@ -198,8 +199,16 @@ type Role = 'positive' | 'water' | 'attention' | 'error' | 'info' | 'neutral'
 function Tile({ role, icon, label, value, unit, empty, note }: {
   role: Role; icon: IconName; label: string; value?: string | null; unit?: string; empty?: string; note?: string
 }) {
+  // The tone follows the state, not the metric. "Nước — Chưa đủ dữ liệu" and
+  // "Phân bón — Chưa đủ dữ liệu" were painted in healthy green and mint
+  // because the role was fixed per row, so the colour said the season was
+  // fine while the words said nothing had been recorded. A tile with no
+  // figure is neutral — unless the caller is deliberately flagging a problem,
+  // which Carbon readiness does.
+  const flagged = role === 'attention' || role === 'error' || role === 'info'
+  const shown: Role = value != null || flagged ? role : 'neutral'
   return (
-    <div className={`fw-summary__item fw-role fw-role--${role}`}>
+    <div className={`fw-summary__item fw-role fw-role--${shown}`}>
       <span className="fw-summary__label"><Ico name={icon} />{label}</span>
       {value != null
         ? <span className="fw-summary__value">{value}{unit && <small>{unit}</small>}</span>

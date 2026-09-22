@@ -114,11 +114,33 @@ function OrgDetail({ ids }: { ids: { id: string; name: string }[] }) {
 
 export function FarmsPage() {
   const state = useAsync(() => listFarms(), [])
+  // A cooperative has hundreds of households; the register had no way to find
+  // one but the browser's own page search. Name, code and place are the three
+  // things an officer has in hand when they go looking.
+  const [q, setQ] = useState('')
+  const match = (f: { name: string; code: string; commune?: string; district?: string; province?: string }) => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return true
+    return [f.name, f.code, f.commune, f.district, f.province].some((v) => (v ?? '').toLowerCase().includes(needle))
+  }
   return (
     <>
       <PageHead eyebrow="Quản lý" title="Nông hộ" meta={[<>Tất cả nông hộ trong phạm vi truy cập của bạn</>]} />
-      <Async state={state} isEmpty={(f) => f.length === 0} empty={<EmptyState icon="farms" title="Chưa có nông hộ nào" />}>
-        {(farms) => (
+      <Async state={state} isEmpty={(f) => f.length === 0} empty={<EmptyState icon="farms" title="Chưa có nông hộ nào" body="Chưa có nông hộ nào thuộc phạm vi truy cập của tài khoản này." />}>
+        {(all) => {
+          const farms = all.filter(match)
+          return (
+        <>
+          <div className="ops-filters">
+            <label className="ops-search">
+              <Ico name="search" size={14} />
+              <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo tên hộ, mã hộ hoặc địa bàn…" aria-label="Tìm nông hộ" />
+            </label>
+            <p className="ops-count" aria-live="polite">{farms.length}/{all.length} nông hộ</p>
+          </div>
+          {farms.length === 0 ? (
+            <EmptyState icon="search" title="Không có nông hộ nào khớp từ khóa" body={`Không tìm thấy nông hộ nào cho “${q.trim()}”. Thử tên hộ, mã hộ hoặc tên xã.`} />
+          ) : (
           <DataTable
             rows={farms}
             rowKey={(f) => f.id}
@@ -132,7 +154,10 @@ export function FarmsPage() {
               { label: 'Diện tích', align: 'num', render: (f) => (f.areaHa == null ? <span className="cell-empty">—</span> : ha(f.areaHa)) },
             ]}
           />
-        )}
+          )}
+        </>
+          )
+        }}
       </Async>
     </>
   )

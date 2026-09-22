@@ -122,7 +122,11 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await nav.getByRole('link', { name: 'Ruộng / Vụ mùa', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Các ruộng trong phạm vi của bạn', level: 1 })).toBeVisible()
   await expect(page.getByText(/thửa$/).first()).toBeVisible()
-  await page.getByRole('link', { name: 'Xem ruộng' }).first().click()
+  // Round 3: the farm card lists its plots and the season on each, so the card
+  // itself carries farm -> plot -> season; the link out is to the farm record.
+  await expect(page.locator('.fw-farm__plot')).toHaveCount(2)
+  await expect(page.locator('.fw-farm__plot', { hasText: 'Thửa A-01' })).toContainText('Hè Thu 2026')
+  await page.getByRole('link', { name: /Xem hồ sơ nông hộ/ }).first().click()
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Ruộng của tôi' })).toBeVisible()
   // Scoped to the plot card: the topbar season chip and the season card also carry the plot name.
