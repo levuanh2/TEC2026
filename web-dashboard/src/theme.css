@@ -29,7 +29,13 @@
   /* --- rules. Three weights carry all structure; shadows carry none. ---- */
   --ac-rule: oklch(88.5% 0.01 165);        /* hairline between rows */
   --ac-rule-2: oklch(80% 0.014 165);       /* section rule */
-  --ac-rule-3: oklch(68% 0.018 165);       /* heavy rule, table head underline */
+  --ac-rule-3: oklch(64% 0.018 165);       /* heavy rule, table head underline */
+  /* The boundary that IDENTIFIES a control — an input's edge, a ghost
+   * button's outline. WCAG 1.4.11 wants 3:1 against what surrounds it,
+   * and the structural hairlines above are far too light for that; they
+   * stay as they are, because a table rule is not a control. Measured:
+   * 3.27:1 on the Management workspace, 3.38:1 on the Farmer sheet. */
+  --ac-control-line: oklch(62% 0.016 165);
 
   /* --- ink -------------------------------------------------------------- */
   --ac-ink: oklch(24% 0.03 165);           /* headings, figures */

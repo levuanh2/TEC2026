@@ -82,14 +82,14 @@
 .fw-btn:hover { background: var(--ac-cta-hover); border-color: var(--ac-cta-hover); }
 .fw-btn:active { background: var(--ac-cta-hover); }
 .fw-btn svg { width: 17px; height: 17px; }
-.fw-btn--soft { background: transparent; color: var(--fw-ink); border-color: var(--fw-rule-2); }
+.fw-btn--soft { background: transparent; color: var(--fw-ink); border-color: var(--ac-control-line); }
 .fw-btn--soft:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
-.fw-btn--ghost { background: transparent; color: var(--fw-ink); border-color: var(--fw-rule-2); }
+.fw-btn--ghost { background: transparent; color: var(--fw-ink); border-color: var(--ac-control-line); }
 .fw-btn--ghost:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
 .fw-btn--danger { background: var(--fw-danger); border-color: var(--fw-danger); color: var(--fw-raise); }
 .fw-btn--danger:hover { background: var(--fw-danger-deep); border-color: var(--fw-danger-deep); }
 .fw-btn--sm { min-height: 36px; padding: 0 var(--fw-space-12); font-size: var(--fw-text-sm); }
-.fw-btn:disabled, .fw-iconbtn:disabled { opacity: .45; cursor: not-allowed; }
+.fw-btn:disabled, .fw-iconbtn:disabled { opacity: .66; cursor: not-allowed; }
 .fw-btn--block { width: 100%; }
 
 .fw-iconbtn {
@@ -166,7 +166,9 @@
  * pop an unwanted horizontal scrollbar. Only vertical scroll is ever wanted. */
 .fw-nav { display: grid; align-content: start; gap: var(--fw-space-20); padding-top: var(--fw-space-32); overflow-y: auto; overflow-x: hidden; flex: 1; }
 .fw-nav__group { display: grid; gap: 1px; }
-.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgb(255 255 255 / .5); padding-bottom: var(--fw-space-6); }
+/* .5 measured 4.40:1 on the sidebar green — just under the 4.5 floor for
+ * text this size. .58 measures 5.3:1. */
+.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgb(255 255 255 / .58); padding-bottom: var(--fw-space-6); }
 /* Quiet but unmistakable: the active row is the only one in full white and
  * the only one with a rule beneath it. No pill, no slab.
  * `.fw-side` prefix (see .fw-brand note above): without it this rule's
