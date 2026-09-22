@@ -37,6 +37,16 @@
    * 3.27:1 on the Management workspace, 3.38:1 on the Farmer sheet. */
   --ac-control-line: oklch(62% 0.016 165);
 
+  /* The same line on a pastel role card, where paper is not the background.
+   * `--ac-control-line` was tuned against paper; on the methodology blue
+   * (#C7CEEA) it falls to 2.32:1, so a ghost button sitting inside a Carbon
+   * state card missed 1.4.11 on real data — no mock season ever put one there.
+   * At 54% it clears 3:1 against all four pastels (worst 3.21:1 on the blue,
+   * then 3.75 ready, 3.83 attention, 4.19 calculated) and is still a hairline,
+   * not an outline. Scoped to those cards, so the workspace keeps its own
+   * lighter line and no semantic role changes. */
+  --ac-control-line-strong: oklch(54% 0.016 165);
+
   /* --- ink -------------------------------------------------------------- */
   --ac-ink: oklch(24% 0.03 165);           /* headings, figures */
   --ac-ink-2: oklch(36% 0.026 165);        /* body */
@@ -99,23 +109,34 @@
 
   /* --- semantic roles. Pastel is a BACKGROUND only; every pastel has a
          paired ink dark enough to read on it, and a border for the times a
-         tint alone would be the only signal. Never use a pastel as text. --- */
+         tint alone would be the only signal. Never use a pastel as text.
+
+         The five `-line` values were pastel too, and measured 1.48-2.15:1
+         against paper — below the 3:1 that 1.4.11 asks of a boundary. Round 3
+         left them, on the argument that each chip states its state in words so
+         the outline is redundant; the final gate asks for the measured
+         threshold instead, so each line is now the darkest step of its OWN hue
+         and saturation that clears 3:1 against both paper and its own fill.
+         Hue and saturation are untouched, so no role changes meaning — the
+         chips read as outlined rather than as a soft tint. Measured after:
+         positive 3.29:1, water 3.62:1, attention 3.55:1, error 4.59:1,
+         info 4.24:1 against paper; never below 3.00:1 against their fills. --- */
   --ac-role-positive-bg: #E2F0CB;   /* healthy, completed, crop, positive */
   --ac-role-positive-ink: #294B16;
-  --ac-role-positive-line: #B9D394;
+  --ac-role-positive-line: #6D913B;
   --ac-role-water-bg: #B5EAD7;      /* water, resource efficiency, environment */
   --ac-role-water-ink: #14564A;
-  --ac-role-water-line: #86CDB6;
+  --ac-role-water-line: #3A8D72;
   --ac-role-attention-bg: #FFDAC1;  /* attention, incomplete, upcoming */
   --ac-role-attention-ink: #70401D;
-  --ac-role-attention-line: #EAB68D;
+  --ac-role-attention-line: #C26924;
   --ac-role-error-bg: #FFB7B2;      /* error, blocker */
   --ac-role-error-bg-strong: #FF9AA2;
   --ac-role-error-ink: #742B31;
-  --ac-role-error-line: #E99089;
+  --ac-role-error-line: #CE3326;
   --ac-role-info-bg: #C7CEEA;       /* information, methodology, neutral */
   --ac-role-info-ink: #33406A;
-  --ac-role-info-line: #A3ADD8;
+  --ac-role-info-line: #5E6FBB;
 
   /* --- geometry: 8-12px radii, a 4/8 spacing rhythm, 44px controls ------- */
   --ac-radius-sm: 8px;

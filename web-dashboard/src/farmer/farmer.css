@@ -90,6 +90,13 @@
 .fw-btn--soft:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
 .fw-btn--ghost { background: transparent; color: var(--fw-ink); border-color: var(--ac-control-line); }
 .fw-btn--ghost:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
+/* On a pastel Carbon-state card the paper-tuned line measures 2.32:1 against
+ * the methodology blue. Same role, darker line, only where the surface is
+ * pastel — see `--ac-control-line-strong`. */
+.fw-role :where(.fw-btn--soft, .fw-btn--ghost),
+.role--info :where(.fw-btn--soft, .fw-btn--ghost, .btn--ghost),
+.role--attention :where(.fw-btn--soft, .fw-btn--ghost, .btn--ghost),
+.role--positive :where(.fw-btn--soft, .fw-btn--ghost, .btn--ghost) { border-color: var(--ac-control-line-strong); }
 .fw-btn--danger { background: var(--fw-danger); border-color: var(--fw-danger); color: var(--fw-raise); }
 .fw-btn--danger:hover { background: var(--fw-danger-deep); border-color: var(--fw-danger-deep); }
 .fw-btn--sm { min-height: 36px; padding: 0 var(--fw-space-12); font-size: var(--fw-text-sm); }
