@@ -25,7 +25,11 @@
   -webkit-font-smoothing: antialiased;
 }
 .fw :where(h1, h2, h3, h4, p, figure) { margin: 0; }
-.fw a { color: inherit; }
+/* `:where()` keeps this at one class, so a later class rule wins the tie.
+ * As `.fw a` it was (0,1,1) and outranked `.fw-btn` (0,1,0): an anchor styled
+ * as the primary button inherited body ink instead of the CTA ink, and the
+ * Farmer Home next action measured 1.05:1 — dark text on the dark button. */
+.fw :where(a) { color: inherit; }
 .fw svg { flex: none; }
 .fw :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--fw-focus);
@@ -75,25 +79,34 @@
 .fw-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--fw-space-8);
   min-height: 44px; padding: 0 var(--fw-space-20); border-radius: var(--fw-radius);
-  border: 1px solid var(--fw-accent); background: var(--fw-accent); color: var(--fw-accent-ink);
+  border: 1px solid var(--ac-cta); background: var(--ac-cta); color: var(--ac-cta-ink);
   font-family: var(--fw-body); font-weight: 650; font-size: 14.5px; text-decoration: none; white-space: nowrap;
   transition: background var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out);
 }
-.fw-btn:hover { background: var(--fw-accent-deep); border-color: var(--fw-accent-deep); }
-.fw-btn:active { background: var(--fw-accent-deep); }
+.fw-btn:hover { background: var(--ac-cta-hover); border-color: var(--ac-cta-hover); }
+.fw-btn:active { background: var(--ac-cta-hover); }
 .fw-btn svg { width: 17px; height: 17px; }
-.fw-btn--soft { background: transparent; color: var(--fw-accent-deep); border-color: var(--fw-rule-2); }
-.fw-btn--soft:hover { background: var(--fw-accent-soft); border-color: var(--fw-rule-3); }
-.fw-btn--ghost { background: transparent; color: var(--fw-ink); border-color: var(--fw-rule-2); }
+.fw-btn--soft { background: transparent; color: var(--fw-ink); border-color: var(--ac-control-line); }
+.fw-btn--soft:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
+.fw-btn--ghost { background: transparent; color: var(--fw-ink); border-color: var(--ac-control-line); }
 .fw-btn--ghost:hover { background: var(--fw-paper-2); border-color: var(--fw-rule-3); }
+/* On a pastel Carbon-state card the paper-tuned line measures 2.32:1 against
+ * the methodology blue. Same role, darker line, only where the surface is
+ * pastel — see `--ac-control-line-strong`. */
+.fw-role :where(.fw-btn--soft, .fw-btn--ghost),
+.role--info :where(.fw-btn--soft, .fw-btn--ghost, .btn--ghost),
+.role--attention :where(.fw-btn--soft, .fw-btn--ghost, .btn--ghost),
+.role--positive :where(.fw-btn--soft, .fw-btn--ghost, .btn--ghost) { border-color: var(--ac-control-line-strong); }
 .fw-btn--danger { background: var(--fw-danger); border-color: var(--fw-danger); color: var(--fw-raise); }
 .fw-btn--danger:hover { background: var(--fw-danger-deep); border-color: var(--fw-danger-deep); }
 .fw-btn--sm { min-height: 36px; padding: 0 var(--fw-space-12); font-size: var(--fw-text-sm); }
-.fw-btn:disabled, .fw-iconbtn:disabled { opacity: .45; cursor: not-allowed; }
+.fw-btn:disabled, .fw-iconbtn:disabled { opacity: .66; cursor: not-allowed; }
 .fw-btn--block { width: 100%; }
 
 .fw-iconbtn {
-  width: 40px; height: 40px; display: grid; place-items: center; flex: none;
+  /* 44px, not 40: edit and delete sit side by side in a journal row and a
+   * thumb has to hit the right one of the two. */
+  width: 44px; height: 44px; display: grid; place-items: center; flex: none;
   border-radius: var(--fw-radius); border: 1px solid transparent; background: transparent; color: var(--fw-muted);
   transition: color var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out);
 }
@@ -118,7 +131,10 @@
 .fw-sk-block { display: grid; gap: var(--fw-space-8); }
 @keyframes fw-fade { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
 
-.fw-empty { display: grid; justify-items: start; gap: var(--fw-space-8); padding: var(--fw-space-24) 0; border-top: 1px solid var(--fw-rule); }
+/* An empty state is a designed state, not the absence of one: it sits on a
+ * bordered panel so the page reads as finished rather than as a sentence
+ * stranded in a field of white. */
+.fw-empty { display: grid; justify-items: start; gap: var(--fw-space-8); padding: var(--fw-space-32) var(--fw-space-24); border: 1px solid var(--fw-rule); border-radius: var(--fw-radius); background: var(--fw-paper-2); }
 .fw-empty .fw-tile { color: var(--fw-rule-3); }
 .fw-empty__title { font-family: var(--fw-display); font-size: var(--fw-text-md); font-weight: 600; }
 .fw-empty__body { color: var(--fw-muted); font-size: 14px; max-width: 52ch; }
@@ -161,7 +177,9 @@
  * pop an unwanted horizontal scrollbar. Only vertical scroll is ever wanted. */
 .fw-nav { display: grid; align-content: start; gap: var(--fw-space-20); padding-top: var(--fw-space-32); overflow-y: auto; overflow-x: hidden; flex: 1; }
 .fw-nav__group { display: grid; gap: 1px; }
-.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgb(255 255 255 / .5); padding-bottom: var(--fw-space-6); }
+/* .5 measured 4.40:1 on the sidebar green — just under the 4.5 floor for
+ * text this size. .58 measures 5.3:1. */
+.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgb(255 255 255 / .58); padding-bottom: var(--fw-space-6); }
 /* Quiet but unmistakable: the active row is the only one in full white and
  * the only one with a rule beneath it. No pill, no slab.
  * `.fw-side` prefix (see .fw-brand note above): without it this rule's
@@ -312,22 +330,23 @@
   transition: background-color var(--fw-dur) var(--fw-ease-out), transform var(--fw-dur) var(--fw-ease-out), box-shadow var(--fw-dur) var(--fw-ease-out);
 }
 .fw-qa .fw-tile svg { width: 22px; height: 22px; }
+.fw-qa .fw-tile { border: 1px solid var(--fw-rule); }
+.fw-qa.tone-leaf .fw-tile svg { color: var(--fw-leaf); }
+.fw-qa.tone-earth .fw-tile svg { color: var(--fw-soil); }
+.fw-qa.tone-water .fw-tile svg { color: var(--fw-water); }
+.fw-qa.tone-terracotta .fw-tile svg { color: var(--fw-terracotta); }
+.fw-qa.tone-straw .fw-tile svg { color: var(--fw-straw); }
+.fw-qa.tone-amber .fw-tile svg { color: var(--fw-grain); }
 .fw-qa.tone-leaf .fw-tile { background: var(--fw-qa-seeding); }
 .fw-qa.tone-earth .fw-tile { background: var(--fw-qa-fertilizer); }
 .fw-qa.tone-water .fw-tile { background: var(--fw-qa-irrigation); }
 .fw-qa.tone-terracotta .fw-tile { background: var(--fw-qa-pesticide); }
 .fw-qa.tone-straw .fw-tile { background: var(--fw-qa-straw); }
 .fw-qa.tone-amber .fw-tile { background: var(--fw-qa-harvest); }
-.fw-qa:hover:not(:disabled) { border-bottom-color: var(--fw-rule-3); color: var(--fw-accent-deep); }
+.fw-qa:hover:not(:disabled) { border-bottom-color: var(--fw-rule-3); color: var(--fw-ink); }
 /* The whole cell washes with the operation's own pastel on hover, not just the tile. */
-.fw-qa.tone-leaf:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-seeding) 22%, transparent); }
-.fw-qa.tone-earth:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-fertilizer) 22%, transparent); }
-.fw-qa.tone-water:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-irrigation) 26%, transparent); }
-.fw-qa.tone-terracotta:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-pesticide) 32%, transparent); }
-.fw-qa.tone-straw:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-straw) 26%, transparent); }
-.fw-qa.tone-amber:hover:not(:disabled) { background: color-mix(in srgb, var(--fw-qa-harvest) 26%, transparent); }
-.fw-qa:hover:not(:disabled) .fw-tile { transform: translateY(-3px); box-shadow: 0 10px 18px -10px oklch(24% 0.03 165 / 0.45); filter: saturate(1.15); }
-.fw-qa:active:not(:disabled) .fw-tile { transform: translateY(-1px); filter: saturate(1.15) brightness(.94); }
+.fw-qa:hover:not(:disabled) .fw-tile { background: var(--fw-paper-3); border-color: var(--fw-rule-2); }
+.fw-qa:active:not(:disabled) .fw-tile { background: var(--fw-paper-3); }
 .fw-qa__label { display: grid; gap: 1px; min-width: 0; }
 .fw-qa__label b { font-size: 14.5px; font-weight: 650; }
 .fw-qa__label small { font-size: var(--fw-text-xs); color: var(--fw-muted); font-weight: 500; line-height: 1.35; }
@@ -519,7 +538,7 @@
 }
 .fw-pill svg { width: 15px; height: 15px; }
 .fw-pill:hover { color: var(--fw-ink); }
-.fw-pill[aria-pressed="true"] { color: var(--fw-accent-deep); border-bottom-color: var(--fw-accent); }
+.fw-pill[aria-pressed="true"] { color: var(--fw-ink); border-bottom-color: var(--ac-marker); }
 .fw-pill small { font-weight: 550; opacity: .7; }
 .fw-summary { display: flex; flex-wrap: wrap; gap: var(--fw-space-24); }
 .fw-summary__item { display: flex; align-items: baseline; gap: var(--fw-space-6); }
@@ -938,7 +957,7 @@
 .fw-area-cv .fw-cvcard > .fw-btn { grid-column: 1 / -1; justify-self: start; margin-top: var(--fw-space-8); }
 
 /* Destructive, but not a primary action competing with Save/Edit. */
-.fw-destroy { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; justify-self: start; }
+.fw-destroy { background: none; border: 0; padding: 0 var(--fw-space-4); min-height: 44px; display: inline-flex; align-items: center; font: inherit; font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; justify-self: start; }
 .fw-destroy:hover { color: var(--fw-danger); }
 .fw-detail__actions { align-items: center; }
 
@@ -1052,3 +1071,85 @@
 }
 .fw-restale svg { width: 18px; height: 18px; flex: none; }
 .fw-source span small { display: block; font-size: var(--fw-text-xs); color: var(--fw-muted); font-variant-numeric: tabular-nums; }
+
+/* -- season context bar: the one place Home states which season this is ---- */
+/* It absorbed the old hero, so it now carries the dates and the quiet link
+   out to the season. The bar wraps into rows rather than a single long line,
+   which is what let a phone scroll sideways before. */
+.fw-ctxbar { flex-direction: column; align-items: stretch; gap: var(--fw-space-8); }
+.fw-ctxbar__dates {
+  display: flex; flex-wrap: wrap; gap: var(--fw-space-8) var(--fw-space-20); margin: 0;
+  font-size: var(--fw-text-sm); color: var(--fw-muted);
+}
+.fw-ctxbar__dates span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.fw-ctxbar__dates svg { width: 15px; height: 15px; flex: none; }
+.fw-ctxbar__dates b { font-family: inherit; font-size: var(--fw-text-sm); font-weight: 650; color: var(--fw-ink); }
+.fw-ctxbar__dates b.is-empty { color: var(--fw-muted); font-weight: 500; }
+.fw-ctxbar__go { margin: 0; }
+/* A long season code wraps under control instead of widening the row. */
+.fw-ctxbar__season b { overflow-wrap: anywhere; }
+
+/* -- control sizing ------------------------------------------------------- */
+/* Same rule as the workspace: 40px on a desktop pointer, 44px on touch. The
+   farmer shell is used on phones first, so its topbar and inline links count. */
+.fw-btn, .fw-btn--sm, .fw-btn--soft, .fw-btn--ghost, .fw-btn--danger { min-height: 40px; }
+.fw-link, .fw-link-btn { min-height: 40px; display: inline-flex; align-items: center; gap: 6px; }
+.fw-topbar__brand, .fw-ctx, .fw-avatar { min-height: 40px; display: inline-flex; align-items: center; }
+.fw-ctxbar__go .fw-link { min-height: 40px; }
+
+@media (max-width: 860px), (pointer: coarse) {
+  .fw-btn, .fw-btn--sm, .fw-btn--soft, .fw-btn--ghost, .fw-btn--danger,
+  .fw-link, .fw-link-btn, .fw-topbar__brand, .fw-ctx, .fw-avatar { min-height: 44px; }
+}
+
+/* -- metric groups: resource · cost · carbon ------------------------------ */
+/* Cost sat directly above CO₂e/kg, which reads as though spending less
+   lowers emissions. Three titled groups keep money away from carbon. */
+.fw-mgroup { margin-top: var(--fw-space-20); }
+.fw-mgroup:first-of-type { margin-top: 0; }
+.fw-mgroup__title { margin: 0 0 2px; font-family: var(--fw-display); font-size: var(--fw-text-md); font-weight: 650; color: var(--fw-ink); }
+.fw-mgroup__desc { margin: 0 0 var(--fw-space-12); font-size: var(--fw-text-sm); color: var(--fw-muted); }
+/* A rule under the cost group makes the separation visible, not just stated. */
+.fw-mgroup--cost { padding-bottom: var(--fw-space-16); border-bottom: 1px solid var(--fw-rule-2); }
+
+.fw-snap-group + .fw-snap-group { margin-top: var(--fw-space-16); padding-top: var(--fw-space-12); border-top: 1px solid var(--fw-rule-2); }
+.fw-snap-group__title { margin: 0 0 var(--fw-space-8); font-size: var(--fw-text-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--fw-muted); }
+
+/* Account scope: farm -> plot -> season as one scannable list. */
+.fw-scope__plots { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--fw-space-8); }
+.fw-scope__plot { display: grid; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); gap: var(--fw-space-12); align-items: center; padding: var(--fw-space-8) 0; border-top: 1px solid var(--fw-rule); }
+.fw-scope__plotname { display: inline-flex; align-items: center; gap: var(--fw-space-6); min-height: 40px; color: var(--fw-ink); font-weight: 650; text-decoration: none; }
+.fw-scope__plotname:hover { text-decoration: underline; text-underline-offset: 3px; }
+.fw-scope__plotname svg { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-scope__seasons { display: flex; flex-wrap: wrap; gap: var(--fw-space-8); align-items: center; }
+.fw-scope__seasons .fw-chip { min-height: 40px; }
+.fw-scope__seasons .fw-chip small { color: var(--fw-muted); font-weight: 550; }
+@media (max-width: 560px) {
+  .fw-scope__plot { grid-template-columns: minmax(0, 1fr); gap: var(--fw-space-4); }
+}
+
+/* Farms list: the farm card carries its plots and the season running on each. */
+.fw-farm__plots { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--fw-rule); }
+.fw-farm__plots > li + li { border-top: 1px solid var(--fw-rule); }
+.fw-farm__plot {
+  display: grid; grid-template-columns: minmax(120px, 1.1fr) 84px minmax(0, 1.6fr) 16px;
+  gap: var(--fw-space-12); align-items: center; min-height: 48px; padding: var(--fw-space-8) 0;
+  color: var(--fw-ink); text-decoration: none;
+}
+.fw-farm__plot:hover { background: var(--fw-paper-2); }
+.fw-farm__plot > svg:last-child { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-farm__plotname { display: inline-flex; align-items: center; gap: var(--fw-space-6); font-weight: 650; }
+.fw-farm__plotname svg { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-farm__plotarea { color: var(--fw-muted); font-size: var(--fw-text-sm); font-variant-numeric: tabular-nums; }
+.fw-farm__plotseason { display: inline-flex; align-items: center; gap: var(--fw-space-8); min-width: 0; }
+.fw-farm__plotseason b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fw-farm__foot { padding-top: var(--fw-space-12); border-top: 1px solid var(--fw-rule); }
+.fw-idcard__action { padding-top: var(--fw-space-16); border-top: 1px solid var(--fw-rule); }
+.fw-muted { color: var(--fw-muted); }
+@media (max-width: 700px) {
+  .fw-farm__plot { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name chev" "area area" "season season"; row-gap: var(--fw-space-4); }
+  .fw-farm__plotname { grid-area: name; }
+  .fw-farm__plot > svg:last-child { grid-area: chev; }
+  .fw-farm__plotarea { grid-area: area; }
+  .fw-farm__plotseason { grid-area: season; flex-wrap: wrap; }
+}

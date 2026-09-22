@@ -1,3 +1,4 @@
+import { label } from '../vocab'
 import type { Activity } from '../types'
 import type { SeasonMetrics } from '../api/metrics'
 import type { Recommendation } from '../api/recommendations'
@@ -21,12 +22,8 @@ const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() !
 const qty = (v: unknown, unit: string): string | null => { const n = toNumber(v); return n == null ? null : `${nf.format(n)} ${unit}` }
 const money = (v: unknown): string | null => { const n = toNumber(v); return n == null ? null : `Chi phí ${nf.format(n)} ₫` }
 
-export const IRRIGATION_METHOD_LABEL: Record<string, string> = {
-  awd: 'Ướt khô xen kẽ (AWD)', continuous_flooding: 'Ngập liên tục', alternate: 'Luân phiên', other: 'Khác',
-}
-export const STRAW_METHOD_LABEL: Record<string, string> = {
-  incorporated: 'Vùi vào đất', burned: 'Đốt', removed: 'Mang ra khỏi ruộng', composted: 'Ủ compost', other: 'Khác',
-}
+export const irrigationMethodLabel = (v: string | null | undefined) => label('irrigationMethod', v)
+export const strawMethodLabel = (v: string | null | undefined) => label('strawMethod', v)
 
 export const ACTIVITY_TITLE: Record<string, string> = {
   seeding: 'Gieo sạ', fertilizer: 'Bón phân', irrigation: 'Tưới nước', pesticide: 'Thuốc BVTV',
@@ -39,33 +36,45 @@ function parse(detail: string): Payload | null {
   try { const v: unknown = JSON.parse(detail); return v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null } catch { return null }
 }
 
+/** One definition, shared with the Management timeline: both surfaces read the
+ *  same seeded rows, and only one of them used to hide the scaffolding. */
+export { isDemoPlaceholder } from '../utils/activityPresentation'
+import { isDemoPlaceholder } from '../utils/activityPresentation'
+
+/** Free text as a farmer should see it: seed scaffolding becomes a short badge. */
+export const humanText = (v: string | null | undefined): string | null =>
+  v == null || v === '' ? null : isDemoPlaceholder(v) ? 'Dữ liệu minh họa' : v
+
 export function viewActivity(activity: Pick<Activity, 'type' | 'detail'>): ActivityView {
   const title = ACTIVITY_TITLE[activity.type] ?? activity.type
   const p = parse(activity.detail)
   if (!p) return { title, value: null, meta: activity.detail ? [activity.detail] : [], note: null }
   const meta = (...items: (string | null)[]) => items.filter((x): x is string => Boolean(x))
-  const note = text(p.note)
+  const note = humanText(text(p.note))
   switch (activity.type) {
     case 'seeding':
-      return { title, value: qty(p.seed_kg, 'kg giống'), meta: meta(text(p.variety_name) && `Giống ${text(p.variety_name)}`, text(p.seeding_method), money(p.cost_vnd)), note }
+      return { title, value: qty(p.seed_kg, 'kg giống'), meta: meta(humanText(text(p.variety_name)) && `Giống ${humanText(text(p.variety_name))}`, text(p.seeding_method), money(p.cost_vnd)), note }
     case 'fertilizer':
-      return { title, value: qty(p.amount_kg, 'kg'), meta: meta(text(p.fertilizer_name) ?? text(p.fertilizer_type), toNumber(p.nitrogen_percent) != null ? `Đạm ${nf.format(toNumber(p.nitrogen_percent)!)}%` : null, money(p.total_cost_vnd)), note }
+      return { title, value: qty(p.amount_kg, 'kg'), meta: meta(humanText(text(p.fertilizer_name) ?? text(p.fertilizer_type)), toNumber(p.nitrogen_percent) != null ? `Đạm ${nf.format(toNumber(p.nitrogen_percent)!)}%` : null, money(p.total_cost_vnd)), note }
     case 'irrigation': {
       const method = text(p.water_regime) ?? text(p.irrigation_method) ?? text(p.method)
-      return { title, value: qty(p.water_volume_m3, 'm³'), meta: meta(method && (IRRIGATION_METHOD_LABEL[method] ?? method), qty(p.duration_minutes, 'phút'), toNumber(p.water_level_cm) != null ? `Mực nước ${nf.format(toNumber(p.water_level_cm)!)} cm` : null, qty(p.pump_energy_kwh, 'kWh bơm'), money(p.total_cost_vnd)), note }
+      // `duration_minutes` is a storage field, not something a farmer reads on
+      // a summary line; water volume and level are what they recognise.
+      return { title, value: qty(p.water_volume_m3, 'm³'), meta: meta(method && irrigationMethodLabel(method), toNumber(p.water_level_cm) != null ? `Mực nước ${nf.format(toNumber(p.water_level_cm)!)} cm` : null, qty(p.pump_energy_kwh, 'kWh bơm'), money(p.total_cost_vnd)), note }
     }
     case 'pesticide': {
       const amount = toNumber(p.amount)
-      return { title, value: amount == null ? null : `${nf.format(amount)} ${text(p.unit) ?? ''}`.trim(), meta: meta(text(p.product_name), text(p.active_ingredient), money(p.total_cost_vnd)), note }
+      return { title, value: amount == null ? null : `${nf.format(amount)} ${text(p.unit) ?? ''}`.trim(), meta: meta(humanText(text(p.product_name)), humanText(text(p.active_ingredient)), money(p.total_cost_vnd)), note }
     }
     case 'straw_management': {
       const method = text(p.management_method) ?? text(p.method)
-      return { title, value: qty(p.straw_mass_kg ?? p.straw_amount_kg, 'kg'), meta: meta(method && (STRAW_METHOD_LABEL[method] ?? method), money(p.total_cost_vnd)), note }
+      return { title, value: qty(p.straw_mass_kg ?? p.straw_amount_kg, 'kg'), meta: meta(method && strawMethodLabel(method), money(p.total_cost_vnd)), note }
     }
     case 'harvest':
       return { title, value: qty(p.yield_kg, 'kg thóc'), meta: meta(qty(p.harvested_area_ha, 'ha'), toNumber(p.moisture_percent) != null ? `Độ ẩm ${nf.format(toNumber(p.moisture_percent)!)}%` : null, money(p.total_cost_vnd)), note }
     case 'fuel':
-      return { title, value: qty(p.amount_liter ?? p.amount_litre, 'L'), meta: meta(text(p.fuel_type), text(p.equipment_name)), note }
+      // `diesel` reached the farmer's home screen before this.
+      return { title, value: qty(p.amount_liter ?? p.amount_litre, 'L'), meta: meta(text(p.fuel_type) && label('fuelType', text(p.fuel_type)), humanText(text(p.equipment_name))), note }
     default:
       return { title, value: null, meta: [], note }
   }

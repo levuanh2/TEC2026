@@ -59,6 +59,7 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
           subtitle={dateTime(open.occurredAt)}
           onClose={() => setOpen(null)}
         >
+          {/* What happened in the field, in the words of the work. */}
           <dl className="dl" style={{ gridTemplateColumns: '1fr' }}>
             {activityFields(open.detail).map((f, i) => (
               <div key={i}>
@@ -71,10 +72,23 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
               <dd>{open.recorder}</dd>
             </div>
             <div>
-              <dt>Nguồn</dt>
-              <dd>{open.source}</dd>
+              <dt>Thời điểm</dt>
+              <dd>{dateTime(open.occurredAt)}</dd>
             </div>
           </dl>
+          {/* Record identity, the stored timestamp and the write channel are
+            * what an auditor needs and what everyone else has to read past.
+            * Closed by default, and present only here: the Farmer app's own
+            * activity drawer has no technical section at all. */}
+          <details className="tech-detail">
+            <summary>Thông tin kỹ thuật</summary>
+            <dl className="dl dl--tech" style={{ gridTemplateColumns: '1fr' }}>
+              <div><dt>Mã bản ghi</dt><dd><code>{open.id}</code></dd></div>
+              <div><dt>Thời điểm (ISO)</dt><dd><code>{open.occurredAt}</code></dd></div>
+              <div><dt>Loại (giá trị lưu trữ)</dt><dd><code>{open.type}</code></dd></div>
+              <div><dt>Nguồn ghi</dt><dd>{open.source}</dd></div>
+            </dl>
+          </details>
           {renderActions?.(open)}
         </Drawer>
       )}

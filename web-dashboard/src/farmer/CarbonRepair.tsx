@@ -5,7 +5,8 @@ import { PRE_SEASON_REGIMES, WATER_REGIMES } from '../features/seasonMethodology
 import type { Activity, IpccPreSeasonRegime, IpccWaterRegime } from '../types'
 import { Link } from '../ui'
 import { isSupportedActivityType, type ActivityMutations, type SeasonContext } from './ActivityForms'
-import { ACTIVITY_TITLE, dayLabel } from './activityView'
+import { ACTIVITY_TITLE, dayLabel, humanText } from './activityView'
+import { known, label } from '../vocab'
 import { invalidateQueries, keys } from './data'
 import { Ico } from './icons'
 
@@ -151,7 +152,11 @@ function RecordRow({ record, activity, activityType, onEdit, journal }: {
 }) {
   const kind = ACTIVITY_TITLE[activityType ?? ''] ?? 'Bản ghi'
   const when = record.occurred_on ? dayLabel(record.occurred_on) : null
-  const name = [kind, record.label, when].filter(Boolean).join(' · ')
+  /* The server names a record by whatever identifies it — for a straw record
+   * that is its stored method, so `incorporated` reached this chip verbatim.
+   * Anything the shared dictionary knows is spoken in Vietnamese; anything it
+   * does not (a fertiliser's brand name) is the farmer's own text and stays. */
+  const name = [kind, recordLabel(record.label), when].filter(Boolean).join(' · ')
   return (
     <li>
       <span>{name}</span>
@@ -165,6 +170,15 @@ function RecordRow({ record, activity, activityType, onEdit, journal }: {
 /* ------------------------------------------------ season-field quick fix */
 
 type SeasonField = 'ipccWaterRegime' | 'preSeasonWaterRegime' | 'cultivationDays'
+/** A record label spoken as a person would say it. */
+function recordLabel(raw: string | null): string | null {
+  if (!raw) return null
+  for (const kind of ['strawMethod', 'irrigationMethod', 'fuelType', 'activityType'] as const) {
+    if (known(kind, raw)) return label(kind, raw)
+  }
+  return humanText(raw)
+}
+
 const SEASON_FIELD: Record<string, { field: SeasonField; label: string; options?: { value: string; label: string; help: string }[] }> = {
   water_regime: { field: 'ipccWaterRegime', label: 'Chế độ nước trong vụ', options: WATER_REGIMES },
   pre_season_water_regime: { field: 'preSeasonWaterRegime', label: 'Chế độ nước trước vụ', options: PRE_SEASON_REGIMES },

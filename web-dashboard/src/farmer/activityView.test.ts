@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SeasonMetrics } from '../api/metrics'
 import type { Recommendation } from '../api/recommendations'
-import { buildAttention, dayLabel, groupByDay, initials, viewActivity } from './activityView'
+import { buildAttention, dayLabel, groupByDay, initials, isDemoPlaceholder, viewActivity } from './activityView'
 import { metricViews } from './metricsView'
 
 const act = (type: string, payload: Record<string, unknown>) => ({ type, detail: JSON.stringify(payload) })
@@ -18,7 +18,9 @@ describe('viewActivity (Farmer journal presentation)', () => {
     const v = viewActivity(act('irrigation', { method: 'awd', water_volume_m3: 320, note: 'sáng' }))
     expect(v.title).toBe('Tưới nước')
     expect(v.value).toBe('320 m³')
-    expect(v.meta).toContain('Ướt khô xen kẽ (AWD)')
+    expect(v.meta).toContain('Tưới ngập–khô xen kẽ (AWD)')
+    // A raw enum must never survive into the meta line.
+    expect(v.meta.join(' ')).not.toContain('awd')
     expect(v.note).toBe('sáng')
   })
 
@@ -98,5 +100,26 @@ describe('initials', () => {
   it('uses first and last name, else the email initial', () => {
     expect(initials('Nguyễn Văn An', 'x@y.z')).toBe('NA')
     expect(initials(null, 'qa-farmer@x.local')).toBe('Q')
+  })
+})
+
+describe('demo seed scaffolding', () => {
+  it('shows a short badge instead of the seeder English text', () => {
+    const v = viewActivity({ type: 'pesticide', detail: JSON.stringify({ product_name: 'Demo pesticide', amount: 2, unit: 'lít' }) })
+    expect(v.meta).toContain('Dữ liệu minh họa')
+    expect(v.meta.join(' ')).not.toContain('Demo pesticide')
+  })
+
+  it('never swallows a real product name or a farmer note', () => {
+    const v = viewActivity({ type: 'pesticide', detail: JSON.stringify({ product_name: 'Regent 800WG', amount: 2, unit: 'lít', note: 'Phun lúc chiều mát' }) })
+    expect(v.meta).toContain('Regent 800WG')
+    expect(v.note).toBe('Phun lúc chiều mát')
+  })
+
+  it('only matches the seeder shape, not any word starting with Demo', () => {
+    expect(isDemoPlaceholder('Demo pesticide')).toBe(true)
+    expect(isDemoPlaceholder('Demo straw_management')).toBe(true)
+    expect(isDemoPlaceholder('Demo Farm Co.')).toBe(false)
+    expect(isDemoPlaceholder('Thuốc Demo')).toBe(false)
   })
 })

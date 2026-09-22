@@ -40,9 +40,13 @@ export function RecommendationsSection({ seasonId, limit, moreTo }: { seasonId: 
   /* Generation is never part of loading this page (see scope.useRecommendations):
    * stored recommendations render immediately and a refresh — the farmer's, or
    * the deferred background one — only ever adds this quiet status line. */
+  /* Error prevention: the engine has already read this season and produced
+   * nothing, so offering "Cập nhật khuyến nghị" would promise a result it has
+   * just demonstrated it cannot give. The empty state says why instead. */
+  const refreshIsPointless = shown.length === 0 && recs.lastGeneratedCount === 0
   const action = recs.generating
     ? <Refreshing show />
-    : seasonId
+    : seasonId && !refreshIsPointless
       ? (
         <div className="fw-section__actions">
           {moreTo && open.length > shown.length && <MoreLink to={moreTo}>Xem tất cả</MoreLink>}
@@ -73,7 +77,11 @@ export function RecommendationsSection({ seasonId, limit, moreTo }: { seasonId: 
         <Empty
           icon="recommendation"
           title="Chưa có khuyến nghị định lượng"
-          body={recs.generating ? 'Đang cập nhật khuyến nghị…' : 'Hệ thống sẽ hiển thị khuyến nghị khi có đủ dữ liệu vụ này và có thể ước tính tác động.'}
+          body={recs.generating
+            ? 'Đang cập nhật khuyến nghị…'
+            : refreshIsPointless
+              ? 'Hệ thống đã kiểm tra vụ này và chưa ước tính được tác động nào. Khuyến nghị sẽ xuất hiện sau khi bạn ghi thêm hoạt động.'
+              : 'Hệ thống sẽ hiển thị khuyến nghị khi có đủ dữ liệu vụ này và có thể ước tính tác động.'}
         />
       ) : (
         <div className="fw-recs farmer-recommendations">

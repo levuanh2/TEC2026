@@ -333,6 +333,23 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     detail.total_cost_vnd, detail.cost_vnd, detail.note,
   ].some((v) => v != null && v !== ''))
 
+  // Arriving from a Carbon quick-fix, the field that needs filling is inside
+  // the disclosure and — that being why Carbon flagged it — still blank. Open
+  // the section and put the caret in the first blank control in it, so the
+  // farmer lands on the field they were sent here to complete rather than on
+  // a form that merely contains it somewhere.
+  useEffect(() => {
+    if (!revealMore) return
+    const id = requestAnimationFrame(() => {
+      const body = formRef.current?.querySelector('.fw-more__body')
+      if (!body) return
+      const controls = Array.from(body.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select'))
+      const target = controls.find((c) => !c.value) ?? controls[0]
+      target?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [revealMore])
+
   let input: ActivityInput
   let errors: FieldErrors
   if (activityType === 'fertilizer') {
@@ -700,6 +717,7 @@ export function AddActivityCta({ season, mutations }: { season: SeasonContext; m
       <button type="button" className="fw-btn" onClick={() => setPickerOpen(true)}><Ico name="plus" />Ghi hoạt động</button>
       {pickerOpen && (
         <FarmerSheet title="Ghi hoạt động" subtitle={season.label} icon="journal" tone="leaf" onClose={() => setPickerOpen(false)}>
+          <ActivitySteps current={1} />
           <div className="fw-pick">
             {QUICK_ENTRY_ACTIVE.map(({ type, label }) => (
               <button key={type} type="button" onClick={() => { setPickerOpen(false); mutations.openCreate(type, season) }}>

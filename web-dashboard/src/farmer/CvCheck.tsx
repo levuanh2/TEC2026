@@ -23,14 +23,20 @@ const cvLabelVi = (label: DiseaseLabel | null) => (label ? CV_LABEL_VI[label] : 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 const DISCLAIMER = 'Kết quả chỉ mang tính hỗ trợ, chưa được xác nhận thực địa.'
 
-function mapCvError(err: unknown): string {
+/* The upstream says things like "CV service is not configured". A farmer sees
+ * Vietnamese, and — when the service is simply not available — no button that
+ * asks them to try the thing again, because nothing they do will make it work. */
+import { errorKind, isUserFacing } from '../utils/errorPresentation'
+
+function mapCvError(err: unknown): { message: string; retryable: boolean } {
   if (err instanceof ApiError) {
-    if (err.code === 'not_found') return 'Không tìm thấy vụ canh tác hoặc bạn không còn quyền truy cập.'
-    if (err.status === 422) return err.message || 'Ảnh không hợp lệ.'
-    if (err.status >= 500 || err.status === 0) return 'Không thể phân tích ảnh lúc này. Dữ liệu chưa được lưu.'
-    return err.message || 'Không thể phân tích ảnh.'
+    if (err.code === 'not_found') return { message: 'Không tìm thấy vụ canh tác hoặc bạn không còn quyền truy cập.', retryable: false }
+    const unavailable = err.status >= 500 || err.status === 0 || errorKind(err.message) === 'unavailable'
+    if (unavailable) return { message: 'Tính năng nhận diện ảnh tạm thời chưa dùng được. Ảnh của bạn chưa được lưu — bạn vẫn ghi nhật ký như bình thường.', retryable: false }
+    if (err.status === 422) return { message: isUserFacing(err.message) ? err.message : 'Ảnh không hợp lệ. Hãy chụp lại gần hơn, đủ sáng và chỉ một lá trong khung hình.', retryable: true }
+    return { message: isUserFacing(err.message) ? err.message : 'Không phân tích được ảnh này. Hãy thử lại với ảnh khác.', retryable: true }
   }
-  return 'Không thể phân tích ảnh.'
+  return { message: 'Không phân tích được ảnh này. Hãy thử lại với ảnh khác.', retryable: true }
 }
 
 function Confidence({ value, threshold }: { value: number; threshold?: number }) {
@@ -63,7 +69,7 @@ function CvCheckSheet({ season, onClose }: { season: SeasonContext; onClose: () 
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [result, setResult] = useState<CvInference | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ message: string; retryable: boolean } | null>(null)
   const [over, setOver] = useState(false)
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
@@ -130,13 +136,13 @@ function CvCheckSheet({ season, onClose }: { season: SeasonContext; onClose: () 
 
         {step === 'result' && result && <CvResultView result={result} onRetry={reset} onClose={onClose} />}
 
-        {step === 'error' && (
-          <div className="fw-cv__result fw-cv__result--uncertain cv-result">
-            <h3>Không phân tích được ảnh</h3>
-            <p>{error}</p>
+        {step === 'error' && error && (
+          <div className="fw-cv__result fw-cv__result--uncertain cv-result" role="alert">
+            <h3>{error.retryable ? 'Không phân tích được ảnh' : 'Chưa dùng được tính năng này'}</h3>
+            <p>{error.message}</p>
             <div className="fw-rec__actions">
               <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose}>Đóng</button>
-              <button type="button" className="fw-btn" onClick={() => setStep('preview')}>Thử lại</button>
+              {error.retryable && <button type="button" className="fw-btn" onClick={() => setStep('preview')}>Thử lại</button>}
             </div>
           </div>
         )}

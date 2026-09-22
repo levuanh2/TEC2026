@@ -3,7 +3,7 @@ import { Ico } from '../icons'
 import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, createMrvXlsxExport, createMrvPdfExport, downloadMrvExport, listMrvExports, type MrvCase, type MrvEvidence, type MrvExportFormat, type MrvExportHistoryItem, type MrvExportResult } from '../api/mrv'
 import { usingMockData } from '../api/farms'
 import { date, dateTime, shortHash } from '../format'
-import { presentMrvStatus, mrvBadgeTone, mrvProgress, MRV_STEP_NAMES } from '../utils/mrvPresentation'
+import { presentMrvStep, presentMrvCaseStatus, presentMrvAggregate, currentMrvStep, mrvBadgeTone, MRV_STEP_NAMES } from '../utils/mrvPresentation'
 import { Async, Badge, EmptyState, Hero, Notice, PageHead, Progress, Section, useAsync } from '../ui'
 import type { Role } from '../types'
 
@@ -44,15 +44,20 @@ export function MrvPage({ role }: { role?: Role } = {}) {
       >
         {({ mrvCase, evidence }) => {
           const steps: MrvStep[] = mrvCase?.steps?.length ? (mrvCase.steps as MrvStep[]) : MOCK_STEPS
-          const p = mrvProgress(steps)
-          const currentIdx = steps.findIndex((s) => s.status === 'in_progress')
+          const agg = presentMrvAggregate(steps)
+          const p = agg.progress
+          const current = currentMrvStep(steps)
+          const currentIdx = current ? steps.indexOf(current as MrvStep) : -1
           return (
             <div className="stack" style={{ marginTop: 16 }}>
               {mrvCase && (
                 <Hero
                   eyebrow={`${mrvCase.caseCode} · Kỳ ${date(mrvCase.periodStart)} – ${date(mrvCase.periodEnd)}`}
                   title={mrvCase.name}
-                  meta={[<Badge tone={mrvBadgeTone(mrvCase.status)} dot>{presentMrvStatus(mrvCase.status).label}</Badge>]}
+                  meta={[
+                    <Badge tone={agg.tone} dot>{agg.label}</Badge>,
+                    <Badge tone={presentMrvCaseStatus(mrvCase.status).tone}>Hồ sơ: {presentMrvCaseStatus(mrvCase.status).label}</Badge>,
+                  ]}
                   stats={[
                     { label: 'Bước hoàn thành', value: `${p.done}/${p.total}` },
                     { label: 'Lô sản xuất', value: mrvCase.batchCount },
@@ -62,12 +67,24 @@ export function MrvPage({ role }: { role?: Role } = {}) {
               )}
               <div className="card card--pad">
                 <Progress value={p.done} max={p.total} unitLabel={`bước hoàn thành · ${p.inProgress} đang thực hiện`} />
+                <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 10 }}>
+                  {current
+                    ? <>Bước hiện tại: <b>{current.name}</b> — {presentMrvStep(current.status).label}.</>
+                    : <>Cả 6 bước đã hoàn thành.</>}
+                </p>
+                {/* The backend exposes no review/approve route for an MRV case
+                  * (only exports), so this workspace is read-only and says so
+                  * rather than showing a button that cannot do anything. */}
+                <p className="muted" style={{ fontSize: 'var(--fs-caption)', marginTop: 4 }}>
+                  Hồ sơ này ở chế độ chỉ đọc: hệ thống chưa có chức năng duyệt hoặc chuyển bước MRV.
+                  Bạn có thể xem tiến độ, minh chứng và xuất gói dữ liệu.
+                </p>
               </div>
 
               <Section title="Tiến trình 6 bước" description="Đo đạc – Báo cáo – Thẩm định, theo đúng thứ tự bắt buộc">
                 <ol className="stepper">
                   {steps.map((s, i) => {
-                    const st = presentMrvStatus(s.status)
+                    const st = presentMrvStep(s.status)
                     const cls = s.status === 'completed' ? 'is-done' : i === currentIdx ? 'is-current' : ''
                     return (
                       <li key={s.stepNo} className={`step ${cls}`}>
@@ -119,7 +136,7 @@ function StepEvidence({ items }: { items: MrvEvidence[] }) {
       {items.map((e) => (
         <li key={e.id} className="chip" style={{ justifyContent: 'space-between', width: '100%' }}>
           <span>
-            📎 {e.fileName} <span className="muted">· {e.evidenceType}</span>
+            <Ico name="evidence" size={13} /> {e.fileName} <span className="muted">· {e.evidenceType}</span>
           </span>
           <span className="muted" style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
             {shortHash(e.sha256)} · {date(e.uploadedAt)}

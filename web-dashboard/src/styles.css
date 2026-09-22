@@ -42,7 +42,7 @@
 
   --border: var(--ac-rule);
   --border-strong: var(--ac-rule-2);
-  --border-input: var(--ac-rule-2);
+  --border-input: var(--ac-control-line);
 
   --text-primary: var(--ac-ink);
   --text-secondary: var(--ac-ink-2);
@@ -80,9 +80,10 @@
   --fs-h1: 26px; --fs-h2: 17px; --fs-h3: 15px; --fs-body: 14px; --fs-sm: 13px; --fs-caption: 12px;
   --lh-tight: 1.25; --lh: 1.55;
 
-  /* Controls carry a small radius; structure carries none. */
-  --radius-card: 4px; --radius-control: 3px; --radius-pill: 3px;
-  --radius-sm: 3px; --radius-md: 4px; --radius-lg: 4px;
+  /* One radius scale, 8-12px, shared with the Farmer app. Structure that is
+   * meant to read as a rule (tables, section edges) still sets 0 locally. */
+  --radius-card: var(--ac-radius); --radius-control: var(--ac-radius-sm); --radius-pill: var(--ac-radius-sm);
+  --radius-sm: var(--ac-radius-sm); --radius-md: var(--ac-radius); --radius-lg: var(--ac-radius-lg);
   --gap: 20px; --gap-lg: 28px;
   --sidebar-w: 216px; --page-max: 1440px; --pad-page: 32px;
 
@@ -162,17 +163,26 @@ h1, h2, h3, p { margin: 0; }
 .nav a.is-context { margin-left: 18px; font-size: var(--fs-caption); color: oklch(84% 0.02 160 / .78); padding-block: 5px; }
 .nav a.is-context::before { content: "└"; opacity: .45; margin-right: 4px; }
 
-.sidebar__foot { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px; display: flex; align-items: center; gap: 10px; }
+/* The footer sits INSIDE the dark green sidebar, so it takes the sidebar's
+ * ink scale. It used to be styled with the workspace tokens — near-black text
+ * and a light hairline on a dark green ground, which rendered the signed-in
+ * address and the role as all but invisible. */
+.sidebar__foot { margin-top: 14px; border-top: 1px solid var(--ac-sidebar-rule); padding-top: 14px; display: flex; align-items: center; gap: 10px; }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; flex: none; background: none;
-  border: 1px solid var(--border-strong); color: var(--brand-strong); font-weight: 650;
+  border: 1px solid var(--ac-sidebar-rule); color: var(--ac-sidebar-ink); font-weight: 650;
   display: grid; place-items: center; font-size: var(--fs-sm);
 }
 .sidebar__id { display: grid; gap: 1px; min-width: 0; }
-.sidebar__id b { font-size: var(--fs-sm); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar__id small { font-size: var(--fs-caption); color: var(--text-muted); }
-.sidebar__id .link { border: 0; background: none; color: var(--text-muted); padding: 3px 0 0; text-align: left; text-decoration: underline; text-underline-offset: 3px; font-size: var(--fs-caption); }
-.sidebar__id .link:hover { color: var(--danger); }
+.sidebar__id b { font-size: var(--fs-sm); color: var(--ac-sidebar-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar__id small { font-size: var(--fs-caption); color: var(--ac-sidebar-ink-2); }
+.sidebar__id .link {
+  border: 0; background: none; color: var(--ac-sidebar-ink-2);
+  /* 40px, like every other control: it was a 12px underlined word. */
+  min-height: 40px; display: inline-flex; align-items: center;
+  padding: 0; text-align: left; text-decoration: underline; text-underline-offset: 3px; font-size: var(--fs-sm);
+}
+.sidebar__id .link:hover { color: var(--ac-sidebar-ink); }
 
 /* ---------------------------------------------------------------- Topbar */
 .main { min-width: 0; display: flex; flex-direction: column; }
@@ -183,12 +193,14 @@ h1, h2, h3, p { margin: 0; }
 }
 .topbar__ctx { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .menu-btn { display: none; background: none; border: 0; color: var(--text-primary); font-size: 20px; padding: 4px; }
+/* Which role is signed in is a fact about the account, not a brand moment.
+ * It was the one piece of institutional green left in the top bar. */
 .role-chip {
-  font-size: var(--fs-caption); font-weight: 650; color: var(--brand-strong);
+  font-size: var(--fs-caption); font-weight: 650; color: var(--text-muted);
   background: none; padding: 0; border: 0; white-space: nowrap;
 }
 .org-chip { font-size: var(--fs-sm); font-weight: 650; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 6px; }
-.org-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.org-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ac-rule-3); flex: none; }
 .org-chip small { color: var(--text-muted); font-weight: 500; }
 
 /* --------------------------------------------------------------- Content */
@@ -304,9 +316,19 @@ table.data thead th {
   position: sticky; top: 0; z-index: 1; padding-top: 11px; padding-bottom: 7px;
 }
 table.data tbody tr:last-child td { border-bottom: 0; }
-table.data tbody tr.is-clickable { cursor: pointer; }
-table.data tbody tr.is-clickable:hover { background: var(--bg-subtle); }
-table.data tbody tr.is-clickable:hover .col-key { text-decoration: underline; text-underline-offset: 3px; }
+/* A navigable row: the first cell holds a real <a>, stretched across the row
+ * so the whole row is the target. Hover and focus are drawn on the row, so
+ * keyboard users see exactly what a mouse user sees. */
+table.data tbody tr.has-rowlink { position: relative; }
+table.data tbody tr.has-rowlink:hover { background: var(--bg-subtle); }
+table.data tbody tr.has-rowlink:hover .col-key { text-decoration: underline; text-underline-offset: 3px; }
+table.data tbody td .rowlink { color: inherit; text-decoration: none; display: block; min-height: 40px; display: flex; align-items: center; }
+table.data tbody td .rowlink::after { content: ""; position: absolute; inset: 0; }
+table.data tbody tr.has-rowlink:has(.rowlink:focus-visible) { background: var(--bg-subtle); }
+table.data tbody td .rowlink:focus-visible { outline: none; }
+table.data tbody tr.has-rowlink:has(.rowlink:focus-visible)::after {
+  content: ""; position: absolute; inset: 0; outline: 2px solid var(--ac-focus); outline-offset: -2px; pointer-events: none;
+}
 table.data .num { text-align: right; font-variant-numeric: tabular-nums; }
 table.data .col-key { font-weight: 650; color: var(--text-primary); }
 /* The emphasised column is marked by rules on its edges, not a tinted fill. */
@@ -327,17 +349,20 @@ table.data .cell-empty { color: var(--text-muted); }
   transition: color var(--ac-dur) var(--ac-ease), border-color var(--ac-dur) var(--ac-ease);
 }
 .tab:hover { color: var(--text-primary); background: none; }
-.tab[aria-current="page"] { color: var(--brand-strong); background: none; box-shadow: none; border-bottom-color: var(--accent); font-weight: 700; }
+.tab[aria-current="page"] { color: var(--text-primary); background: none; box-shadow: none; border-bottom-color: var(--ac-marker); font-weight: 700; }
 
 /* -------------------------------------------------------------- Buttons */
-.btn { border: 1px solid var(--accent); border-radius: var(--radius-control); padding: 8px 15px; font-weight: 650; font-size: var(--fs-sm); background: var(--accent); color: var(--ac-accent-ink); display: inline-flex; align-items: center; gap: 7px; transition: background var(--ac-dur) var(--ac-ease), border-color var(--ac-dur) var(--ac-ease); }
+.btn { border: 1px solid var(--ac-cta); border-radius: var(--radius-control); padding: 8px 15px; font-weight: 650; font-size: var(--fs-sm); background: var(--ac-cta); color: var(--ac-cta-ink); display: inline-flex; align-items: center; gap: 7px; transition: background var(--ac-dur) var(--ac-ease), border-color var(--ac-dur) var(--ac-ease); }
 .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn--ghost { background: none; color: var(--brand-strong); border: 1px solid var(--border-strong); }
+.btn--ghost { background: none; color: var(--brand-strong); border: 1px solid var(--ac-control-line); }
 .btn--ghost:hover { background: var(--brand-soft); border-color: var(--ac-rule-3); }
 .btn--link { background: none; border: 0; color: var(--brand-strong); padding: 5px 0; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
 .btn--link:hover { background: none; }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
-select.select, input.search { border: 0; border-bottom: 1px solid var(--border-strong); border-radius: 0; padding: 7px 2px; background: none; font-size: var(--fs-sm); color: var(--text-primary); min-height: 34px; }
+/* An inactive control is exempt from 1.4.3, but .45 left the label at
+ * 1.72:1 — unreadable rather than merely quiet. .66 measures just over 3:1
+ * still reads as clearly inactive next to a live button. */
+.btn:disabled { opacity: .66; cursor: not-allowed; }
+select.select, input.search { border: 0; border-bottom: 1px solid var(--ac-control-line); border-radius: 0; padding: 7px 2px; background: none; font-size: var(--fs-sm); color: var(--text-primary); min-height: 34px; }
 select.select:hover, input.search:hover { border-bottom-color: var(--ac-rule-3); }
 select.select:focus, input.search:focus { outline: none; border-bottom: 2px solid var(--accent); }
 /* A filter row reads as controls on a rule, not a bar of chips. */
@@ -382,7 +407,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .stepper { list-style: none; padding: 0; margin: 0; display: grid; border-top: 1px solid var(--border); }
 .step { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding: 11px 0; position: relative; border-bottom: 1px solid var(--border); }
 .step:not(:last-child)::before { display: none; }
-.step__marker { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: none; border: 1px solid var(--border-strong); color: var(--text-muted); }
+.step__marker { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: none; border: 1px solid var(--ac-control-line); color: var(--text-muted); }
 .step.is-done .step__marker { background: var(--accent); border-color: var(--accent); color: var(--ac-accent-ink); }
 .step.is-current .step__marker { background: none; border-color: var(--accent); border-width: 2px; color: var(--brand-strong); }
 .step__body { display: grid; gap: 3px; }
@@ -525,7 +550,12 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .dl dt { font-size: var(--fs-caption); color: var(--text-muted); font-weight: 600; }
 .dl dd { margin: 0; font-size: var(--fs-body); font-weight: 650; color: var(--text-primary); }
 
-.stack { display: grid; gap: 14px; }
+/* An implicit grid track is `auto`, so it grows to its widest child and the
+   children then fill THAT, not the container — which is how the season hub
+   came to be 682px wide inside a 390px phone. One explicit, shrinkable
+   column keeps every child bounded by the viewport. */
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.stack > * { min-width: 0; }
 .muted { color: var(--text-muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
@@ -597,6 +627,10 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .role--error { --role-bg: var(--ac-role-error-bg); --role-ink: var(--ac-role-error-ink); --role-line: var(--ac-role-error-line); }
 .role--info { --role-bg: var(--ac-role-info-bg); --role-ink: var(--ac-role-info-ink); --role-line: var(--ac-role-info-line); }
 .role--neutral { --role-bg: var(--ac-subtle); --role-ink: var(--text-secondary); --role-line: var(--border); }
+/* A methodology/factor limitation is lavender (#C7CEEA), the same tint as
+   `info`. It has its own name so a call site reads as what it means, and so
+   the two can diverge later without hunting for every usage. */
+.role--methodology { --role-bg: var(--ac-role-info-bg); --role-ink: var(--ac-role-info-ink); --role-line: var(--ac-role-info-line); }
 
 .ops { display: grid; gap: 18px; align-content: start; }
 .ops__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
@@ -623,12 +657,12 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 
 /* -- filters -------------------------------------------------------------- */
 .ops-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.ops-search { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-height: var(--ac-control-h); padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--ac-radius-sm); background: var(--ac-elevated); color: var(--text-muted); }
+.ops-search { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-height: var(--ac-control-h); padding: 0 12px; border: 1px solid var(--ac-control-line); border-radius: var(--ac-radius-sm); background: var(--ac-elevated); color: var(--text-muted); }
 .ops-search input { flex: 1; border: 0; background: none; font: inherit; color: var(--text-primary); min-width: 0; }
 .ops-search input:focus { outline: none; }
-.ops-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ac-accent-soft); }
+.ops-search:focus-within { border-color: var(--ac-marker); box-shadow: 0 0 0 3px var(--ac-band); }
 .ops-filter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--text-muted); }
-.ops-filter select { min-height: var(--ac-control-h-sm); border: 1px solid var(--border-strong); border-radius: var(--ac-radius-sm); background: var(--ac-elevated); color: var(--text-primary); font: inherit; font-size: var(--fs-sm); padding: 0 8px; }
+.ops-filter select { min-height: var(--ac-control-h-sm); border: 1px solid var(--ac-control-line); border-radius: var(--ac-radius-sm); background: var(--ac-elevated); color: var(--text-primary); font: inherit; font-size: var(--fs-sm); padding: 0 8px; }
 .ops-count { margin: 0 0 0 auto; font-size: var(--fs-caption); color: var(--text-muted); }
 
 /* -- tables --------------------------------------------------------------- */
@@ -638,7 +672,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .ops-table td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .ops-table tbody tr:last-child td { border-bottom: 0; }
 .ops-table tbody tr:hover { background: var(--ac-subtle); }
-.ops-table tbody tr[aria-selected="true"] { background: var(--ac-accent-soft); }
+.ops-table tbody tr[aria-selected="true"] { background: var(--ac-select); box-shadow: inset 3px 0 0 var(--ac-select-rule); }
 .ops-table td b { display: block; font-weight: 650; color: var(--text-primary); }
 /* Season and farm codes are identifiers: breaking them mid-token makes them
  * unreadable in a dense table. */
@@ -678,6 +712,94 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .ops-table td { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 2px 0; border: 0; align-items: baseline; }
   .ops-table td::before { content: attr(data-label); font-size: var(--fs-caption); color: var(--text-muted); }
   /* A season code broken across two lines reads as two codes. */
-  .ops-table td[data-label="Nông hộ / Vụ mùa"] small { white-space: nowrap; }
+  .ops-table td[data-label="Vụ mùa"] small,
+  .ops-table td[data-label="Thửa / Vụ mùa"] small { white-space: nowrap; }
   .ops-table td .btn { margin-top: 4px; }
+
+  /* The generic data table gets the same treatment rather than a sideways
+     scroll: a 680px table inside a 390px phone is not a usable row.
+     `overflow-x: auto` stays: it is the safety net for any table that is NOT
+     `table.data` (farm performance, organisation rollups, the MRV batch list),
+     and removing it let those escape their wrapper and push the whole page
+     sideways by ~306px — measured, not guessed. */
+  .table-wrap:has(table.data) { border: 0; background: none; }
+  table.data thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  table.data tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
+  table.data td { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; padding: 2px 0; border: 0; align-items: baseline; text-align: left; }
+  table.data td::before { content: attr(data-label); font-size: var(--fs-caption); color: var(--text-muted); }
+  table.data td.num { text-align: left; }
+}
+
+/* One readiness statement, shared by the season Carbon tab and the season hub.
+   Pastel background, ink text — the pastel is never used as a text colour. */
+.carbon-readiness {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--role-line, var(--border));
+  border-radius: 10px;
+  background: var(--role-bg, var(--ac-subtle));
+  color: var(--text-primary);
+}
+.carbon-readiness p { margin: 0; font-size: var(--fs-sm); }
+.carbon-readiness ul { margin: 2px 0 0; padding-left: 18px; font-size: var(--fs-caption); display: grid; gap: 4px; }
+
+/* -- control sizing ------------------------------------------------------- */
+/* Measured on the rendered page, the workspace's buttons came out at 38px and
+   several links and the search input well under that. Desktop controls are at
+   least 40px and touch controls 44px, from the tokens that already existed. */
+.btn, .btn--sm, .btn--ghost, .btn--danger { min-height: var(--ac-control-h-sm); }
+.btn--link { min-height: var(--ac-control-h-sm); padding-block: 0; }
+select.select, input.search { min-height: var(--ac-control-h-sm); }
+/* The search wrapper is the visible control; its input must fill it so the
+   hit area and the thing a pointer lands on are the same rectangle. */
+.ops-search input { align-self: stretch; min-height: var(--ac-control-h-sm); }
+.ops-filter select { min-height: var(--ac-control-h-sm); }
+/* Sign-out is a real action, not a footnote. */
+.sidebar__id .link { min-height: var(--ac-control-h-sm); display: inline-flex; align-items: center; }
+
+@media (max-width: 860px), (pointer: coarse) {
+  .btn, .btn--sm, .btn--ghost, .btn--danger, .btn--link,
+  select.select, input.search, .ops-search input, .ops-filter select,
+  .sidebar__id .link { min-height: var(--ac-control-h); }
+}
+
+/* Farm performance: a group header row that keeps resource efficiency, the
+ * cost the cooperative recorded, and the Carbon result visibly apart. */
+.perf-table thead tr.colgroups th { border-bottom: 0; padding-bottom: 2px; }
+.perf-table .colgroup {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-muted); text-align: left; border-bottom: 2px solid var(--border-strong);
+}
+.perf-table .colgroup--carbon { border-bottom-color: var(--ac-carbon); color: var(--ac-carbon); }
+.perf-table td.col-hi, .perf-table th.col-hi { background: var(--ac-subtle); }
+.perf-table .cell-empty { font-size: var(--fs-caption); font-style: normal; }
+@media (max-width: 720px) {
+  .perf-table thead tr.colgroups { display: none; }
+}
+
+/* Technical disclosure: ids, ISO timestamps and the write channel. Closed by
+ * default and visually quieter than the business facts above it. */
+.tech-detail { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+.tech-detail > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 8px;
+  min-height: 40px; font-size: var(--fs-sm); font-weight: 650; color: var(--text-muted);
+}
+.tech-detail > summary::-webkit-details-marker { display: none; }
+.tech-detail > summary::before { content: "▸"; font-size: 11px; transition: transform var(--ac-dur) var(--ac-ease); }
+.tech-detail[open] > summary::before { transform: rotate(90deg); }
+.tech-detail > summary:focus-visible { outline: 2px solid var(--ac-focus); outline-offset: 2px; border-radius: var(--radius-control); }
+.dl--tech dd code { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-muted); word-break: break-all; }
+
+.ops-filters + .table-wrap, .ops-filters + .state { margin-top: 14px; }
+
+@media (max-width: 720px) {
+  /* As a card, a navigable row needs to look navigable: the stretched link is
+   * still there, but nothing on screen said the card could be opened. */
+  table.data tbody tr.has-rowlink { position: relative; padding-right: 30px; }
+  table.data tbody tr.has-rowlink::before {
+    content: "›"; position: absolute; right: 12px; top: 12px;
+    font-size: 20px; line-height: 1; color: var(--text-muted);
+  }
+  table.data tbody tr.has-rowlink .rowlink { font-weight: 700; color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
 }

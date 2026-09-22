@@ -46,8 +46,6 @@ function FarmCard({ farm, scope }: { farm: Farm; scope: FarmerScope }) {
   const seasons = seasonsOfPlots(scope, plots)
   const active = seasons.filter((s) => isActiveStatus(s.status))
   const area = sumArea(plots)
-  const current = active[0]
-  const currentPlot = plots.find((p) => p.id === current?.plotId)
   const place = placeOf(farm)
   return (
     <article className="fw-farm farmer-farm-card">
@@ -62,12 +60,33 @@ function FarmCard({ farm, scope }: { farm: Farm; scope: FarmerScope }) {
           <Stat value={plots.length} label="thửa" />
           <Stat value={active.length} label="vụ đang canh tác" />
         </div>
-        <div className="fw-farm__season">
-          <span>
-            <small>{current ? 'Vụ đang canh tác' : 'Hiện tại'}</small>
-            <b>{current ? `${current.name}${currentPlot ? ` · ${currentPlot.name}` : ''}` : 'Chưa có vụ đang canh tác'}</b>
-          </span>
-          <Link to={`/farmer/farms/${farm.id}`} className="fw-farm__go" aria-label={`Xem ruộng ${farm.name}`}>Xem ruộng<Ico name="arrow" /></Link>
+        {/* The card used to name one active season out of however many the
+          * farm has, then stop — the reader had to open the farm to find the
+          * others, and the page was a single line in a lot of white. The
+          * hierarchy is on the page now: each plot, and the season on it. */}
+        <ul className="fw-farm__plots">
+          {plots.map((plot) => {
+            const on = seasons.filter((x) => x.plotId === plot.id)
+            const running = on.find((x) => isActiveStatus(x.status))
+            return (
+              <li key={plot.id}>
+                <Link to={`/farmer/plots/${plot.id}`} className="fw-farm__plot">
+                  <span className="fw-farm__plotname"><Ico name="plot" />{plot.name}</span>
+                  <span className="fw-farm__plotarea">{plot.areaHa == null ? '—' : ha(plot.areaHa)}</span>
+                  <span className="fw-farm__plotseason">
+                    {running
+                      ? <><b>{running.name}</b><span className="fw-chip tone-leaf">Đang canh tác</span></>
+                      : <span className="fw-muted">Chưa có vụ đang canh tác</span>}
+                  </span>
+                  <Ico name="chevron" />
+                </Link>
+              </li>
+            )
+          })}
+          {!plots.length && <li className="fw-note">Nông hộ này chưa có thửa ruộng nào được ghi nhận.</li>}
+        </ul>
+        <div className="fw-farm__foot">
+          <Link to={`/farmer/farms/${farm.id}`} className="fw-btn fw-btn--soft" aria-label={`Xem hồ sơ nông hộ ${farm.name}`}>Xem hồ sơ nông hộ<Ico name="arrow" /></Link>
         </div>
       </div>
     </article>
@@ -117,17 +136,23 @@ export function FarmerFarmPage({ id }: { id: string }) {
           <Stat value={plots.length} label="thửa ruộng" />
           <Stat value={active.length} label="vụ đang canh tác" />
         </div>
+        {/* One next action. The page used to end with a "Vụ đang canh tác"
+          * section that listed the same seasons the plot cards above already
+          * named, so the running season was stated twice on one screen. */}
+        {active[0] && (
+          <div className="fw-idcard__action">
+            <Link to={`/farmer/crop-seasons/${active[0].id}/journal`} className="fw-btn" onMouseEnter={() => prefetchSeason(active[0].id)}>
+              <Ico name="journal" />Ghi hoạt động cho {active[0].name}
+            </Link>
+          </div>
+        )}
       </section>
       <Section title="Thửa ruộng" icon="plot" tone="leaf" description={`${plots.length} thửa trong nông hộ này`}>
         {plots.length
           ? <div className="fw-plots">{plots.map((plot) => <PlotCard key={plot.id} plot={plot} seasons={seasonsOfPlot(scope.data!, plot.id)} />)}</div>
           : <Empty icon="plot" tone="leaf" title="Chưa có thửa ruộng nào" body="Nông hộ này chưa có thửa ruộng được ghi nhận." />}
       </Section>
-      {active.length > 0 && (
-        <Section title="Vụ đang canh tác" icon="seeding" tone="leaf">
-          <div className="fw-seasons">{active.map((s) => <SeasonRow key={s.id} season={s} plot={plots.find((p) => p.id === s.plotId)} />)}</div>
-        </Section>
-      )}
+
     </>
   )
 }
@@ -168,6 +193,7 @@ export function FarmerPlotPage({ id }: { id: string }) {
   const seasons = seasonsOfPlot(scope.data, plot.id)
   const active = seasons.find((s) => isActiveStatus(s.status))
   const days = active && !active.harvestDate ? daysSince(active.plantingDate) : null
+  const past = seasons.filter((x) => x.id !== active?.id)
   return (
     <>
       <Crumbs items={[{ label: 'Ruộng của tôi', to: '/farmer/farms' }, ...(farm ? [{ label: farm.name, to: `/farmer/farms/${farm.id}` }] : []), { label: plot.name }]} />
@@ -186,6 +212,9 @@ export function FarmerPlotPage({ id }: { id: string }) {
           <Stat value={active ? 1 : 0} label="vụ đang canh tác" />
         </div>
       </section>
+      {/* The running season was featured here AND listed again below, so the
+        * same season appeared twice on one screen. It is stated once: as the
+        * highlighted head of the season list, carrying the page's one action. */}
       {active && (
         <Link to={`/farmer/crop-seasons/${active.id}`} className="fw-current" onMouseEnter={() => prefetchSeason(active.id)}>
           <span>
@@ -196,11 +225,21 @@ export function FarmerPlotPage({ id }: { id: string }) {
           <span className="fw-btn">Mở vụ<Ico name="arrow" /></span>
         </Link>
       )}
-      <Section title="Mùa vụ" icon="history" tone="sage" description={active ? `${seasons.length} vụ — vụ đang canh tác được đánh dấu` : 'Thửa này hiện chưa có vụ nào đang canh tác'}>
-        {seasons.length
-          ? <div className="fw-seasons farmer-season-list">{seasons.map((s) => <SeasonRow key={s.id} season={s} plot={plot} past={!isActiveStatus(s.status)} />)}</div>
-          : <Empty icon="seeding" tone="leaf" title="Thửa này chưa có vụ canh tác nào." body="Khi vụ mới được tạo cho thửa này, vụ sẽ xuất hiện ở đây." />}
-      </Section>
+      {past.length > 0 && (
+        <Section title="Vụ đã kết thúc" icon="history" tone="sage" description={`${past.length} vụ trước trên thửa này`}>
+          <div className="fw-seasons farmer-season-list">{past.map((s) => <SeasonRow key={s.id} season={s} plot={plot} past />)}</div>
+        </Section>
+      )}
+      {!seasons.length && (
+        <Section title="Mùa vụ" icon="history" tone="sage">
+          <Empty icon="seeding" tone="leaf" title="Thửa này chưa có vụ canh tác nào." body="Khi vụ mới được tạo cho thửa này, vụ sẽ xuất hiện ở đây." />
+        </Section>
+      )}
+      {seasons.length > 0 && !active && !past.length && (
+        <Section title="Mùa vụ" icon="history" tone="sage">
+          <div className="fw-seasons farmer-season-list">{seasons.map((s) => <SeasonRow key={s.id} season={s} plot={plot} />)}</div>
+        </Section>
+      )}
     </>
   )
 }

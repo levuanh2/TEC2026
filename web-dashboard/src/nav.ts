@@ -19,8 +19,6 @@ const STATIC: NavGroup[] = [
     ],
   },
   {
-    // Kept as "Hiệu suất" so a season being viewed still docks here as a
-    // context link (see ContextLink below) instead of disappearing.
     label: 'Hiệu suất',
     items: [
       { to: '/carbon', label: 'Carbon', icon: 'carbon' },
@@ -37,17 +35,18 @@ const STATIC: NavGroup[] = [
   },
 ]
 
-export interface ContextLink { to: string; label: string; group: 'Quản lý' | 'Hiệu suất' }
-
-/** Build the nav for a role, injecting the plot/season the user is currently viewing. */
-export function buildNav(role: Role, context: ContextLink[]): NavGroup[] {
+/**
+ * Build the nav for a role.
+ *
+ * Global IA only. The sidebar used to grow an extra "Vụ canh tác"/"Carbon vụ"
+ * entry for whatever season was open, so the navigation changed shape as you
+ * moved through the app and two of its rows pointed at the page you were
+ * already on. Where you are now belongs to the workspace — its breadcrumb and
+ * tabs — not to the list of places you can go.
+ */
+export function buildNav(role: Role): NavGroup[] {
   const allowed = new Set(visibleNav(role))
-  return STATIC.map((g) => {
-    const items = g.items.filter((it) => allowed.has(it.to))
-    const ctx = context.filter((c) => c.group === g.label)
-    return {
-      ...g,
-      items: [...items, ...ctx.map((c) => ({ to: c.to, label: c.label, icon: 'chevron', context: true } as NavItem & { context?: boolean }))],
-    }
-  }).filter((g) => g.items.length > 0)
+  return STATIC
+    .map((g) => ({ ...g, items: g.items.filter((it) => allowed.has(it.to)) }))
+    .filter((g) => g.items.length > 0)
 }

@@ -29,7 +29,23 @@
   /* --- rules. Three weights carry all structure; shadows carry none. ---- */
   --ac-rule: oklch(88.5% 0.01 165);        /* hairline between rows */
   --ac-rule-2: oklch(80% 0.014 165);       /* section rule */
-  --ac-rule-3: oklch(68% 0.018 165);       /* heavy rule, table head underline */
+  --ac-rule-3: oklch(64% 0.018 165);       /* heavy rule, table head underline */
+  /* The boundary that IDENTIFIES a control — an input's edge, a ghost
+   * button's outline. WCAG 1.4.11 wants 3:1 against what surrounds it,
+   * and the structural hairlines above are far too light for that; they
+   * stay as they are, because a table rule is not a control. Measured:
+   * 3.27:1 on the Management workspace, 3.38:1 on the Farmer sheet. */
+  --ac-control-line: oklch(62% 0.016 165);
+
+  /* The same line on a pastel role card, where paper is not the background.
+   * `--ac-control-line` was tuned against paper; on the methodology blue
+   * (#C7CEEA) it falls to 2.32:1, so a ghost button sitting inside a Carbon
+   * state card missed 1.4.11 on real data — no mock season ever put one there.
+   * At 54% it clears 3:1 against all four pastels (worst 3.21:1 on the blue,
+   * then 3.75 ready, 3.83 attention, 4.19 calculated) and is still a hairline,
+   * not an outline. Scoped to those cards, so the workspace keeps its own
+   * lighter line and no semantic role changes. */
+  --ac-control-line-strong: oklch(54% 0.016 165);
 
   /* --- ink -------------------------------------------------------------- */
   --ac-ink: oklch(24% 0.03 165);           /* headings, figures */
@@ -73,28 +89,54 @@
   --ac-sidebar-active: oklch(38% 0.085 160);
   --ac-sidebar-marker: oklch(78% 0.16 140);
 
+  /* --- workspace controls ------------------------------------------------
+         The institutional green stops at the sidebar, so the three places a
+         workspace would reach for it — a primary CTA, the active tab's
+         underline, a selected row — are drawn here instead. CTA and marker
+         are neutral ink; the selection tint is lavender, because a selected
+         row is usually a row with something still missing and a healthy
+         green would say the opposite. ------------------------------------- */
+  --ac-cta: oklch(26% 0.022 165);
+  --ac-cta-hover: oklch(19% 0.018 165);
+  --ac-cta-ink: oklch(99.5% 0.003 165);
+  --ac-marker: oklch(30% 0.02 165);
+  --ac-select: oklch(94% 0.022 292);
+  --ac-select-rule: oklch(76% 0.055 292);
+  --ac-select-ink: oklch(34% 0.09 292);
+
   /* --- warm off-white workspace ----------------------------------------- */
   --ac-workspace: oklch(97.6% 0.005 80);
 
   /* --- semantic roles. Pastel is a BACKGROUND only; every pastel has a
          paired ink dark enough to read on it, and a border for the times a
-         tint alone would be the only signal. Never use a pastel as text. --- */
+         tint alone would be the only signal. Never use a pastel as text.
+
+         The five `-line` values were pastel too, and measured 1.48-2.15:1
+         against paper — below the 3:1 that 1.4.11 asks of a boundary. Round 3
+         left them, on the argument that each chip states its state in words so
+         the outline is redundant; the final gate asks for the measured
+         threshold instead, so each line is now the darkest step of its OWN hue
+         and saturation that clears 3:1 against both paper and its own fill.
+         Hue and saturation are untouched, so no role changes meaning — the
+         chips read as outlined rather than as a soft tint. Measured after:
+         positive 3.29:1, water 3.62:1, attention 3.55:1, error 4.59:1,
+         info 4.24:1 against paper; never below 3.00:1 against their fills. --- */
   --ac-role-positive-bg: #E2F0CB;   /* healthy, completed, crop, positive */
   --ac-role-positive-ink: #294B16;
-  --ac-role-positive-line: #B9D394;
+  --ac-role-positive-line: #6D913B;
   --ac-role-water-bg: #B5EAD7;      /* water, resource efficiency, environment */
   --ac-role-water-ink: #14564A;
-  --ac-role-water-line: #86CDB6;
+  --ac-role-water-line: #3A8D72;
   --ac-role-attention-bg: #FFDAC1;  /* attention, incomplete, upcoming */
   --ac-role-attention-ink: #70401D;
-  --ac-role-attention-line: #EAB68D;
+  --ac-role-attention-line: #C26924;
   --ac-role-error-bg: #FFB7B2;      /* error, blocker */
   --ac-role-error-bg-strong: #FF9AA2;
   --ac-role-error-ink: #742B31;
-  --ac-role-error-line: #E99089;
+  --ac-role-error-line: #CE3326;
   --ac-role-info-bg: #C7CEEA;       /* information, methodology, neutral */
   --ac-role-info-ink: #33406A;
-  --ac-role-info-line: #A3ADD8;
+  --ac-role-info-line: #5E6FBB;
 
   /* --- geometry: 8-12px radii, a 4/8 spacing rhythm, 44px controls ------- */
   --ac-radius-sm: 8px;
@@ -115,3 +157,16 @@
   --ac-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ac-dur: 140ms;
 }
+
+/* Skip-to-content. Off-screen until focused, then a real, visible control at
+ * the top-left of the workspace — both apps mount it as the first node. */
+.skip-link {
+  position: fixed; top: 0; left: 0; z-index: 200;
+  transform: translateY(-120%); transition: transform 120ms var(--ac-ease);
+  background: var(--ac-cta); color: var(--ac-cta-ink);
+  min-height: 44px; display: inline-flex; align-items: center;
+  padding: 0 20px; border-radius: 0 0 var(--ac-radius-sm) 0;
+  font-weight: 650; font-size: 14px; text-decoration: none;
+}
+.skip-link:focus-visible, .skip-link:focus { transform: translateY(0); outline: 2px solid var(--ac-focus); outline-offset: -4px; }
+:where(main):focus { outline: none; }

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
-import { getCarbon, getCarbonReadiness, type CarbonMissingInput } from '../api/carbon'
-import { getFarmCropSeasons, listFarms } from '../api/farms'
+import { getCarbon, getCarbonReadiness, type CarbonMissingInput, type CarbonResult } from '../api/carbon'
+import { getFarmCropSeasons, getPlotsForFarm, listFarms } from '../api/farms'
 import { listMrvBatches, listMrvCases } from '../api/mrv'
-import type { CropSeason, Farm } from '../types'
+import { carbonView, type CarbonDisplayState, type CarbonView } from '../carbon/readiness'
+import { getEngineInfo } from '../api/engine'
+import { label, seasonStatus } from '../vocab'
+import type { CropSeason, Farm, Plot } from '../types'
 
 /* The cooperative's work queue, assembled from the endpoints that already
  * exist. There is no "seasons of an organization" route, so this composes
@@ -13,22 +16,31 @@ import type { CropSeason, Farm } from '../types'
  */
 
 export type DataState = 'complete' | 'missing' | 'unknown'
-export type CarbonState = 'calculated' | 'ready' | 'blocked' | 'limited' | 'unknown'
+/** Kept as an alias of the shared view model's state so no screen invents its own. */
+export type CarbonState = CarbonDisplayState
 
 export interface OpsRow {
   seasonId: string
   seasonName: string
   status?: string
+  /** Season status in Vietnamese — a raw `active` never reaches a table. */
+  statusLabel: string
   farmId: string
   farmName: string
   farmCode?: string
   plotId: string
+  /** Plot identity. Without it two seasons of the same farm and season code
+   *  render as identical rows, which is exactly what the audit found. */
+  plotName?: string
+  plotCode?: string
   /** Blocking inputs the farmer can still supply. */
   missing: CarbonMissingInput[]
   /** Blocking inputs no data entry can resolve (unverified factors). */
   limitations: CarbonMissingInput[]
   data: DataState
   carbon: CarbonState
+  /** The one readiness answer every Management surface renders. */
+  view: CarbonView | null
   carbonPerKg: number | null
   calculatedAt: string | null
   mrv: { caseId: string; caseCode: string; status: string } | null
@@ -62,42 +74,54 @@ async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Prom
   return out
 }
 
-function carbonState(row: { missing: CarbonMissingInput[]; limitations: CarbonMissingInput[]; canCalculate: boolean; hasResult: boolean }): CarbonState {
-  if (row.hasResult) return 'calculated'
-  if (row.limitations.length) return 'limited'
-  if (row.canCalculate) return 'ready'
-  if (row.missing.length) return 'blocked'
-  return 'unknown'
-}
-
-async function seasonRow(farm: Farm, season: CropSeason, mrvBySeason: Map<string, { caseId: string; caseCode: string; status: string }>): Promise<OpsRow> {
-  const base: OpsRow = {
+/** The shape every row starts as, before its per-season detail resolves. */
+function baseRow(farm: Farm, season: CropSeason, plot: Plot | undefined,
+                 mrvBySeason: Map<string, { caseId: string; caseCode: string; status: string }>): OpsRow {
+  return {
     seasonId: season.id, seasonName: season.name, status: season.status,
-    farmId: farm.id, farmName: farm.name, farmCode: farm.code, plotId: season.plotId,
-    missing: [], limitations: [], data: 'unknown', carbon: 'unknown',
+    statusLabel: seasonStatus(season.status),
+    farmId: farm.id, farmName: farm.name, farmCode: farm.code,
+    plotId: season.plotId, plotName: plot?.name, plotCode: plot?.code,
+    missing: [], limitations: [], data: 'unknown', carbon: 'unknown', view: null,
     carbonPerKg: null, calculatedAt: null, mrv: mrvBySeason.get(season.id) ?? null,
   }
+}
+
+async function seasonRow(
+  farm: Farm, season: CropSeason, plot: Plot | undefined,
+  mrvBySeason: Map<string, { caseId: string; caseCode: string; status: string }>,
+  efConfigVersion: string | null,
+): Promise<OpsRow> {
+  const base = baseRow(farm, season, plot, mrvBySeason)
   try {
     const readiness = await getCarbonReadiness(season.id)
-    const blocking = readiness.missing_inputs.filter((m) => m.blocking)
-    const limitations = blocking.filter((m) => m.flow === 'factor_unavailable')
-    const missing = blocking.filter((m) => m.flow !== 'factor_unavailable')
-    let hasResult = false
-    let carbonPerKg: number | null = null
-    let calculatedAt: string | null = null
+    let result: CarbonResult | null = null
     try {
-      const result = await getCarbon(season.id)
-      hasResult = true
-      carbonPerKg = result.co2e_per_kg ?? null
-      calculatedAt = result.calculated_at ?? null
+      result = await getCarbon(season.id)
     } catch {
       // No stored calculation is a normal state, not an error.
     }
+    // One decision, taken in one place, for Overview, Seasons, Data gaps,
+    // Carbon and the season's own Carbon tab alike.
+    const view = carbonView({
+      readiness,
+      result,
+      liveEfConfigVersion: efConfigVersion,
+      fixTarget: `/crop-seasons/${season.id}`,
+      resultTarget: `/crop-seasons/${season.id}/carbon`,
+    })
     return {
-      ...base, missing, limitations,
-      data: missing.length ? 'missing' : 'complete',
-      carbon: carbonState({ missing, limitations, canCalculate: readiness.can_calculate, hasResult }),
-      carbonPerKg, calculatedAt,
+      ...base,
+      missing: view.userFixableGaps,
+      limitations: view.methodologyLimitations,
+      // "Đủ dữ liệu" is about what a person can still supply, so a factor
+      // limitation never makes a season look incomplete — and a remaining
+      // user-fixable gap never lets it look complete.
+      data: view.userFixableGaps.length ? 'missing' : 'complete',
+      carbon: view.calculationStatus,
+      view,
+      carbonPerKg: result?.co2e_per_kg ?? null,
+      calculatedAt: result?.calculated_at ?? null,
     }
   } catch (e) {
     return { ...base, error: e instanceof Error ? e.message : 'Không đọc được dữ liệu vụ này.' }
@@ -118,36 +142,56 @@ export function useOperations(organizationId: string | null): OpsState {
       try {
         // RLS already scopes /v1/farms to what this manager may see.
         const farms = await listFarms()
+
+        /* MRV and the engine's factor-set version depend on nothing in the
+         * farm→season chain, so they run beside it instead of in front of it.
+         * On the demo tenant this removed a full serial leg from first paint. */
         const mrvBySeason = new Map<string, { caseId: string; caseCode: string; status: string }>()
-        try {
-          const cases = await listMrvCases()
-          const forOrg = cases.filter((c) => c.organizationId === organizationId)
-          const batchLists = await mapLimited(forOrg, CONCURRENCY, async (c) => ({ c, batches: await listMrvBatches(c.caseId) }))
-          for (const { c, batches } of batchLists) {
-            for (const b of batches) mrvBySeason.set(b.cropSeasonId, { caseId: c.caseId, caseCode: c.caseCode, status: c.status })
+        const mrvWork = (async () => {
+          try {
+            const cases = await listMrvCases()
+            const forOrg = cases.filter((c) => c.organizationId === organizationId)
+            const batchLists = await mapLimited(forOrg, CONCURRENCY, async (c) => ({ c, batches: await listMrvBatches(c.caseId) }))
+            for (const { c, batches } of batchLists) {
+              for (const b of batches) mrvBySeason.set(b.cropSeasonId, { caseId: c.caseId, caseCode: c.caseCode, status: c.status })
+            }
+          } catch {
+            // MRV is a separate module; its absence must not empty the queue.
           }
-        } catch {
-          // MRV is a separate module; its absence must not empty the queue.
-        }
-        const seasonsByFarm = await mapLimited(farms, CONCURRENCY, async (f) => ({ farm: f, seasons: await getFarmCropSeasons(f.id).catch(() => [] as CropSeason[]) }))
-        const pairs = seasonsByFarm.flatMap(({ farm, seasons }) => seasons.map((season) => ({ farm, season })))
+        })()
+
+        // Plots come with the seasons, per farm, in the same parallel pass:
+        // a row without its plot name is a row an officer cannot tell apart.
+        const [byFarm] = await Promise.all([
+          mapLimited(farms, CONCURRENCY, async (f) => {
+            const [seasons, plots] = await Promise.all([
+              getFarmCropSeasons(f.id).catch(() => [] as CropSeason[]),
+              getPlotsForFarm(f.id).catch(() => [] as Plot[]),
+            ])
+            return { farm: f, seasons, plots }
+          }),
+          mrvWork,
+        ])
+        const engine = await getEngineInfo()
+        const efConfigVersion = engine?.efConfigVersion ?? null
+        const pairs = byFarm.flatMap(({ farm, seasons, plots }) => {
+          const plotById = new Map(plots.map((pl) => [pl.id, pl]))
+          return seasons.map((season) => ({ farm, season, plot: plotById.get(season.plotId) }))
+        })
 
         /* Readiness for one season measured 6-8s against hosted Supabase, so a
          * cooperative with several seasons would stare at an empty table for
          * half a minute. Each season's row is published the moment it resolves:
          * the list fills in front of the officer, and the count says how many
          * are still coming. */
-        const rows: OpsRow[] = pairs.map(({ farm, season }) => ({
-          seasonId: season.id, seasonName: season.name, status: season.status,
-          farmId: farm.id, farmName: farm.name, farmCode: farm.code, plotId: season.plotId,
-          missing: [], limitations: [], data: 'unknown', carbon: 'unknown',
-          carbonPerKg: null, calculatedAt: null, mrv: mrvBySeason.get(season.id) ?? null, loading: true,
+        const rows: OpsRow[] = pairs.map(({ farm, season, plot }) => ({
+          ...baseRow(farm, season, plot, mrvBySeason), loading: true,
         }))
         let pending = rows.length
         const publish = () => { if (live) setState({ data: { rows: [...rows], farms, pending }, loading: pending > 0, error: null }) }
         publish()
-        await mapLimited(pairs, CONCURRENCY, async ({ farm, season }, ) => {
-          const row = await seasonRow(farm, season, mrvBySeason)
+        await mapLimited(pairs, CONCURRENCY, async ({ farm, season, plot }) => {
+          const row = await seasonRow(farm, season, plot, mrvBySeason, efConfigVersion)
           const at = rows.findIndex((r) => r.seasonId === season.id)
           if (at >= 0) rows[at] = row
           pending -= 1
@@ -206,7 +250,15 @@ export function exceptionsOf(rows: OpsRow[]): Exception[] {
         action: { label: 'Tính ngay', to },
       })
     }
-    if (row.carbon === 'limited') {
+    if (row.carbon === 'stale') {
+      out.push({
+        id: `${row.seasonId}:stale`, severity: 'medium', row,
+        issue: 'Kết quả Carbon đã cũ',
+        detail: 'Dữ liệu thay đổi sau lần tính gần nhất — cần tính lại.',
+        action: { label: 'Tính lại', to: `/crop-seasons/${row.seasonId}/carbon` },
+      })
+    }
+    if (row.carbon === 'methodology_limited') {
       out.push({
         id: `${row.seasonId}:limited`, severity: 'low', row,
         issue: 'Giới hạn của bộ hệ số',
@@ -214,12 +266,17 @@ export function exceptionsOf(rows: OpsRow[]): Exception[] {
         action: { label: 'Xem', to },
       })
     }
-    if (row.mrv && row.mrv.status !== 'approved' && row.mrv.status !== 'exported') {
+    /* `verified`/`closed` are the only settled `mrv_case_status` values. The
+     * previous filter compared against 'approved'/'exported', which are not in
+     * that enum at all, so every case looked outstanding for ever. */
+    if (row.mrv && row.mrv.status !== 'verified' && row.mrv.status !== 'closed') {
       out.push({
         id: `${row.seasonId}:mrv`, severity: 'medium', row,
         issue: `Hồ sơ MRV ${row.mrv.caseCode} chờ xử lý`,
-        detail: `Trạng thái hiện tại: ${row.mrv.status}.`,
-        action: { label: 'Duyệt MRV', to: '/mrv' },
+        detail: `Trạng thái hiện tại: ${label('mrvCaseStatus', row.mrv.status)}.`,
+        // There is no review/approve endpoint for an MRV case, so this opens
+        // the record instead of promising an approval the API cannot perform.
+        action: { label: 'Mở hồ sơ MRV', to: '/mrv' },
       })
     }
   }

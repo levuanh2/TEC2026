@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from '../../ui'
-import { ActivityCardActions, ActivityDetailActions, ActivitySteps, AddActivityCta, QuickActions, useActivityMutations } from '../ActivityForms'
+import { ActivityCardActions, ActivityDetailActions, AddActivityCta, useActivityMutations } from '../ActivityForms'
 import { Ico } from '../icons'
 import { JournalView } from '../journal'
 import { Empty, ErrorPanel, Flash, PageHeader } from '../kit'
@@ -40,17 +40,6 @@ export function FarmerJournalPage() {
         </div>
       )}
       <Flash message={mutations.flash} />
-      {/* Step 1 of the record flow, in the place a farmer goes to record:
-        * pick the work, then the sheet asks only for what that work needs. */}
-      {seasonCtx && (
-        <section className="fw-record" aria-labelledby="fw-record-title">
-          <div className="fw-record__head">
-            <h2 id="fw-record-title">Ghi hoạt động</h2>
-            <ActivitySteps current={1} />
-          </div>
-          <QuickActions seasons={[seasonCtx]} mutations={mutations} />
-        </section>
-      )}
       {scope.error && !scope.data ? (
         <ErrorPanel error={scope.error} onRetry={scope.reload} />
       ) : !scope.loading && !all.length ? (
@@ -61,7 +50,6 @@ export function FarmerJournalPage() {
           resetSignal={mutations.version}
           renderCardActions={seasonCtx ? (a) => <ActivityCardActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined}
           renderDetailActions={seasonCtx ? (a) => <ActivityDetailActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined}
-          emptyAction={seasonCtx ? <AddActivityCta season={seasonCtx} mutations={mutations} /> : undefined}
         />
       )}
       {mutations.node}
