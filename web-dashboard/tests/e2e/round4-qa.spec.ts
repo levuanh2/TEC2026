@@ -55,7 +55,9 @@ test('/seasons, /data-gaps and /carbon are three different jobs', async ({ page 
 
   expect(seasons.map((h) => h.toLowerCase())).toEqual(expect.arrayContaining(['giai đoạn', 'gieo sạ', 'thu hoạch']))
   expect(gaps.map((h) => h.toLowerCase())).toEqual(expect.arrayContaining(['cần bổ sung', 'thông tin còn thiếu']))
-  expect(carbon.map((h) => h.toLowerCase())).toEqual(expect.arrayContaining(['sẵn sàng', 'kết quả', 'độ mới', 'tổng co₂e', 'co₂e / kg']))
+  // Round 4.1: readiness, result, freshness and totals are one state and one
+  // issue/result cell — the nine-column table clipped its actions at 1363px.
+  expect(carbon.map((h) => h.toLowerCase())).toEqual(expect.arrayContaining(['trạng thái carbon', 'cần xử lý · kết quả']))
   expect(new Set([seasons.join('|'), gaps.join('|'), carbon.join('|')]).size).toBe(3)
   // Every view keeps the three identity columns.
   for (const cols of [seasons, gaps, carbon]) expect(cols.slice(0, 3).map((h) => h.toLowerCase())).toEqual(['nông hộ', 'thửa', 'vụ'])
