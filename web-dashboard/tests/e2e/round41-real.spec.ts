@@ -38,6 +38,7 @@ test.describe('Round 4.1 — real session', () => {
     await signIn(page, MANAGER)
     await carbonSettled(page)
     const rows = await page.locator('tr[data-carbon-row]').count()
+    let checks = 0
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: width < 800 ? 844 : 900 })
       await page.waitForTimeout(400)
@@ -54,8 +55,24 @@ test.describe('Round 4.1 — real session', () => {
         expect(b.left, `${width}px ${b.kind} "${b.name}" left edge`).toBeGreaterThanOrEqual(b.containerLeft - 0.5)
         expect(b.hit, `${width}px ${b.kind} "${b.name}" is covered or clipped`).toBe(true)
         if (width <= 768) expect(b.h, `${width}px touch target`).toBeGreaterThanOrEqual(40)
+        checks++
+      }
+      // Each control is keyboard-focusable, passes Playwright's actionability
+      // check (visible, stable, enabled, receives events — a trial click, no
+      // navigation) and carries the right accessible name.
+      const controls = page.locator('[data-row-action]')
+      for (let i = 0; i < await controls.count(); i++) {
+        const c = controls.nth(i)
+        const kind = await c.getAttribute('data-row-action')
+        await c.focus()
+        await expect(c, `${width}px control ${i} focus`).toBeFocused()
+        await c.click({ trial: true, timeout: 5_000 })
+        await expect(c).toHaveAccessibleName(kind === 'secondary' ? /^Chi tiết vụ .+, .+, .+$/ : /^(Bổ sung dữ liệu|Tính Carbon|Tính lại|Xem kết quả|Xem giới hạn): vụ .+, .+, .+$/)
       }
     }
+    // rows × 2 controls × 5 viewports, each measured on all box criteria.
+    expect(checks).toBe(rows * 2 * WIDTHS.length)
+    console.log(`/carbon bounding-box checks: ${checks} = ${rows} rows × 2 controls × ${WIDTHS.length} viewports`)
   })
 
   test('/seasons and /data-gaps share the table: no sideways scroll, no clipped action at 1363 and 1280px', async ({ page }) => {
