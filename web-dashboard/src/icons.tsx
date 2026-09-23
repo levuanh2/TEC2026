@@ -3,7 +3,7 @@ import {
   ChevronRight, Circle, CircleAlert, CircleCheck, ClipboardCheck, ClipboardList, Cloud, Clock, Download, Droplets,
   FileSearch, FlaskConical, Fuel, Gauge, History, House, ImagePlus, Info, LandPlot, LayoutDashboard, Leaf, Lightbulb,
   ListChecks, LoaderCircle, Lock, LogOut, MapPin, MapPinned, Menu, NotebookPen, Paperclip, Pencil, Plus, RefreshCw,
-  Ruler, ScanSearch, Scissors, Search, ShieldCheck, SlidersHorizontal, Sprout, Sun, Tractor, Trash2, TriangleAlert,
+  Ellipsis, Ruler, ScanSearch, Scissors, Search, ShieldCheck, SlidersHorizontal, Sprout, Sun, Tractor, Trash2, TriangleAlert,
   UserRound, WalletCards, Wheat, X,
   type LucideIcon,
 } from 'lucide-react'
@@ -71,6 +71,7 @@ const ICONS = {
   edit: Pencil,
   delete: Trash2,
   close: X,
+  more: Ellipsis,
   logout: LogOut,
   search: Search,
   filter: SlidersHorizontal,

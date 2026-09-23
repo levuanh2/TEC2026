@@ -159,7 +159,7 @@
 .fw-side {
   position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
   padding: var(--fw-space-24) var(--fw-space-20) var(--fw-space-16);
-  background: linear-gradient(180deg, var(--fw-navbar), var(--fw-navbar-2));
+  background: var(--fw-navbar);
   color-scheme: dark;
 }
 /* Compact brand: a wordmark, not a logo tile.
@@ -199,7 +199,8 @@
 .fw-nav__item:hover svg { color: #fff; }
 .fw-nav__item[aria-current="page"] {
   color: #fff; font-weight: 700; border-bottom-color: transparent;
-  background: var(--ac-sidebar-active); border-radius: var(--ac-radius-sm);
+  background: var(--ac-sidebar-selected); box-shadow: inset 0 0 0 1px var(--ac-sidebar-selected-line);
+  border-radius: var(--ac-radius-sm);
 }
 /* The active item is marked three ways — a bar, the icon and the weight — so
  * it never depends on colour alone (WCAG 1.4.1). */
@@ -1153,3 +1154,40 @@
   .fw-farm__plotarea { grid-area: area; }
   .fw-farm__plotseason { grid-area: season; flex-wrap: wrap; }
 }
+
+
+/* ======================================================= Round 4 additions */
+
+/* Home: four regions, one column, nothing competing with the next action. */
+.fw-greet--compact h1 { font-size: var(--fw-text-lg); }
+.fw-home-top { display: grid; gap: var(--fw-space-16); }
+@media (max-width: 1100px) { .fw-home-top { display: grid; } }
+.fw-cost { position: relative; }
+.fw-cost__more { position: absolute; top: var(--fw-space-12); right: var(--fw-space-16); font-size: var(--fw-text-sm); }
+@media (max-width: 520px) { .fw-cost__more { position: static; justify-self: start; } }
+
+/* Activity picker: icon + label + one line of what it records. */
+.fw-pick button { min-height: 64px; }
+.fw-pick__text { display: grid; gap: 2px; }
+.fw-pick__text small { font-size: var(--fw-text-xs); font-weight: 500; color: var(--fw-muted); }
+
+/* Field-level help and errors: beside the field, in words and an icon. */
+.fw-overlay .form-field__help { display: block; margin: -2px 0 4px; font-size: var(--fw-text-xs); color: var(--fw-muted); font-weight: 500; }
+.fw-overlay .form-field__error { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+.fw-overlay .form-field__error svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+.fw-overlay .form-field[aria-invalid="true"] .fw-num__box,
+.fw-overlay .form-field[aria-invalid="true"] > input,
+.fw-overlay .form-field[aria-invalid="true"] > select { box-shadow: inset 0 0 0 2px var(--ac-role-error-line); border-radius: var(--ac-radius-sm); }
+
+/* One ledger-level statement that the rows are demo data. */
+.fw-demo-banner { display: flex; align-items: center; gap: var(--fw-space-8); padding: var(--fw-space-8) var(--fw-space-12); border: 1px solid var(--ac-role-info-line); background: var(--ac-role-info-bg); color: var(--ac-role-info-ink); border-radius: var(--ac-radius-sm); font-size: var(--fw-text-sm); font-weight: 600; }
+.fw-demo-banner svg { width: 16px; height: 16px; flex: none; }
+.fw-demo-banner span { font-weight: 500; }
+
+/* The next action is the loudest thing on Home, but a heading, not a poster. */
+.fw-next__text h2 { font-size: var(--fw-text-lg); line-height: 1.25; }
+@media (max-width: 768px) {
+  .fw-next__text h2 { font-size: var(--fw-text-md); }
+  .fw-ctxbar { gap: 4px var(--fw-space-12); }
+}
+.fw-date-read { display: block; margin-top: 4px; font-size: var(--fw-text-xs); color: var(--fw-muted); font-weight: 550; }
