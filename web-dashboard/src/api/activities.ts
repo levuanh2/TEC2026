@@ -199,13 +199,15 @@ export async function createActivity(cropSeasonId: string, input: ActivityInput,
 
 export interface UpdateActivityParams {
   occurredAt: string
+  /** Omit to leave the stored note untouched — the PATCH only rewrites
+   *  `note` when the key is present. `null` clears it. */
   note?: string | null
 }
 
 export async function updateActivity(activityId: string, input: ActivityInput, params: UpdateActivityParams): Promise<ActivityWriteResult> {
   const body = {
     occurred_at: params.occurredAt,
-    note: params.note ?? null,
+    ...(params.note !== undefined ? { note: params.note } : {}),
     data: activityDataPayload(input),
   }
   return mapWriteResult(await apiRequest<any>(`/v1/activities/${activityId}`, { method: 'PATCH', body: JSON.stringify(body) }))

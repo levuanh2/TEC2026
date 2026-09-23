@@ -369,7 +369,7 @@
 .fw-attn__item b { display: block; font-size: 14.5px; font-weight: 650; }
 .fw-attn__item p { color: var(--fw-muted); font-size: var(--fw-text-sm); max-width: var(--fw-measure); }
 .fw-attn__clear { display: flex; align-items: center; gap: var(--fw-space-8); padding: var(--fw-space-12) 0; border-bottom: 1px solid var(--fw-rule); color: var(--fw-ink-2); font-size: 14px; }
-.fw-attn__clear svg { width: 17px; height: 17px; color: var(--fw-accent); }
+.fw-attn__clear svg { width: 17px; height: 17px; color: var(--fw-ok); }
 /* Cost and Carbon are independent metrics fed by different inputs. The heading
    keeps them visually apart so "thiếu chi phí" never reads as a Carbon cause. */
 .fw-attn-group + .fw-attn-group { margin-top: var(--fw-space-20, 20px); }
@@ -386,7 +386,7 @@
 /* Carbon repair hub: one card per missing input, each with its own action. */
 .fw-repair { display: grid; gap: var(--fw-space-12); margin-bottom: var(--fw-space-20); padding: var(--fw-space-20); border: 1px solid var(--fw-rule-2); border-radius: var(--fw-radius-lg); background: var(--fw-raise); }
 .fw-repair h2 { font-family: var(--fw-display); font-size: var(--fw-text-lg); font-weight: 600; line-height: 1.3; }
-.fw-repair--ready { border-color: var(--fw-accent); background: var(--fw-accent-soft); }
+.fw-repair--ready { border-color: var(--ac-role-water-line); background: var(--ac-role-water-bg); }
 .fw-repair__list { display: grid; gap: var(--fw-space-12); margin: 0; padding: 0; list-style: none; }
 /* Missing data is attention; an unverified factor is information. The tint
  * carries its paired ink and a border, so the meaning survives greyscale. */
@@ -426,8 +426,8 @@
 
 .fw-status { display: inline-flex; align-items: center; gap: var(--fw-space-6); font-size: var(--fw-text-xs); font-weight: 550; color: var(--fw-muted); }
 .fw-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--fw-rule-3); flex: none; }
-.fw-status.is-ok { color: var(--fw-accent-deep); }
-.fw-status.is-ok::before { background: var(--fw-accent); }
+.fw-status.is-ok { color: var(--ac-role-positive-ink); }
+.fw-status.is-ok::before { background: var(--fw-ok); }
 .fw-status.is-missing { color: var(--fw-amber); }
 .fw-status.is-missing::before { background: var(--fw-amber); }
 
@@ -663,13 +663,13 @@
 }
 .fw-tab svg { width: 16px; height: 16px; }
 .fw-tab:hover { color: var(--fw-ink); }
-.fw-tab[aria-current="page"] { color: var(--fw-accent-deep); border-bottom-color: var(--fw-accent); font-weight: 700; }
+.fw-tab[aria-current="page"] { color: var(--fw-ink); border-bottom-color: var(--ac-marker); font-weight: 700; }
 
 .fw-checklist { display: grid; }
 .fw-check { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: var(--fw-space-12); padding: var(--fw-space-12) 0; border-bottom: 1px solid var(--fw-rule); }
 .fw-check__mark { display: grid; place-items: center; color: var(--fw-rule-3); }
 .fw-check__mark svg { width: 16px; height: 16px; }
-.fw-check.is-ok .fw-check__mark { color: var(--fw-accent); }
+.fw-check.is-ok .fw-check__mark { color: var(--fw-ok); }
 .fw-check b { font-size: 14px; display: block; font-weight: 650; }
 .fw-check small { font-size: var(--fw-text-xs); color: var(--fw-muted); }
 .fw-check__ico { width: 16px; height: 16px; color: var(--fw-muted); }
@@ -1198,3 +1198,32 @@
 .fw-pill small { opacity: 1; color: var(--fw-ink-2); }
 .fw-pill[aria-pressed="true"] small { color: inherit; }
 .fw-repair__item.fw-role > p { color: var(--role-ink, var(--fw-ink-2)); }
+
+/* Focus on the green navbar: the workspace's blue ring would sit at ~2:1 on
+ * forest, so navigation uses the light marker instead (Round 4.1). */
+.fw-side :where(a, button):focus-visible, .fw-bottom a:focus-visible { outline-color: var(--ac-sidebar-marker); }
+
+/* Round 4.1 — the disclosure names what it holds, on two lines. */
+.fw-more > summary { flex-wrap: wrap; padding-block: var(--fw-space-8); }
+.fw-more__label { flex: 1 1 auto; }
+.fw-more__contents { order: 3; flex-basis: 100%; font-size: var(--fw-text-sm); font-weight: 500; color: var(--fw-muted); }
+.fw-more > summary::after { order: 2; }
+
+/* A save that cannot happen looks like it: flat, recessed, dashed edge, and a
+ * line saying why, tied to the button with aria-describedby. Not `disabled`,
+ * so a click still moves focus to the first wrong field. Measured: ink-2 on
+ * the band fill 8.9:1. */
+.fw-btn[aria-disabled="true"], .fw-btn[aria-disabled="true"]:hover {
+  background: var(--fw-paper-3); border: 1px dashed var(--ac-control-line); color: var(--fw-ink-2); cursor: not-allowed;
+  transition: none; /* no dark-on-dark frame while the fill would animate */
+}
+.fw-form__footer { flex-wrap: wrap; align-items: center; }
+.fw-form__blocked { display: flex; align-items: center; gap: var(--fw-space-8); margin: 0 auto 0 0; font-size: 14px; font-weight: 600; color: var(--fw-danger); }
+@media (max-width: 1023px) { .fw-form__blocked { flex-basis: 100%; } }
+.fw-form__blocked svg { width: 16px; height: 16px; }
+
+/* Demo marker: metadata about the record, set apart from the note box. */
+.fw-demo-tag { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-6); margin: calc(var(--fw-space-8) * -1) 0 0; font-size: var(--fw-text-sm); color: var(--ac-role-info-ink); }
+.fw-demo-tag svg { width: 15px; height: 15px; }
+.fw-demo-tag b { padding: 1px 8px; border-radius: 999px; background: var(--ac-role-info-bg); border: 1px solid var(--ac-role-info-line); font-weight: 650; }
+.fw-demo-tag span { color: var(--fw-muted); }

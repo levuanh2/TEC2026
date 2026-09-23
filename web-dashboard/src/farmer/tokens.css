@@ -35,9 +35,14 @@
   --fw-rule-3: var(--ac-rule-3);
 
   /* accent — AgriCarbon forest, hue held at 160-163 ---------------------- */
-  --fw-accent: var(--ac-accent);
-  --fw-accent-deep: var(--ac-accent-deep);
-  --fw-accent-soft: var(--ac-accent-soft);
+  /* Round 4.1: the workspace accent is slate. Institutional green belongs to
+   * the navbar (--fw-navbar); inside the sheet green means "done / healthy"
+   * and is spelled --fw-ok. */
+  --fw-accent: var(--ac-work);
+  --fw-accent-deep: var(--ac-work-strong);
+  --fw-accent-soft: var(--ac-work-soft);
+  --fw-ok: var(--ac-success-mark);
+  --fw-ok-soft: var(--ac-role-positive-bg);
   --fw-accent-ink: var(--ac-accent-ink);
   --fw-focus: var(--ac-focus);
 

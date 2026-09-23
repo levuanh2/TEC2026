@@ -64,10 +64,13 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(fertilizer.locator('.form-field__required').first()).toBeVisible()
   await expect(fertilizer.getByLabel(/Loại phân/)).toBeVisible()
   await expect(fertilizer.getByLabel(/Lượng bón/)).toBeVisible()
-  await expect(fertilizer.getByText('Không bắt buộc').first()).toBeHidden()
-  await fertilizer.getByText('Thông tin bổ sung').click()
+  // The note is the one optional field on the primary screen; every other
+  // optional field waits behind the disclosure, which names what it holds.
+  const more = fertilizer.locator('details.fw-more')
+  await expect(more.getByText('Không bắt buộc').first()).toBeHidden()
+  await more.getByText('Thông tin kỹ thuật và chi phí').click()
   await expect(fertilizer.getByLabel(/Hàm lượng đạm/)).toBeVisible()
-  await expect(fertilizer.getByText('Không bắt buộc').first()).toBeVisible()
+  await expect(more.getByText('Không bắt buộc').first()).toBeVisible()
   // The unit sits beside the value rather than inside the label.
   await expect(fertilizer.locator('.fw-num__unit', { hasText: 'kg' }).first()).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()

@@ -27,6 +27,29 @@ export const isDemoPlaceholder = (v: string | null | undefined): boolean =>
 const DEMO_DISCLAIMER = /demo\s*\/\s*synthetic data/i
 export const isDemoDisclaimer = (v: string | null | undefined): boolean =>
   typeof v === 'string' && DEMO_DISCLAIMER.test(v)
+/** The seed's disclaimer, as the backend stores it. */
+const DEMO_MARKER_TEXT = /DEMO\s*\/\s*SYNTHETIC DATA[^\n]*/i
+
+/** A stored note, split into the system's demo marker and the person's own
+ *  words. The marker is a property of the record (seeded demo data), not
+ *  something the farmer wrote: it is shown as a "Dữ liệu minh họa" badge and
+ *  never put in the note box, where it would read as their own note and be
+ *  sent back — or silently deleted — on the next save. */
+export function splitDemoMarker(note: string | null | undefined): { marker: string | null; text: string } {
+  if (typeof note !== 'string' || note === '') return { marker: null, text: note ?? '' }
+  const m = note.match(DEMO_MARKER_TEXT)
+  if (!m) return { marker: null, text: note }
+  return { marker: m[0].trim(), text: note.replace(m[0], '').trim() }
+}
+
+/** The inverse of `splitDemoMarker`: the person's note, with the marker kept
+ *  after it so the record stays identifiable as demo data. */
+export function joinDemoMarker(marker: string | null, text: string): string | null {
+  const own = text.trim()
+  if (!marker) return own || null
+  return own ? `${own}\n\n${marker}` : marker
+}
+
 /** True when any of these activities is seeded demo data. */
 export const hasDemoData = (activities: readonly { detail: string }[] | null | undefined): boolean =>
   (activities ?? []).some((a) => DEMO_DISCLAIMER.test(a.detail ?? ''))
@@ -170,6 +193,9 @@ export function activityFields(detail: string, type?: string): { label: string; 
     if (typeof v === 'boolean') { rows.push({ label, value: v ? 'Có' : 'Không' }); continue }
     const kind = byType?.kind ?? ENUM_KEY[k]
     const text = String(v)
+    // A note that carries the demo marker keeps the person's own words; the
+    // marker alone reads as the badge.
+    if (k === 'note' && isDemoDisclaimer(text)) { rows.push({ label, value: splitDemoMarker(text).text || 'Dữ liệu minh họa' }); continue }
     rows.push({ label, value: kind ? vocab(kind, text) : isDemoPlaceholder(text) || isDemoDisclaimer(text) ? 'Dữ liệu minh họa' : text })
   }
   return rows

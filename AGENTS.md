@@ -367,6 +367,12 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 
 Đã dọn sạch rác QA trên hosted (0 activity có note `QA-`).
 
+## Round 4.1 (2026-09-23) — UX hotfix sau Round 4 (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `web-dashboard/src/{pages/operations.tsx,styles.css,theme.css,api/activities.ts,utils/activityPresentation.ts}`, `web-dashboard/src/farmer/{ActivityForms.tsx,activityView.ts,farmer.css,tokens.css}`, test mới `round41-*`, `carbonRows.test.ts`, `demoMarker.test.ts`, `docs/WEB_UX_REDESIGN_ROUND4_1.md` | — (released) | /carbon bị cắt thao tác ở 1363px, xanh TDMU tràn workspace, disclosure form Nước tưới, quick-fix invalid, demo marker trong ghi chú. Không đụng backend/API/Carbon. | Branch `fix/agricarbon-redesign-round4-1`, commit local, **chưa push/merge/deploy** — chờ duyệt. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_1.md`. |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash

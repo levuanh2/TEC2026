@@ -11,6 +11,7 @@ import {
 import { mapActivityError, type ActivityErrorPresentation } from './activityErrors'
 import { nextIdempotencyKey } from './idempotency'
 import { ACTIVITY_TITLE, longDay } from './activityView'
+import { joinDemoMarker, splitDemoMarker } from '../utils/activityPresentation'
 import { markSeasonDataChanged } from './data'
 import { Ico } from './icons'
 import { ACTIVITY_ICON, FarmerConfirm, FarmerSheet, IconTile } from './kit'
@@ -192,16 +193,31 @@ function CheckboxField({ label, checked, onChange }: { label: string; checked: b
   )
 }
 
-const MORE_LABEL = 'Thông tin bổ sung'
+/** The disclosure is named for what it actually holds (Round 4.1). It used to
+ * say "Thông tin bổ sung" and sit above the note, so a closed summary with a
+ * note field under it read as if the note were what it hid. It now closes the
+ * form, and its summary lists its fields. */
+const MORE_CONTENTS: Record<SupportedActivityType, string> = {
+  fertilizer: 'Hàm lượng đạm, lân, kali · chi phí vật tư',
+  irrigation: 'Thời gian tưới, mực nước, máy bơm · chi phí',
+  harvest: 'Diện tích thu hoạch, độ ẩm · chi phí',
+  seeding: 'Chi phí vật tư',
+  pesticide: 'Hoạt chất / đối tượng phòng trừ · chi phí vật tư',
+  straw_management: 'Số ngày trước khi làm đất, tỷ lệ chất khô, trả rơm về ruộng · chi phí',
+}
+const moreLabel = (type: SupportedActivityType) => (type === 'seeding' ? 'Chi phí' : 'Thông tin kỹ thuật và chi phí')
 
 /** The one disclosure every form uses. Collapsed on a new entry so the default
  * screen is only what a farmer typically records; opened automatically when
  * editing a record that already carries any of these values, so nothing the
  * farmer entered before is hidden from them on the way back in. */
-function MoreDetails({ open, onToggle, children }: { open: boolean; onToggle: (v: boolean) => void; children: ReactNode }) {
+function MoreDetails({ type, open, onToggle, children }: { type: SupportedActivityType; open: boolean; onToggle: (v: boolean) => void; children: ReactNode }) {
   return (
     <details className="fw-more" open={open} onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}>
-      <summary>{MORE_LABEL}</summary>
+      <summary>
+        <span className="fw-more__label">{moreLabel(type)}</span>
+        <small className="fw-more__contents">{MORE_CONTENTS[type]}</small>
+      </summary>
       <div className="fw-more__body">{children}</div>
     </details>
   )
@@ -284,7 +300,10 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
   const needs = (field: string) => required.includes(field)
   const reveal = revealMore || fix.length > 0
   const [date, setDate] = useState(() => (activity?.occurredAt ?? new Date().toISOString()).slice(0, 10))
-  const [note, setNote] = useState(() => (typeof detail.note === 'string' ? detail.note : ''))
+  // The seed's demo marker is metadata, not the farmer's note: it is shown as
+  // a badge, kept out of the box, and preserved on save (see splitDemoMarker).
+  const [stored] = useState(() => splitDemoMarker(typeof detail.note === 'string' ? detail.note : null))
+  const [note, setNote] = useState(stored.text)
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<ActivityErrorPresentation | null>(null)
@@ -349,7 +368,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     detail.harvested_area_ha, detail.moisture_percent,
     detail.active_ingredient, detail.variety_name,
     detail.days_before_cultivation, detail.dry_matter_fraction, detail.returned_to_field,
-    detail.total_cost_vnd, detail.cost_vnd, detail.note,
+    detail.total_cost_vnd, detail.cost_vnd,
   ].some((v) => v != null && v !== ''))
 
   // Arriving from a Carbon quick-fix, the field that needs filling is inside
@@ -427,6 +446,10 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     dryMatterFraction: wDry,
   }
   const err = (key: string) => (touched || (RAW[key] ?? '').trim() !== '' ? errors[key] : undefined)
+  /** Errors the farmer can currently see. Zero until something is typed wrong
+   *  or a save is tried, so a fresh form never opens looking broken. */
+  const blocked = Object.keys(errors).filter((k) => err(k)).length
+  const blockedId = useId()
 
   async function submit() {
     setPending(true)
@@ -439,7 +462,13 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
         idKeyRef.current = nextIdempotencyKey(idKeyRef.current, 'retry')
         result = await createActivity(season.id, input, { occurredAt, note: trimmedNote, idempotencyKey: idKeyRef.current! })
       } else {
-        result = await updateActivity(activity!.id, input, { occurredAt, note: trimmedNote })
+        // An untouched note is not sent at all, so the stored value — demo
+        // marker included — is left exactly as it was. An edited note keeps
+        // the marker after the farmer's words.
+        const noteChanged = note.trim() !== stored.text.trim()
+        result = await updateActivity(activity!.id, input, noteChanged
+          ? { occurredAt, note: joinDemoMarker(stored.marker, note) }
+          : { occurredAt })
       }
       idKeyRef.current = nextIdempotencyKey(idKeyRef.current, 'success')
       onSaved(result)
@@ -533,7 +562,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
         * so this IS counted now — the old "khi phương pháp tính khả dụng" wording
         * understated it. Needs the dry-matter fraction below to compute. */}
       {wMethod === 'burned' && (
-        <p className="fw-disclaimer"><Ico name="info" />Đốt rơm phát thải CH₄ và N₂O, sẽ được tính vào kết quả carbon của vụ. Cần điền <strong>Tỷ lệ chất khô của rơm</strong> ở phần Thông tin bổ sung.</p>
+        <p className="fw-disclaimer"><Ico name="info" />Đốt rơm phát thải CH₄ và N₂O, sẽ được tính vào kết quả carbon của vụ. Cần điền <strong>Tỷ lệ chất khô của rơm</strong> ở phần Thông tin kỹ thuật và chi phí.</p>
       )}
       <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} error={err('strawMassKg')} big field="strawMassKg"
         required={needs('strawMassKg')} hint={needs('strawMassKg') ? CARBON_NEEDS : OPTIONAL} />
@@ -581,17 +610,21 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
 
         {main}
 
-        <MoreDetails open={moreOpen} onToggle={setMoreOpen}>
+        {/* The note stays on the primary screen, with the essentials. Cost and
+          * methodology are things the system wants; the note is the farmer's
+          * own remark about what happened in the field — and this product is
+          * called Nhật ký. */}
+        <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint={OPTIONAL} />
+        {stored.marker && (
+          <p className="fw-demo-tag" data-testid="demo-marker">
+            <Ico name="info" /><b>Dữ liệu minh họa</b><span>Bản ghi mẫu của hệ thống — nhãn này được giữ nguyên khi lưu, không phải ghi chú của bạn.</span>
+          </p>
+        )}
+
+        <MoreDetails type={activityType} open={moreOpen} onToggle={setMoreOpen}>
           {extra}
           {costField}
         </MoreDetails>
-
-        {/* The note stays on the primary screen. Cost and methodology are things
-          * the system wants; the note is the farmer's own remark about what
-          * happened in the field — and this product is called Nhật ký. Burying
-          * it behind a summary is the one optional field that would cost more
-          * than it saves. */}
-        <TextAreaField label="Ghi chú" value={note} onChange={setNote} hint={OPTIONAL} />
 
         {error && (
           <div className="fw-form__error" role="alert">
@@ -600,9 +633,18 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
           </div>
         )}
 
+        {/* A form that cannot be saved says so at the button, not only at the
+          * field: the button is marked unavailable (still focusable, so a
+          * click moves the caret to the first wrong field) and names why. */}
         <div className="fw-form__footer">
+          {blocked > 0 && (
+            <p className="fw-form__blocked" id={blockedId} role="status">
+              <Ico name="warning" />Chưa lưu được — {blocked === 1 ? 'còn 1 ô cần sửa' : `còn ${blocked} ô cần sửa`}.
+            </p>
+          )}
           <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose} disabled={pending}>Hủy</button>
-          <button type="submit" className="fw-btn" disabled={pending}>{saveLabel}</button>
+          <button type="submit" className="fw-btn" disabled={pending}
+            aria-disabled={blocked > 0 ? true : undefined} aria-describedby={blocked > 0 ? blockedId : undefined}>{saveLabel}</button>
         </div>
       </form>
     </FarmerSheet>
