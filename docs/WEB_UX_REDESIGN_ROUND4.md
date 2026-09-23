@@ -182,7 +182,7 @@ fc53635 fix(carbon): the quick-fix form asks for what readiness says is missing
 c925081 feat(farmer): a Home that says what to do next, and one story per record
 97c3c7f feat(management): three routes, three jobs; Carbon actions follow state
 4424af9 fix(ui): overlay drawer, flat sidebar with a readable active row
-(this)  test+docs: Round 4 gates, a11y/responsive fixes found by them, report
+7da676a test(web): Round 4 gates, the fixes they found, and the report
 ```
 
 Gate: **dừng tại đây** — không merge, không push, không deploy, không đổi `autoDeployTrigger`. Chờ duyệt giao diện.
