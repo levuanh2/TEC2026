@@ -85,7 +85,7 @@
   --radius-card: var(--ac-radius); --radius-control: var(--ac-radius-sm); --radius-pill: var(--ac-radius-sm);
   --radius-sm: var(--ac-radius-sm); --radius-md: var(--ac-radius); --radius-lg: var(--ac-radius-lg);
   --gap: 20px; --gap-lg: 28px;
-  --sidebar-w: 216px; --page-max: 1440px; --pad-page: 32px;
+  --sidebar-w: 240px; --page-max: 1440px; --pad-page: 32px;
 
   /* One raised surface in the app: overlays. Nothing else has a shadow. */
   --shadow-card: none; --shadow-card-hover: none; --shadow-sm: none;
@@ -118,7 +118,7 @@ h1, h2, h3, p { margin: 0; }
 .sidebar {
   /* Institutional TDMU green lives here and only here: the workspace to the
    * right stays light so dense Vietnamese tables keep their contrast. */
-  background: linear-gradient(180deg, var(--ac-sidebar), var(--ac-sidebar-2));
+  background: var(--ac-sidebar);
   color: var(--ac-sidebar-ink-2);
   display: flex; flex-direction: column; padding: 22px 18px 16px;
   position: sticky; top: 0; height: 100vh; border-right: 0;
@@ -705,7 +705,9 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 }
 /* Phones: the table becomes ranked rows — every cell keeps its label, and no
  * column is dropped silently. */
-@media (max-width: 720px) {
+/* Tablet and phone: ranked rows, not a squeezed or sideways-scrolling table
+ * (Round 4 found /seasons 99px wider than a 768px viewport). */
+@media (max-width: 900px) {
   .ops-table__wrap { border: 0; background: none; overflow: visible; }
   .ops-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .ops-table tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
@@ -803,3 +805,70 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
   }
   table.data tbody tr.has-rowlink .rowlink { font-weight: 700; color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
 }
+
+
+/* ======================================================= Round 4 additions */
+
+/* Sidebar: one label per line (a two-line nav item is the first thing a scan
+ * trips on), and an active row that reads by shape, marker and weight. */
+.sidebar { padding-inline: 14px; }
+.nav a { white-space: nowrap; }
+.nav a[aria-current="page"] { background: var(--ac-sidebar-selected); box-shadow: inset 0 0 0 1px var(--ac-sidebar-selected-line); }
+.nav a[aria-current="page"]::before { left: -3px; width: 4px; height: 24px; }
+
+/* Drawer: slides over the table, never takes width from it. */
+.drawer-layer { position: fixed; inset: 0; z-index: 80; }
+.drawer-backdrop { position: absolute; inset: 0; background: var(--ac-scrim); }
+.side-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(460px, 100vw);
+  background: var(--ac-elevated); border-left: 1px solid var(--ac-rule-2);
+  overflow-y: auto; overscroll-behavior: contain;
+  animation: drawer-in 180ms var(--ac-ease);
+}
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0 } to { transform: none; opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .side-drawer { animation: none; } }
+.side-drawer .ops-detail { position: static; border: 0; border-radius: 0; padding: 0 22px; gap: 18px; background: none; min-height: 100%; display: flex; flex-direction: column; }
+.side-drawer .ops-detail > header { position: sticky; top: 0; z-index: 1; margin: 0 -22px; padding: 18px 22px 14px; background: var(--ac-elevated); border-bottom: 1px solid var(--border); }
+.side-drawer .ops-detail > header h2 { font-size: 20px; font-weight: 700; margin: 2px 0; color: var(--text-primary); }
+.ops-detail__eyebrow { font-size: var(--fs-caption); color: var(--text-muted); font-weight: 600; }
+.side-drawer .ops-detail > footer { position: sticky; bottom: 0; margin: auto -22px 0; padding: 14px 22px; background: var(--ac-elevated); }
+.btn--icon { width: var(--ac-control-h-sm); min-width: var(--ac-control-h-sm); padding: 0; justify-content: center; }
+.ops-detail h3:focus-visible { outline: 2px solid var(--ac-focus); outline-offset: 4px; }
+@media (max-width: 900px) {
+  .side-drawer { width: 100vw; border-left: 0; }
+}
+
+/* Route-specific tables. Identity columns never wrap mid-code. */
+.ops-table .nowrap, .ops-table td b.nowrap { white-space: nowrap; }
+.ops-table td:nth-child(-n+3) small { white-space: nowrap; }
+.ops-table th.num, .ops-table td.num { text-align: right; }
+.ops-table td.num small.unit { display: inline; color: var(--text-muted); margin: 0; }
+.ops-table td.ops-act { text-align: right; white-space: nowrap; width: 1%; }
+.ops-table td.ops-act .btn { margin: 0 0 0 6px; }
+.ops-table tbody tr.is-attention td:first-child { box-shadow: inset 3px 0 0 var(--ac-role-attention-line); }
+.ops-table tbody tr.is-ready td:first-child { box-shadow: inset 3px 0 0 var(--ac-role-water-line); }
+.ops-table tbody tr:focus-within { background: var(--ac-subtle); }
+.ops-gaps { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.ops-gaps li { font-size: var(--fs-sm); color: var(--text-secondary); }
+.ops-gaps li::first-letter { text-transform: uppercase; }
+.ops-check { display: inline-flex; align-items: center; gap: 8px; min-height: var(--ac-control-h-sm); font-size: var(--fs-sm); color: var(--text-secondary); }
+.ops-check input { width: 18px; height: 18px; accent-color: var(--ac-cta); }
+.ops-more { width: var(--ac-control-h-sm); padding: 0; justify-content: center; }
+.ops-table--missing td:nth-child(5) { min-width: 240px; }
+.cell-note { color: var(--text-muted); font-size: var(--fs-caption); }
+.btn--sm { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .ops-table td.ops-act { display: flex; gap: 8px; width: auto; text-align: left; }
+  .ops-table td.ops-act::before { content: none; }
+  .ops-table td.ops-act .btn { margin: 0; }
+  .ops-table td:nth-child(-n+3) small { white-space: normal; }
+}
+
+/* A button is a button whether it is a <button> or a link that navigates:
+ * one voice, no underline on a filled or outlined control. */
+a.btn, a.btn:hover { text-decoration: none; }
+.carbon-readiness__fix { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* The workspace column never grows to its widest table. */
+.ops, .ops > *, .ops-table__wrap { min-width: 0; max-width: 100%; }

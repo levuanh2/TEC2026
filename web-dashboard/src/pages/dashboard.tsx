@@ -92,7 +92,7 @@ function DashboardBody({ organizationId }: { organizationId: string }) {
             <div className="grid grid-4">
               <MetricCard name="Nước / kg" value={m.waterPerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.waterPerKg, '')} unit="m³/kg" context="Tổng m³ nước / tổng kg thóc" status={completenessTone(m.completeness.water)} />
               <MetricCard name="Phân bón / kg" value={m.fertilizerPerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.fertilizerPerKg, '')} unit="kg/kg" context="Tổng kg phân / tổng kg thóc" status={completenessTone(m.completeness.fertilizer)} />
-              <MetricCard name="CO₂e / kg" value={m.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.co2ePerKg, '')} unit="kg/kg" context="Chờ GWP theo QĐ 4801 / IPCC" status={{ tone: 'warning', label: 'Đang chờ hệ số' }} />
+              <MetricCard name="CO₂e / kg" value={m.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.co2ePerKg, '')} unit="kg/kg" context={m.co2ePerKg == null ? 'Chưa có kết quả Carbon đã tính' : 'Theo các kết quả Carbon đã lưu'} />
               <MetricCard name="Chi phí / kg" value={m.costPerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.costPerKg, '')} unit="₫/kg" context="Tổng chi phí đầu vào / kg thóc" status={completenessTone(m.completeness.cost)} />
             </div>
           )}

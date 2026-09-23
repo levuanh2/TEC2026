@@ -56,7 +56,7 @@ function PerformanceBody({ organizationId }: { organizationId: string }) {
             </Section>
             <Section title="Carbon" description="Kết quả tính theo phương pháp MRV — phụ thuộc hệ số phát thải, không phải một khoản chi">
               <div className="grid grid-2">
-                <MetricCard name="CO₂e / kg thóc" value={m.co2ePerKg == null ? 'Chờ hệ số phát thải' : perKg(m.co2ePerKg, '')} unit="kg CO₂e/kg" context="Chờ GWP theo QĐ 4801 / IPCC Tier 2" status={{ tone: 'warning', label: 'Đang chờ hệ số' }} />
+                <MetricCard name="CO₂e / kg thóc" value={m.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.co2ePerKg, '')} unit="kg CO₂e/kg" context={m.co2ePerKg == null ? 'Chưa có kết quả Carbon đã tính' : 'Theo các kết quả Carbon đã lưu'} />
               </div>
             </Section>
           </>

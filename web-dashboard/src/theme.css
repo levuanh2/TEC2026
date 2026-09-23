@@ -88,6 +88,11 @@
   --ac-sidebar-rule: oklch(42% 0.06 160);
   --ac-sidebar-active: oklch(38% 0.085 160);
   --ac-sidebar-marker: oklch(78% 0.16 140);
+  /* The active row: a lighter, outlined slab - shape, not a shade. The old
+   * step (31% to 38% lightness) was too small to find the current page at a
+   * glance. */
+  --ac-sidebar-selected: oklch(99% 0.004 165 / .16);
+  --ac-sidebar-selected-line: oklch(99% 0.004 165 / .28);
 
   /* --- workspace controls ------------------------------------------------
          The institutional green stops at the sidebar, so the three places a

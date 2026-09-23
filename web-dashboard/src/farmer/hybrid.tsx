@@ -64,7 +64,7 @@ export function SeasonContextBar({ ctx, loading }: { ctx: SeasonCtx | null; load
   )
 }
 
-export type NextActionKind = 'record' | 'fix-data' | 'calculate' | 'none'
+export type NextActionKind = 'record' | 'fix-data' | 'calculate' | 'view-result' | 'none'
 
 export interface NextAction {
   kind: NextActionKind
@@ -117,6 +117,14 @@ export function nextAction(input: {
       cta: 'Tính Carbon',
     }
   }
+  if (input.hasCarbonResult) {
+    return {
+      kind: 'view-result',
+      title: 'Xem kết quả Carbon',
+      body: 'Vụ này đã có kết quả phát thải và đã ghi hoạt động hôm nay.',
+      cta: 'Xem kết quả',
+    }
+  }
   return null
 }
 
@@ -132,8 +140,8 @@ export function PrimaryNextAction({ action, onAct, to, loading }: {
     return <div className="fw-next fw-next--sk" aria-busy="true"><Sk w={44} h={44} r={10} /><span className="fw-sk-lines"><Sk w="40%" h={18} /><Sk w="70%" h={13} /></span></div>
   }
   if (!action) return null
-  const tone = action.kind === 'fix-data' ? 'attention' : action.kind === 'calculate' ? 'info' : 'positive'
-  const icon: IconName = action.kind === 'fix-data' ? 'warning' : action.kind === 'calculate' ? 'carbon' : 'journal'
+  const tone = action.kind === 'fix-data' ? 'attention' : action.kind === 'calculate' || action.kind === 'view-result' ? 'info' : 'positive'
+  const icon: IconName = action.kind === 'fix-data' ? 'warning' : action.kind === 'calculate' || action.kind === 'view-result' ? 'carbon' : 'journal'
   return (
     <section className={`fw-next fw-next--${tone}`} aria-labelledby="fw-next-title">
       <span className="fw-next__ico" aria-hidden="true"><Ico name={icon} /></span>
@@ -222,11 +230,12 @@ function Tile({ role, icon, label, value, unit, empty, note }: {
  *
  * Money is not an input to any emission factor. Putting the two side by side
  * is what makes a farmer believe spending less would lower their CO₂e. */
-export function CostPanel({ metrics }: { metrics: QueryState<SeasonMetrics> }) {
+export function CostPanel({ metrics, moreTo }: { metrics: QueryState<SeasonMetrics>; moreTo?: string }) {
   if (metrics.loading) return <div className="fw-cost" aria-busy="true"><Sk w="40%" h={14} /><Sk w="55%" h={24} /></div>
   const cost = metrics.data?.costPerKg
   return (
     <div className="fw-cost">
+      {moreTo && <Link className="fw-link fw-cost__more" to={moreTo}>Xem ở Hiệu suất<Ico name="arrow" /></Link>}
       <span className="fw-cost__label"><Ico name="money" />Chi phí trực tiếp đã ghi nhận</span>
       {cost != null
         ? <span className="fw-cost__value">{new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(cost)}<small>₫ / kg lúa</small></span>

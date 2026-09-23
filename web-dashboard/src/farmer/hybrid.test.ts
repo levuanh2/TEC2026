@@ -45,9 +45,9 @@ describe('the one next action', () => {
     expect(action).toMatchObject({ kind: 'calculate', cta: 'Tính Carbon' })
   })
 
-  it('stays silent when there is a result and nothing outstanding', () => {
+  it('points to the result when there is one and nothing outstanding', () => {
     const action = nextAction({ ...base, hasCarbonResult: true, readiness: readiness(), activities: [activity('2026-09-21')] })
-    expect(action).toBeNull()
+    expect(action).toMatchObject({ kind: 'view-result', cta: 'Xem kết quả' })
   })
 
   it('gives a viewer no action at all', () => {

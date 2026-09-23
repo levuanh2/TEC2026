@@ -148,3 +148,40 @@ export function numberFormatErrors(raw: Record<string, string>, integers: readon
   }
   return errors
 }
+
+/**
+ * Carbon readiness gap code (server) → the form field that supplies it.
+ *
+ * The server decides which inputs are missing; this only says where on the
+ * form each one is typed. A code not listed here has no field on this form.
+ */
+export const GAP_FIELD: Readonly<Record<string, string>> = {
+  straw_days_before_cultivation: 'daysBeforeCultivation',
+  straw_dry_matter: 'dryMatterFraction',
+  straw_mass: 'strawMassKg',
+  straw_returned_to_field: 'returnedToField',
+  fertilizer_nitrogen: 'nitrogenPercent',
+}
+
+const REQUIRED_MESSAGE: Readonly<Record<string, string>> = {
+  daysBeforeCultivation: 'Nhập số ngày (số nguyên, từ 0) — cần để tính phát thải.',
+  dryMatterFraction: 'Nhập tỷ lệ chất khô từ 0 đến 1, ví dụ 0,85 — cần để tính phát thải.',
+  strawMassKg: 'Nhập lượng rơm (kg) — cần để tính phát thải.',
+  returnedToField: 'Chọn rơm có được trả lại ruộng không — cần để tính phát thải.',
+  nitrogenPercent: 'Nhập hàm lượng đạm (%) — cần để tính phát thải.',
+}
+
+/** The fields a set of open readiness gaps makes required, in form order. */
+export function requiredFieldsFor(gapCodes: readonly string[]): string[] {
+  const wanted = new Set(gapCodes.map((c) => GAP_FIELD[c]).filter(Boolean))
+  return Object.keys(REQUIRED_MESSAGE).filter((f) => wanted.has(f))
+}
+
+/** A blank value in a field an open Carbon gap depends on. */
+export function requiredErrors(required: readonly string[], values: Readonly<Record<string, string>>): FieldErrors {
+  const errors: FieldErrors = {}
+  for (const key of required) {
+    if (key in values && values[key].trim() === '') errors[key] = REQUIRED_MESSAGE[key] ?? 'Trường này cần để tính phát thải.'
+  }
+  return errors
+}

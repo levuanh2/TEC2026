@@ -16,16 +16,20 @@ const { CarbonPanel } = await import('./carbon')
 afterEach(cleanup)
 
 describe('Carbon recalculate affordance', () => {
-  it('is shown when the viewer may persist', async () => {
+  it('is shown when the viewer may persist, and the empty state names that same button', async () => {
     render(<CarbonPanel id="season-1" canRecalculate />)
     await waitFor(() => expect(screen.getByText('Chưa có bản tính CO₂e cho vụ này')).toBeTruthy())
-    expect(screen.getByRole('button', { name: 'Tính lại theo kịch bản' })).toBeTruthy()
+    // No stored result yet: the action is to calculate, not to "recalculate".
+    const button = screen.getByRole('button', { name: 'Tính Carbon' }) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    expect(screen.getByText(/Chọn “Tính Carbon”/)).toBeTruthy()
+    expect(screen.queryByText(/Tính lại theo kịch bản/)).toBeNull()
   })
 
   it('is hidden for a read-only viewer, who still sees the result state', async () => {
     render(<CarbonPanel id="season-1" canRecalculate={false} />)
     await waitFor(() => expect(screen.getByText('Chưa có bản tính CO₂e cho vụ này')).toBeTruthy())
-    expect(screen.queryByRole('button', { name: 'Tính lại theo kịch bản' })).toBeNull()
-    expect(screen.queryByText(/Nhấn “Tính lại theo kịch bản”/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Tính/ })).toBeNull()
+    expect(screen.queryByText(/Chọn “Tính/)).toBeNull()
   })
 })

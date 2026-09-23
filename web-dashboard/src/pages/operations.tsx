@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Ico } from '../icons'
-import { go, Link } from '../ui'
+import { Link, SideDrawer } from '../ui'
 import { exceptionsOf, useOperations, type Exception, type OpsRow, type Severity } from './ops'
 import { label } from '../vocab'
 
@@ -193,44 +193,81 @@ function ExceptionTable({ queue }: { queue: Exception[] }) {
 
 export type SeasonsFocus = 'all' | 'missing' | 'carbon'
 
-const FOCUS_COPY: Record<SeasonsFocus, { title: string; sub: string }> = {
-  all: { title: 'Danh sách nông hộ và vụ mùa', sub: 'Tìm kiếm, lọc và theo dõi tiến độ dữ liệu, Carbon, MRV.' },
-  missing: { title: 'Dữ liệu còn thiếu', sub: 'Các vụ chưa đủ dữ liệu để tính phát thải — bấm Xử lý để mở đúng vụ và phần dữ liệu cần bổ sung.' },
-  carbon: { title: 'Carbon theo vụ', sub: 'Trạng thái tính phát thải của từng vụ trong hợp tác xã.' },
+const FOCUS_COPY: Record<SeasonsFocus, { title: string; sub: string; search: string }> = {
+  all: {
+    title: 'Vụ mùa',
+    sub: 'Toàn bộ vụ trong phạm vi hợp tác xã — giai đoạn, trạng thái và ngày của từng vụ.',
+    search: 'Tìm nông hộ, thửa hoặc vụ…',
+  },
+  missing: {
+    title: 'Dữ liệu còn thiếu',
+    sub: 'Các vụ còn thông tin có thể bổ sung để tính phát thải — bấm Xử lý để xem đúng mục cần nhập.',
+    search: 'Tìm vụ cần bổ sung…',
+  },
+  carbon: {
+    title: 'Carbon theo vụ',
+    sub: 'Tính toán và kết quả phát thải của từng vụ: sẵn sàng hay chưa, kết quả còn mới hay đã cũ.',
+    search: 'Tìm vụ theo nông hộ, thửa…',
+  },
 }
 
-/** `/seasons`, `/data-gaps`, `/carbon` — one dense table, three entry points. */
+/** The one action a Carbon row permits, from the shared view model's state. */
+function carbonRowAction(r: OpsRow): { label: string; to: string } | null {
+  const tab = `/crop-seasons/${r.seasonId}/carbon`
+  switch (r.carbon) {
+    case 'missing_data': return { label: 'Bổ sung dữ liệu', to: `/crop-seasons/${r.seasonId}` }
+    case 'ready': return { label: 'Tính Carbon', to: tab }
+    case 'stale': return { label: 'Tính lại', to: tab }
+    case 'calculated': return { label: 'Xem kết quả', to: tab }
+    case 'methodology_limited': return { label: 'Xem giới hạn', to: tab }
+    default: return null
+  }
+}
+
+const nf = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 })
+const shortDate = (iso?: string) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : null)
+
+/**
+ * `/seasons`, `/data-gaps`, `/carbon` — one data source, three jobs.
+ *
+ * They used to be the same table under three headings. Each now has its own
+ * default set, columns, row emphasis, empty state and primary action:
+ *   /seasons    every season, lifecycle columns (stage, dates), open detail
+ *   /data-gaps  only seasons with user-fixable gaps, what is missing, "Xử lý"
+ *   /carbon     readiness, result, freshness, totals, the action the state allows
+ * No owner, deadline or figure is shown that the server did not return.
+ */
 export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizationId: string | null; focus?: SeasonsFocus }) {
   const ops = useOperations(organizationId)
-  // A summary card links to its own filtered view, so the number a person
-  // clicked and the list they land on are the same set.
   const preset = new URLSearchParams(location.search).get('loc')
   const [q, setQ] = useState('')
-  const [dataFilter, setDataFilter] = useState<'all' | OpsRow['data']>(
-    preset === 'missing' || focus === 'missing' ? 'missing' : 'all')
+  const [status, setStatus] = useState<string>('all')
   const [carbonFilter, setCarbonFilter] = useState<'all' | OpsRow['carbon']>(
     preset && preset !== 'missing' ? (preset as OpsRow['carbon']) : 'all')
-  const [mrvFilter, setMrvFilter] = useState<'all' | 'has' | 'none'>('all')
+  const [includeComplete, setIncludeComplete] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
 
   const rows = ops.data?.rows ?? []
+  const statuses = useMemo(() => [...new Map(rows.map((r) => [r.status ?? '', r.statusLabel])).entries()].filter(([k]) => k), [rows])
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return rows.filter((r) => {
       if (needle && !`${r.farmName} ${r.farmCode ?? ''} ${r.plotName ?? ''} ${r.plotCode ?? ''} ${r.seasonName}`.toLowerCase().includes(needle)) return false
-      if (dataFilter !== 'all' && r.data !== dataFilter) return false
-      if (carbonFilter !== 'all' && r.carbon !== carbonFilter) return false
-      if (mrvFilter === 'has' && !r.mrv) return false
-      if (mrvFilter === 'none' && r.mrv) return false
-      if (focus === 'carbon' && r.carbon === 'unknown') return false
+      if (focus === 'all' && status !== 'all' && r.status !== status) return false
+      // Data gaps: a season is on this list because a person can fix it. A
+      // season blocked only by an unverified factor is not — it lives on /carbon.
+      if (focus === 'missing' && !includeComplete && !r.loading && !r.missing.length) return false
+      if (focus === 'carbon' && carbonFilter !== 'all' && r.carbon !== carbonFilter) return false
       return true
     })
-  }, [rows, q, dataFilter, carbonFilter, mrvFilter, focus])
-  const current = filtered.find((r) => r.seasonId === selected) ?? null
+  }, [rows, q, status, carbonFilter, includeComplete, focus])
+  const current = rows.find((r) => r.seasonId === selected) ?? null
   const copy = FOCUS_COPY[focus]
+  const limitedOnly = rows.filter((r) => !r.loading && !r.missing.length && r.limitations.length).length
+  const cols = focus === 'all' ? 8 : focus === 'missing' ? 7 : 9
 
   return (
-    <section className="ops">
+    <section className={`ops ops--${focus}`}>
       <header className="ops__head">
         <div>
           <h1>{copy.title}</h1>
@@ -244,35 +281,36 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
       <div className="ops-filters" role="search">
         <label className="ops-search">
           <Ico name="search" size={14} />
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm nông hộ, vụ mùa…" aria-label="Tìm nông hộ hoặc vụ mùa" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={copy.search} aria-label="Tìm nông hộ hoặc vụ mùa" />
         </label>
-        <label className="ops-filter">
-          <span>Dữ liệu</span>
-          <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value as typeof dataFilter)}>
-            <option value="all">Tất cả</option>
-            <option value="missing">Thiếu dữ liệu</option>
-            <option value="complete">Đủ dữ liệu</option>
-          </select>
-        </label>
-        <label className="ops-filter">
-          <span>Carbon</span>
-          <select value={carbonFilter} onChange={(e) => setCarbonFilter(e.target.value as typeof carbonFilter)}>
-            <option value="all">Tất cả</option>
-            <option value="missing_data">Thiếu dữ liệu</option>
-            <option value="methodology_limited">Giới hạn hệ số</option>
-            <option value="ready">Sẵn sàng tính</option>
-            <option value="calculated">Đã tính</option>
-            <option value="stale">Cần tính lại</option>
-          </select>
-        </label>
-        <label className="ops-filter">
-          <span>MRV</span>
-          <select value={mrvFilter} onChange={(e) => setMrvFilter(e.target.value as typeof mrvFilter)}>
-            <option value="all">Tất cả</option>
-            <option value="has">Có hồ sơ</option>
-            <option value="none">Chưa có hồ sơ</option>
-          </select>
-        </label>
+        {focus === 'all' && (
+          <label className="ops-filter">
+            <span>Trạng thái vụ</span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="all">Tất cả</option>
+              {statuses.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </label>
+        )}
+        {focus === 'missing' && (
+          <label className="ops-check">
+            <input type="checkbox" checked={includeComplete} onChange={(e) => setIncludeComplete(e.target.checked)} />
+            <span>Hiện cả vụ đã đủ dữ liệu</span>
+          </label>
+        )}
+        {focus === 'carbon' && (
+          <label className="ops-filter">
+            <span>Trạng thái Carbon</span>
+            <select value={carbonFilter} onChange={(e) => setCarbonFilter(e.target.value as typeof carbonFilter)}>
+              <option value="all">Tất cả</option>
+              <option value="missing_data">Thiếu dữ liệu</option>
+              <option value="methodology_limited">Giới hạn hệ số</option>
+              <option value="ready">Sẵn sàng tính</option>
+              <option value="calculated">Đã tính</option>
+              <option value="stale">Cần tính lại</option>
+            </select>
+          </label>
+        )}
         <p className="ops-count" aria-live="polite">
           {filtered.length} vụ{ops.data?.pending ? ` · đang đọc thêm ${ops.data.pending}` : ''}
         </p>
@@ -280,116 +318,167 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
 
       {ops.error && <p className="ops-error" role="alert"><Ico name="warning" size={14} />{ops.error}</p>}
 
-      <div className={`ops-split${current ? ' is-open' : ''}`}>
-        <div className="ops-table__wrap">
-          <table className="ops-table ops-table--seasons">
-            <thead>
-              <tr>
-                <th scope="col">Nông hộ</th>
-                <th scope="col">Thửa</th>
-                <th scope="col">Vụ mùa</th>
-                <th scope="col">Dữ liệu</th>
+      <div className="ops-table__wrap">
+        <table className={`ops-table ops-table--seasons ops-table--${focus}`}>
+          <thead>
+            <tr>
+              <th scope="col">Nông hộ</th>
+              <th scope="col">Thửa</th>
+              <th scope="col">Vụ</th>
+              {focus === 'all' && <>
+                <th scope="col">Giai đoạn</th>
+                <th scope="col">Gieo sạ</th>
+                <th scope="col">Thu hoạch</th>
                 <th scope="col">Carbon</th>
-                <th scope="col">MRV</th>
-                <th scope="col">Hành động</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => {
-                const data = dataBadge(r)
-                const carbon = CARBON_LABEL[r.carbon]
-                // One interaction, not two near-identical ones: the row (and
-                // its single button) opens the detail panel; the panel itself
-                // carries the one link that leaves the list.
-                const open = () => setSelected(r.seasonId)
-                return (
-                  <tr key={r.seasonId} aria-selected={r.seasonId === selected}>
-                    <td data-label="Nông hộ"><b>{r.farmName}</b>{r.farmCode && <small>{r.farmCode}</small>}</td>
-                    <td data-label="Thửa">
-                      {/* Without this column two seasons of one farm sharing a
-                        * season code render as identical rows (audit P0-2). */}
-                      <b>{r.plotName ?? 'Chưa rõ thửa'}</b>{r.plotCode && <small>{r.plotCode}</small>}
-                    </td>
-                    <td data-label="Vụ mùa"><b>{r.seasonName}</b><small>{r.statusLabel}</small></td>
-                    <td data-label="Dữ liệu">
-                      {r.loading ? <Sk w={86} h={20} /> : <Badge role={data.role}>{data.text}</Badge>}
-                      {!r.loading && r.missing.length > 0 && <small>{r.missing.length} mục</small>}
-                    </td>
-                    <td data-label="Carbon">{r.loading ? <Sk w={92} h={20} /> : <Badge role={carbon.role}>{carbon.text}</Badge>}</td>
-                    <td data-label="MRV">{r.mrv ? <Badge role="info">{r.mrv.caseCode}</Badge> : <span className="ops-dash">—</span>}</td>
-                    <td data-label="Hành động">
-                      {/* The label is the work. /data-gaps told the officer to
-                        * "bấm Xử lý" next to a button that said "Chi tiết", so
-                        * the instruction pointed at a control that did not
-                        * exist. A row with something missing is handled; a row
-                        * with nothing missing is only inspected. */}
-                      <button
-                        type="button" className="btn btn--ghost btn--sm"
-                        onClick={open}
-                        aria-expanded={r.seasonId === selected}
-                        aria-label={`${r.missing.length > 0 ? 'Xử lý' : 'Chi tiết'} vụ ${r.seasonName}, thửa ${r.plotName ?? r.plotId}, ${r.farmName}`}
-                      >{r.missing.length > 0 ? 'Xử lý' : 'Chi tiết'}</button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {/* Three distinct states, never one blank table: still reading,
-                * nothing matched the filter, or nothing to show at all. */}
-              {!filtered.length && ops.loading && (
-                <tr><td colSpan={7} className="ops-empty" aria-live="polite">
-                  <p>Đang đọc danh sách vụ…</p>
-                  <Sk w={180} h={14} />
-                </td></tr>
-              )}
-              {!filtered.length && !ops.loading && (
-                <tr><td colSpan={7} className="ops-empty">
-                  <p>{rows.length ? 'Không có vụ nào khớp bộ lọc.' : 'Chưa có vụ nào trong phạm vi này.'}</p>
-                  {rows.length > 0 && (
-                    <button
-                      type="button" className="btn btn--ghost btn--sm"
-                      onClick={() => { setQ(''); setDataFilter('all'); setCarbonFilter('all'); setMrvFilter('all') }}
-                    >Xóa bộ lọc</button>
-                  )}
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {current && <SeasonDetailPanel row={current} onClose={() => setSelected(null)} />}
+              </>}
+              {focus === 'missing' && <>
+                <th scope="col" className="num">Cần bổ sung</th>
+                <th scope="col">Thông tin còn thiếu</th>
+                <th scope="col">Carbon</th>
+              </>}
+              {focus === 'carbon' && <>
+                <th scope="col">Sẵn sàng</th>
+                <th scope="col">Kết quả</th>
+                <th scope="col">Độ mới</th>
+                <th scope="col" className="num">Tổng CO₂e</th>
+                <th scope="col" className="num">CO₂e / kg</th>
+              </>}
+              <th scope="col"><span className="sr-only">Hành động</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r) => (
+              <SeasonRow key={r.seasonId} r={r} focus={focus} selected={r.seasonId === selected} onOpen={() => setSelected(r.seasonId)} />
+            ))}
+            {!filtered.length && (ops.loading || ops.data?.pending) ? (
+              <tr><td colSpan={cols} className="ops-empty" aria-live="polite">
+                <p>Đang đọc danh sách vụ…</p>
+                <Sk w={180} h={14} />
+              </td></tr>
+            ) : null}
+            {!filtered.length && !ops.loading && !ops.data?.pending && (
+              <tr><td colSpan={cols} className="ops-empty">
+                <EmptyCopy focus={focus} hasRows={rows.length > 0} limitedOnly={limitedOnly} />
+                {q.trim() !== '' && <button type="button" className="btn btn--ghost btn--sm" onClick={() => setQ('')}>Xóa bộ lọc</button>}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
+
+      {current && (
+        <SideDrawer
+          label={`Chi tiết vụ ${current.seasonName}, ${current.plotName ?? ''}`}
+          onClose={() => setSelected(null)}
+          initialFocus={current.missing.length ? '[data-drawer-missing]' : undefined}
+        >
+          <SeasonDetailPanel row={current} focus={focus} onClose={() => setSelected(null)} />
+        </SideDrawer>
+      )}
     </section>
   )
 }
 
-function SeasonDetailPanel({ row, onClose }: { row: OpsRow; onClose: () => void }) {
-  const carbon = CARBON_LABEL[row.carbon]
-  // "Xử lý" has to land on the thing to be handled, not at the top of a panel
-  // whose first two sections are context the officer already read in the row.
-  const missingRef = useRef<HTMLHeadingElement>(null)
-  useEffect(() => {
-    if (!row.missing.length) return
-    const id = requestAnimationFrame(() => missingRef.current?.focus())
-    return () => cancelAnimationFrame(id)
-  }, [row.seasonId, row.missing.length])
+function EmptyCopy({ focus, hasRows, limitedOnly }: { focus: SeasonsFocus; hasRows: boolean; limitedOnly: number }) {
+  if (!hasRows) return <p>Chưa có vụ nào trong phạm vi này.</p>
+  if (focus === 'missing') {
+    return (
+      <>
+        <p><Ico name="check" size={14} /> Không còn vụ nào thiếu thông tin có thể bổ sung.</p>
+        {limitedOnly > 0 && <p className="ops-note">{limitedOnly} vụ chỉ vướng giới hạn của bộ hệ số — nhập thêm không giải quyết được. <Link to="/carbon?loc=methodology_limited">Xem ở Carbon</Link></p>}
+      </>
+    )
+  }
+  if (focus === 'carbon') return <p>Không có vụ nào ở trạng thái này.</p>
+  return <p>Không có vụ nào khớp bộ lọc.</p>
+}
+
+function SeasonRow({ r, focus, selected, onOpen }: { r: OpsRow; focus: SeasonsFocus; selected: boolean; onOpen: () => void }) {
+  const carbon = CARBON_LABEL[r.carbon]
+  const where = `vụ ${r.seasonName}, ${r.plotName ?? 'chưa rõ thửa'}, ${r.farmName}`
+  const emphasis = focus === 'missing' && r.missing.length ? ' is-attention'
+    : focus === 'carbon' && r.carbon === 'stale' ? ' is-attention'
+      : focus === 'carbon' && r.carbon === 'ready' ? ' is-ready' : ''
+  const identity = <>
+    <td data-label="Nông hộ"><b>{r.farmName}</b>{r.farmCode && <small>{r.farmCode}</small>}</td>
+    <td data-label="Thửa"><b>{r.plotName ?? 'Chưa rõ thửa'}</b>{r.plotCode && <small>{r.plotCode}</small>}</td>
+    <td data-label="Vụ"><b className="nowrap">{r.seasonName}</b></td>
+  </>
+  const skel = (w: number) => <Sk w={w} h={20} />
+  const open = (text: string) => (
+    <td data-label="" className="ops-act">
+      <button type="button" className="btn btn--ghost btn--sm" onClick={onOpen} aria-haspopup="dialog" aria-label={`${text} ${where}`}>{text}</button>
+    </td>
+  )
+
+  if (focus === 'all') {
+    return (
+      <tr aria-selected={selected} className={emphasis}>
+        {identity}
+        <td data-label="Giai đoạn"><Badge role={r.status === 'active' ? 'positive' : 'neutral'}>{r.statusLabel}</Badge></td>
+        <td data-label="Gieo sạ" className="nowrap">{shortDate(r.plantingDate) ?? <span className="ops-dash">Chưa ghi</span>}</td>
+        <td data-label="Thu hoạch" className="nowrap">{shortDate(r.harvestDate) ?? <span className="ops-dash">Chưa ghi</span>}</td>
+        <td data-label="Carbon" className="ops-secondary">{r.loading ? skel(80) : <Badge role={carbon.role}>{carbon.text}</Badge>}</td>
+        {open('Chi tiết')}
+      </tr>
+    )
+  }
+  if (focus === 'missing') {
+    return (
+      <tr aria-selected={selected} className={emphasis}>
+        {identity}
+        <td data-label="Cần bổ sung" className="num">{r.loading ? skel(24) : <b>{r.missing.length}</b>}</td>
+        <td data-label="Thông tin còn thiếu">
+          {r.loading ? skel(160) : r.missing.length
+            ? <ul className="ops-gaps">{r.missing.map((m) => <li key={m.code}>{m.label.replace(/^Thiếu\s+/i, '')}</li>)}</ul>
+            : <span className="ops-dash">Đã đủ</span>}
+        </td>
+        <td data-label="Carbon">{r.loading ? skel(80) : <Badge role={carbon.role}>{carbon.text}</Badge>}</td>
+        {open(r.missing.length ? 'Xử lý' : 'Chi tiết')}
+      </tr>
+    )
+  }
+  const action = carbonRowAction(r)
+  const readiness = r.carbon === 'missing_data' ? { text: 'Thiếu dữ liệu', role: 'attention' }
+    : r.carbon === 'methodology_limited' ? { text: 'Giới hạn hệ số', role: 'methodology' }
+      : r.carbon === 'unknown' ? { text: '—', role: 'neutral' } : { text: 'Đủ dữ liệu', role: 'positive' }
+  const hasResult = r.carbon === 'calculated' || r.carbon === 'stale'
   return (
-    <aside className="ops-detail" aria-label={`Chi tiết vụ ${row.seasonName}`}>
+    <tr aria-selected={selected} className={emphasis}>
+      {identity}
+      <td data-label="Sẵn sàng">{r.loading ? skel(80) : <Badge role={readiness.role}>{readiness.text}</Badge>}</td>
+      <td data-label="Kết quả">{r.loading ? skel(60) : hasResult ? 'Đã tính' : <span className="ops-dash">Chưa tính</span>}</td>
+      <td data-label="Độ mới">{r.loading ? skel(60) : r.carbon === 'stale' ? <Badge role="attention" icon="clock">Cũ — cần tính lại</Badge> : r.carbon === 'calculated' ? <Badge role="positive" icon="check">Mới</Badge> : <span className="ops-dash">—</span>}</td>
+      <td data-label="Tổng CO₂e" className="num">{r.totalCo2eKg != null ? <>{nf.format(r.totalCo2eKg)} <small className="unit">kg</small></> : <span className="ops-dash">—</span>}</td>
+      <td data-label="CO₂e / kg" className="num">{r.carbonPerKg != null ? <>{nf.format(r.carbonPerKg)} <small className="unit">kg/kg</small></> : <span className="ops-dash">—</span>}</td>
+      <td data-label="" className="ops-act">
+        {action && !r.loading
+          ? <Link to={action.to} className={`btn btn--sm${r.carbon === 'ready' || r.carbon === 'stale' ? '' : ' btn--ghost'}`} aria-label={`${action.label}: ${where}`}>{action.label}</Link>
+          : null}
+        <button type="button" className="btn btn--ghost btn--sm ops-more" onClick={onOpen} aria-haspopup="dialog" aria-label={`Chi tiết ${where}`}><Ico name="more" size={15} /></button>
+      </td>
+    </tr>
+  )
+}
+
+function SeasonDetailPanel({ row, focus, onClose }: { row: OpsRow; focus: SeasonsFocus; onClose: () => void }) {
+  const carbon = CARBON_LABEL[row.carbon]
+  const action = carbonRowAction(row)
+  return (
+    <div className="ops-detail">
       <header>
         <div>
-          <b>{row.seasonName}</b>
-          <small>
-            {row.farmName}{row.farmCode ? ` · ${row.farmCode}` : ''}
-            {' · '}{row.plotName ?? 'Chưa rõ thửa'}{row.plotCode ? ` (${row.plotCode})` : ''}
-            {' · '}{row.statusLabel}
-          </small>
+          <p className="ops-detail__eyebrow">{row.farmName}{row.farmCode ? ` · ${row.farmCode}` : ''}</p>
+          <h2>{row.seasonName}</h2>
+          <small>{row.plotName ?? 'Chưa rõ thửa'}{row.plotCode ? ` (${row.plotCode})` : ''} · {row.statusLabel}</small>
         </div>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={onClose} aria-label="Đóng chi tiết">Đóng</button>
+        <button type="button" className="btn btn--ghost btn--icon" onClick={onClose} aria-label="Đóng chi tiết vụ" data-drawer-close><Ico name="close" size={16} /></button>
       </header>
 
       {row.loading && <p className="ops-note" aria-live="polite">Đang đọc dữ liệu của vụ này…</p>}
 
       <section>
-        <h3 ref={missingRef} tabIndex={-1}>Dữ liệu còn thiếu</h3>
+        <h3 tabIndex={-1} data-drawer-missing>Dữ liệu còn thiếu</h3>
         {row.loading
           ? <p className="ops-note">Chưa đọc xong.</p>
           : row.missing.length === 0
@@ -401,7 +490,8 @@ function SeasonDetailPanel({ row, onClose }: { row: OpsRow; onClose: () => void 
         <h3>Carbon</h3>
         <p>{row.loading ? <Sk w={92} /> : <Badge role={carbon.role}>{carbon.text}</Badge>}</p>
         {!row.loading && row.view && <p className="ops-note">{row.view.detail}</p>}
-        {row.carbonPerKg != null && <p className="ops-note">{row.carbonPerKg} kg CO₂e / kg lúa</p>}
+        {row.totalCo2eKg != null && <p className="ops-note">Tổng: {nf.format(row.totalCo2eKg)} kg CO₂e</p>}
+        {row.carbonPerKg != null && <p className="ops-note">{nf.format(row.carbonPerKg)} kg CO₂e / kg lúa</p>}
         {row.limitations.map((m) => (
           <p key={m.code} className="ops-limit role--methodology"><Ico name="info" size={13} /><span><b>{m.label}</b> — {m.detail}</span></p>
         ))}
@@ -415,10 +505,14 @@ function SeasonDetailPanel({ row, onClose }: { row: OpsRow; onClose: () => void 
       </section>
 
       <footer>
-        <Link to={`/crop-seasons/${row.seasonId}`} className="btn btn--sm">Mở vụ mùa</Link>
-        <Link to={`/crop-seasons/${row.seasonId}/carbon`} className="btn btn--ghost btn--sm">Xem Carbon</Link>
+        {/* One primary: fix the gap on the data-gaps list; on Carbon, the
+          * action the Carbon state allows; otherwise open the season. */}
+        {focus === 'carbon' && action
+          ? <Link to={action.to} className="btn btn--sm">{action.label}</Link>
+          : <Link to={`/crop-seasons/${row.seasonId}`} className="btn btn--sm">{focus === 'missing' && row.missing.length ? 'Mở vụ để bổ sung' : 'Mở vụ mùa'}</Link>}
+        {focus !== 'carbon' && <Link to={`/crop-seasons/${row.seasonId}/carbon`} className="btn btn--ghost btn--sm">Carbon của vụ</Link>}
         <Link to={`/farms/${row.farmId}`} className="btn btn--ghost btn--sm">Hồ sơ nông hộ</Link>
       </footer>
-    </aside>
+    </div>
   )
 }

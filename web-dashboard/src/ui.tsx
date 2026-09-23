@@ -367,7 +367,7 @@ export function Progress({ value, max, unitLabel }: { value: number; max: number
         </b>
         <span>{unitLabel}</span>
       </div>
-      <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max}>
+      <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max} aria-label={`${value}/${max} ${unitLabel}`}>
         <div className="progress__fill" style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -586,6 +586,65 @@ export function ConfirmDialog({
             {busy ? 'Đang xử lý…' : confirmLabel}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------ side drawer */
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/**
+ * A detail panel that slides over the page instead of taking a column from it.
+ *
+ * The old split layout gave the drawer ~380px of the table's width, so every
+ * season code wrapped onto three lines and badges were cut. This overlays:
+ * the table behind keeps its layout exactly. It is a modal dialog — focus is
+ * trapped inside, Esc and the backdrop close it, and focus goes back to the
+ * control that opened it. Under 900px it becomes a full-screen sheet.
+ */
+export function SideDrawer({ label, onClose, children, initialFocus }: {
+  label: string
+  onClose: () => void
+  children: ReactNode
+  /** Selector inside the drawer to focus first; defaults to the close button. */
+  initialFocus?: string
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    const panel = ref.current
+    const first = (initialFocus && panel?.querySelector<HTMLElement>(initialFocus)) || panel?.querySelector<HTMLElement>('[data-drawer-close]')
+    first?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeRef.current(); return }
+      if (e.key !== 'Tab' || !panel) return
+      const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement)
+      if (!items.length) return
+      const head = items[0]
+      const tail = items[items.length - 1]
+      if (e.shiftKey && (document.activeElement === head || !panel.contains(document.activeElement))) { e.preventDefault(); tail.focus() }
+      else if (!e.shiftKey && document.activeElement === tail) { e.preventDefault(); head.focus() }
+    }
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+      // Back to the row that opened it, if that row is still on the page.
+      if (opener && document.contains(opener)) opener.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <div className="drawer-layer">
+      <div className="drawer-backdrop" onClick={onClose} aria-hidden="true" />
+      <div className="side-drawer" role="dialog" aria-modal="true" aria-label={label} ref={ref}>
+        {children}
       </div>
     </div>
   )

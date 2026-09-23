@@ -187,9 +187,24 @@ function CvResultView({ result, onRetry, onClose }: { result: CvInference; onRet
 
 /* ------------------------------------------------------------------ history */
 
+/** Whether the leaf check can be offered at all.
+ *
+ * There is no capability endpoint; the history read is the probe. On a server
+ * without the model (Render Free, no torch) every CV route answers 503
+ * `backend_not_configured`, and a card that ends in "Tạm thời chưa dùng được"
+ * is a dead feature on the farmer's screen. `VITE_FEATURE_CV=false` turns it
+ * off outright. Unknown while loading, so nothing flashes in and back out. */
+export function cvAvailability(state: { loading: boolean; error?: string }): 'loading' | 'yes' | 'no' {
+  if (import.meta.env.VITE_FEATURE_CV === 'false') return 'no'
+  if (state.loading) return 'loading'
+  if (state.error && errorKind(state.error) === 'unavailable') return 'no'
+  return 'yes'
+}
+
 export function CvHistorySection({ seasonId }: { seasonId: string | null }) {
   const state = useCvHistory(seasonId)
   const [open, setOpen] = useState<CvInference | null>(null)
+  if (cvAvailability(state) === 'no') return null
   const items = [...(state.data ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   return (
     <Section title="Kiểm tra gần đây" icon="history" tone="info" description="Kết quả hỗ trợ nhận diện từ mô hình AI — chưa xác nhận thực địa.">
@@ -233,6 +248,7 @@ export function CvHistorySection({ seasonId }: { seasonId: string | null }) {
 export function CvPreviewCard({ season, seasonId }: { season: SeasonContext | null; seasonId: string | null }) {
   const state = useCvHistory(seasonId)
   const latest = [...(state.data ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  if (cvAvailability(state) !== 'yes') return null
   return (
     <section className="fw-cvcard" aria-labelledby="fw-cvcard-title">
       <IconTile name="cv" tone="info" size="lg" />

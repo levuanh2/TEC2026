@@ -38,19 +38,23 @@ function parse(detail: string): Payload | null {
 
 /** One definition, shared with the Management timeline: both surfaces read the
  *  same seeded rows, and only one of them used to hide the scaffolding. */
-export { isDemoPlaceholder } from '../utils/activityPresentation'
-import { isDemoPlaceholder } from '../utils/activityPresentation'
+export { hasDemoData, isDemoDisclaimer, isDemoPlaceholder } from '../utils/activityPresentation'
+import { isDemoDisclaimer, isDemoPlaceholder } from '../utils/activityPresentation'
 
 /** Free text as a farmer should see it: seed scaffolding becomes a short badge. */
 export const humanText = (v: string | null | undefined): string | null =>
   v == null || v === '' ? null : isDemoPlaceholder(v) ? 'Dữ liệu minh họa' : v
+
+/** A note as a farmer should see it. The seed disclaimer is said once per
+ *  ledger (see `hasDemoData`), so on a row it is simply not a note. */
+const humanNote = (v: string | null): string | null => (isDemoDisclaimer(v) ? null : humanText(v))
 
 export function viewActivity(activity: Pick<Activity, 'type' | 'detail'>): ActivityView {
   const title = ACTIVITY_TITLE[activity.type] ?? activity.type
   const p = parse(activity.detail)
   if (!p) return { title, value: null, meta: activity.detail ? [activity.detail] : [], note: null }
   const meta = (...items: (string | null)[]) => items.filter((x): x is string => Boolean(x))
-  const note = humanText(text(p.note))
+  const note = humanNote(text(p.note))
   switch (activity.type) {
     case 'seeding':
       return { title, value: qty(p.seed_kg, 'kg giống'), meta: meta(humanText(text(p.variety_name)) && `Giống ${humanText(text(p.variety_name))}`, text(p.seeding_method), money(p.cost_vnd)), note }

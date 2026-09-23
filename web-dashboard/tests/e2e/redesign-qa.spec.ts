@@ -210,7 +210,7 @@ test('management workspace across four viewports', async ({ page }) => {
     await shoot(page, 'mgmt-farms', vp)
 
     await page.goto('/seasons')
-    await expect(page.getByRole('heading', { name: 'Danh sách nông hộ và vụ mùa' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Vụ mùa', level: 1 })).toBeVisible()
     await page.waitForTimeout(6000)
     await shoot(page, 'mgmt-seasons', vp)
 
@@ -264,7 +264,8 @@ test('season rows are reachable and operable from the keyboard', async ({ page }
   await signIn(page, manager)
   await page.setViewportSize({ width: 1440, height: 1024 })
   await page.goto('/seasons')
-  const rows = page.locator('.ops-table--seasons tbody tr')
+  // Real rows only: the "đang đọc danh sách vụ" placeholder is a <tr> too.
+  const rows = page.locator('.ops-table--seasons tbody tr:has(button)')
   await expect(rows.first()).toBeVisible({ timeout: 60_000 })
 
   // One interaction per row, and it is a real button — not a div with onClick.

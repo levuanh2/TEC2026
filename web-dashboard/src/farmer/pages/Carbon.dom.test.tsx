@@ -58,7 +58,7 @@ const dryMatter = issue({
 })
 
 function renderTab(props: Partial<Parameters<typeof SeasonCarbon>[0]> = {}) {
-  const mutations = { openEdit: vi.fn(), openCreate: vi.fn(), openDelete: vi.fn(), flash: null, node: null, version: 0 }
+  const mutations = { openEdit: vi.fn(), openPicker: vi.fn(), openCreate: vi.fn(), openDelete: vi.fn(), flash: null, node: null, version: 0 }
   const onSaved = vi.fn()
   const utils = render(
     <SeasonCarbon seasonId="s1" season={season} plotId="p1" writeCtx={writeCtx}
@@ -114,14 +114,15 @@ describe('activity direct edit', () => {
     readinessState.data = readiness(nitrogen)
     const { mutations } = renderTab()
     fireEvent.click(screen.getByRole('button', { name: /Sửa ngay: Bón phân · NPK/ }))
-    expect(mutations.openEdit).toHaveBeenCalledWith(npk, writeCtx, { revealMore: true })
+    // The gap code travels with the record, so the form can make N required.
+    expect(mutations.openEdit).toHaveBeenCalledWith(npk, writeCtx, { fix: ['fertilizer_nitrogen'] })
   })
 
   it('"Sửa ngay" opens the exact straw record', () => {
     readinessState.data = readiness(dryMatter)
     const { mutations } = renderTab()
     fireEvent.click(screen.getByRole('button', { name: /Sửa ngay/ }))
-    expect(mutations.openEdit).toHaveBeenCalledWith(straw, writeCtx, { revealMore: true })
+    expect(mutations.openEdit).toHaveBeenCalledWith(straw, writeCtx, { fix: [dryMatter.code] })
   })
 
   it('both straw cards open the same record by id, even beside another straw record on the same date', () => {
@@ -201,11 +202,12 @@ describe('resolution and ready state', () => {
     expect(invalidateQueries).toHaveBeenCalledWith('carbon:s1', 'metrics:s1')
   })
 
-  it('offers "Tính lại Carbon" when a result already exists', () => {
+  it('leads with a fresh result and does not push a recalculation', () => {
     readinessState.data = readiness()
     carbonState.data = { kind: 'result', result: { crop_season_id: 's1', total_co2e_kg: 1200, co2e_per_kg: 0.3, breakdown: [], warnings: [] } }
     renderTab()
-    expect(screen.getByRole('button', { name: /Tính lại Carbon/ })).toBeTruthy()
+    expect(screen.getByText('Tổng phát thải vụ này')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Tính lại Carbon/ })).toBeNull()
   })
 
   it('a non-blocking missing yield does not hold back the ready state', () => {

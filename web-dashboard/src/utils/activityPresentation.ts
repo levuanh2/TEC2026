@@ -20,6 +20,17 @@ const DEMO_PLACEHOLDER = /^demo[\s_-]+(seeding|fertilizer|irrigation|pesticide|f
 export const isDemoPlaceholder = (v: string | null | undefined): boolean =>
   typeof v === 'string' && DEMO_PLACEHOLDER.test(v.trim())
 
+/** The seed script writes one English disclaimer into every demo row's note
+ *  (`backend/scripts/seed_demo_data.py::DEMO_NOTE`). It is a property of the
+ *  tenant, not of each activity: a surface says it once, in Vietnamese, as
+ *  "Dữ liệu minh họa" — never the English sentence on every row. */
+const DEMO_DISCLAIMER = /demo\s*\/\s*synthetic data/i
+export const isDemoDisclaimer = (v: string | null | undefined): boolean =>
+  typeof v === 'string' && DEMO_DISCLAIMER.test(v)
+/** True when any of these activities is seeded demo data. */
+export const hasDemoData = (activities: readonly { detail: string }[] | null | undefined): boolean =>
+  (activities ?? []).some((a) => DEMO_DISCLAIMER.test(a.detail ?? ''))
+
 const value = (payload: Payload, key: string, unit = ''): string => {
   if (!(key in payload)) return missing
   if (payload[key] == null) return '—'
@@ -103,16 +114,16 @@ export function groupActivities<T extends { type: string; occurredAt: string }>(
 const KEY_LABELS: Record<string, string> = {
   variety_name: 'Giống', seed_kg: 'Lượng giống (kg)', seeding_method: 'Phương pháp gieo',
   fertilizer_name: 'Loại phân', fertilizer_type: 'Loại phân', amount_kg: 'Khối lượng (kg)', nitrogen_percent: 'Hàm lượng N (%)', application_no: 'Lần bón',
-  water_regime: 'Chế độ nước', irrigation_method: 'Phương pháp tưới', method: 'Phương pháp', water_volume_m3: 'Lượng nước (m³)',
+  water_regime: 'Chế độ nước', irrigation_method: 'Hình thức tưới', method: 'Phương pháp', water_volume_m3: 'Nước tưới (m³)',
   // Real payloads carry these; without a label the drawer printed the column.
   duration_minutes: 'Thời gian tưới (phút)', water_level_cm: 'Mực nước (cm)', pump_energy_kwh: 'Điện bơm (kWh)',
   phosphorus_percent: 'Hàm lượng P (%)', potassium_percent: 'Hàm lượng K (%)', moisture_percent: 'Độ ẩm (%)',
   product_name: 'Tên sản phẩm', amount: 'Lượng dùng', unit: 'Đơn vị',
   fuel_type: 'Loại nhiên liệu', amount_liter: 'Lượng (L)', amount_litre: 'Lượng (L)', equipment_name: 'Thiết bị',
-  management_method: 'Phương pháp xử lý', straw_amount_kg: 'Khối lượng rơm (kg)', straw_mass_kg: 'Khối lượng rơm (kg)',
+  management_method: 'Phương pháp xử lý rơm', straw_amount_kg: 'Khối lượng rơm (kg)', straw_mass_kg: 'Khối lượng rơm (kg)',
   yield_kg: 'Sản lượng (kg)', harvested_area_ha: 'Diện tích thu hoạch (ha)', note: 'Ghi chú',
   cost_vnd: 'Chi phí (đ)', total_cost_vnd: 'Chi phí (đ)', active_ingredient: 'Mục đích / đối tượng',
-  days_before_cultivation: 'Số ngày trước canh tác', dry_matter_fraction: 'Tỷ lệ chất khô', returned_to_field: 'Trả lại ruộng',
+  days_before_cultivation: 'Số ngày trước khi làm đất', dry_matter_fraction: 'Tỷ lệ chất khô của rơm', returned_to_field: 'Rơm trả lại ruộng',
 }
 /** Bookkeeping columns. They identify a row to the database, not an activity
  *  to a farmer, and the drawer was printing them: `activity_id` with its raw
@@ -136,18 +147,30 @@ const ENUM_KEY: Record<string, Parameters<typeof vocab>[0]> = {
  *     database column name — a farmer never reads `pump_energy_kwh`;
  *   - a stored enum goes through the dictionary.
  */
-export function activityFields(detail: string): { label: string; value: string }[] {
+/** `method` is one column name with a different meaning per activity: the
+ *  irrigation regime on a watering, the straw treatment on a straw record.
+ *  Read through the irrigation dictionary regardless, a straw record's
+ *  `incorporated` became "Chưa rõ" in the drawer while the list beside it said
+ *  "Vùi vào đất" — two stories about one record. */
+const METHOD_BY_TYPE: Record<string, { kind: Parameters<typeof vocab>[0]; label: string }> = {
+  straw_management: { kind: 'strawMethod', label: 'Phương pháp xử lý rơm' },
+  irrigation: { kind: 'irrigationMethod', label: 'Hình thức tưới' },
+}
+
+export function activityFields(detail: string, type?: string): { label: string; value: string }[] {
   const payload = parse(detail)
   if (!payload) return detail ? [{ label: 'Chi tiết', value: detail }] : []
   const rows: { label: string; value: string }[] = []
   for (const [k, v] of Object.entries(payload)) {
     if (INTERNAL_KEY.test(k)) continue
-    const label = KEY_LABELS[k]
+    const byType = k === 'method' && type ? METHOD_BY_TYPE[type] : undefined
+    const label = byType?.label ?? KEY_LABELS[k]
     if (!label) continue
     if (v == null || v === '') { rows.push({ label, value: '—' }); continue }
-    const kind = ENUM_KEY[k]
+    if (typeof v === 'boolean') { rows.push({ label, value: v ? 'Có' : 'Không' }); continue }
+    const kind = byType?.kind ?? ENUM_KEY[k]
     const text = String(v)
-    rows.push({ label, value: kind ? vocab(kind, text) : isDemoPlaceholder(text) ? 'Dữ liệu minh họa' : text })
+    rows.push({ label, value: kind ? vocab(kind, text) : isDemoPlaceholder(text) || isDemoDisclaimer(text) ? 'Dữ liệu minh họa' : text })
   }
   return rows
 }

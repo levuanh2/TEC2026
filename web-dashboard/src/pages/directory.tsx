@@ -25,6 +25,7 @@ import {
   go,
 } from '../ui'
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
+import { farmArea, type FarmArea } from '../utils/area'
 
 const isActiveSeason = (status: string | null | undefined) =>
   ['active', 'in_progress', 'planted'].includes(String(status ?? '').toLowerCase())
@@ -112,8 +113,22 @@ function OrgDetail({ ids }: { ids: { id: string; name: string }[] }) {
 
 /* ================================================================== Farms */
 
+/** One area cell, shared by the register and the farm page so they agree. */
+function AreaValue({ area }: { area: FarmArea | undefined }) {
+  if (!area || area.ha == null) return <span className="cell-empty">Chưa có</span>
+  return <>{ha(area.ha)}{!area.complete && <small className="cell-note"> · còn thửa chưa ghi</small>}</>
+}
+
 export function FarmsPage() {
   const state = useAsync(() => listFarms(), [])
+  // `/v1/farms` has no area. Read each farm's plots (the same read the farm
+  // page makes) and sum them, so the register never shows "—" for a farm
+  // whose page shows 3,9 ha.
+  const areas = useAsync(async () => {
+    const out = new Map<string, FarmArea>()
+    for (const f of state.data ?? []) out.set(f.id, farmArea(await getPlotsForFarm(f.id)))
+    return out
+  }, [state.data])
   // A cooperative has hundreds of households; the register had no way to find
   // one but the browser's own page search. Name, code and place are the three
   // things an officer has in hand when they go looking.
@@ -151,7 +166,9 @@ export function FarmsPage() {
               { label: 'Chủ hộ', render: (f) => f.name },
               { label: 'Địa bàn', render: (f) => place(f.commune, f.district, f.province) },
               { label: 'Thửa', align: 'num', render: (f) => f.plotCount },
-              { label: 'Diện tích', align: 'num', render: (f) => (f.areaHa == null ? <span className="cell-empty">—</span> : ha(f.areaHa)) },
+              { label: 'Diện tích', align: 'num', render: (f) => (areas.loading
+                ? <span className="skeleton" style={{ display: 'inline-block', width: 52, height: 13, borderRadius: 5 }} aria-label="Đang tính diện tích" />
+                : <AreaValue area={areas.data?.get(f.id)} />) },
             ]}
           />
           )}
@@ -189,11 +206,16 @@ export function FarmPage({ id }: { id: string }) {
             <div className="grid grid-3" style={{ marginTop: 'var(--gap-lg)' }}>
               <Async state={plots} skeleton="kpis">
                 {(rows) => (
-                  <MetricCard
-                    name="Diện tích"
-                    value={rows.reduce((s, p) => s + (p.areaHa ?? 0), 0) > 0 ? ha(rows.reduce((s, p) => s + (p.areaHa ?? 0), 0)) : 'Chưa đủ dữ liệu'}
-                    context="Tổng diện tích các thửa"
-                  />
+                  (() => {
+                    const area = farmArea(rows)
+                    return (
+                      <MetricCard
+                        name="Diện tích"
+                        value={area.ha == null ? 'Chưa đủ dữ liệu' : ha(area.ha)}
+                        context={area.complete ? 'Tổng diện tích các thửa' : 'Tổng các thửa đã có diện tích — còn thửa chưa ghi'}
+                      />
+                    )
+                  })()
                 )}
               </Async>
               <Async state={metrics} skeleton="kpis">
@@ -205,8 +227,7 @@ export function FarmPage({ id }: { id: string }) {
                     name="CO₂e / kg"
                     value={m?.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.co2ePerKg, '')}
                     unit="kg/kg"
-                    context="Chờ hệ số phát thải"
-                    status={{ tone: 'warning', label: 'Đang chờ hệ số' }}
+                    context={m?.co2ePerKg == null ? 'Chưa có kết quả Carbon đã tính' : 'Theo các kết quả Carbon đã lưu'}
                   />
                 )}
               </Async>

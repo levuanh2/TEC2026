@@ -90,6 +90,7 @@ export function SeasonMethodologyPanel({
 }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(season))
   const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [state, setState] = useState<{ busy: boolean; error?: string; saved?: boolean }>({ busy: false })
 
   const missing = [
@@ -116,6 +117,20 @@ export function SeasonMethodologyPanel({
           : e instanceof Error ? e.message : 'Không lưu được.',
       })
     }
+  }
+
+  /* Nothing missing: a closed summary line, not a section with a CTA that
+   * competes with the Carbon result for a task that is already done. */
+  if (missing.length === 0 && !editing) {
+    return (
+      <details id="fw-carbon-methodology" className="card card--pad tech-detail methodology-done">
+        <summary>Thông tin phương pháp tính — đã đủ</summary>
+        <div className="stack" style={{ marginTop: 10 }}>
+          <p className="muted">Chế độ nước trong vụ và trước vụ đã được khai báo theo phân loại IPCC.</p>
+          {canEdit && <div><button className="btn btn--ghost btn--sm" onClick={() => { setEditing(true); setOpen(true) }}>Sửa thông tin phương pháp</button></div>}
+        </div>
+      </details>
+    )
   }
 
   return (

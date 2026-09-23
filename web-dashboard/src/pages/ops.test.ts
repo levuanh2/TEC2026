@@ -17,7 +17,7 @@ const row = (over: Partial<OpsRow> = {}): OpsRow => ({
   farmId: 'f1', farmName: 'Hộ demo 1', farmCode: 'DEMO-FARM-01',
   plotId: 'p1', plotName: 'Thửa demo 1.1', plotCode: 'DEMO-PLOT-01',
   missing: [], limitations: [], data: 'complete', carbon: 'calculated', view: null,
-  carbonPerKg: 0.4, calculatedAt: '2026-09-20T00:00:00Z', mrv: null, ...over,
+  carbonPerKg: 0.4, totalCo2eKg: null, calculatedAt: '2026-09-20T00:00:00Z', mrv: null, ...over,
 })
 
 describe('exception queue', () => {

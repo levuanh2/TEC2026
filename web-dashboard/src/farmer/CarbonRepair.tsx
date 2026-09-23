@@ -69,6 +69,14 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
   }
 
   const byId = new Map((activities ?? []).map((a) => [a.id, a]))
+  // Every open gap the server ties to each record, so the edit form can make
+  // exactly those fields required — both straw gaps on one record open one
+  // form that asks for both.
+  const gapsByRecord = new Map<string, string[]>()
+  for (const m of blocking) {
+    if (m.flow !== 'activity') continue
+    for (const r of m.records ?? []) gapsByRecord.set(r.activity_id, [...(gapsByRecord.get(r.activity_id) ?? []), m.code])
+  }
   return (
     <section className="fw-repair" aria-labelledby={titleId}>
       {/* Count only what a form can fix. A factor the set does not carry is
@@ -82,7 +90,7 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
       </p>
       <ol className="fw-repair__list" data-testid="carbon-missing">
         {blocking.map((m) => (
-          <RepairItem key={m.code} issue={m} seasonId={seasonId} plotId={plotId} writeCtx={writeCtx} byId={byId} mutations={mutations} onSeasonSaved={onSeasonSaved} />
+          <RepairItem key={m.code} issue={m} seasonId={seasonId} plotId={plotId} writeCtx={writeCtx} byId={byId} gapsByRecord={gapsByRecord} mutations={mutations} onSeasonSaved={onSeasonSaved} />
         ))}
       </ol>
       {optional.map((m) => <p key={m.code} className="fw-note">{m.label} — {m.detail}</p>)}
@@ -90,12 +98,13 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
   )
 }
 
-function RepairItem({ issue, seasonId, plotId, writeCtx, byId, mutations, onSeasonSaved }: {
+function RepairItem({ issue, seasonId, plotId, writeCtx, byId, gapsByRecord, mutations, onSeasonSaved }: {
   issue: CarbonMissingInput
   seasonId: string
   plotId?: string | null
   writeCtx: SeasonContext | null
   byId: Map<string, Activity>
+  gapsByRecord: Map<string, string[]>
   mutations?: ActivityMutations
   onSeasonSaved?: () => void
 }) {
@@ -114,7 +123,7 @@ function RepairItem({ issue, seasonId, plotId, writeCtx, byId, mutations, onSeas
       <ul className="fw-repair__records">
         {records.map((r) => (
           <RecordRow key={r.activity_id} record={r} activity={byId.get(r.activity_id)} activityType={issue.activity_type}
-            onEdit={(a) => mutations.openEdit(a, writeCtx, { revealMore: true })} journal={journal} />
+            onEdit={(a) => mutations.openEdit(a, writeCtx, { fix: gapsByRecord.get(a.id) ?? [issue.code] })} journal={journal} />
         ))}
       </ul>
     ) : writeCtx ? <Link to={journal} className="fw-btn fw-btn--soft fw-btn--sm">Mở nhật ký vụ</Link> : null

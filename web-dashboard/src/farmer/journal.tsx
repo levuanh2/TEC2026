@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Activity } from '../types'
-import { activityFields } from '../utils/activityPresentation'
+import { activityFields, hasDemoData } from '../utils/activityPresentation'
 import { ACTIVITY_TITLE, dayLabel, groupByDay, longDay, viewActivity } from './activityView'
 import type { QueryState } from './data'
 import { Ico } from './icons'
@@ -29,6 +29,12 @@ export function Timeline({ activities, renderCardActions, renderDetailActions, r
 
   return (
     <>
+      {/* The seed marks every demo row; the ledger says it once. */}
+      {hasDemoData(activities) && (
+        <p className="fw-demo-banner" data-testid="demo-banner">
+          <Ico name="info" />Dữ liệu minh họa<span> — không phải số liệu đo ngoài ruộng, không dùng làm hồ sơ MRV chính thức.</span>
+        </p>
+      )}
       <ol className="fw-tl" aria-label="Nhật ký theo ngày">
         {groupByDay(activities).map((group) => (
           <li key={group.day} className="fw-tl__day">
@@ -69,7 +75,7 @@ export function Timeline({ activities, renderCardActions, renderDetailActions, r
             {detail.meta.length > 0 && <div className="fw-drawer__chips">{detail.meta.map((m) => <Chip key={m}>{m}</Chip>)}</div>}
           </div>
           <dl className="fw-detail">
-            {activityFields(open.detail).map((f, i) => <div key={i}><dt>{f.label}</dt><dd>{f.value}</dd></div>)}
+            {activityFields(open.detail, open.type).map((f, i) => <div key={i}><dt>{f.label}</dt><dd>{f.value}</dd></div>)}
             <div><dt>Người ghi</dt><dd>{open.recorder}</dd></div>
           </dl>
           {renderDetailActions && <div className="fw-detail__actions">{renderDetailActions(open)}</div>}
@@ -142,7 +148,7 @@ export function MiniTimeline({ state, limit = 4 }: { state: QueryState<Activity[
   }
   if (state.error) return <ErrorPanel error={state.error} onRetry={state.reload} />
   const rows = [...(state.data ?? [])].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, limit)
-  if (!rows.length) return <Empty icon="journal" tone="leaf" title="Chưa có hoạt động nào được ghi nhận cho vụ này." body="Dùng Ghi nhanh ở trên để thêm hoạt động đầu tiên." />
+  if (!rows.length) return <Empty icon="journal" tone="leaf" title="Chưa có hoạt động nào được ghi nhận cho vụ này." body="Dùng nút Ghi hoạt động để thêm hoạt động đầu tiên." />
   return (
     <ul className="fw-mini">
       {rows.map((a) => {
