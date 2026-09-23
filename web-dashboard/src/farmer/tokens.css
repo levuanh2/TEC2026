@@ -41,7 +41,7 @@
   --fw-accent: var(--ac-work);
   --fw-accent-deep: var(--ac-work-strong);
   --fw-accent-soft: var(--ac-work-soft);
-  --fw-ok: var(--ac-success);
+  --fw-ok: var(--ac-success-mark);
   --fw-ok-soft: var(--ac-role-positive-bg);
   --fw-accent-ink: var(--ac-accent-ink);
   --fw-focus: var(--ac-focus);

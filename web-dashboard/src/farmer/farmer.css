@@ -1215,6 +1215,7 @@
  * the band fill 8.9:1. */
 .fw-btn[aria-disabled="true"], .fw-btn[aria-disabled="true"]:hover {
   background: var(--fw-paper-3); border: 1px dashed var(--ac-control-line); color: var(--fw-ink-2); cursor: not-allowed;
+  transition: none; /* no dark-on-dark frame while the fill would animate */
 }
 .fw-form__footer { flex-wrap: wrap; align-items: center; }
 .fw-form__blocked { display: flex; align-items: center; gap: var(--fw-space-8); margin: 0 auto 0 0; font-size: 14px; font-weight: 600; color: var(--fw-danger); }

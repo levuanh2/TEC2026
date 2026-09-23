@@ -64,7 +64,6 @@
 
   /* --- semantic state. Deliberately unsaturated: these annotate rows in a
          dense table, they do not decorate. ---------------------------------- */
-  --ac-success: oklch(45% 0.11 155);
   --ac-warning: oklch(47% 0.115 65);
   --ac-warning-soft: oklch(94% 0.04 82);
   --ac-danger: oklch(46% 0.15 32);
@@ -141,6 +140,12 @@
   --ac-role-positive-bg: #E2F0CB;   /* healthy, completed, crop, positive */
   --ac-role-positive-ink: #294B16;
   --ac-role-positive-line: #6D913B;
+  /* Semantic "done / healthy" (Round 4.1). It used to be oklch(45% 0.11 155),
+   * a near twin of the forest accent (45% 0.13 160), so a completed MRV step
+   * read as brand colour. It is now the #E2F0CB role's own ink (text, 9.3:1 on
+   * paper) and line (marks and icons, 3.29:1). */
+  --ac-success: var(--ac-role-positive-ink);
+  --ac-success-mark: var(--ac-role-positive-line);
   --ac-role-water-bg: #B5EAD7;      /* water, resource efficiency, environment */
   --ac-role-water-ink: #14564A;
   --ac-role-water-line: #3A8D72;

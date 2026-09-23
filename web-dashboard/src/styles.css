@@ -69,7 +69,7 @@
   --soil: var(--ac-soil);
   --straw: var(--ac-straw);
 
-  --success-bg: var(--ac-accent-soft);  --success-fg: var(--ac-success);  --success-line: var(--ac-success);
+  --success-bg: var(--ac-role-positive-bg);  --success-fg: var(--ac-success);  --success-line: var(--ac-success-mark);
   --warning-bg: var(--ac-warning-soft); --warning-fg: var(--ac-warning);  --warning-line: var(--ac-warning);
   --error-bg: var(--ac-danger-soft);    --error-fg: var(--ac-danger);     --error-line: var(--ac-danger);
   --info-bg: var(--ac-subtle);          --info-fg: var(--ac-ink-2);       --info-line: var(--ac-water);
@@ -375,7 +375,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .notice { border-radius: 0; padding: 10px 0 10px 14px; font-size: var(--fs-sm); background: none; color: var(--text-secondary); border: 0; border-left: 2px solid var(--info-line); }
 .notice.warning { background: none; color: var(--text-secondary); border-left-color: var(--warning); }
 .notice.error { background: none; color: var(--text-secondary); border-left-color: var(--danger); }
-.notice.success { background: none; color: var(--text-secondary); border-left-color: var(--success); }
+.notice.success { background: none; color: var(--text-secondary); border-left-color: var(--ac-success-mark); }
 .notice + .notice { margin-top: 6px; }
 
 /* ------------------------------------------------------ State (L/E/Err) */
@@ -409,7 +409,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .step { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding: 11px 0; position: relative; border-bottom: 1px solid var(--border); }
 .step:not(:last-child)::before { display: none; }
 .step__marker { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: none; border: 1px solid var(--ac-control-line); color: var(--text-muted); }
-.step.is-done .step__marker { background: var(--ac-success); border-color: var(--ac-success); color: var(--ac-accent-ink); }
+.step.is-done .step__marker { background: var(--ac-role-positive-bg); border-color: var(--ac-role-positive-line); color: var(--ac-role-positive-ink); }
 .step.is-current .step__marker { background: none; border-color: var(--accent); border-width: 2px; color: var(--brand-strong); }
 .step__body { display: grid; gap: 3px; }
 .step__body b { font-size: var(--fs-body); font-weight: 650; color: var(--text-primary); }
