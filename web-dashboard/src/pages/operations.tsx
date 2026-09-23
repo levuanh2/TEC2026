@@ -264,7 +264,7 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
   const current = rows.find((r) => r.seasonId === selected) ?? null
   const copy = FOCUS_COPY[focus]
   const limitedOnly = rows.filter((r) => !r.loading && !r.missing.length && r.limitations.length).length
-  const cols = focus === 'all' ? 8 : focus === 'missing' ? 7 : 9
+  const cols = focus === 'all' ? 8 : focus === 'missing' ? 7 : 6
 
   return (
     <section className={`ops ops--${focus}`}>
@@ -324,7 +324,7 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
             <tr>
               <th scope="col">Nông hộ</th>
               <th scope="col">Thửa</th>
-              <th scope="col">Vụ</th>
+              <th scope="col">{focus === 'carbon' ? 'Vụ mùa' : 'Vụ'}</th>
               {focus === 'all' && <>
                 <th scope="col">Giai đoạn</th>
                 <th scope="col">Gieo sạ</th>
@@ -337,11 +337,8 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
                 <th scope="col">Carbon</th>
               </>}
               {focus === 'carbon' && <>
-                <th scope="col">Sẵn sàng</th>
-                <th scope="col">Kết quả</th>
-                <th scope="col">Độ mới</th>
-                <th scope="col" className="num">Tổng CO₂e</th>
-                <th scope="col" className="num">CO₂e / kg</th>
+                <th scope="col">Trạng thái Carbon</th>
+                <th scope="col">Cần xử lý · Kết quả</th>
               </>}
               <th scope="col"><span className="sr-only">Hành động</span></th>
             </tr>
@@ -438,24 +435,70 @@ function SeasonRow({ r, focus, selected, onOpen }: { r: OpsRow; focus: SeasonsFo
       </tr>
     )
   }
+  return <CarbonRow r={r} where={where} selected={selected} emphasis={emphasis} identity={identity} onOpen={onOpen} />
+}
+
+/** What the Carbon state means for this row, in one cell: the thing to fix
+ *  while the season is blocked, the result once there is one. A season that
+ *  is still missing data used to carry five result columns that could only
+ *  ever say "—"; they are gone, and the cell says what is missing instead. */
+export function carbonIssue(r: OpsRow): { head: string; sub?: string } {
+  const missing = r.missing.map((m) => m.label.replace(/^Thiếu\s+/i, ''))
+  const total = r.totalCo2eKg != null ? `${nf.format(r.totalCo2eKg)} kg CO₂e` : null
+  const perKg = r.carbonPerKg != null ? `${nf.format(r.carbonPerKg)} kg CO₂e / kg lúa` : null
+  switch (r.carbon) {
+    case 'missing_data':
+      return { head: missing.length ? `Thiếu ${missing.length} thông tin` : 'Thiếu dữ liệu', sub: missing.join(', ') || undefined }
+    case 'methodology_limited':
+      return { head: r.limitations[0]?.label ?? 'Bộ hệ số chưa đủ', sub: 'Nhập thêm dữ liệu không giải quyết được' }
+    case 'ready':
+      return { head: 'Đủ dữ liệu, chưa tính' }
+    case 'stale':
+      return { head: 'Dữ liệu đã đổi sau lần tính', sub: total ? `Kết quả cũ: ${total}` : undefined }
+    case 'calculated':
+      return { head: total ?? 'Đã có kết quả', sub: perKg ?? undefined }
+    default:
+      return { head: r.error ? 'Chưa đọc được trạng thái' : '—' }
+  }
+}
+
+const CARBON_ICON: Partial<Record<OpsRow['carbon'], 'warning' | 'info' | 'clock' | 'check'>> = {
+  missing_data: 'warning', methodology_limited: 'info', stale: 'clock', calculated: 'check',
+}
+
+/**
+ * `/carbon` row. Six columns, not nine: identity (Nông hộ · Thửa · Vụ mùa),
+ * one Carbon state, one cell for what to fix or what came out, and the
+ * actions. Exactly one action is a labelled button; opening the detail
+ * panel is a 40px icon button with a full accessible name, so the action
+ * cell has a fixed, small width and can never be pushed past the table's
+ * edge (Round 4 clipped it at 1363px). Below 1180px the row becomes a card.
+ */
+function CarbonRow({ r, where, selected, emphasis, identity, onOpen }: {
+  r: OpsRow; where: string; selected: boolean; emphasis: string; identity: React.ReactNode; onOpen: () => void
+}) {
+  const carbon = CARBON_LABEL[r.carbon]
   const action = carbonRowAction(r)
-  const readiness = r.carbon === 'missing_data' ? { text: 'Thiếu dữ liệu', role: 'attention' }
-    : r.carbon === 'methodology_limited' ? { text: 'Giới hạn hệ số', role: 'methodology' }
-      : r.carbon === 'unknown' ? { text: '—', role: 'neutral' } : { text: 'Đủ dữ liệu', role: 'positive' }
-  const hasResult = r.carbon === 'calculated' || r.carbon === 'stale'
+  const issue = carbonIssue(r)
+  const urgent = r.carbon === 'ready' || r.carbon === 'stale'
   return (
-    <tr aria-selected={selected} className={emphasis}>
+    <tr aria-selected={selected} className={`ops-crow${emphasis}`} data-carbon-row>
       {identity}
-      <td data-label="Sẵn sàng">{r.loading ? skel(80) : <Badge role={readiness.role}>{readiness.text}</Badge>}</td>
-      <td data-label="Kết quả">{r.loading ? skel(60) : hasResult ? 'Đã tính' : <span className="ops-dash">Chưa tính</span>}</td>
-      <td data-label="Độ mới">{r.loading ? skel(60) : r.carbon === 'stale' ? <Badge role="attention" icon="clock">Cũ — cần tính lại</Badge> : r.carbon === 'calculated' ? <Badge role="positive" icon="check">Mới</Badge> : <span className="ops-dash">—</span>}</td>
-      <td data-label="Tổng CO₂e" className="num">{r.totalCo2eKg != null ? <>{nf.format(r.totalCo2eKg)} <small className="unit">kg</small></> : <span className="ops-dash">—</span>}</td>
-      <td data-label="CO₂e / kg" className="num">{r.carbonPerKg != null ? <>{nf.format(r.carbonPerKg)} <small className="unit">kg/kg</small></> : <span className="ops-dash">—</span>}</td>
+      <td data-label="Trạng thái Carbon" className="ops-crow__state">
+        {r.loading ? <Sk w={96} h={22} /> : <Badge role={carbon.role} icon={CARBON_ICON[r.carbon]}>{carbon.text}</Badge>}
+      </td>
+      <td data-label="Cần xử lý · Kết quả" className="ops-crow__issue">
+        {r.loading ? <Sk w={160} h={16} /> : <><b>{issue.head}</b>{issue.sub && <small>{issue.sub}</small>}</>}
+      </td>
       <td data-label="" className="ops-act">
-        {action && !r.loading
-          ? <Link to={action.to} className={`btn btn--sm${r.carbon === 'ready' || r.carbon === 'stale' ? '' : ' btn--ghost'}`} aria-label={`${action.label}: ${where}`}>{action.label}</Link>
-          : null}
-        <button type="button" className="btn btn--ghost btn--sm ops-more" onClick={onOpen} aria-haspopup="dialog" aria-label={`Chi tiết ${where}`}><Ico name="more" size={15} /></button>
+        <span className="ops-act__row">
+          {action && !r.loading
+            ? <Link to={action.to} data-row-action="primary" className={`btn btn--sm${urgent ? '' : ' btn--ghost'}`} aria-label={`${action.label}: ${where}`}>{action.label}</Link>
+            : null}
+          <button type="button" data-row-action="secondary" className="btn btn--quiet btn--sm ops-more" onClick={onOpen} aria-haspopup="dialog" aria-label={`Chi tiết ${where}`} title="Chi tiết">
+            <Ico name="chevron" size={16} />
+          </button>
+        </span>
       </td>
     </tr>
   )

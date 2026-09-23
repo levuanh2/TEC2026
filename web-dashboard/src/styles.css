@@ -872,3 +872,55 @@ a.btn, a.btn:hover { text-decoration: none; }
 
 /* The workspace column never grows to its widest table. */
 .ops, .ops > *, .ops-table__wrap { min-width: 0; max-width: 100%; }
+
+/* ---------------------------------------------------------- /carbon rows
+ * Six columns: identity (farm · plot · season), one Carbon state, one cell
+ * for what to fix or what came out, and a fixed-width action cell. The table
+ * is laid out to the width it has; nothing is pushed past its right edge and
+ * the wrapper never has to scroll sideways (Round 4.1: at 1363px the detail
+ * button was clipped to a sliver while the document reported no overflow). */
+.btn--quiet { background: none; border-color: transparent; color: var(--text-secondary); }
+.btn--quiet:hover { background: var(--ac-band); border-color: var(--ac-control-line); }
+.ops-act__row { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.ops-table td.ops-act .ops-act__row .btn { margin: 0; }
+.ops-table--carbon { table-layout: auto; }
+.ops-table--carbon td.ops-crow__issue { min-width: 180px; }
+.ops-table--carbon td.ops-crow__issue b { font-weight: 600; }
+.ops-table--carbon td.ops-crow__issue small { color: var(--text-secondary); }
+.ops-table--carbon .ops-more { min-height: var(--ac-control-h-sm); }
+
+/* Narrower than 1180px — tablets, a laptop with a side panel, phones — the
+ * row is a card: where it is (Nông hộ → Thửa → Vụ mùa) on one line of three,
+ * then the state and the issue, then the actions, full width. */
+@media (max-width: 1180px) {
+  .ops-table--carbon, .ops-table--carbon tbody { display: block; }
+  .ops-table--carbon thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ops-table__wrap:has(.ops-table--carbon) { border: 0; background: none; overflow: visible; }
+  .ops-table--carbon tbody tr.ops-crow {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px;
+    padding: 14px 16px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated);
+  }
+  .ops-table--carbon tbody tr.ops-crow:last-child td { border-bottom: 0; }
+  .ops-table--carbon tr.ops-crow td { display: block; padding: 0; border: 0; min-width: 0; }
+  .ops-table--carbon tr.ops-crow td::before { content: attr(data-label); display: block; font-size: var(--fs-caption); color: var(--text-muted); margin-bottom: 2px; }
+  .ops-table--carbon tr.ops-crow td.ops-act::before { content: none; }
+  .ops-table--carbon tr.ops-crow td.ops-crow__state { grid-column: 1 / 2; }
+  .ops-table--carbon tr.ops-crow td.ops-crow__issue { grid-column: 2 / -1; min-width: 0; }
+  .ops-table--carbon tr.ops-crow td.ops-act { grid-column: 1 / -1; width: auto; text-align: left; padding-top: 10px; border-top: 1px solid var(--border); }
+  .ops-table--carbon tr.ops-crow .ops-act__row { display: flex; justify-content: space-between; }
+  .ops-table--carbon tr.ops-crow td.ops-crow__state .ops-badge { white-space: normal; }
+  .ops-table--carbon tr.ops-crow td small { white-space: normal; }
+  .ops-table--carbon tbody tr.is-attention td:first-child,
+  .ops-table--carbon tbody tr.is-ready td:first-child { box-shadow: none; }
+  .ops-table--carbon tbody tr.ops-crow.is-attention { box-shadow: inset 3px 0 0 var(--ac-role-attention-line); }
+  .ops-table--carbon tbody tr.ops-crow.is-ready { box-shadow: inset 3px 0 0 var(--ac-role-water-line); }
+  .ops-table--carbon .ops-empty { display: block; }
+}
+@media (max-width: 560px) {
+  .ops-table--carbon tbody tr.ops-crow { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 14px; }
+  .ops-table--carbon tr.ops-crow td[data-label="Vụ mùa"] { grid-column: 1 / 2; }
+  .ops-table--carbon tr.ops-crow td.ops-crow__state { grid-column: 2 / 3; }
+  .ops-table--carbon tr.ops-crow td.ops-crow__issue { grid-column: 1 / -1; }
+  .ops-table--carbon tr.ops-crow td.ops-act .btn[data-row-action="primary"] { min-height: var(--ac-control-h); flex: 1; justify-content: center; }
+  .ops-table--carbon tr.ops-crow td.ops-act .ops-more { width: var(--ac-control-h); min-height: var(--ac-control-h); }
+}
