@@ -14,7 +14,7 @@ Ngày: 2026-09-23 · Phạm vi: `web-dashboard/**` · Backend, API Carbon, công
 |---|---|
 | Branch | `fix/agricarbon-redesign-round4` (không upstream, không push) |
 | Base | `origin/main` = `32fe933` (Merge branch 'fix/hybrid-redesign-round2') |
-| Commit Round 4 | 6 (xem §15) |
+| Commit Round 4 | **8** ở merge candidate cuối: 7 commit hiện có + 1 commit sửa tính toàn vẹn báo cáo (xem §15) |
 
 File untracked có sẵn trước round (`.mcp.json`, 4 ảnh ChatGPT + 9 ảnh `.jpg` trong `docs/`) **giữ nguyên**, không sửa / stage / xoá.
 
@@ -50,7 +50,9 @@ Thư mục gitignored: `web-dashboard/.qa-screenshots/round4/before/` (99 file) 
 | Carbon tab tự mâu thuẫn | `before/mgmt-season-carbon-1440.png` | `after/mgmt-season-carbon-1440.png` |
 | Diện tích "—" | `before/mgmt-farms-1440.png` | `after/mgmt-farms-1440.png` |
 
-## 4. File đã thay đổi (48 file, +1394 / −487)
+## 4. File đã thay đổi (52 file, +1821 / −487)
+
+Đo bằng `git diff --shortstat origin/main...HEAD` trên merge candidate cuối (đã gồm commit sửa báo cáo).
 
 - Auth: `src/App.tsx`, `src/api/auth.ts`, `src/api/client.ts`, `src/farmer/kit.tsx`, `src/farmer/pages/Account.tsx`
 - Quick-fix / form: `src/farmer/ActivityForms.tsx`, `src/farmer/activityValidation.ts`, `src/farmer/CarbonRepair.tsx`
@@ -113,7 +115,7 @@ Không file backend nào đổi (`git diff 32fe933 -- backend supabase` rỗng).
 | Lệnh | Kết quả |
 |---|---|
 | `npx tsc --noEmit` | **PASS** |
-| `npx vitest run` | **PASS** — 41 file, 336 test, 0 fail (trước round: 306) |
+| `npx vitest run` | **PASS** — 41 file, 336 test, 0 fail. Round 4 final: 336 test passed. Baseline test count không được chạy lại độc lập tại gate này nên không dùng để tuyên bố mức tăng. |
 | `npm run build` | **PASS** (cảnh báo chunk > 500 kB có từ trước) |
 | Playwright mock: `round4-qa` 6, `round3-qa`, `web-smoke`, `farmer-web` | **PASS** — 23 passed, 0 failed, 20 skipped (skip = spec cần credential, chạy riêng bên dưới) |
 | `round4-real` (real, REDESIGN_*) | **PASS** 5/5 — Farmer logout + Back, Management logout, session hết hạn (không loop), quick-fix, drawer 1440+390 |
@@ -151,7 +153,7 @@ Phạm vi axe **không** gồm: 1280/768/390, trang login, form tạo mới từ
 | `/data-gaps` | 7,0–8,8s / 14,2–15,9s | 2,9–5,6s / 13,6–16,3s |
 | `/carbon` | 6,9s / 10,0–11,9s | 5,1–5,3s / 13,4–15,4s |
 
-Round 4 **không đổi cách fetch** của ops (cùng `useOperations`); chênh lệch nằm trong biến thiên của backend (lượt 1 Round 4 là lượt "nguội"). Không false empty state, không "Chưa gán tổ chức" khi đang tải, skeleton giữ chỗ, cột không nhảy khi row stream. **Readiness vẫn tăng tuyến tính theo số vụ** → blocker B1.
+Round 4 **không đổi cách fetch** của ops (cùng `useOperations`). Hai lượt đo chưa đủ để kết luận regression hoặc equivalence. Backend readiness vẫn là blocker; operational readiness vẫn NOT READY. Không false empty state, không "Chưa gán tổ chức" khi đang tải, skeleton giữ chỗ, cột không nhảy khi row stream. **Readiness vẫn tăng tuyến tính theo số vụ** → blocker B1.
 
 ## 12. Chưa làm / giới hạn
 
@@ -177,12 +179,17 @@ Sạch ngoài file untracked có sẵn trước round (`.mcp.json`, `docs/*.jpg`
 ## 15. Commit list
 
 ```
-3acfba7 fix(auth): logout and an expired session end at the login screen
-fc53635 fix(carbon): the quick-fix form asks for what readiness says is missing
-c925081 feat(farmer): a Home that says what to do next, and one story per record
-97c3c7f feat(management): three routes, three jobs; Carbon actions follow state
-4424af9 fix(ui): overlay drawer, flat sidebar with a readable active row
+f0142d1 docs: Round 4 report — final commit id
 7da676a test(web): Round 4 gates, the fixes they found, and the report
+4424af9 fix(ui): overlay drawer, flat sidebar with a readable active row
+97c3c7f feat(management): three routes, three jobs; Carbon actions follow state
+c925081 feat(farmer): a Home that says what to do next, and one story per record
+fc53635 fix(carbon): the quick-fix form asks for what readiness says is missing
+3acfba7 fix(auth): logout and an expired session end at the login screen
 ```
+
+Current report-integrity commit — xem git log; không tự nhúng SHA vì commit hash phụ thuộc chính nội dung báo cáo này.
+
+Real-data gate (`round4-real` 5/5, `redesign-qa` 15/15, sweep/flows/axe/perf) đã pass tại HEAD `f0142d1`. Commit sửa tính toàn vẹn chỉ sửa `docs/WEB_UX_REDESIGN_ROUND4.md`; real-data suite không được chạy lại sau commit tài liệu đó.
 
 Gate: **dừng tại đây** — không merge, không push, không deploy, không đổi `autoDeployTrigger`. Chờ duyệt giao diện.
