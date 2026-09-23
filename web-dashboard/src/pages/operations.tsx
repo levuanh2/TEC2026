@@ -324,7 +324,7 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
             <tr>
               <th scope="col">Nông hộ</th>
               <th scope="col">Thửa</th>
-              <th scope="col">{focus === 'carbon' ? 'Vụ mùa' : 'Vụ'}</th>
+              <th scope="col">Vụ</th>
               {focus === 'all' && <>
                 <th scope="col">Giai đoạn</th>
                 <th scope="col">Gieo sạ</th>
@@ -467,7 +467,7 @@ const CARBON_ICON: Partial<Record<OpsRow['carbon'], 'warning' | 'info' | 'clock'
 }
 
 /**
- * `/carbon` row. Six columns, not nine: identity (Nông hộ · Thửa · Vụ mùa),
+ * `/carbon` row. Six columns, not nine: identity (Nông hộ · Thửa · Vụ),
  * one Carbon state, one cell for what to fix or what came out, and the
  * actions. Exactly one action is a labelled button; opening the detail
  * panel is a 40px icon button with a full accessible name, so the action

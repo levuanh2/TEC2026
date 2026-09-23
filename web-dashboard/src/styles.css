@@ -919,7 +919,7 @@ a.btn, a.btn:hover { text-decoration: none; }
 }
 @media (max-width: 560px) {
   .ops-table--carbon tbody tr.ops-crow { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 14px; }
-  .ops-table--carbon tr.ops-crow td[data-label="Vụ mùa"] { grid-column: 1 / 2; }
+  .ops-table--carbon tr.ops-crow td[data-label="Vụ"] { grid-column: 1 / 2; }
   .ops-table--carbon tr.ops-crow td.ops-crow__state { grid-column: 2 / 3; }
   .ops-table--carbon tr.ops-crow td.ops-crow__issue { grid-column: 1 / -1; }
   .ops-table--carbon tr.ops-crow td.ops-act .btn[data-row-action="primary"] { min-height: var(--ac-control-h); flex: 1; justify-content: center; }
@@ -929,3 +929,10 @@ a.btn, a.btn:hover { text-decoration: none; }
 /* Focus on the green sidebar uses the light marker; the workspace's blue ring
  * would fall to ~2:1 on forest (Round 4.1). */
 .sidebar :where(a, button):focus-visible { outline-color: var(--ac-sidebar-marker); }
+
+/* /seasons and /data-gaps measured 4px and 1px wider than their wrapper at
+ * 1280px (Round 4.1 audit): the identity codes never wrap, so the cells give
+ * up a little padding instead. */
+@media (max-width: 1320px) and (min-width: 901px) {
+  .ops-table th, .ops-table td { padding-inline: 10px; }
+}
