@@ -52,14 +52,15 @@
   --ink-muted: var(--ac-muted);
   --ink-faint: var(--ac-muted);
 
-  --accent: var(--ac-accent);
-  --accent-hover: var(--ac-accent-hover);
-  --brand: var(--ac-accent);
+  /* Workspace accent is slate, not the institutional green (Round 4.1). */
+  --accent: var(--ac-work);
+  --accent-hover: var(--ac-cta-hover);
+  --brand: var(--ac-work);
   --brand-dark: var(--ac-ink);
-  --brand-strong: var(--ac-accent-deep);
-  --brand-050: var(--ac-accent-soft);
-  --brand-soft: var(--ac-accent-soft);
-  --surface-green: var(--ac-accent-soft);
+  --brand-strong: var(--ac-work-strong);
+  --brand-050: var(--ac-work-soft);
+  --brand-soft: var(--ac-work-soft);
+  --surface-green: var(--ac-role-positive-bg);
 
   --success: var(--ac-success);
   --warning: var(--ac-warning);
@@ -353,7 +354,7 @@ table.data .cell-empty { color: var(--text-muted); }
 
 /* -------------------------------------------------------------- Buttons */
 .btn { border: 1px solid var(--ac-cta); border-radius: var(--radius-control); padding: 8px 15px; font-weight: 650; font-size: var(--fs-sm); background: var(--ac-cta); color: var(--ac-cta-ink); display: inline-flex; align-items: center; gap: 7px; transition: background var(--ac-dur) var(--ac-ease), border-color var(--ac-dur) var(--ac-ease); }
-.btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn:hover { background: var(--ac-cta-hover); border-color: var(--ac-cta-hover); }
 .btn--ghost { background: none; color: var(--brand-strong); border: 1px solid var(--ac-control-line); }
 .btn--ghost:hover { background: var(--brand-soft); border-color: var(--ac-rule-3); }
 .btn--link { background: none; border: 0; color: var(--brand-strong); padding: 5px 0; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
@@ -408,7 +409,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .step { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding: 11px 0; position: relative; border-bottom: 1px solid var(--border); }
 .step:not(:last-child)::before { display: none; }
 .step__marker { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: none; border: 1px solid var(--ac-control-line); color: var(--text-muted); }
-.step.is-done .step__marker { background: var(--accent); border-color: var(--accent); color: var(--ac-accent-ink); }
+.step.is-done .step__marker { background: var(--ac-success); border-color: var(--ac-success); color: var(--ac-accent-ink); }
 .step.is-current .step__marker { background: none; border-color: var(--accent); border-width: 2px; color: var(--brand-strong); }
 .step__body { display: grid; gap: 3px; }
 .step__body b { font-size: var(--fs-body); font-weight: 650; color: var(--text-primary); }
@@ -924,3 +925,7 @@ a.btn, a.btn:hover { text-decoration: none; }
   .ops-table--carbon tr.ops-crow td.ops-act .btn[data-row-action="primary"] { min-height: var(--ac-control-h); flex: 1; justify-content: center; }
   .ops-table--carbon tr.ops-crow td.ops-act .ops-more { width: var(--ac-control-h); min-height: var(--ac-control-h); }
 }
+
+/* Focus on the green sidebar uses the light marker; the workspace's blue ring
+ * would fall to ~2:1 on forest (Round 4.1). */
+.sidebar :where(a, button):focus-visible { outline-color: var(--ac-sidebar-marker); }

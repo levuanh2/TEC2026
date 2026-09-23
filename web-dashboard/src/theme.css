@@ -58,7 +58,9 @@
   --ac-accent-deep: oklch(31% 0.095 163);
   --ac-accent-soft: oklch(93% 0.03 155);   /* selected row, active nav wash */
   --ac-accent-ink: oklch(99.5% 0.003 165); /* text on an accent fill */
-  --ac-focus: oklch(48% 0.19 160);
+  /* Focus ring: a clear blue, never the brand green (Round 4.1). On the
+   * sidebar the ring switches to the light marker — see styles.css. */
+  --ac-focus: oklch(50% 0.17 257);
 
   /* --- semantic state. Deliberately unsaturated: these annotate rows in a
          dense table, they do not decorate. ---------------------------------- */
@@ -101,10 +103,20 @@
          are neutral ink; the selection tint is lavender, because a selected
          row is usually a row with something still missing and a healthy
          green would say the opposite. ------------------------------------- */
-  --ac-cta: oklch(26% 0.022 165);
-  --ac-cta-hover: oklch(19% 0.018 165);
-  --ac-cta-ink: oklch(99.5% 0.003 165);
-  --ac-marker: oklch(30% 0.02 165);
+  /* Round 4.1: the CTA used to be a near-black *green* (hue 165) and the
+   * workspace accent (links, active tab, progress, "Xuất PDF", "Mở vụ mùa")
+   * was the institutional forest itself, so the brand leaked across every
+   * page. The workspace now speaks in slate — a graphite navy at hue 257 —
+   * and green inside the workspace means one thing: a completed / healthy
+   * state (--ac-success and the #E2F0CB role). Measured on paper
+   * (oklch 97.6%): CTA fill vs its ink 14.6:1, link ink 9.6:1, marker 3:1+. */
+  --ac-cta: oklch(28% 0.035 257);
+  --ac-cta-hover: oklch(21% 0.035 257);
+  --ac-cta-ink: oklch(99.5% 0.003 257);
+  --ac-marker: oklch(33% 0.045 257);
+  --ac-work: oklch(42% 0.06 257);          /* workspace accent: bars, rules, markers */
+  --ac-work-strong: oklch(34% 0.05 257);   /* link and accent text on paper */
+  --ac-work-soft: oklch(94.5% 0.014 257);  /* hover wash under an accent control */
   --ac-select: oklch(94% 0.022 292);
   --ac-select-rule: oklch(76% 0.055 292);
   --ac-select-ink: oklch(34% 0.09 292);
