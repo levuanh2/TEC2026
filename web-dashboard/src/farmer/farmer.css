@@ -1191,3 +1191,10 @@
   .fw-ctxbar { gap: 4px var(--fw-space-12); }
 }
 .fw-date-read { display: block; margin-top: 4px; font-size: var(--fw-text-xs); color: var(--fw-muted); font-weight: 550; }
+
+/* axe (Round 4, real data): these three sat below 4.5:1 on their pastel.
+ * Full-strength role ink instead of a faded one; muted grey never on a tint. */
+.fw-summary__value small { opacity: 1; color: var(--role-ink); font-weight: 600; }
+.fw-pill small { opacity: 1; color: var(--fw-ink-2); }
+.fw-pill[aria-pressed="true"] small { color: inherit; }
+.fw-repair__item.fw-role > p { color: var(--role-ink, var(--fw-ink-2)); }

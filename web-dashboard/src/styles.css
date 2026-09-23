@@ -705,7 +705,9 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 }
 /* Phones: the table becomes ranked rows — every cell keeps its label, and no
  * column is dropped silently. */
-@media (max-width: 720px) {
+/* Tablet and phone: ranked rows, not a squeezed or sideways-scrolling table
+ * (Round 4 found /seasons 99px wider than a 768px viewport). */
+@media (max-width: 900px) {
   .ops-table__wrap { border: 0; background: none; overflow: visible; }
   .ops-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .ops-table tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
@@ -867,3 +869,6 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
  * one voice, no underline on a filled or outlined control. */
 a.btn, a.btn:hover { text-decoration: none; }
 .carbon-readiness__fix { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* The workspace column never grows to its widest table. */
+.ops, .ops > *, .ops-table__wrap { min-width: 0; max-width: 100%; }

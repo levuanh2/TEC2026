@@ -484,3 +484,11 @@ Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trư�
 | `web-dashboard/src/{theme.css,styles.css,ui.tsx,App.tsx}`, `web-dashboard/src/farmer/**`, `web-dashboard/src/pages/**`, `web-dashboard/src/utils/errorPresentation.ts` (new), `web-dashboard/tests/e2e/**`, `docs/WEB_UX_REDESIGN_ROUND3.md` (new) | **Claude** (đang giữ) | Round 3: hoàn thiện Farmer journal/farm/plot/season/account và Management farms/farm/plot/organizations/performance/data-gaps, cộng một pass visual-system trên toàn bộ route (bỏ serif, bỏ dark green khỏi workspace CTA/tab/row, bỏ pastel ngẫu nhiên, radius 8–12px, row semantic, skip-to-content, copy lỗi tiếng Việt). **Không** đổi backend, không đổi công thức/hệ số/logic Carbon. Branch `fix/hybrid-redesign-round2`. | DONE — 27/27 route trên mock tenant, tsc pass, vitest 298 pass, build pass, round3-qa 15/15 pass, web-smoke + farmer-web pass. `redesign-qa` BLOCKED (thiếu credential `REDESIGN_*`). Chưa merge/push/deploy. Blocker còn lại: Management ~32s (đề xuất bulk readiness ở `docs/WEB_UX_REDESIGN_ROUND3.md` §12). |
 
 Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trước qua Herdr.
+
+## AgriCarbon Web Redesign Round 4 (2026-09-23)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `web-dashboard/**` (auth boundary, Carbon quick-fix contract, Farmer Home/Journal, Management `/seasons` `/data-gaps` `/carbon`, overlay drawer, visual tokens, tests), `docs/WEB_UX_REDESIGN_ROUND4.md` (new) | **Claude** (đang giữ) | Round 4: P0 logout/session-expired dead end, P0 quick-fix required/optional contradiction, Farmer Home task-first, ba route Management khác nhiệm vụ, drawer overlay, copy Carbon theo state. **Không** đổi backend, công thức/hệ số/logic Carbon. Branch `fix/agricarbon-redesign-round4`, commit local, chưa merge/push/deploy. | Xem `docs/WEB_UX_REDESIGN_ROUND4.md`. |
+
+Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trước qua Herdr.

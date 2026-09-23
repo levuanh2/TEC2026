@@ -367,7 +367,7 @@ export function Progress({ value, max, unitLabel }: { value: number; max: number
         </b>
         <span>{unitLabel}</span>
       </div>
-      <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max}>
+      <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max} aria-label={`${value}/${max} ${unitLabel}`}>
         <div className="progress__fill" style={{ width: `${pct}%` }} />
       </div>
     </div>
