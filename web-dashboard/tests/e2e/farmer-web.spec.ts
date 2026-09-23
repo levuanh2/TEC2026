@@ -5,11 +5,13 @@ const noHorizontalOverflow = (page: Page) => page.evaluate(() => document.docume
 /** Quick Entry from Home, where the fixture has two active seasons (like the
  * real QA farmer): the picker appears first and the chosen season is the one
  * the form is opened for. */
-async function quickEntry(page: Page, label: string, season = 'Hè Thu 2026') {
-  await page.getByRole('button', { name: label, exact: true }).click()
-  const picker = page.getByRole('dialog', { name: 'Chọn vụ cần ghi' })
+/** Round 4: every record starts from the one "Ghi hoạt động" entry point,
+ *  whose first step is the activity picker. */
+async function quickEntry(page: Page, label: string) {
+  await page.getByRole('button', { name: 'Ghi hoạt động', exact: true }).first().click()
+  const picker = page.getByRole('dialog', { name: 'Ghi hoạt động' })
   await expect(picker).toBeVisible()
-  await picker.getByRole('button', { name: new RegExp(season) }).click()
+  await picker.getByRole('button', { name: new RegExp(`^${label}`) }).click()
   await expect(picker).toHaveCount(0)
 }
 
@@ -38,10 +40,20 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(nav.locator('svg')).toHaveCount(6)
   await expect(page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })).toBeHidden()
 
-  for (const label of ['Gieo sạ', 'Bón phân', 'Tưới nước', 'Thuốc BVTV', 'Rơm rạ', 'Thu hoạch']) {
-    await expect(page.getByRole('button', { name: label, exact: true })).toBeEnabled()
-  }
+  // Round 4: Home has one next action; the six activity types live in the
+  // picker that action opens, not as a second grid of buttons on the page.
+  await expect(page.locator('main .fw-quick')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/farmer-v2-home-1440.png', fullPage: true })
+  await page.getByRole('button', { name: /Ghi hoạt động/ }).first().click()
+  const homePicker = page.getByRole('dialog', { name: 'Ghi hoạt động' })
+  for (const label of ['Gieo sạ', 'Bón phân', 'Tưới nước', 'Thuốc BVTV', 'Rơm rạ', 'Thu hoạch']) {
+    await expect(homePicker.getByRole('button', { name: new RegExp(`^${label}`) })).toBeEnabled()
+  }
+  await page.keyboard.press('Escape')
+  await expect(homePicker).toHaveCount(0)
+
+  // The rest of the forms are reached the way a farmer records: from the journal.
+  await page.goto('/farmer/journal')
 
   await quickEntry(page, 'Bón phân')
   const fertilizer = page.getByRole('dialog', { name: 'Bón phân' })
@@ -92,6 +104,8 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toHaveCount(0)
 
+  // CV lives on the season page now (Home is one action only).
+  await page.goto('/farmer/crop-seasons/crop-demo-01')
   // CV: picker opens, analyze stays disabled with no file, disclaimer always visible.
   await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
@@ -100,13 +114,11 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toHaveCount(0)
 
-  // Two active seasons: Quick Entry must ask which one, and open the form for
-  // the season actually chosen — not silently assume the primary one.
-  await page.getByRole('button', { name: 'Tưới nước', exact: true }).click()
-  const picker = page.getByRole('dialog', { name: 'Chọn vụ cần ghi' })
-  await expect(picker).toBeVisible()
-  await expect(picker.getByRole('button')).toHaveCount(3)  // 2 seasons + close
-  await picker.getByRole('button', { name: /Thu Đông 2026/ }).click()
+  // Two active seasons: the journal names which season a record goes to, and
+  // the form opens for the season actually chosen — not the primary one.
+  await page.goto('/farmer/journal')
+  await page.getByRole('group', { name: 'Chọn vụ canh tác' }).getByRole('button', { name: /Thu Đông 2026/ }).click()
+  await quickEntry(page, 'Tưới nước')
   const forSecondSeason = page.getByRole('dialog', { name: 'Ghi tưới nước' })
   await expect(forSecondSeason).toBeVisible()
   // The form's own context line, not the sheet subtitle: it is what tells the

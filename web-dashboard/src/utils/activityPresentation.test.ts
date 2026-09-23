@@ -53,7 +53,7 @@ describe('activityFields — the detail drawer', () => {
 
   it('still shows a labelled field, and an empty one as a dash', () => {
     const rows = activityFields(irrigation)
-    expect(rows).toContainEqual({ label: 'Lượng nước (m³)', value: '320' })
+    expect(rows).toContainEqual({ label: 'Nước tưới (m³)', value: '320' })
     expect(rows).toContainEqual({ label: 'Điện bơm (kWh)', value: '12' })
     expect(rows).toContainEqual({ label: 'Thời gian tưới (phút)', value: '—' })
   })
@@ -63,5 +63,16 @@ describe('activityFields — the detail drawer', () => {
       .toContainEqual({ label: 'Tên sản phẩm', value: 'Dữ liệu minh họa' })
     expect(presentActivity('pesticide', JSON.stringify({ product_name: 'Demo pesticide', amount: 2 })).summary)
       .toBe('Dữ liệu minh họa · 2')
+  })
+})
+
+describe('list and detail tell the same story', () => {
+  it('reads a straw record method as straw treatment, not as an irrigation regime', () => {
+    const straw = JSON.stringify({ method: 'incorporated', straw_mass_kg: 800, returned_to_field: true })
+    expect(activityFields(straw, 'straw_management')).toContainEqual({ label: 'Phương pháp xử lý rơm', value: 'Vùi vào đất' })
+    expect(activityFields(straw, 'straw_management')).toContainEqual({ label: 'Rơm trả lại ruộng', value: 'Có' })
+  })
+  it('keeps an irrigation method as the watering regime', () => {
+    expect(activityFields(JSON.stringify({ method: 'awd' }), 'irrigation')).toContainEqual({ label: 'Hình thức tưới', value: 'Tưới ngập–khô xen kẽ (AWD)' })
   })
 })

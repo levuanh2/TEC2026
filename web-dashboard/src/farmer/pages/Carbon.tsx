@@ -62,7 +62,14 @@ export function SeasonCarbon({ seasonId, season, plotId, writeCtx = null, activi
   if (!state.data || state.data.kind === 'none') {
     return <>{hub}<CarbonEmpty reason={state.data?.kind === 'none' ? state.data.reason : null} />{inputs}</>
   }
-  return <>{hub}<CarbonSuccess result={state.data.result} stale={stale} />{inputs}</>
+  /* A fresh result with nothing outstanding: the result leads and the hub,
+   * whose only content would be "Tính lại", is not shown — recalculating is not
+   * the next thing to do. Stale or still-incomplete: the hub first, since it
+   * carries the action the result is waiting on. */
+  const outstanding = stale || (readiness.data?.missing_inputs ?? []).some((m) => m.blocking)
+  return outstanding
+    ? <>{hub}<CarbonSuccess result={state.data.result} stale={stale} />{inputs}</>
+    : <><CarbonSuccess result={state.data.result} stale={stale} />{inputs}</>
 }
 
 /** No stored result yet. What is missing, and how to supply it, is the repair
@@ -136,7 +143,7 @@ function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolea
             const share = total && total > 0 ? Math.max(0, item.co2e_kg) / total : null
             return (
               <div key={index} className="fw-source">
-                <span>{SOURCE_LABEL[item.source] ?? item.source}<small>{item.source}</small></span>
+                <span>{SOURCE_LABEL[item.source] ?? 'Nguồn khác'}</span>
                 <span className="fw-source__bar" aria-hidden="true"><i style={{ width: `${(share ?? 0) * 100}%` }} /></span>
                 <b>{perKg(item.co2e_kg, 'kg CO₂e')}</b>
               </div>

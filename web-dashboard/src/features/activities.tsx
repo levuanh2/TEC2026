@@ -1,7 +1,7 @@
 import { Ico } from '../icons'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Activity } from '../types'
-import { presentActivity, groupActivities, activityFields, ACTIVITY_GROUPS } from '../utils/activityPresentation'
+import { presentActivity, groupActivities, activityFields, hasDemoData, ACTIVITY_GROUPS } from '../utils/activityPresentation'
 import { dateTime } from '../format'
 import { Drawer, EmptyState } from '../ui'
 
@@ -25,6 +25,9 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
 
   return (
     <>
+      {hasDemoData(activities) && (
+        <p className="notice info" data-testid="demo-banner">Dữ liệu minh họa — không phải số liệu đo ngoài ruộng, không dùng làm hồ sơ MRV chính thức.</p>
+      )}
       <div className="timeline">
         {groups.map((g) => (
           <div key={g.type} className="timeline__group">
@@ -61,7 +64,7 @@ export function ActivityTimeline({ activities, renderActions, resetSignal }: { a
         >
           {/* What happened in the field, in the words of the work. */}
           <dl className="dl" style={{ gridTemplateColumns: '1fr' }}>
-            {activityFields(open.detail).map((f, i) => (
+            {activityFields(open.detail, open.type).map((f, i) => (
               <div key={i}>
                 <dt>{f.label}</dt>
                 <dd>{f.value}</dd>

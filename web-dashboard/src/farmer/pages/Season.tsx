@@ -3,7 +3,7 @@ import type { Activity } from '../../types'
 import { date, daysSince, ha } from '../../format'
 import { ACTIVITY_TITLE, dayLabel, fmtNumber } from '../activityView'
 import {
-  ActivityCardActions, ActivityDetailActions, AddActivityCta, QuickActions, toSeasonContext, useActivityMutations,
+  ActivityCardActions, ActivityDetailActions, AddActivityCta, toSeasonContext, useActivityMutations,
   type ActivityMutations, type SeasonContext,
 } from '../ActivityForms'
 import { CvHistorySection, CvPreviewCard } from '../CvCheck'
@@ -128,10 +128,10 @@ function SeasonOverview({ id, ctx, seasonCtx, writeCtx, metrics, activities, mut
 }) {
   return (
     <>
-      {(!seasonCtx || writeCtx) && (
-        <Section title="Ghi nhanh cho vụ này" icon="plus" description="Chọn việc bạn vừa làm — không cần chọn lại vụ.">
-          <QuickActions seasons={writeCtx ? [writeCtx] : []} mutations={mutations} compact loading={!seasonCtx} />
-        </Section>
+      {/* One way to start a record, the same one the journal has: the
+        * picker is step 1 inside the sheet, not a second grid on the page. */}
+      {writeCtx && (
+        <p className="fw-cta-row fw-cta-row--start"><AddActivityCta season={writeCtx} mutations={mutations} /></p>
       )}
       <div className="fw-grid-2">
         <Section title="Tình trạng vụ" icon="checklist" tone="leaf">
