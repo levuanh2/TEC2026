@@ -2,7 +2,7 @@ import type { Session } from '@supabase/supabase-js'
 import { signOut } from '../../api/auth'
 import type { CurrentUser } from '../../api/me'
 import { getOrganization } from '../../api/organizations'
-import { go, Link } from '../../ui'
+import { Link } from '../../ui'
 import { initials } from '../activityView'
 import { keys, STABLE_MS, useQuery } from '../data'
 import { Ico } from '../icons'
@@ -31,7 +31,7 @@ export function FarmerAccountPage({ session, viewer }: { session: Session | null
             {org.data && <Chip tone="info" icon="farm">{org.data.name}</Chip>}
           </div>
         </div>
-        <button type="button" className="fw-btn fw-btn--ghost" onClick={() => void signOut().then(() => go('/login'))}><Ico name="logout" />Đăng xuất</button>
+        <button type="button" className="fw-btn fw-btn--ghost" onClick={() => void signOut()}><Ico name="logout" />Đăng xuất</button>
       </section>
 
       <Section title="Phạm vi truy cập" icon="farm" description="Nông hộ, thửa ruộng và vụ canh tác mà tài khoản của bạn được cấp quyền xem và ghi.">

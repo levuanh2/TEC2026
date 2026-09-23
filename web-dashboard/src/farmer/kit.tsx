@@ -1,3 +1,4 @@
+import { expireSession } from '../api/auth'
 import { errorKind, friendlyError, isRetryable } from '../utils/errorPresentation'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Link } from '../ui'
@@ -121,6 +122,7 @@ export function ErrorPanel({ error, onRetry }: { error: string; onRetry?: () => 
         <p className="fw-error__title">{TITLE[kind]}</p>
         <p className="fw-error__body">{notFound ? NEUTRAL_404 : friendlyError(error)}</p>
       </div>
+      {kind === 'auth' && <button type="button" className="fw-btn fw-btn--primary" onClick={expireSession}>Đăng nhập lại</button>}
       {onRetry && isRetryable(error) && <button type="button" className="fw-btn fw-btn--soft" onClick={onRetry}><Ico name="refresh" />Thử lại</button>}
     </div>
   )

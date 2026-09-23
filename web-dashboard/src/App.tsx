@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { restoreSession, signIn, signOut } from './api/auth'
+import { onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
@@ -26,7 +26,12 @@ const ROLE_LABEL: Record<string, string> = {
 
 /* --------------------------------------------------------------------- Login */
 
-function Login({ done }: { done: (s: Session) => void }) {
+const ENDED_NOTICE: Record<AuthEndReason, { kind: 'info' | 'warning'; text: string }> = {
+  signed_out: { kind: 'info', text: 'Bạn đã đăng xuất.' },
+  expired: { kind: 'warning', text: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' },
+}
+
+function Login({ done, ended }: { done: (s: Session) => void; ended: AuthEndReason | null }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -40,7 +45,7 @@ function Login({ done }: { done: (s: Session) => void }) {
         done(s)
       }
     } catch (x) {
-      setError(x instanceof Error ? x.message : 'Không thể đăng nhập.')
+      setError(x instanceof Error ? x.message : 'Không thể đăng nhập. Vui lòng thử lại.')
     } finally {
       setBusy(false)
     }
@@ -50,7 +55,12 @@ function Login({ done }: { done: (s: Session) => void }) {
       <section className="login-card">
         <p className="eyebrow">AGRICARBON</p>
         <h1>Đăng nhập</h1>
-        <p>Quản trị hiệu suất tài nguyên &amp; carbon cho lúa gạo. JWT chỉ được chuyển cho FastAPI để kiểm tra RLS.</p>
+        <p>Nhật ký canh tác, hiệu suất tài nguyên và Carbon cho lúa gạo.</p>
+        {ended && !error && (
+          <div role={ended === 'expired' ? 'alert' : 'status'} data-testid="auth-ended">
+            <Notice kind={ENDED_NOTICE[ended].kind}>{ENDED_NOTICE[ended].text}</Notice>
+          </div>
+        )}
         <form onSubmit={submit}>
           <label>
             Email
@@ -62,7 +72,7 @@ function Login({ done }: { done: (s: Session) => void }) {
           </label>
           {error && <Notice kind="error">{error}</Notice>}
           <button className="btn" disabled={busy}>
-            {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
+            {busy ? 'Đang đăng nhập…' : ended === 'expired' ? 'Đăng nhập lại' : 'Đăng nhập'}
           </button>
         </form>
       </section>
@@ -143,7 +153,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
             <b>{email}</b>
             <small>{ROLE_LABEL[viewer.role] ?? viewer.role}</small>
             {session && (
-              <button className="link" onClick={() => void signOut().then(() => go('/login'))}>
+              <button className="link" onClick={() => void signOut()}>
                 Đăng xuất
               </button>
             )}
@@ -252,12 +262,30 @@ export default function App() {
   const [viewer, setViewer] = useState<CurrentUser>({ role: 'farmer', organizationId: null })
   const [ready, setReady] = useState(false)
   const [viewerReady, setViewerReady] = useState(false)
+  const [ended, setEnded] = useState<AuthEndReason | null>(null)
 
   useEffect(() => {
     const update = () => setPath(location.pathname)
     addEventListener('popstate', update)
     return () => removeEventListener('popstate', update)
   }, [])
+
+  // Sign-out and an expired token end the same way: the session and the viewer
+  // are dropped in this render, and the URL is replaced (not pushed) by /login,
+  // so nothing signed-in is left mounted and there is no redirect back into
+  // the app from a stale session value.
+  useEffect(() => onAuthEnded((reason) => {
+    setSession(null)
+    setViewer({ role: 'farmer', organizationId: null })
+    setEnded(reason)
+    // Already on the login screen: nothing to remember and no URL to change,
+    // so a late second signal can never become a redirect to itself.
+    if (location.pathname !== '/login') {
+      const next = reason === 'expired' ? `/login?next=${encodeURIComponent(location.pathname)}` : '/login'
+      history.replaceState({}, '', next)
+    }
+    setPath('/login')
+  }), [])
 
   useEffect(() => {
     void restoreSession()
@@ -341,7 +369,16 @@ export default function App() {
   // silently affect normal production mode, but it also must not be blocked by
   // the real Supabase credentials loaded from .env during the mock smoke test.
   const authRequired = Boolean(!usingMockData && import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY && !session)
-  if (path === '/login' || authRequired) return <Login done={setSession} />
+  if (path === '/login' || authRequired) {
+    return <Login ended={ended} done={(s) => {
+      setEnded(null)
+      // Back to where an expired session interrupted the person, if it was a
+      // page of this app; the role redirect still applies once /v1/me answers.
+      const next = new URLSearchParams(location.search).get('next')
+      if (next && next.startsWith('/') && !next.startsWith('//')) { history.replaceState({}, '', next); setPath(next) }
+      setSession(s)
+    }} />
+  }
   if (session && !viewerReady) return <main className="login">Đang tải phạm vi tài khoản…</main>
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
