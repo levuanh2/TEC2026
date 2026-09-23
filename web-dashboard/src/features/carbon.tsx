@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { ApiError } from '../api/client'
 import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '../api/carbon'
 import { num, kg, perKg, dateTime } from '../format'
-import { Async, Badge, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
+import { Async, Badge, Link, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
 import { useCarbonView } from '../carbon/useCarbonView'
 
 const SCENARIOS: { value: Scenario; label: string }[] = [
@@ -52,6 +52,17 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
   const readiness = useCarbonView(id, { resultTarget: `/crop-seasons/${id}/carbon` })
   const view = readiness.view
   const blocked = Boolean(view && !view.isReady && view.calculationStatus !== 'calculated' && view.calculationStatus !== 'stale')
+  /* The one action this state allows, and nothing else. A button that could
+   * only fail is not drawn at all (it used to be drawn disabled, while the copy
+   * below still told the officer to press it). */
+  const hasStored = Boolean(state.data) && !state.error
+  const action: string | null = !canRecalculate || readiness.loading || state.loading || blocked
+    ? null
+    : view?.calculationStatus === 'stale' && scenario === 'as_recorded' ? 'Tính lại'
+      : !hasStored ? (scenario === 'as_recorded' ? 'Tính Carbon' : 'Tính theo kịch bản này')
+        : null
+  const activityGaps = view?.userFixableGaps.filter((g) => g.flow === 'activity') ?? []
+  const methodologyGaps = view?.userFixableGaps.filter((g) => g.flow === 'carbon_methodology') ?? []
 
   async function recalculate() {
     setRecalc({ busy: true })
@@ -83,16 +94,9 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
             <Segmented options={SCENARIOS} value={scenario} onChange={setScenario} label="Kịch bản chế độ nước" />
             {/* Persisting a calculation needs write authority on the crop (B4);
               * read-only management roles only view results. */}
-            {canRecalculate && (
-              <button
-                className="btn btn--ghost"
-                onClick={recalculate}
-                // Error prevention: an action that cannot succeed is disabled
-                // before it is pressed, and says why.
-                disabled={recalc.busy || state.loading || readiness.loading || blocked}
-                title={blocked && view ? view.detail : undefined}
-              >
-                {recalc.busy ? 'Đang tính…' : 'Tính lại theo kịch bản'}
+            {action && (
+              <button className="btn" onClick={recalculate} disabled={recalc.busy} data-testid="carbon-action">
+                <Ico name="calculator" size={14} />{recalc.busy ? 'Đang tính…' : action}
               </button>
             )}
           </div>
@@ -106,7 +110,16 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
               </Badge>
               <p>{view.detail}</p>
               {view.userFixableGaps.length > 0 && (
-                <ul>{view.userFixableGaps.map((g) => <li key={g.code}><b>{g.label}</b> — {g.detail}</li>)}</ul>
+                <>
+                  <ul>{view.userFixableGaps.map((g) => <li key={g.code}><b>{g.label}</b> — {g.detail}</li>)}</ul>
+                  {/* Where each gap is supplied — the next step, not a button that cannot run. */}
+                  {canRecalculate && (
+                    <p className="carbon-readiness__fix">
+                      {methodologyGaps.length > 0 && <a className="btn btn--sm" href="#fw-carbon-methodology">Bổ sung thông tin phương pháp</a>}
+                      {activityGaps.length > 0 && <Link to={`/crop-seasons/${id}/activities`} className={`btn btn--sm${methodologyGaps.length ? ' btn--ghost' : ''}`}>Xem hoạt động cần bổ sung</Link>}
+                    </p>
+                  )}
+                </>
               )}
               {view.methodologyLimitations.length > 0 && (
                 <ul>{view.methodologyLimitations.map((g) => <li key={g.code}><b>{g.label}</b> — {g.detail}</li>)}</ul>
@@ -116,28 +129,34 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
 
           {recalc.error && <Notice kind="warning">{recalc.error}</Notice>}
 
-          <CarbonBody state={state} canRecalculate={canRecalculate} />
+          <CarbonBody state={state} canRecalculate={canRecalculate} action={action} blocked={blocked} />
         </div>
       </Section>
     </div>
   )
 }
 
-const noCalcState = (canRecalculate: boolean) => (
+/** The empty result says what will produce one — naming only a control that
+ *  is on screen and enabled right now. */
+const noCalcState = (canRecalculate: boolean, action: string | null, blocked: boolean) => (
   <EmptyState
     icon="calculator"
     title="Chưa có bản tính CO₂e cho vụ này"
-    body={canRecalculate
-      ? 'Nhấn “Tính lại theo kịch bản” để chạy Carbon Engine với dữ liệu hoạt động hiện có.'
-      : 'Kết quả sẽ hiển thị khi quản lý HTX hoặc nông hộ phụ trách lưu bản tính cho vụ này.'}
+    body={!canRecalculate
+      ? 'Kết quả sẽ hiển thị khi quản lý HTX hoặc nông hộ phụ trách lưu bản tính cho vụ này.'
+      : blocked
+        ? 'Cần bổ sung các thông tin nêu ở trên trước khi tính phát thải.'
+        : action
+          ? `Chọn “${action}” để tính phát thải từ dữ liệu hoạt động hiện có.`
+          : 'Đang kiểm tra dữ liệu của vụ.'}
   />
 )
 
-function CarbonBody({ state, canRecalculate }: { state: ReturnType<typeof useAsync<CarbonResult>>; canRecalculate: boolean }) {
+function CarbonBody({ state, canRecalculate, action, blocked }: { state: ReturnType<typeof useAsync<CarbonResult>>; canRecalculate: boolean; action: string | null; blocked: boolean }) {
   const err = state.error ?? ''
   // Chưa từng tính thành công — đây là trạng thái bình thường, không phải lỗi.
   if (err && /(chưa có bản tính|no[_ ]?calculation|calculate trước|not[_ ]?found|\b404\b)/i.test(err)) {
-    return noCalcState(canRecalculate)
+    return noCalcState(canRecalculate, action, blocked)
   }
   // Bộ hệ số chưa hoàn chỉnh (GWP / hệ số nhiên liệu) — trạng thái "chờ khoa học", bình tĩnh.
   if (err && /(hệ số phát thải|\bgwp\b|emission factor|factor[_ ]?set)/i.test(err)) {
@@ -148,7 +167,7 @@ function CarbonBody({ state, canRecalculate }: { state: ReturnType<typeof useAsy
       state={state}
       skeleton="table"
       isEmpty={(r) => !r || (r.total_co2e_kg == null && (r.breakdown ?? []).length === 0)}
-      empty={noCalcState(canRecalculate)}
+      empty={noCalcState(canRecalculate, action, blocked)}
     >
       {(r) => <CarbonResultView r={r} />}
     </Async>
@@ -238,10 +257,10 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
         </div>
       )}
 
-      {/* Provenance / trust */}
+      {/* Provenance: the scientific detail, one click away rather than first. */}
       {breakdown.length > 0 && (
-        <div className="card card--pad">
-          <h3 style={{ fontSize: 'var(--fs-h3)', marginBottom: 6 }}>Số liệu này được tính thế nào?</h3>
+        <details className="card card--pad tech-detail">
+          <summary>Số liệu này được tính thế nào? — công thức, hệ số, nguồn trích dẫn</summary>
           <div className="prov-chain">
             {['CO₂e/kg', 'Công thức', 'Hệ số', 'Nguồn trích dẫn', 'Phiên bản'].map((n, i) => (
               <span key={n} style={{ display: 'contents' }}>
@@ -253,7 +272,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
           {breakdown.map((b, i) => (
             <ProvenanceItem key={`${b.source}-prov-${i}`} entry={b} />
           ))}
-        </div>
+        </details>
       )}
     </div>
   )

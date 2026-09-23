@@ -83,11 +83,11 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
                 </>,
                 <>Trạng thái: {seasonStatus(season.status)}</>,
               ]}
-              actions={
-                <button className="btn" onClick={() => go(`${base}/carbon`)}>
+              actions={tab === 'carbon' ? undefined : (
+                <button className="btn btn--ghost" onClick={() => go(`${base}/carbon`)}>
                   Xem Carbon
                 </button>
-              }
+              )}
             />
 
             <Tabs items={tabs} />
@@ -115,12 +115,14 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
                 {/* A farm-level `viewer` still shows up as app role `farmer`, so the
                   * client cannot rule them out here — the backend answers 404 and the
                   * panel surfaces that as a permission message. */}
+                {/* Result and readiness first; the methodology form is the
+                  * detail behind it, open only while something there is missing. */}
+                <CarbonPanel id={id} seasonLabel={season.name} canRecalculate={role !== 'regulator' && role !== 'enterprise_viewer'} />
                 <SeasonMethodologyPanel
                   season={season}
                   canEdit={role !== 'regulator' && role !== 'enterprise_viewer'}
                   onSaved={() => frame.reload()}
                 />
-                <CarbonPanel id={id} seasonLabel={season.name} canRecalculate={role !== 'regulator' && role !== 'enterprise_viewer'} />
               </div>
             )}
             {tab === 'mrv' && (
@@ -236,7 +238,7 @@ function Performance({ metrics }: { metrics: Metrics }) {
       <div className="grid grid-4">
         <MetricCard name="Nước / kg" value={metrics.waterPerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.waterPerKg, '')} unit="m³/kg" context="Tổng nước tưới chia sản lượng" status={tone(metrics.completeness.water)} />
         <MetricCard name="Phân bón / kg" value={metrics.fertilizerPerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.fertilizerPerKg, '')} unit="kg/kg" context="Tổng phân bón chia sản lượng" status={tone(metrics.completeness.fertilizer)} />
-        <MetricCard name="Carbon / kg" value={metrics.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.co2ePerKg, '')} unit="kg CO₂e/kg" context="Chờ GWP theo QĐ 4801 / IPCC Tier 2" status={{ tone: 'warning', label: 'Đang chờ hệ số' }} />
+        <MetricCard name="Carbon / kg" value={metrics.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.co2ePerKg, '')} unit="kg CO₂e/kg" context={metrics.co2ePerKg == null ? 'Chưa có kết quả Carbon đã tính' : 'Theo kết quả Carbon đã lưu của vụ'} />
         <MetricCard name="Chi phí / kg" value={metrics.costPerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.costPerKg, '')} unit="₫/kg" context="Tổng chi phí đầu vào chia sản lượng" status={tone(metrics.completeness.cost)} />
       </div>
       {!metrics.completeness.cost && (

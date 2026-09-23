@@ -42,7 +42,12 @@ export interface OpsRow {
   /** The one readiness answer every Management surface renders. */
   view: CarbonView | null
   carbonPerKg: number | null
+  /** Stored result's season total — shown only when a result exists. */
+  totalCo2eKg: number | null
   calculatedAt: string | null
+  /** The season's own dates, as stored — no inferred deadlines. */
+  plantingDate?: string
+  harvestDate?: string
   mrv: { caseId: string; caseCode: string; status: string } | null
   /** Unavailable rows still render — the row says so instead of vanishing. */
   error?: string
@@ -83,7 +88,8 @@ function baseRow(farm: Farm, season: CropSeason, plot: Plot | undefined,
     farmId: farm.id, farmName: farm.name, farmCode: farm.code,
     plotId: season.plotId, plotName: plot?.name, plotCode: plot?.code,
     missing: [], limitations: [], data: 'unknown', carbon: 'unknown', view: null,
-    carbonPerKg: null, calculatedAt: null, mrv: mrvBySeason.get(season.id) ?? null,
+    carbonPerKg: null, totalCo2eKg: null, calculatedAt: null, mrv: mrvBySeason.get(season.id) ?? null,
+    plantingDate: season.plantingDate, harvestDate: season.harvestDate,
   }
 }
 
@@ -121,6 +127,7 @@ async function seasonRow(
       carbon: view.calculationStatus,
       view,
       carbonPerKg: result?.co2e_per_kg ?? null,
+      totalCo2eKg: result ? (result.total_co2e_kg ?? result.co2e_total_kg ?? null) : null,
       calculatedAt: result?.calculated_at ?? null,
     }
   } catch (e) {

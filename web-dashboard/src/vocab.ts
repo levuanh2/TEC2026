@@ -109,6 +109,20 @@ const CARBON_SCENARIO: Record<string, string> = {
   continuous_flooding: 'Ngập liên tục',
 }
 
+/** `public.mrv_evidence.evidence_type` — free text in the schema (non-blank
+ *  only), so only the values the product writes are named; anything else is
+ *  called by its generic kind, never printed raw. */
+const EVIDENCE_TYPE: Record<string, string> = {
+  photo: 'Ảnh',
+  image: 'Ảnh',
+  document: 'Tài liệu',
+  pdf: 'Tài liệu',
+  spreadsheet: 'Bảng tính',
+  receipt: 'Hoá đơn',
+  video: 'Video',
+  other: 'Tài liệu',
+}
+
 const DICTS = {
   cropStatus: CROP_STATUS,
   irrigationMethod: IRRIGATION_METHOD,
@@ -121,6 +135,7 @@ const DICTS = {
   ipccWaterRegime: IPCC_WATER_REGIME,
   ipccPreSeason: IPCC_PRE_SEASON,
   carbonScenario: CARBON_SCENARIO,
+  evidenceType: EVIDENCE_TYPE,
 } as const
 
 export type VocabKind = keyof typeof DICTS

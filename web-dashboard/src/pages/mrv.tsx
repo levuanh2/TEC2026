@@ -1,3 +1,4 @@
+import { label } from '../vocab'
 import { useState } from 'react'
 import { Ico } from '../icons'
 import { listMrvCases, getMrvCase, listMrvEvidence, createMrvJsonExport, createMrvXlsxExport, createMrvPdfExport, downloadMrvExport, listMrvExports, type MrvCase, type MrvEvidence, type MrvExportFormat, type MrvExportHistoryItem, type MrvExportResult } from '../api/mrv'
@@ -136,10 +137,12 @@ function StepEvidence({ items }: { items: MrvEvidence[] }) {
       {items.map((e) => (
         <li key={e.id} className="chip" style={{ justifyContent: 'space-between', width: '100%' }}>
           <span>
-            <Ico name="evidence" size={13} /> {e.fileName} <span className="muted">· {e.evidenceType}</span>
+            <Ico name="evidence" size={13} /> {e.fileName} <span className="muted">· {label('evidenceType', e.evidenceType, 'Tài liệu')}</span>
           </span>
-          <span className="muted" style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-            {shortHash(e.sha256)} · {date(e.uploadedAt)}
+          {/* The file hash is for an auditor, not a default line: it sits in
+            * the title, and the row shows when the file arrived. */}
+          <span className="muted" title={e.sha256 ? `SHA-256 ${shortHash(e.sha256)}` : undefined}>
+            Tải lên {date(e.uploadedAt)}
           </span>
         </li>
       ))}

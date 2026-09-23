@@ -44,7 +44,10 @@ describe('SeasonMethodologyPanel', () => {
       ipccWaterRegime: 'irrigated_multiple_drainage',
       preSeasonWaterRegime: 'non_flooded_pre_season_lt_180d',
     })} canEdit />)
-    expect(screen.getByText('Đã đủ thông tin chế độ nước để tính phát thải.')).toBeTruthy()
+    // Complete: a closed summary, not an open section with a CTA competing
+    // with the Carbon result.
+    expect(screen.getByText('Thông tin phương pháp tính — đã đủ')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Khai báo/ })).toBeNull()
   })
 
   it('offers every IPCC water regime the engine accepts, with AWD discoverable', () => {
