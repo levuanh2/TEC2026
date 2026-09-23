@@ -5,7 +5,7 @@ import {
   type ActivityInput, type ActivityWriteResult, type IrrigationMethod, type StrawManagementMethod, type SupportedActivityType,
 } from '../api/activities'
 import {
-  blankToNumber, numberFormatErrors, validateFertilizer, validateHarvest, validateIrrigation,
+  blankToNumber, numberFormatErrors, requiredErrors, requiredFieldsFor, validateFertilizer, validateHarvest, validateIrrigation,
   validatePesticide, validateSeeding, validateStrawManagement, type FieldErrors,
 } from './activityValidation'
 import { mapActivityError, type ActivityErrorPresentation } from './activityErrors'
@@ -64,6 +64,9 @@ export const numOrUndef = (v: unknown): number | undefined => {
 /* --------------------------------------------------------------- fields */
 
 const OPTIONAL = 'Không bắt buộc'
+/** Not required to save the record, but required for the Carbon result. */
+const CARBON_NEEDS = 'Cần để tính phát thải'
+const NO_GAPS: readonly string[] = []
 
 function LabelText({ label, required, hint }: { label: string; required?: boolean; hint?: string }) {
   return (
@@ -98,26 +101,33 @@ function TextField({ label, value, onChange, type = 'text', required, error, hin
  * keypad to the numeric pad and the step to 1 for the fields the backend types
  * as `int`; everything else keeps the decimal pad. Blank is preserved as blank
  * all the way to `blankToNumber`, so unknown never becomes zero. */
-function NumberField({ label, value, onChange, unit, required, error, hint, integer, big }: {
+function NumberField({ label, value, onChange, unit, required, error, hint, help, integer, big, field }: {
   label: string; value: string; onChange: (v: string) => void; unit?: string; required?: boolean
   error?: string; hint?: string; integer?: boolean; big?: boolean
+  /** A sentence under the label (range, example) — read out with the field. */
+  help?: string
+  /** The draft key this field feeds; lets a Carbon quick-fix find and focus it. */
+  field?: string
 }) {
   const id = useId()
   const errId = `${id}-err`
   const unitId = `${id}-unit`
-  const described = [error ? errId : null, unit ? unitId : null].filter(Boolean).join(' ') || undefined
+  const helpId = `${id}-help`
+  const described = [error ? errId : null, help ? helpId : null, unit ? unitId : null].filter(Boolean).join(' ') || undefined
   return (
-    <div className={`form-field fw-num${big ? ' fw-num--big' : ''}`} aria-invalid={error ? 'true' : undefined}>
+    <div className={`form-field fw-num${big ? ' fw-num--big' : ''}`} aria-invalid={error ? 'true' : undefined} data-field={field}>
       <label htmlFor={id}><LabelText label={label} required={required} hint={hint} /></label>
+      {help && <span className="form-field__help" id={helpId}>{help}</span>}
       <span className="fw-num__box">
         {/* Text, not type="number": a number input reports "" for "0,85" or a
           * typo, so the entry would silently become blank. The raw text goes
           * to `blankToNumber` / `numberFormatErrors` instead. */}
         <input id={id} type="text" inputMode={integer ? 'numeric' : 'decimal'} autoComplete="off"
-          value={value} aria-describedby={described} onChange={(e) => onChange(e.target.value)} />
+          value={value} aria-describedby={described} aria-required={required || undefined}
+          aria-invalid={error ? true : undefined} onChange={(e) => onChange(e.target.value)} />
         {unit && <span className="fw-num__unit" id={unitId}>{unit}</span>}
       </span>
-      {error && <span id={errId} className="form-field__error" role="alert">{error}</span>}
+      {error && <span id={errId} className="form-field__error" role="alert"><Ico name="warning" />{error}</span>}
     </div>
   )
 }
@@ -153,15 +163,17 @@ function TextAreaField({ label, value, onChange, hint }: { label: string; value:
   )
 }
 
-function SelectField({ label, value, onChange, options, error }: {
+function SelectField({ label, value, onChange, options, error, required, field }: {
   label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; error?: string
+  required?: boolean; field?: string
 }) {
   const id = useId()
   const errId = `${id}-err`
   return (
-    <div className="form-field" aria-invalid={error ? 'true' : undefined}>
-      <label htmlFor={id}>{label}</label>
-      <select id={id} value={value} aria-describedby={error ? errId : undefined} onChange={(e) => onChange(e.target.value)}>
+    <div className="form-field" aria-invalid={error ? 'true' : undefined} data-field={field}>
+      <label htmlFor={id}><LabelText label={label} required={required} /></label>
+      <select id={id} value={value} aria-describedby={error ? errId : undefined} aria-required={required || undefined}
+        aria-invalid={error ? true : undefined} onChange={(e) => onChange(e.target.value)}>
         <option value="" disabled>— Chọn —</option>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -252,7 +264,7 @@ export function ActivitySteps({ current }: { current: 1 | 2 | 3 }) {
 
 /* --------------------------------------------------------- the form sheet */
 
-export function ActivitySheetForm({ mode, activityType, season, activity, revealMore = false, onClose, onSaved }: {
+export function ActivitySheetForm({ mode, activityType, season, activity, revealMore = false, fix = NO_GAPS, onClose, onSaved }: {
   mode: 'create' | 'edit'
   activityType: SupportedActivityType
   season: SeasonContext
@@ -260,10 +272,17 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
   /** Open "Thông tin bổ sung" on the way in — used when the field being fixed
    * (Nitơ, rơm) lives there and is, by definition, still blank. */
   revealMore?: boolean
+  /** Readiness gap codes the server reports open for THIS record. Each one
+   * makes its field required here: Carbon cannot be computed without it, so
+   * the form must not call it optional. */
+  fix?: readonly string[]
   onClose: () => void
   onSaved: (result: ActivityWriteResult) => void
 }) {
   const detail = parseDetail(activity)
+  const required = requiredFieldsFor(fix)
+  const needs = (field: string) => required.includes(field)
+  const reveal = revealMore || fix.length > 0
   const [date, setDate] = useState(() => (activity?.occurredAt ?? new Date().toISOString()).slice(0, 10))
   const [note, setNote] = useState(() => (typeof detail.note === 'string' ? detail.note : ''))
   const [touched, setTouched] = useState(false)
@@ -324,7 +343,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
   // One disclosure for every form. Open it on the way in when the record being
   // edited already carries something that lives inside it — otherwise a farmer
   // would have to guess that their own earlier entry is behind a closed summary.
-  const [moreOpen, setMoreOpen] = useState(() => revealMore || mode === 'edit' && [
+  const [moreOpen, setMoreOpen] = useState(() => reveal || mode === 'edit' && [
     detail.nitrogen_percent, detail.phosphorus_percent, detail.potassium_percent,
     detail.duration_minutes, detail.water_level_cm, detail.pump_energy_kwh,
     detail.harvested_area_ha, detail.moisture_percent,
@@ -339,22 +358,30 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
   // farmer lands on the field they were sent here to complete rather than on
   // a form that merely contains it somewhere.
   useEffect(() => {
-    if (!revealMore) return
+    if (!reveal) return
     const id = requestAnimationFrame(() => {
-      const body = formRef.current?.querySelector('.fw-more__body')
-      if (!body) return
-      const controls = Array.from(body.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select'))
-      const target = controls.find((c) => !c.value) ?? controls[0]
+      const form = formRef.current
+      if (!form) return
+      // The field a gap names comes first, in form order; otherwise the first
+      // blank control of the disclosure, as before.
+      const named = Array.from(form.querySelectorAll<HTMLElement>('[data-field]'))
+        .filter((el) => required.includes(el.dataset.field ?? ''))
+        .map((el) => el.querySelector<HTMLInputElement | HTMLSelectElement>('input, select'))
+        .filter((c): c is HTMLInputElement | HTMLSelectElement => Boolean(c))
+      const body = form.querySelector('.fw-more__body')
+      const controls = body ? Array.from(body.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select')) : []
+      const target = named.find((c) => !c.value) ?? named[0] ?? controls.find((c) => !c.value) ?? controls[0]
       target?.focus()
     })
     return () => cancelAnimationFrame(id)
-  }, [revealMore])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal])
 
   let input: ActivityInput
   let errors: FieldErrors
   if (activityType === 'fertilizer') {
     const draft = { fertilizerName: fName, amountKg: blankToNumber(fAmount), nitrogenPercent: blankToNumber(fN), phosphorusPercent: blankToNumber(fP), potassiumPercent: blankToNumber(fK), totalCostVnd: blankToNumber(fCost) }
-    errors = { ...validateFertilizer(draft), ...numberFormatErrors({ amountKg: fAmount, nitrogenPercent: fN, phosphorusPercent: fP, potassiumPercent: fK, totalCostVnd: fCost }) }
+    errors = { ...requiredErrors(required, { nitrogenPercent: fN }), ...validateFertilizer(draft), ...numberFormatErrors({ amountKg: fAmount, nitrogenPercent: fN, phosphorusPercent: fP, potassiumPercent: fK, totalCostVnd: fCost }) }
     input = { activityType: 'fertilizer', data: { fertilizerName: draft.fertilizerName, amountKg: draft.amountKg ?? 0, nitrogenPercent: draft.nitrogenPercent, phosphorusPercent: draft.phosphorusPercent, potassiumPercent: draft.potassiumPercent, totalCostVnd: draft.totalCostVnd } }
   } else if (activityType === 'irrigation') {
     const draft = { method: iMethod, waterVolumeM3: blankToNumber(iWater), durationMinutes: blankToNumber(iDuration), waterLevelCm: blankToNumber(iLevel), pumpEnergyKwh: iPump ? blankToNumber(iPumpEnergy) : null, totalCostVnd: blankToNumber(iCost) }
@@ -377,7 +404,11 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
       method: wMethod, strawMassKg: blankToNumber(wMass), totalCostVnd: blankToNumber(wCost),
       daysBeforeCultivation: blankToNumber(wDays), dryMatterFraction: blankToNumber(wDry),
     }
-    errors = { ...validateStrawManagement(draft), ...numberFormatErrors({ strawMassKg: wMass, totalCostVnd: wCost, daysBeforeCultivation: wDays, dryMatterFraction: wDry }, ['daysBeforeCultivation']) }
+    errors = {
+      ...requiredErrors(required, { strawMassKg: wMass, daysBeforeCultivation: wDays, dryMatterFraction: wDry, returnedToField: wReturned == null ? '' : String(wReturned) }),
+      ...validateStrawManagement(draft),
+      ...numberFormatErrors({ strawMassKg: wMass, totalCostVnd: wCost, daysBeforeCultivation: wDays, dryMatterFraction: wDry }, ['daysBeforeCultivation']),
+    }
     input = { activityType: 'straw_management', data: {
       method: (draft.method || 'other') as StrawManagementMethod,
       strawMassKg: draft.strawMassKg, totalCostVnd: draft.totalCostVnd,
@@ -386,7 +417,16 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     } }
   }
   const hasErrors = Object.keys(errors).length > 0
-  const err = (key: string) => (touched ? errors[key] : undefined)
+  // A blank required field is flagged once the farmer tries to save; a value
+  // that is typed but wrong ("0,8,5", "-3", "1,2" for a 0-1 ratio) is flagged
+  // as soon as it is typed, beside the field, not only after a failed save.
+  const RAW: Record<string, string> = {
+    amountKg: fAmount, nitrogenPercent: fN, phosphorusPercent: fP, potassiumPercent: fK, waterVolumeM3: iWater,
+    durationMinutes: iDuration, waterLevelCm: iLevel, pumpEnergyKwh: iPumpEnergy, yieldKg: hYield, harvestedAreaHa: hArea,
+    moisturePercent: hMoisture, seedKg: sSeedKg, amount: pAmount, strawMassKg: wMass, daysBeforeCultivation: wDays,
+    dryMatterFraction: wDry,
+  }
+  const err = (key: string) => (touched || (RAW[key] ?? '').trim() !== '' ? errors[key] : undefined)
 
   async function submit() {
     setPending(true)
@@ -437,7 +477,8 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     // N is a methodology input, not the farmer's action — the backend types it
     // optional, so it does not get equal billing with the amount actually spread.
     extra = <>
-      <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} hint={OPTIONAL} />
+      <NumberField label="Hàm lượng đạm" unit="%" value={fN} onChange={setFN} error={err('nitrogenPercent')} field="nitrogenPercent"
+        required={needs('nitrogenPercent')} hint={needs('nitrogenPercent') ? CARBON_NEEDS : OPTIONAL} />
       <div className="form-grid">
         <NumberField label="Hàm lượng lân" unit="%" value={fP} onChange={setFP} error={err('phosphorusPercent')} hint={OPTIONAL} />
         <NumberField label="Hàm lượng kali" unit="%" value={fK} onChange={setFK} error={err('potassiumPercent')} hint={OPTIONAL} />
@@ -494,16 +535,25 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
       {wMethod === 'burned' && (
         <p className="fw-disclaimer"><Ico name="info" />Đốt rơm phát thải CH₄ và N₂O, sẽ được tính vào kết quả carbon của vụ. Cần điền <strong>Tỷ lệ chất khô của rơm</strong> ở phần Thông tin bổ sung.</p>
       )}
-      <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} hint={OPTIONAL} error={err('strawMassKg')} big />
+      <NumberField label="Lượng rơm rạ" unit="kg" value={wMass} onChange={setWMass} error={err('strawMassKg')} big field="strawMassKg"
+        required={needs('strawMassKg')} hint={needs('strawMassKg') ? CARBON_NEEDS : OPTIONAL} />
     </>
     // Carbon-methodology inputs, stated the way a farmer would say them. Blank
     // stays blank: the Carbon Engine still fails closed rather than guessing.
     extra = <>
-      <NumberField label="Số ngày trước khi làm đất" unit="ngày" value={wDays} onChange={setWDays} hint={OPTIONAL} error={err('daysBeforeCultivation')} integer />
-      <NumberField label="Tỷ lệ chất khô của rơm" value={wDry} onChange={setWDry} hint="Không bắt buộc · từ 0 đến 1, ví dụ 0,85" error={err('dryMatterFraction')} />
+      {/* Never "Không bắt buộc": the Carbon result cannot be computed for
+        * incorporated or burned straw without these two. Required outright
+        * when the server reports the gap open for this record. */}
+      <NumberField label="Số ngày trước khi làm đất" unit="ngày" value={wDays} onChange={setWDays} error={err('daysBeforeCultivation')} integer
+        field="daysBeforeCultivation" required={needs('daysBeforeCultivation')} hint={wMethod === 'incorporated' || needs('daysBeforeCultivation') ? CARBON_NEEDS : undefined}
+        help="Số ngày từ lúc vùi rơm tới lúc làm đất cho vụ mới. Số nguyên, từ 0." />
+      <NumberField label="Tỷ lệ chất khô của rơm" value={wDry} onChange={setWDry} error={err('dryMatterFraction')}
+        field="dryMatterFraction" required={needs('dryMatterFraction')} hint={['incorporated', 'burned', 'composted'].includes(wMethod) || needs('dryMatterFraction') ? CARBON_NEEDS : undefined}
+        help="Phần khối lượng còn lại khi rơm khô hẳn. Từ 0 đến 1, ví dụ 0,85 hoặc 0.85." />
       {/* Three states, not a checkbox: "không trả lại" is a real answer the
         * Carbon Engine needs for composted straw, distinct from "chưa ghi". */}
       <SelectField
+        field="returnedToField" required={needs('returnedToField')} error={err('returnedToField')}
         label="Rơm có được trả lại ruộng không"
         value={wReturned == null ? '' : wReturned ? 'yes' : 'no'}
         onChange={(v) => setWReturned(v === 'yes' ? true : v === 'no' ? false : null)}
@@ -523,6 +573,10 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
         <div className="fw-fn">
           <p className="fw-fn__target"><Ico name="plot" /><span>Ghi vào vụ <b>{season.label}</b></span></p>
           <TextField label={DATE_LABEL[activityType]} type="date" value={date} onChange={setDate} required />
+          {/* The native picker writes the date in the browser's own locale
+            * (09/23/2026 on an English Chrome). The day is also said the
+            * Vietnamese way, so there is never a doubt about day vs month. */}
+          {/^\d{4}-\d{2}-\d{2}$/.test(date) && <small className="fw-date-read" aria-live="polite">{longDay(date)}</small>}
         </div>
 
         {main}
@@ -610,8 +664,9 @@ function successMessage(mode: 'create' | 'edit', type: SupportedActivityType, re
 const deletedMessage = (type: SupportedActivityType) => (type === 'harvest' ? 'Đã xóa bản ghi thu hoạch.' : 'Đã xóa hoạt động.')
 
 type FlowState =
+  | { kind: 'pick'; season: SeasonContext }
   | { kind: 'create'; type: SupportedActivityType; season: SeasonContext }
-  | { kind: 'edit'; activity: Activity; season: SeasonContext; revealMore?: boolean }
+  | { kind: 'edit'; activity: Activity; season: SeasonContext; revealMore?: boolean; fix?: readonly string[] }
   | { kind: 'delete'; activity: Activity; season: SeasonContext }
   | null
 
@@ -631,9 +686,12 @@ export function useActivityMutations() {
     return () => clearTimeout(t)
   }, [flash])
 
+  /** Step 1 of recording: which activity. The one entry point every "Ghi
+   * hoạt động" button opens, so Home and the journal start the same way. */
+  const openPicker = (season: SeasonContext) => setState({ kind: 'pick', season })
   const openCreate = (type: SupportedActivityType, season: SeasonContext) => setState({ kind: 'create', type, season })
-  const openEdit = (activity: Activity, season: SeasonContext, opts?: { revealMore?: boolean }) =>
-    setState({ kind: 'edit', activity, season, revealMore: opts?.revealMore })
+  const openEdit = (activity: Activity, season: SeasonContext, opts?: { revealMore?: boolean; fix?: readonly string[] }) =>
+    setState({ kind: 'edit', activity, season, revealMore: opts?.revealMore, fix: opts?.fix })
   const openDelete = (activity: Activity, season: SeasonContext) => setState({ kind: 'delete', activity, season })
   const close = () => setState(null)
   const done = (seasonId: string, message: string) => {
@@ -644,7 +702,22 @@ export function useActivityMutations() {
   }
 
   let node: ReactNode = null
-  if (state?.kind === 'delete') {
+  if (state?.kind === 'pick') {
+    const season = state.season
+    node = (
+      <FarmerSheet title="Ghi hoạt động" subtitle={season.label} icon="journal" tone="leaf" onClose={close}>
+        <ActivitySteps current={1} />
+        <div className="fw-pick" role="group" aria-label="Chọn loại hoạt động">
+          {QUICK_ENTRY_ACTIVE.map(({ type, label, hint }) => (
+            <button key={type} type="button" className={`tone-${ACTIVITY_ICON[type].tone}`} onClick={() => openCreate(type, season)}>
+              <IconTile name={ACTIVITY_ICON[type].icon} tone={ACTIVITY_ICON[type].tone} size="sm" />
+              <span className="fw-pick__text"><b>{label}</b><small>{hint}</small></span>
+            </button>
+          ))}
+        </div>
+      </FarmerSheet>
+    )
+  } else if (state?.kind === 'delete') {
     const type = isSupportedActivityType(state.activity.type) ? state.activity.type : 'fertilizer'
     node = <DeleteActivityDialog activity={state.activity} onCancel={close} onDeleted={() => done(state.season.id, deletedMessage(type))} />
   } else if (state) {
@@ -656,13 +729,14 @@ export function useActivityMutations() {
         season={state.season}
         activity={state.kind === 'edit' ? state.activity : undefined}
         revealMore={state.kind === 'edit' && state.revealMore}
+        fix={state.kind === 'edit' ? state.fix : undefined}
         onClose={close}
         onSaved={(result) => done(state.season.id, successMessage(state.kind, type, result))}
       />
     )
   }
 
-  return { openCreate, openEdit, openDelete, flash, node, version }
+  return { openPicker, openCreate, openEdit, openDelete, flash, node, version }
 }
 
 export type ActivityMutations = ReturnType<typeof useActivityMutations>
@@ -711,24 +785,7 @@ export function QuickActions({ seasons, mutations, compact, loading }: { seasons
 /* --------------------------------------------------- Journal "Ghi hoạt động" */
 
 export function AddActivityCta({ season, mutations }: { season: SeasonContext; mutations: ActivityMutations }) {
-  const [pickerOpen, setPickerOpen] = useState(false)
-  return (
-    <>
-      <button type="button" className="fw-btn" onClick={() => setPickerOpen(true)}><Ico name="plus" />Ghi hoạt động</button>
-      {pickerOpen && (
-        <FarmerSheet title="Ghi hoạt động" subtitle={season.label} icon="journal" tone="leaf" onClose={() => setPickerOpen(false)}>
-          <ActivitySteps current={1} />
-          <div className="fw-pick">
-            {QUICK_ENTRY_ACTIVE.map(({ type, label }) => (
-              <button key={type} type="button" onClick={() => { setPickerOpen(false); mutations.openCreate(type, season) }}>
-                <IconTile name={ACTIVITY_ICON[type].icon} tone={ACTIVITY_ICON[type].tone} size="sm" />{label}
-              </button>
-            ))}
-          </div>
-        </FarmerSheet>
-      )}
-    </>
-  )
+  return <button type="button" className="fw-btn" onClick={() => mutations.openPicker(season)}><Ico name="plus" />Ghi hoạt động</button>
 }
 
 /* ------------------------------------------------------ journal row actions */
