@@ -39,15 +39,16 @@ function parse(detail: string): Payload | null {
 /** One definition, shared with the Management timeline: both surfaces read the
  *  same seeded rows, and only one of them used to hide the scaffolding. */
 export { hasDemoData, isDemoDisclaimer, isDemoPlaceholder } from '../utils/activityPresentation'
-import { isDemoDisclaimer, isDemoPlaceholder } from '../utils/activityPresentation'
+import { isDemoPlaceholder, splitDemoMarker } from '../utils/activityPresentation'
 
 /** Free text as a farmer should see it: seed scaffolding becomes a short badge. */
 export const humanText = (v: string | null | undefined): string | null =>
   v == null || v === '' ? null : isDemoPlaceholder(v) ? 'Dữ liệu minh họa' : v
 
 /** A note as a farmer should see it. The seed disclaimer is said once per
- *  ledger (see `hasDemoData`), so on a row it is simply not a note. */
-const humanNote = (v: string | null): string | null => (isDemoDisclaimer(v) ? null : humanText(v))
+ *  ledger (see `hasDemoData`), so on a row it is not a note — but anything the
+ *  farmer wrote beside it still is. */
+const humanNote = (v: string | null): string | null => humanText(splitDemoMarker(v).text || null)
 
 export function viewActivity(activity: Pick<Activity, 'type' | 'detail'>): ActivityView {
   const title = ACTIVITY_TITLE[activity.type] ?? activity.type

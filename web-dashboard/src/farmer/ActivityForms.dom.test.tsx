@@ -67,7 +67,7 @@ function fill(label: string | RegExp, value: string) {
  *  element rather than its text. */
 const submitButton = () => document.querySelector('button[type="submit"]') as HTMLButtonElement
 const save = () => fireEvent.click(submitButton())
-const openMore = () => fireEvent.click(screen.getByText('Thông tin bổ sung'))
+const openMore = () => fireEvent.click(document.querySelector('details.fw-more > summary')!)
 const payload = () => createActivity.mock.calls[0][1].data as Record<string, unknown>
 
 /** `<details>` keeps its children in the DOM when closed — that is the point of
@@ -124,12 +124,27 @@ describe('primary screen holds only what a farmer records in the field', () => {
     }
   })
 
-  it('every form uses the same disclosure label', () => {
+  it('every form names its disclosure by what it holds, and the disclosure closes the form', () => {
     for (const t of ['seeding', 'fertilizer', 'irrigation', 'pesticide', 'straw_management', 'harvest'] as const) {
       cleanup()
       renderForm({ activityType: t })
-      expect(screen.getByText('Thông tin bổ sung')).toBeTruthy()
+      const details = document.querySelector('details.fw-more')!
+      const summary = details.querySelector('summary')!.textContent ?? ''
+      expect(summary).toMatch(t === 'seeding' ? /^Chi phí/ : /^Thông tin kỹ thuật và chi phí/)
+      expect(summary).toMatch(/chi phí/i)
+      // Nothing that is always visible sits under the closed summary.
+      const note = screen.getByLabelText(/^Ghi chú/)
+      expect(note.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
+  })
+
+  it('irrigation: essentials visible, technical fields and cost behind the disclosure', () => {
+    renderForm({ activityType: 'irrigation' })
+    const details = document.querySelector('details.fw-more') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.querySelector('summary')!.textContent).toContain('Thời gian tưới, mực nước, máy bơm · chi phí')
+    for (const label of [/^Hình thức tưới/, /^Lượng nước/, /^Ghi chú/]) expect(screen.getByLabelText(label).closest('details')).toBeNull()
+    for (const label of [/^Thời gian tưới/, /^Mực nước ruộng/, /^Chi phí/]) expect(screen.getByLabelText(label).closest('details')).toBe(details)
   })
 })
 
