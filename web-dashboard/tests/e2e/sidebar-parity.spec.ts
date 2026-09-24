@@ -73,6 +73,9 @@ async function open(page: Page, path: string, side: string) {
   await page.goto(path)
   await expect(page.locator(side)).toBeVisible()
   await expect(page.locator(`${side} nav a`).first()).toBeVisible()
+  // Geometry is compared at sub-pixel tolerance: measure with the webfont's
+  // metrics, never the fallback's (a 1px brand offset flaked without this).
+  await page.evaluate(() => document.fonts.ready)
 }
 
 for (const vw of DESKTOP) {
@@ -125,8 +128,11 @@ for (const vw of DESKTOP) {
   })
 }
 
-test('a long address wraps after "@", stays inside the rail and keeps its full text', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
+// 1280: local part and domain on two lines. 1024 (216px rail): the domain
+// also breaks at its hyphen — real-data QA found it cut to "agricarbon-…"
+// under a two-line clamp.
+for (const [vw, lines] of [[1280, 2], [1024, 3]] as const) test(`${vw}px: a long address wraps after "@", stays inside the rail and keeps its full text`, async ({ page }) => {
+  await page.setViewportSize({ width: vw, height: 900 })
   for (const [path, side] of [['/farmer', FARMER_SIDE], ['/dashboard', MANAGER_SIDE]] as const) {
     await open(page, path, side)
     // Layout stress on the real component's markup: the mock tenant has no
@@ -140,12 +146,14 @@ test('a long address wraps after "@", stays inside the rail and keeps its full t
     }, LONG_EMAIL)
     const g = await geometry(page, side)
     expect(g.footInside, `${path} footer inside`).toBe(true)
+    // Line breaks depend on the webfont's metrics, not the fallback's.
+    await page.evaluate(() => document.fonts.ready)
     const box = await name.evaluate((el) => {
       const r = el.getBoundingClientRect(); const lh = parseFloat(getComputedStyle(el).lineHeight)
       return { lines: Math.round(r.height / lh), clipped: el.scrollHeight > el.clientHeight + 1 }
     })
-    expect(box.lines, `${path}: local part and domain on two lines`).toBe(2)
-    expect(box.clipped, `${path}: nothing hidden at 1280px`).toBe(false)
+    expect(box.lines, `${path}: lines at ${vw}px`).toBe(lines)
+    expect(box.clipped, `${path}: nothing hidden at ${vw}px`).toBe(false)
     await expect(name).toHaveText(LONG_EMAIL)
     await expect(name).toHaveAttribute('title', LONG_EMAIL)
   }
