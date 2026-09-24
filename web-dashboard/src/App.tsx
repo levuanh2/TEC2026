@@ -14,6 +14,7 @@ import { PerformancePage } from './pages/performance'
 import { SeasonHub, type SeasonTab } from './pages/season'
 import { MrvPage } from './pages/mrv'
 import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
+import { AccountName, Sidebar } from './components/Sidebar'
 import { FarmerExperience } from './farmer/FarmerExperience'
 import { prefetchFarmerScope } from './farmer/scope'
 
@@ -117,40 +118,28 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
       {/* First stop for a keyboard or screen-reader user: the sidebar is a
         * long list of links to walk past on every page. */}
       <a className="skip-link" href="#main">Bỏ qua điều hướng, tới nội dung chính</a>
-      <aside className={`sidebar${open ? ' is-open' : ''}`}>
-        <Link to="/dashboard" className="brand">
-          AgriCarbon
-          <small>Hiệu suất tài nguyên · Carbon · MRV</small>
-        </Link>
-        <nav className="nav" aria-label="Điều hướng chính">
-          {groups.map((g, gi) => (
-            <div className="nav-group" key={gi}>
-              {g.label && <div className="nav-group__label">{g.label}</div>}
-              {g.items.map((it) => {
-                const isCtx = (it as { context?: boolean }).context
-                const active = path === it.to || (!isCtx && it.to !== '/dashboard' && path.startsWith(it.to))
-                return (
-                  <Link
-                    key={it.to}
-                    to={it.to}
-                    className={isCtx ? 'is-context' : undefined}
-                    aria-current={active ? 'page' : undefined}
-                    onClick={() => setOpen(false)}
-                  >
-                    {!isCtx && <span className="nav__ico"><Ico name={it.icon} size={15} /></span>}
-                    {it.label}
-                  </Link>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
-        <div className="sidebar__foot">
+      <Sidebar
+        className={open ? 'is-open' : undefined}
+        home="/dashboard"
+        tagline="Hiệu suất tài nguyên · Carbon · MRV"
+        navLabel="Điều hướng chính"
+        groups={groups.map((g, gi) => ({
+          key: g.label ?? String(gi),
+          label: g.label,
+          items: g.items.map((it) => ({
+            to: it.to,
+            label: it.label,
+            icon: <Ico name={it.icon} size={15} />,
+            current: path === it.to || (it.to !== '/dashboard' && path.startsWith(it.to)),
+            onClick: () => setOpen(false),
+          })),
+        }))}
+        foot={<>
           <span className="avatar" aria-hidden="true">
             {email[0]?.toUpperCase()}
           </span>
           <span className="sidebar__id">
-            <b>{email}</b>
+            <AccountName text={email} />
             <small>{ROLE_LABEL[viewer.role] ?? viewer.role}</small>
             {session && (
               <button className="link" onClick={() => void signOut()}>
@@ -158,13 +147,13 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
               </button>
             )}
           </span>
-        </div>
-      </aside>
+        </>}
+      />
 
       <div className="main">
         <header className="topbar">
           <div className="topbar__ctx">
-            <button className="menu-btn" aria-label="Mở menu" onClick={() => setOpen((o) => !o)}>
+            <button className="menu-btn" aria-label="Mở menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
               <Ico name="menu" size={20} />
             </button>
             <span className="org-chip">

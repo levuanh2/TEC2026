@@ -124,6 +124,10 @@ h1, h2, h3, p { margin: 0; }
   display: flex; flex-direction: column; padding: 22px 18px 16px;
   position: sticky; top: 0; height: 100vh; border-right: 0;
   color-scheme: dark;
+  /* Both roles render this sidebar (components/Sidebar.tsx). The Farmer
+   * shell sets its own body type (15px / 1.6), so the rail states its own
+   * rather than inheriting whichever shell it sits in. */
+  font-family: var(--font); font-size: var(--fs-body); line-height: var(--lh);
 }
 .brand {
   display: block; text-decoration: none; color: var(--ac-sidebar-ink);
@@ -175,7 +179,23 @@ h1, h2, h3, p { margin: 0; }
   display: grid; place-items: center; font-size: var(--fs-sm);
 }
 .sidebar__id { display: grid; gap: 1px; min-width: 0; }
-.sidebar__id b { font-size: var(--fs-sm); color: var(--ac-sidebar-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A long address breaks after its "@" (AccountName) and, on the 216px
+ * tablet rail, again at a hyphen in the domain — real-data QA found the QA
+ * farmer's domain cut to "agricarbon-…" there under a two-line clamp. Three
+ * lines hold it; anything longer is clipped, with the full text in the DOM
+ * and in `title`. */
+.sidebar__id b {
+  font-size: var(--fs-sm); color: var(--ac-sidebar-ink); line-height: 1.35;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+/* Farmer: the whole account block is one link to the account page. */
+.sidebar__acct {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  min-height: var(--ac-control-h); padding-block: 2px;
+  color: inherit; text-decoration: none; border-radius: var(--ac-radius-sm);
+}
+.sidebar__acct:hover .sidebar__id small { color: var(--ac-sidebar-ink); text-decoration: underline; text-underline-offset: 3px; }
 .sidebar__id small { font-size: var(--fs-caption); color: var(--ac-sidebar-ink-2); }
 .sidebar__id .link {
   border: 0; background: none; color: var(--ac-sidebar-ink-2);
@@ -578,7 +598,10 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .kpi__value { font-size: 21px; }
 }
 @media (max-width: 1024px) {
-  :root { --sidebar-w: 192px; }
+  /* 216, not 192: at 192 the longest Management row ("Tổng quan vận hành",
+   * 132px of bold 13px text) ran 20px past the rail and was clipped. Both
+   * roles take this width from here (Round 4.2). */
+  :root { --sidebar-w: 216px; }
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi:nth-child(2n+1) { padding-left: 0; border-left: 0; }
   .grid-4, .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -587,8 +610,12 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 }
 @media (max-width: 768px) {
   .shell { display: block; }
-  .sidebar { position: fixed; z-index: 50; width: 250px; transform: translateX(-100%); transition: transform .2s var(--ac-ease); box-shadow: var(--shadow-drawer); }
-  .sidebar.is-open { transform: translateX(0); }
+  /* Closed, the drawer is also `visibility: hidden`: translated off-screen
+   * alone, its links stayed in the tab order and took the first three Tab
+   * presses to nowhere visible (Round 4.2 audit). Visibility flips after the
+   * slide-out and before the slide-in. */
+  .sidebar { position: fixed; z-index: 50; width: 250px; transform: translateX(-100%); visibility: hidden; transition: transform .2s var(--ac-ease), visibility 0s linear .2s; box-shadow: var(--shadow-drawer); }
+  .sidebar.is-open { transform: translateX(0); visibility: visible; transition: transform .2s var(--ac-ease), visibility 0s; }
   .menu-btn { display: block; }
   .content { padding: 18px 16px 48px; }
   .page-head { flex-direction: column; }
@@ -873,6 +900,13 @@ a.btn, a.btn:hover { text-decoration: none; }
 
 /* The workspace column never grows to its widest table. */
 .ops, .ops > *, .ops-table__wrap { min-width: 0; max-width: 100%; }
+/* The wrapper is also the containing block of what sits in it. The actions
+ * header's `.sr-only` label is `position: absolute`; with <body> as its
+ * containing block it escaped the wrapper's horizontal scroll at its
+ * static position past the last column, and on real data widened the page
+ * at 1024px — /seasons by 38px and /data-gaps by 66px before Round 4.2's
+ * 216px rail, 62px and 90px after (Round 4.2 real-data QA). */
+.ops-table__wrap { position: relative; }
 
 /* ---------------------------------------------------------- /carbon rows
  * Six columns: identity (farm · plot · season), one Carbon state, one cell
@@ -928,7 +962,7 @@ a.btn, a.btn:hover { text-decoration: none; }
 
 /* Focus on the green sidebar uses the light marker; the workspace's blue ring
  * would fall to ~2:1 on forest (Round 4.1). */
-.sidebar :where(a, button):focus-visible { outline-color: var(--ac-sidebar-marker); }
+aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-sidebar-marker); outline-offset: 2px; border-radius: var(--ac-radius-sm); }
 
 /* /seasons and /data-gaps measured 4px and 1px wider than their wrapper at
  * 1280px (Round 4.1 audit): the identity codes never wrap, so the cells give

@@ -154,81 +154,17 @@
 .fw-disclaimer svg { width: 16px; height: 16px; margin-top: 2px; }
 
 /* ----------------------------------------------------------------- shell */
-.fw-shell { min-height: 100vh; display: grid; grid-template-columns: 232px minmax(0, 1fr); background: var(--fw-paper); }
-/* Requested carve-out: solid navbar blue, not the shell's paper surface. */
-.fw-side {
-  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
-  padding: var(--fw-space-24) var(--fw-space-20) var(--fw-space-16);
-  background: var(--fw-navbar);
-  color-scheme: dark;
-}
-/* Compact brand: a wordmark, not a logo tile.
- * `.fw-side` prefix beats the global `.fw a { color: inherit }` reset (which
- * otherwise wins on specificity: class+type > class alone), so the brand
- * link doesn't inherit the app's dark ink instead of white. */
-.fw-side .fw-brand { display: flex; align-items: baseline; gap: var(--fw-space-8); text-decoration: none; color: #fff; }
-.fw-brand__mark { display: none; }
-.fw-brand b { font-family: var(--fw-display); font-size: var(--fw-text-lg); font-weight: 600; letter-spacing: -.01em; line-height: 1; }
-.fw-brand small { font-size: var(--fw-text-xs); font-weight: 600; color: rgb(255 255 255 / .62); }
-
-/* overflow-y: auto with overflow-x left as the visible default computes
- * overflow-x to auto too (CSS overflow spec) — so the hover scale(1.1) on
- * .fw-nav__item (which nudges scrollable-overflow width right) was enough to
- * pop an unwanted horizontal scrollbar. Only vertical scroll is ever wanted. */
-.fw-nav { display: grid; align-content: start; gap: var(--fw-space-20); padding-top: var(--fw-space-32); overflow-y: auto; overflow-x: hidden; flex: 1; }
-.fw-nav__group { display: grid; gap: 1px; }
-/* .5 measured 4.40:1 on the sidebar green — just under the 4.5 floor for
- * text this size. .58 measures 5.3:1. */
-.fw-nav__label { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgb(255 255 255 / .58); padding-bottom: var(--fw-space-6); }
-/* Quiet but unmistakable: the active row is the only one in full white and
- * the only one with a rule beneath it. No pill, no slab.
- * `.fw-side` prefix (see .fw-brand note above): without it this rule's
- * (0,1,0) specificity loses to `.fw a { color: inherit }`'s (0,1,1), so the
- * resting label silently inherits the app's dark ink instead of staying
- * white — invisible against navy, which is exactly the bug reported. */
-.fw-side .fw-nav__item {
-  position: relative; display: flex; align-items: center; gap: var(--fw-space-12);
-  min-height: var(--ac-control-h-sm); padding-inline: var(--fw-space-10); margin-left: 3px;
-  color: rgb(255 255 255 / .86); font-weight: 550; font-size: 14.5px; text-decoration: none;
-  border-bottom: 1px solid transparent;
-  transform-origin: left center;
-  transition: color var(--fw-dur) var(--fw-ease-out), border-color var(--fw-dur) var(--fw-ease-out), transform var(--fw-dur) var(--fw-ease-out);
-}
-.fw-nav__item svg { width: 18px; height: 18px; color: rgb(255 255 255 / .68); transition: color var(--fw-dur) var(--fw-ease-out); }
-.fw-nav__item:hover { color: #fff; font-weight: 700; border-bottom-color: rgb(255 255 255 / .35); transform: scale(1.1); }
-.fw-nav__item:hover svg { color: #fff; }
-.fw-nav__item[aria-current="page"] {
-  color: #fff; font-weight: 700; border-bottom-color: transparent;
-  background: var(--ac-sidebar-selected); box-shadow: inset 0 0 0 1px var(--ac-sidebar-selected-line);
-  border-radius: var(--ac-radius-sm);
-}
-/* The active item is marked three ways — a bar, the icon and the weight — so
- * it never depends on colour alone (WCAG 1.4.1). */
-.fw-nav__item[aria-current="page"]::before {
-  content: ""; position: absolute; left: calc(var(--fw-space-10) * -1); top: 50%;
-  transform: translateY(-50%); width: 3px; height: 18px; border-radius: 2px;
-  background: var(--ac-sidebar-marker);
-}
-.fw-nav__item[aria-current="page"] svg { color: var(--ac-sidebar-marker); }
-
-.fw-profile { display: flex; align-items: center; gap: var(--fw-space-8); padding-top: var(--fw-space-16); border-top: 1px solid rgb(255 255 255 / .16); }
-.fw-side .fw-avatar {
-  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  border: 1px solid rgb(255 255 255 / .35); color: #fff; font-weight: 650; font-size: var(--fw-text-sm);
-  text-decoration: none;
-}
+.fw-shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); background: var(--fw-paper); }
+/* The sidebar is the shared one (components/Sidebar.tsx, styled in
+ * styles.css "Shell"): same --sidebar-w token, grid and states as Management.
+ * Round 4.2 removed the Farmer copy — its rows padded with --fw-space-10,
+ * a token that was never defined, so the active pill had no inner space. */
 .fw-avatar {
   width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
   border: 1px solid var(--fw-rule-2); color: var(--fw-accent-deep); font-weight: 650; font-size: var(--fw-text-sm);
   text-decoration: none;
 }
 .fw-avatar--lg { width: 56px; height: 56px; font-size: var(--fw-text-lg); font-family: var(--fw-display); }
-.fw-profile__id { min-width: 0; flex: 1; display: grid; text-decoration: none; }
-.fw-profile__id b { font-size: var(--fw-text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
-.fw-profile__id small { font-size: var(--fw-text-xs); color: rgb(255 255 255 / .58); }
-/* Logout reads as a real action, not an input-looking button. */
-.fw-signout { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fw-text-xs); font-weight: 600; color: rgb(255 255 255 / .58); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
-.fw-signout:hover { color: #ff9aa2; }
 
 .fw-main { min-width: 0; display: flex; flex-direction: column; overflow-x: clip; }
 .fw-topbar {
@@ -850,7 +786,6 @@
   .fw-qa:nth-child(3n+1) { border-left: 0; }
 }
 @media (max-width: 1100px) {
-  .fw-shell { grid-template-columns: 208px minmax(0, 1fr); }
   .fw-content { padding: var(--fw-space-32) var(--fw-space-24) var(--fw-space-56); gap: var(--fw-space-32); }
   .fw-topbar { padding: 0 var(--fw-space-24); }
   .fw-grid-2, .fw-home-grid { grid-template-columns: minmax(0, 1fr); gap: var(--fw-space-32); }
@@ -877,7 +812,7 @@
 @media (max-width: 768px) {
   .fw { --fw-top: 52px; --fw-rail: 0; }
   .fw-shell { display: block; }
-  .fw-side { display: none; }
+  .fw-shell > .sidebar { display: none; }
   .fw-topbar { padding: 0 var(--fw-space-16); gap: var(--fw-space-8); }
   .fw-topbar__brand { display: flex; }
   .fw-topbar__meta { display: none; }
@@ -1201,7 +1136,7 @@
 
 /* Focus on the green navbar: the workspace's blue ring would sit at ~2:1 on
  * forest, so navigation uses the light marker instead (Round 4.1). */
-.fw-side :where(a, button):focus-visible, .fw-bottom a:focus-visible { outline-color: var(--ac-sidebar-marker); }
+.fw-bottom a:focus-visible { outline-color: var(--ac-sidebar-marker); }
 
 /* Round 4.1 — the disclosure names what it holds, on two lines. */
 .fw-more > summary { flex-wrap: wrap; padding-block: var(--fw-space-8); }
