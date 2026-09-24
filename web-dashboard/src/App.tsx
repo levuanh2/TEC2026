@@ -15,6 +15,7 @@ import { SeasonHub, type SeasonTab } from './pages/season'
 import { MrvPage } from './pages/mrv'
 import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
 import { AccountName, Sidebar } from './components/Sidebar'
+import { useMobileDrawer } from './components/useMobileDrawer'
 import { FarmerExperience } from './farmer/FarmerExperience'
 import { prefetchFarmerScope } from './farmer/scope'
 
@@ -84,7 +85,7 @@ function Login({ done, ended }: { done: (s: Session) => void; ended: AuthEndReas
 /* ---------------------------------------------------------------- App shell */
 
 function AppShell({ session, viewer, path, children }: { session: Session | null; viewer: CurrentUser; path: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const drawer = useMobileDrawer(path)
   const [orgName, setOrgName] = useState<string | null>(null)
   /* "Chưa gán tổ chức" is a statement of fact about the account, so it must
    * not appear while the organisation's name is merely still being read —
@@ -118,8 +119,12 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
       {/* First stop for a keyboard or screen-reader user: the sidebar is a
         * long list of links to walk past on every page. */}
       <a className="skip-link" href="#main">Bỏ qua điều hướng, tới nội dung chính</a>
+      {/* Phones only: covers the workspace while the drawer is open, and a tap
+        * on it closes the drawer. */}
+      {drawer.open && <div className="shell-backdrop" data-testid="drawer-backdrop" aria-hidden="true" onClick={drawer.close} />}
       <Sidebar
-        className={open ? 'is-open' : undefined}
+        className={drawer.open ? 'is-open' : undefined}
+        drawer={{ id: 'app-drawer', open: drawer.open, mobile: drawer.mobile, onClose: drawer.close, asideRef: drawer.drawerRef, closeRef: drawer.closeRef }}
         home="/dashboard"
         tagline="Hiệu suất tài nguyên · Carbon · MRV"
         navLabel="Điều hướng chính"
@@ -131,7 +136,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
             label: it.label,
             icon: <Ico name={it.icon} size={15} />,
             current: path === it.to || (it.to !== '/dashboard' && path.startsWith(it.to)),
-            onClick: () => setOpen(false),
+            onClick: drawer.close,
           })),
         }))}
         foot={<>
@@ -150,10 +155,10 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
         </>}
       />
 
-      <div className="main">
+      <div className="main" inert={drawer.open ? true : undefined}>
         <header className="topbar">
           <div className="topbar__ctx">
-            <button className="menu-btn" aria-label="Mở menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+            <button type="button" className="menu-btn" aria-label="Mở menu" aria-expanded={drawer.open} aria-controls="app-drawer" ref={drawer.openerRef} onClick={drawer.toggle}>
               <Ico name="menu" size={20} />
             </button>
             <span className="org-chip">

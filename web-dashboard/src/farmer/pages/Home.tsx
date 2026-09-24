@@ -6,6 +6,7 @@ import type { QueryState } from '../data'
 import { MiniTimeline } from '../journal'
 import { Chip, Empty, ErrorPanel, Flash, MoreLink, Section, Sk, SkBlock } from '../kit'
 import { CostPanel, PrimaryNextAction, SeasonContextBar, SummaryStrip, nextAction } from '../hybrid'
+import { seasonFacts } from '../metricsView'
 import { useWritableSeason } from '../writeAccess'
 import { primarySeason, useActivities, useCarbonReadiness, useMetrics, useScope, type SeasonCtx } from '../scope'
 
@@ -20,8 +21,9 @@ function pending<T>(state: QueryState<T>, scopeLoading: boolean): QueryState<T> 
  *
  *   A. which season this is (one compact bar)
  *   B. ONE next action, decided from the server's state
- *   C. a compact read of the season (activities · water · fertiliser · Carbon),
- *      with direct cost in its own panel that says it is not a CO₂e input
+ *   C. a compact read of the season (water · fertiliser · Carbon, then the
+ *      journal count as a plain line), with direct cost in its own panel that
+ *      says it is not a CO₂e input
  *   D. the last five activities, and a link to the whole journal
  *
  * Everything else has a home of its own and is not repeated here: recording
@@ -37,6 +39,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   const carbonReadiness = useCarbonReadiness(sid)
   const mutations = useActivityMutations()
   const primaryWriteCtx = useWritableSeason(primary)
+  const facts = seasonFacts(activities.data, primary?.plot?.areaHa)
   const name = viewer.fullName?.trim()
   const action = nextAction({
     hasSeason: Boolean(sid),
@@ -72,8 +75,8 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
 
       {sid && (
         <Section className="fw-area-summary" title="Tổng quan vụ này">
-          <SummaryStrip activities={pending(activities, scope.loading)} metrics={pending(metrics, scope.loading)} readiness={pending(carbonReadiness, scope.loading)} />
-          <CostPanel metrics={pending(metrics, scope.loading)} moreTo="/farmer/performance" />
+          <SummaryStrip activities={pending(activities, scope.loading)} metrics={pending(metrics, scope.loading)} readiness={pending(carbonReadiness, scope.loading)} facts={facts} />
+          <CostPanel metrics={pending(metrics, scope.loading)} facts={facts} moreTo="/farmer/performance" />
         </Section>
       )}
 

@@ -970,3 +970,57 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
 @media (max-width: 1320px) and (min-width: 901px) {
   .ops-table th, .ops-table td { padding-inline: 10px; }
 }
+
+/* -- Round 4.3: a cooperative aggregate always states its coverage --------- */
+.agg { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--border); align-content: start; }
+.agg__top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.agg__name { margin: 0; font-size: var(--fs-caption); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.agg__value { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--text-primary); }
+.agg__value.is-empty { font-size: var(--fs-body); font-weight: 650; color: var(--text-secondary); letter-spacing: 0; }
+.agg__reading { white-space: nowrap; }
+.agg__reading small { font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); }
+.agg__coverage { margin: 0; font-size: var(--fs-body); font-weight: 650; color: var(--text-primary); }
+.agg__why { font-weight: 500; color: var(--text-secondary); }
+.agg__facts { display: grid; gap: 2px; margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+.agg__facts div { display: flex; flex-wrap: wrap; gap: 4px; }
+.agg__facts dt { font-weight: 650; color: var(--text-muted); }
+.agg__facts dt::after { content: ":"; }
+.agg__facts dd { margin: 0; }
+.agg__toggle {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: none; font: inherit; font-size: var(--fs-sm); font-weight: 650; color: var(--text-primary); cursor: pointer;
+}
+.agg__toggle svg:last-child { transition: transform .15s var(--ac-ease); }
+.agg__toggle[aria-expanded="true"] svg:last-child { transform: rotate(90deg); }
+.agg__toggle:focus-visible { outline: 2px solid var(--ac-focus); outline-offset: 2px; }
+.agg__list { display: grid; gap: 2px; margin: 6px 0 0; padding: 0; list-style: none; }
+.agg__list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 6px 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.agg__list a { color: var(--text-primary); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; min-height: 32px; display: inline-flex; align-items: center; }
+.agg__list small { color: var(--text-secondary); }
+.ops-scope { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+
+/* -- Round 4.3: the Management drawer on phones ------------------------------
+ * A backdrop that covers (and closes) the workspace, a named close button,
+ * and a drawer that scrolls on its own while the page behind it cannot. The
+ * brand row wrapper is a plain block above the breakpoint, so the desktop and
+ * tablet rail — and the Farmer sidebar, which never has a close button —
+ * render exactly as before. */
+.sidebar__top { display: block; }
+.sidebar__close { display: none; }
+.shell-backdrop { display: none; }
+@media (max-width: 768px) {
+  .shell-backdrop { display: block; position: fixed; inset: 0; z-index: 45; background: var(--ac-scrim); animation: backdrop-in .2s var(--ac-ease); }
+  .shell > .sidebar { overflow-y: auto; overscroll-behavior: contain; height: 100dvh; }
+  .sidebar__top { display: flex; align-items: flex-start; gap: 8px; }
+  .sidebar__top > .brand { flex: 1 1 auto; min-width: 0; }
+  .sidebar__close {
+    display: inline-grid; place-items: center; flex: none; width: 44px; height: 44px; margin: -8px -8px 0 0;
+    border: 0; border-radius: var(--ac-radius-sm); background: none; color: var(--ac-sidebar-ink); cursor: pointer;
+  }
+  .sidebar__close:hover { background: var(--ac-sidebar-selected); }
+  .menu-btn { min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; }
+}
+@keyframes backdrop-in { from { opacity: 0 } to { opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .shell-backdrop { animation: none; } }
+/* A list that sets its own display must still honour `hidden`. */
+.agg__list[hidden] { display: none; }

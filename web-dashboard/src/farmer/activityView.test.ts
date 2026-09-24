@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SeasonMetrics } from '../api/metrics'
 import type { Recommendation } from '../api/recommendations'
 import { buildAttention, dayLabel, groupByDay, initials, isDemoPlaceholder, viewActivity } from './activityView'
-import { metricViews } from './metricsView'
+import { metricDetails, seasonFacts } from './metricsView'
 
 const act = (type: string, payload: Record<string, unknown>) => ({ type, detail: JSON.stringify(payload) })
 
@@ -76,23 +76,24 @@ describe('buildAttention', () => {
   })
 })
 
-describe('metricViews', () => {
+describe('metricDetails', () => {
+  const views = (m: SeasonMetrics) => metricDetails(m, seasonFacts([], null))
   it('shows backend ratios as-is and keeps missing ratios null (never 0)', () => {
-    const views = metricViews(metrics())
-    expect(views.find((v) => v.key === 'water')?.value).toBe('0,062')
-    expect(views.find((v) => v.key === 'cost')?.value).toBeNull()
-    expect(views.find((v) => v.key === 'carbon')?.value).toBeNull()
+    const v = views(metrics())
+    expect(v.find((x) => x.key === 'water')?.secondary).toContainEqual({ value: '0,062', unit: 'm³ / kg lúa' })
+    expect(v.find((x) => x.key === 'cost')?.primary).toBeNull()
+    expect(v.find((x) => x.key === 'carbon')?.primary).toBeNull()
   })
 
   it('points to the harvest form when yield is what is missing', () => {
-    const views = metricViews(metrics({ yieldKg: null, waterPerKg: null, fertilizerPerKg: null }))
-    expect(views.find((v) => v.key === 'water')?.cta).toBe('harvest')
+    const v = views(metrics({ yieldKg: null, waterPerKg: null, fertilizerPerKg: null }))
+    expect(v.find((x) => x.key === 'water')?.action?.create).toBe('harvest')
   })
 
   it('offers no form shortcut where no dedicated form exists', () => {
-    const views = metricViews(metrics())
-    expect(views.find((v) => v.key === 'cost')?.cta).toBeUndefined()
-    expect(views.find((v) => v.key === 'carbon')?.cta).toBeUndefined()
+    const v = views(metrics())
+    expect(v.find((x) => x.key === 'cost')?.action?.create).toBeUndefined()
+    expect(v.find((x) => x.key === 'carbon')?.action?.create).toBeUndefined()
   })
 })
 

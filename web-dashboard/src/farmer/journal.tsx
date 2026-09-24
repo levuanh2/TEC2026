@@ -103,14 +103,17 @@ export function TimelineSkeleton() {
 }
 
 /** Filters + summary + timeline for one season's activities. */
-export function JournalView({ state, renderCardActions, renderDetailActions, resetSignal, emptyAction }: {
+export function JournalView({ state, renderCardActions, renderDetailActions, resetSignal, emptyAction, initialType }: {
   state: QueryState<Activity[]>
+  /** Opens pre-filtered — "Xem hoạt động tưới" from Performance lands on the
+   *  records its figure was computed from. Unknown types fall back to all. */
+  initialType?: string | null
   renderCardActions?: (activity: Activity) => ReactNode
   renderDetailActions?: (activity: Activity) => ReactNode
   resetSignal?: number
   emptyAction?: ReactNode
 }) {
-  const [type, setType] = useState('all')
+  const [type, setType] = useState(initialType ?? 'all')
   if (state.loading) return <TimelineSkeleton />
   if (state.error) return <ErrorPanel error={state.error} onRetry={state.reload} />
   const items = state.data ?? []

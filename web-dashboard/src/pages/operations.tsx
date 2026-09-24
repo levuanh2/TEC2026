@@ -95,6 +95,14 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
         ))}
       </div>
 
+      {/* The counts above are work items, each tile opening exactly the
+        * seasons it counts; this line says what they were counted over. */}
+      {!ops.loading && rows.length > 0 && (
+        <p className="ops-scope" data-testid="ops-scope">
+          Phạm vi: toàn HTX · {rows.length} vụ · mỗi ô mở đúng danh sách vụ được đếm. Đây là số việc cần xử lý, không phải điểm hiệu suất.
+        </p>
+      )}
+
       {ops.error && <p className="ops-error" role="alert"><Ico name="warning" size={14} />{ops.error}</p>}
 
       <h2 className="ops__section">Danh sách công việc ưu tiên</h2>
