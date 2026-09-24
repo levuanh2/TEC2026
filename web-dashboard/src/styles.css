@@ -607,8 +607,12 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 }
 @media (max-width: 768px) {
   .shell { display: block; }
-  .sidebar { position: fixed; z-index: 50; width: 250px; transform: translateX(-100%); transition: transform .2s var(--ac-ease); box-shadow: var(--shadow-drawer); }
-  .sidebar.is-open { transform: translateX(0); }
+  /* Closed, the drawer is also `visibility: hidden`: translated off-screen
+   * alone, its links stayed in the tab order and took the first three Tab
+   * presses to nowhere visible (Round 4.2 audit). Visibility flips after the
+   * slide-out and before the slide-in. */
+  .sidebar { position: fixed; z-index: 50; width: 250px; transform: translateX(-100%); visibility: hidden; transition: transform .2s var(--ac-ease), visibility 0s linear .2s; box-shadow: var(--shadow-drawer); }
+  .sidebar.is-open { transform: translateX(0); visibility: visible; transition: transform .2s var(--ac-ease), visibility 0s; }
   .menu-btn { display: block; }
   .content { padding: 18px 16px 48px; }
   .page-head { flex-direction: column; }

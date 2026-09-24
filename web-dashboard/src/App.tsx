@@ -153,7 +153,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
       <div className="main">
         <header className="topbar">
           <div className="topbar__ctx">
-            <button className="menu-btn" aria-label="Mở menu" onClick={() => setOpen((o) => !o)}>
+            <button className="menu-btn" aria-label="Mở menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
               <Ico name="menu" size={20} />
             </button>
             <span className="org-chip">
