@@ -42,47 +42,54 @@ test.describe('authenticated real-data dashboard', () => {
     await page.getByLabel('Mật khẩu').fill(password!)
     await page.getByRole('button', { name: 'Đăng nhập' }).click()
 
+    // Signed in as a manager: on the Management home, with the Management
+    // navigation, one h1 that names this route, and no login form left.
     await expect(page).toHaveURL(/\/dashboard$/)
-    await expect(page.getByRole('heading', { name: 'Tổng quan', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Hôm nay cần xử lý gì?', level: 1 })).toBeVisible()
+    const nav = page.getByRole('navigation', { name: 'Điều hướng chính' })
+    await expect(nav.getByRole('link', { name: 'Tổng quan vận hành' })).toHaveAttribute('aria-current', 'page')
+    await expect(nav.getByRole('link', { name: 'Nông hộ & ruộng' })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Điều hướng nông hộ' })).toHaveCount(0)
+    await expect(page.getByLabel('Mật khẩu')).toHaveCount(0)
     await expect(page.getByText('MOCK DATA — NOT PRODUCTION.')).toHaveCount(0)
-
-    // Wait for /v1/me to resolve so the manager scope (org context + nav) is in
-    // place before asserting on it — otherwise a slow hosted call races the
-    // click-through and the aggregate views are silently skipped. This also
-    // guarantees DashboardBody has mounted, so its /v1/organizations/{id}/summary
-    // etc. requests have been issued (checked by the apiPaths assertions below).
-    // We do NOT wait for the KPI values to render: those aggregate rollups can
-    // exceed a minute against hosted Supabase and blocking on them is flaky.
-    await expect(page.locator('.org-chip')).not.toHaveText(/Chưa gán tổ chức/)
+    // Primary content loaded: the work queue heading and the organisation's
+    // name in the scope chip (not "Chưa gán tổ chức", not still loading).
+    await expect(page.getByRole('heading', { name: 'Danh sách công việc ưu tiên', level: 2 })).toBeVisible()
+    await expect(page.getByText('· phạm vi hiện tại')).toBeVisible()
+    await expect(page.getByText('Chưa gán tổ chức')).toHaveCount(0)
 
     // Organization and aggregate performance are real FastAPI views for roles
     // that can navigate there. Farmers may legitimately not see this link.
-    const organizationLink = page.getByRole('link', { name: 'Tổ chức / HTX' })
+    const organizationLink = nav.getByRole('link', { name: 'Tổ chức / HTX' })
     if (await organizationLink.count()) {
       await organizationLink.click()
       await expect(page.getByRole('heading', { name: 'Tổ chức / HTX', level: 1 })).toBeVisible()
-      await page.getByRole('link', { name: 'Tổng quan' }).click()
+      await expect(page.getByRole('heading', { name: 'Nông hộ trực thuộc' })).toBeVisible()
+      await nav.getByRole('link', { name: 'Tổng quan vận hành' }).click()
       await expect(page).toHaveURL(/\/dashboard$/)
     }
 
-    // Dashboard → real farm hierarchy → season subflows.
-    await page.getByRole('link', { name: 'Nông hộ' }).click()
+    // Dashboard → real farm hierarchy → season subflows, each hop through the
+    // named link a person would use.
+    await nav.getByRole('link', { name: 'Nông hộ & ruộng' }).click()
     await expect(page.getByRole('heading', { name: 'Nông hộ', level: 1 })).toBeVisible()
-    await expect(page.locator('tbody tr').first()).toBeVisible()
-    await page.locator('tbody tr').first().click()
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await page.getByRole('link', { name: /^Mở hồ sơ nông hộ / }).first().click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'Thửa ruộng' })).toBeVisible()
 
-    await page.locator('tbody tr').first().click()
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await page.getByRole('link', { name: /^Mở thửa / }).first().click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'Vụ canh tác' })).toBeVisible()
-    await page.locator('tbody tr').first().click()
+    await page.getByRole('link', { name: /^Mở vụ / }).first().click()
     await expect(page.getByRole('tab', { name: 'Tổng quan' })).toBeVisible()
 
     await page.getByRole('tab', { name: 'Hoạt động' }).click()
     await expect(page.getByRole('heading', { name: 'Nhật ký hoạt động' })).toBeVisible()
-    await expect(page.locator('.act').first()).toBeVisible()
-    await page.locator('.act').first().click()
+    // Each recorded activity is a button whose name ends with its time and date.
+    const activity = page.getByRole('main').getByRole('button', { name: /\d{2}:\d{2} \d{2}\/\d{2}\/\d{4}$/ })
+    await expect(activity.first()).toBeVisible()
+    await activity.first().click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await page.getByRole('button', { name: 'Đóng' }).click()
 

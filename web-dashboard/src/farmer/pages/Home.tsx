@@ -81,7 +81,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
       )}
 
       {sid && (
-        <Section className="fw-area-journal" title="Hoạt động gần đây" action={<MoreLink to="/farmer/journal">Xem toàn bộ nhật ký</MoreLink>}>
+        <Section className="fw-area-journal" title="Hoạt động gần đây" labelledBy="fw-home-recent" action={<MoreLink to="/farmer/journal">Xem toàn bộ nhật ký</MoreLink>}>
           <MiniTimeline state={pending(activities, scope.loading)} limit={5} />
         </Section>
       )}
