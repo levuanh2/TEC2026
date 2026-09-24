@@ -179,11 +179,14 @@ h1, h2, h3, p { margin: 0; }
   display: grid; place-items: center; font-size: var(--fs-sm);
 }
 .sidebar__id { display: grid; gap: 1px; min-width: 0; }
-/* A long address breaks after its "@" (AccountName) and is clipped at two
- * lines; the full text stays in the DOM and in `title`. */
+/* A long address breaks after its "@" (AccountName) and, on the 216px
+ * tablet rail, again at a hyphen in the domain — real-data QA found the QA
+ * farmer's domain cut to "agricarbon-…" there under a two-line clamp. Three
+ * lines hold it; anything longer is clipped, with the full text in the DOM
+ * and in `title`. */
 .sidebar__id b {
   font-size: var(--fs-sm); color: var(--ac-sidebar-ink); line-height: 1.35;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
   overflow: hidden; overflow-wrap: anywhere;
 }
 /* Farmer: the whole account block is one link to the account page. */
