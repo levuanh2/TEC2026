@@ -373,6 +373,12 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 |---|---|---|---|
 | `web-dashboard/src/{pages/operations.tsx,styles.css,theme.css,api/activities.ts,utils/activityPresentation.ts}`, `web-dashboard/src/farmer/{ActivityForms.tsx,activityView.ts,farmer.css,tokens.css}`, test mới `round41-*`, `carbonRows.test.ts`, `demoMarker.test.ts`, `docs/WEB_UX_REDESIGN_ROUND4_1.md` | — (released) | /carbon bị cắt thao tác ở 1363px, xanh TDMU tràn workspace, disclosure form Nước tưới, quick-fix invalid, demo marker trong ghi chú. Không đụng backend/API/Carbon. | Branch `fix/agricarbon-redesign-round4-1`, commit local, **chưa push/merge/deploy** — chờ duyệt. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_1.md`. |
 
+## Round 4.2 (2026-09-24) — Sidebar Nông hộ đồng bộ Quản lý (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `web-dashboard/src/components/Sidebar.tsx` (new) + `Sidebar.dom.test.tsx` (new), `web-dashboard/src/{App.tsx,styles.css}`, `web-dashboard/src/farmer/{FarmerExperience.tsx,farmer.css}`, `web-dashboard/tests/e2e/sidebar-parity.spec.ts` (new), `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` (new) | — (released) | Một component sidebar + một token `--sidebar-w` cho cả hai vai trò (240px; 216px ở ≤1024px), drawer Quản lý đóng không còn nhận Tab. Không đụng backend/API/Carbon/MRV. | Branch `fix/agricarbon-farmer-sidebar-parity`, commit local, **chưa push/merge/deploy** — chờ duyệt. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md`. |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
