@@ -377,7 +377,7 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 
 | Files | Owner | Task | Trạng thái |
 |---|---|---|---|
-| `web-dashboard/src/components/Sidebar.tsx` (new) + `Sidebar.dom.test.tsx` (new), `web-dashboard/src/{App.tsx,styles.css}`, `web-dashboard/src/farmer/{FarmerExperience.tsx,farmer.css}`, `web-dashboard/tests/e2e/sidebar-parity.spec.ts` (new), `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` (new) | — (released) | Một component sidebar + một token `--sidebar-w` cho cả hai vai trò (240px; 216px ở ≤1024px), drawer Quản lý đóng không còn nhận Tab. Không đụng backend/API/Carbon/MRV. | Branch `fix/agricarbon-farmer-sidebar-parity`, commit local, **chưa push/merge/deploy** — chờ duyệt. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md`. |
+| `web-dashboard/src/components/Sidebar.tsx` (new) + `Sidebar.dom.test.tsx` (new), `web-dashboard/src/{App.tsx,styles.css}`, `web-dashboard/src/farmer/{FarmerExperience.tsx,farmer.css}`, `web-dashboard/tests/e2e/sidebar-parity.spec.ts` (new), `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` (new) | — (released) | Một component sidebar + một token `--sidebar-w` cho cả hai vai trò (240px; 216px ở ≤1024px), drawer Quản lý đóng không còn nhận Tab. Không đụng backend/API/Carbon/MRV. | DONE — real-data QA pass (sidebar-real 3/3, redesign-qa 15/15, axe 0), 2 lỗi thật đã sửa (địa chỉ bị cắt ở 216px; `.sr-only` làm tràn `/seasons` `/data-gaps` ở 1024px). Merge `--no-ff` vào `main`, **không deploy**. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` §12. |
 
 ## Uncommitted changes rule
 

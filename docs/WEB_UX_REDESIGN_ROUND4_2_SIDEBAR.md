@@ -113,7 +113,7 @@ Sau khi sửa, ở mọi viewport desktop hai vai trò trùng nhau: padding 14/1
 | `npx vitest run` | **46 files, 365 passed** (trước 360; +5 trong `src/components/Sidebar.dom.test.tsx`) |
 | `npm run build` | pass (`✓ built`; cảnh báo chunk > 500 kB có từ trước) |
 | `npx playwright test sidebar-parity farmer-web web-smoke round3-qa round4-qa round41-qa redesign-qa` | **40 passed, 15 skipped** — 13/13 suite mới + 27 suite cũ; 15 skipped là `redesign-qa` (tự bỏ qua khi thiếu `REDESIGN_*`) |
-| Real-data QA (`round4-real`, `round41-real`, `farmer-real-*`, `web-real-data`) | **Không chạy** — không có credential trong phiên này (tool call không thấy biến môi trường của terminal người dùng) |
+| Real-data QA | Lần đầu không chạy (thiếu credential) — **đã chạy ở §12** |
 | axe-core 4.13.0 | **36 lần quét** (12 màn hình × 1363/1024/390, gồm drawer Quản lý mở ở 390), **0 violation** |
 
 Không hạ assertion, không skip test nào để gate pass. Một assertion trong suite mới được viết lại trong lúc làm: lần đầu so *tổng chiều cao* khối brand, fail ở 1024px vì tagline Quản lý dài xuống 2 dòng — đó là khác biệt nội dung chứ không phải lưới; assertion thay thế chặt hơn ở chỗ quan trọng (vị trí wordmark, vị trí tagline, cỡ chữ cả hai, tagline Nông hộ 1 dòng, wordmark và tagline khác dòng).
@@ -135,9 +135,9 @@ Backend, API, Supabase, Flutter, Carbon engine/readiness/công thức/hệ số,
 
 ## 10. Known limitations
 
-- Chạy trên mock tenant: shell Quản lý khi mock không có session hiển thị menu của viewer chưa gán tổ chức (2 mục). Phần được kiểm — rộng, padding, lưới hàng, brand, marker, footer — không phụ thuộc số hàng; menu đầy đủ của `cooperative_manager` chưa được chụp trên dữ liệu thật trong round này.
-- Real-data QA chưa chạy (thiếu credential). Nếu cung cấp credential, chạy `round41-real`/`farmer-real-data`/`web-real-data` theo cách cũ.
-- Email dài hơn 2 dòng × ~170px vẫn bị cắt ở dòng thứ 2 (có `title` và tên truy cập đầy đủ).
+- Mock tenant chỉ có 2 mục menu Quản lý; menu đầy đủ 8 mục đã kiểm trên dữ liệu thật (§12).
+- Địa chỉ dài hơn 3 dòng vẫn bị cắt ở dòng thứ 3 (có `title` và tên truy cập đầy đủ).
+- Menu trượt Quản lý ở ≤768px mở ra **không có backdrop**: workspace không bị làm tối, chạm ra ngoài không đóng menu (có từ trước, thấy trong `management-menu-390-real.png`). Không sửa trong round này — ngoài phạm vi, không phải lỗi chức năng; ghi nhận cho vòng sau.
 - Kiểm tra trên dev server local, không phải staging.
 - Bottom nav Nông hộ (nền gradient) vẫn là `incomplete` với axe như trước.
 
@@ -151,6 +151,74 @@ Branch `fix/agricarbon-farmer-sidebar-parity` (từ `origin/main` `98676ac`):
 | `022bd6c` | fix(web): tablet sidebar is 216px for both roles, so no row is clipped |
 | `0270544` | fix(web): closed Management drawer is out of the tab order |
 | `1cf4b58` | test(web): sidebar parity — width token, row grid, marker, footer, keyboard, mobile |
-| (commit chứa báo cáo này) | docs: Round 4.2 sidebar parity report and ownership row |
+| `6e0eaf1` | docs: Round 4.2 sidebar parity report and ownership row |
+| `1235159` | fix(web): a long account address is never cut on the 216px tablet rail *(real-data QA)* |
+| `1ca2bbf` | fix(web): Management season tables no longer widen the page at 1024px *(real-data QA)* |
+| `55d5d2a` | test(web): real-data sidebar gate; mock gate waits for the webfont |
+| (commit chứa bản cập nhật này) | docs: Round 4.2 real-data QA results |
 
-**Xác nhận:** chưa push, chưa merge, chưa tag, chưa deploy. File untracked có sẵn (`.mcp.json`, ảnh trong `docs/`) không bị sửa, stage hay xoá.
+**Xác nhận:** không tag, không deploy, không sửa `render.yaml`. Push/merge theo §12.5, chỉ sau khi toàn bộ gate pass. File untracked có sẵn (`.mcp.json`, ảnh trong `docs/`) không bị sửa, stage hay xoá.
+
+## 12. Real-data QA (2026-09-24)
+
+### 12.1 Provenance
+
+- Frontend: `vite` dev, `VITE_USE_MOCK_DATA=false`, `http://127.0.0.1:5173` (origin CORS cho phép), branch này.
+- Backend: FastAPI local `http://127.0.0.1:8010` (`uvicorn main:app`) nối Supabase hosted dev `awazhdqzkktekbwaqiic`, tenant `DEMO-AGRICARBON-2026`.
+- Tài khoản: `qa-farmer-fw1@agricarbon-demo.local` (Nông hộ, `DEMO-FARM-01`) và `demo-manager@agricarbon-demo.local` (`cooperative_manager`). Mật khẩu người dùng gửi bị Supabase từ chối (`invalid_credentials` cho cả hai, kiểm trực tiếp qua Auth API). Người dùng tự chạy script reset qua `!`; mật khẩu mới chỉ nằm trong file env tạm ở scratchpad, truyền cho test bằng biến môi trường, đã xoá sau gate. Không mật khẩu nào nằm trong source, report, ảnh hay commit. Ảnh có hiện **email** QA ở footer — đó chính là thứ đang được kiểm; không có mật khẩu.
+- Season thật `2e63e128-f53d-4f70-9bb4-62b9efc048e3` (DEMO-HT-2026, Thửa demo 1.1); plot thật lấy từ link trên trang vụ.
+- Test chỉ đọc; thao tác có tác dụng duy nhất là đăng xuất ở cuối. Không bản ghi nào được tạo hay sửa.
+
+### 12.2 Lỗi thật phát hiện và đã sửa
+
+| # | Lỗi | Nguyên nhân | Sửa | Sau sửa |
+|---|---|---|---|---|
+| R1 | Ở 1024px (rail 216px) footer Nông hộ hiện `qa-farmer-fw1@` / `agricarbon-…` — domain bị cắt | Domain xuống dòng thêm ở dấu gạch nối; clamp 2 dòng giấu dòng thứ 3 | clamp 3 dòng (`1235159`) | `qa-farmer-fw1@` / `agricarbon-` / `demo.local`, không bị cắt ở mọi route × viewport |
+| R2 | `/seasons` tràn ngang 62px, `/data-gaps` 90px ở 1024px | `.sr-only` "Hành động" trong header cột thao tác là `position: absolute` với containing block `<body>`, nên thoát khỏi vùng cuộn ngang của bảng. **Có sẵn trên `main`**: với rail 192px là 38px và 66px; rail 216px làm nặng thêm 24px | `.ops-table__wrap { position: relative }` (`1ca2bbf`) | 0px ở cả 6 route Quản lý, với rail 216px lẫn 192px |
+
+Ba sự cố khác trong lúc chạy là **lỗi của test**, đã sửa trong test, không nới assertion:
+- Test giả định nút "Ghi hoạt động" có trên Home. Trên dữ liệu thật, hành động duy nhất của Home là "Bổ sung ngay" (vụ thiếu dữ liệu Carbon — đúng thiết kế Round 4). Nay mở form từ Nhật ký và kiểm CTA thật của `section.fw-next`.
+- Kiểm drawer đè sidebar khi drawer còn đang trượt vào (180ms). Nay chờ animation xong.
+- Mock gate flake 1px (vị trí brand) vì đo trước khi webfont tải xong. Nay đo sau `document.fonts.ready`; 3 lần lặp liên tiếp 123/123.
+
+### 12.3 Kết quả real-data
+
+`sidebar-parity-real.spec.ts` — **3/3 passed** (4.2 phút):
+- Nông hộ: 11 route (`/farmer`, `journal`, `farms`, `performance`, `carbon`, `account`, plot thật, season thật + 3 tab) × 6 viewport = 66 phép đo rail. Footer hiện đúng email, có `title` và accessible name đầy đủ, link cao 44px. Hover không dịch chuyển gì. Tab: brand → 6 đích đúng thứ tự → tài khoản, ring 2px. Không có xanh TDMU trong workspace. Form ghi hoạt động và sheet sửa nhanh Carbon nằm trên sidebar. 390px: bottom bar, không có nút menu Quản lý, CTA và h1 Carbon trong viewport, CTA nằm trên bottom bar, rail ẩn không nhận focus. Tài khoản → `/farmer/account`; đăng xuất → `/login`.
+- Quản lý: 6 route × 6 viewport = 36 phép đo. Menu đầy đủ 8 mục; "Tổng quan vận hành" không bị cắt ở 1024px. Email đầy đủ + `title`. Hover ổn định. Drawer vụ (1363) và drawer Carbon (1024) nằm trên sidebar. 390px: không có bottom bar Nông hộ, menu đóng không nhận focus, "Mở menu" có `aria-expanded`, chọn một đích thì menu đóng và điều hướng. Đăng xuất → `/login`.
+- Console: 0 lỗi do app. Toàn bộ lỗi console (lượt đếm riêng: Quản lý 49, Nông hộ 1) là `404 GET /v1/crop-seasons/:id/carbon` — câu trả lời "chưa có bản tính" đã có trong tài liệu — và favicon.
+
+Chiều rộng rail đo được trên dữ liệu thật:
+
+| Viewport | Nông hộ | Quản lý |
+|---|---|---|
+| 1440 | 240 | 240 |
+| 1363 | 240 | 240 |
+| 1280 | 240 | 240 |
+| 1024 | 216 | 216 |
+| 768 | ẩn (bottom bar) | ẩn (menu trượt) |
+| 390 | ẩn (bottom bar) | ẩn (menu trượt) |
+
+`redesign-qa.spec.ts` (real data, `REDESIGN_QA=true`) — **15/15 passed** (12.5 phút).
+
+axe-core 4.13.0 trên dữ liệu thật — **25 lần quét, 0 violation** (Nông hộ 5 màn × 1363/1024/390; Quản lý 3 màn × 3 viewport + menu mở ở 390). `incomplete` chỉ có `color-contrast`: bottom bar gradient và vùng bị sheet che ở Nông hộ 390, và `.sidebar__name` khi menu Quản lý mở đè lên workspace (chữ sidebar-ink trên nền sidebar, cùng cặp màu với phần còn lại của rail).
+
+Ảnh real-data (gitignored) tại `web-dashboard/.qa-screenshots/round4-2/real/`: `farmer-home-1363-real.png`, `farmer-carbon-1363-real.png`, `farmer-season-1024-real.png`, `farmer-carbon-390-real.png`, `management-dashboard-1363-real.png`, `management-carbon-1024-real.png`, `management-menu-390-real.png`.
+
+### 12.4 Gate cuối trên feature branch (`web-dashboard/`, sau commit `55d5d2a`)
+
+| Lệnh | Kết quả |
+|---|---|
+| `npx tsc --noEmit` | pass |
+| `npx vitest run` | 46 files, **365 passed** |
+| `npm run build` | pass |
+| Mock Playwright (`sidebar-parity` 14, `farmer-web`, `web-smoke`, `round3-qa`, `round4-qa`, `round41-qa`) | **41 passed**; `--repeat-each=3`: **123 passed** |
+| `sidebar-parity-real` (real) | **3 passed** |
+| `redesign-qa` (real) | **15 passed** |
+| axe-core (mock 36 + real 25 lượt) | 0 violation |
+
+Backend/API/Carbon/MRV: `git diff origin/main --stat` trên `backend supabase app ml infra render.yaml docs/openapi.json web-dashboard/src/{carbon,features,api,pages} web-dashboard/src/farmer/pages` = 0 dòng.
+
+### 12.5 Merge
+
+Push branch → kiểm `origin/main` không đổi ngoài dự kiến → `git merge --no-ff` vào `main` → chạy lại `tsc`, `vitest`, `build`, mock sidebar trên `main` → chỉ push `main` khi tất cả pass. Không deploy, không tag, không sửa `render.yaml`.
