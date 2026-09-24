@@ -282,8 +282,8 @@ function fertilizer(m: SeasonMetrics, f: SeasonFacts): MetricDetail {
     key: 'fertilizer', group: 'resource', name: 'Phân bón', icon: 'fertilizer',
     primary, secondary,
     meaning: perHa != null
-      ? 'Lượng phân bón đã ghi trên mỗi ha — con số dùng để so với liều bón bạn dự định.'
-      : 'Lượng phân bón đã ghi để làm ra mỗi kg thóc.',
+      ? `Khối lượng sản phẩm phân bón (không phải lượng N/P/K) đã ghi trên mỗi ha ${areaWords(f)} — dùng để so với liều bón bạn dự định.`
+      : 'Khối lượng sản phẩm phân bón (không phải lượng N/P/K) đã ghi để làm ra mỗi kg thóc.',
     basis: m.fertilizerKg != null && (f.areaHa != null || m.yieldKg != null)
       ? `Tính từ ${fmtNumber(m.fertilizerKg)} kg phân đã ghi${f.areaHa != null ? `, ${fmtNumber(f.areaHa)} ha ${areaWords(f)}` : ''}${m.yieldKg != null ? ` và ${fmtNumber(m.yieldKg)} kg thóc` : ''}.`
       : null,

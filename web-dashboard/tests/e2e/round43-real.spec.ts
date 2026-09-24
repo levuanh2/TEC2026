@@ -89,22 +89,30 @@ test('Farmer: Home keeps the count as a journal line and stays short', async ({ 
   expect(v2, JSON.stringify(v2, null, 2)).toEqual([])
 })
 
-test('Manager: every aggregate states its coverage and opens its missing seasons', async ({ page }) => {
+test('Manager: every aggregate states its farm coverage, opens its missing farms, and never fans out per season', async ({ page }) => {
   await signIn(page, MANAGER)
+  await page.waitForLoadState('networkidle')
+  const seasonMetrics: string[] = []
+  page.on('request', (r) => { if (/\/v1\/crop-seasons\/[^/]+\/metrics/.test(r.url())) seasonMetrics.push(r.url()) })
   await page.goto('/performance')
   const coverage = page.getByTestId('aggregate-coverage')
   await expect(coverage).toHaveCount(4, { timeout: 120_000 })
-  for (const c of await coverage.all()) await expect(c).toContainText(/^Dựa trên \d+\/\d+ vụ đủ dữ liệu/, { timeout: 180_000 })
+  for (const c of await coverage.all()) await expect(c).toContainText(/^Dựa trên \d+\/\d+ nông hộ đủ dữ liệu/, { timeout: 120_000 })
+  for (const c of await page.getByTestId('aggregate-season-coverage').all()) {
+    await expect(c).toHaveText('Chưa có dữ liệu tổng hợp — cần endpoint chỉ số theo lô.')
+  }
   for (const card of await page.getByTestId('aggregate-metric').all()) {
-    const toggle = card.getByRole('button', { name: /\d+ vụ thiếu dữ liệu/ })
+    const toggle = card.getByRole('button', { name: /\d+ nông hộ thiếu dữ liệu/ })
     if (!(await toggle.count())) continue
-    const n = Number((await toggle.innerText()).match(/(\d+) vụ/)![1])
+    const n = Number((await toggle.innerText()).match(/(\d+) nông hộ/)![1])
     await expect(card.locator('.agg__list')).toBeHidden()
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await expect(card.locator('.agg__list a')).toHaveCount(n)
     await expect(card.locator('.agg__list')).toBeVisible()
   }
+  await page.waitForLoadState('networkidle')
+  expect(seasonMetrics, 'no per-season /metrics on Management Performance').toEqual([])
   const v = blocking(await axe(page))
   expect(v, JSON.stringify(v, null, 2)).toEqual([])
   await page.goto('/dashboard')

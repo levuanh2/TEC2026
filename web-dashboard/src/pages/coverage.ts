@@ -1,112 +1,60 @@
-import { useEffect, useState } from 'react'
-import { getFarmCropSeasons, getPlotsForFarm, listFarms } from '../api/farms'
-import { getResourceMetrics, type SeasonMetrics } from '../api/metrics'
-import type { CropSeason, Plot } from '../types'
+import type { FarmPerformance } from '../api/organizations'
 
-/* Which seasons stand behind a cooperative aggregate (Round 4.3).
+/* Which farms stand behind a cooperative aggregate (Round 4.3 gate).
  *
  * `/organizations/{id}/metrics` returns one figure per metric, and null as soon
- * as any season lacks the data — which is honest, but it never said how many
- * seasons that was, or which. There is no per-season rollup route, so this
- * composes the ones that exist (farms → seasons → each season's own
- * `/metrics`), the same way the operations queue does. Nothing is averaged or
- * recomputed here: a season either has the server's per-kg figure or it does
- * not, and the reason is read off the same response. */
+ * as any season lacks the data. The Performance page already loads
+ * `/organizations/{id}/farm-performance`, whose per-farm figure is null under
+ * the same rule — a farm has a water/kg figure only when every one of its
+ * seasons does. So coverage *per farm* is exact from a payload the page
+ * already holds, with no extra request.
+ *
+ * Coverage *per season* is not derivable from anything the page loads. An
+ * earlier draft fetched every season's `/metrics` to get it (N+1: 5 → 18
+ * requests on a 6-season tenant). That is gone; the season count waits for a
+ * batch endpoint and the UI says so instead of inventing it. */
 
 export type AggregateKey = 'water' | 'fertilizer' | 'cost' | 'carbon'
 
-export interface SeasonMetricRow {
-  seasonId: string
-  seasonName: string
-  farmName: string
-  plotName?: string
-  metrics: SeasonMetrics | null
-  error?: string
-}
-
-export interface MissingSeason { row: SeasonMetricRow; reason: string }
+export interface MissingFarm { farm: FarmPerformance; reason: string }
 
 export interface Coverage {
-  /** Seasons in scope, readable or not. */
+  /** Farms in scope. */
   total: number
-  /** Seasons whose own per-kg figure exists for this metric. */
+  /** Farms whose own per-kg figure exists for this metric. */
   valid: number
-  missing: MissingSeason[]
+  missing: MissingFarm[]
 }
 
-const PER_KG: Record<AggregateKey, keyof SeasonMetrics> = {
+const PER_KG: Record<AggregateKey, keyof FarmPerformance> = {
   water: 'waterPerKg', fertilizer: 'fertilizerPerKg', cost: 'costPerKg', carbon: 'co2ePerKg',
 }
 
-/** Why one season has no figure for this metric, in the words of what to record. */
-export function missingReason(m: SeasonMetrics | null, key: AggregateKey, error?: string): string {
-  if (!m) return error ? `Không đọc được dữ liệu vụ (${error})` : 'Không đọc được dữ liệu vụ'
-  // Yield is the denominator of every per-kg figure; without it nothing resolves.
-  if (key === 'carbon' && m.totalCo2eKg == null) return 'Chưa có kết quả Carbon'
-  if (m.yieldKg == null) return 'Thiếu sản lượng thu hoạch'
+/** Why one farm has no figure for this metric, in the words of what to record.
+ *  Yield is checked first: it is the denominator of every per-kg figure. */
+export function missingReason(f: FarmPerformance, key: AggregateKey): string {
+  if (f.dataStatus === 'missing') return 'Chưa có vụ nào có dữ liệu'
+  if (f.yieldKg == null) return 'Có vụ thiếu sản lượng thu hoạch'
   switch (key) {
-    case 'water': return 'Thiếu lượng nước tưới'
-    case 'fertilizer': return 'Thiếu khối lượng phân bón'
-    case 'cost': return 'Có hoạt động chưa ghi chi phí'
-    case 'carbon': return 'Thiếu sản lượng thu hoạch'
+    case 'water': return 'Có vụ thiếu lượng nước tưới'
+    case 'fertilizer': return 'Có vụ thiếu khối lượng phân bón'
+    case 'cost': return 'Có vụ còn hoạt động chưa ghi chi phí'
+    case 'carbon': return 'Có vụ chưa có kết quả Carbon'
   }
 }
 
-export function coverageOf(rows: SeasonMetricRow[], key: AggregateKey): Coverage {
-  const missing: MissingSeason[] = []
+export function coverageOf(farms: FarmPerformance[], key: AggregateKey): Coverage {
+  const missing: MissingFarm[] = []
   let valid = 0
-  for (const row of rows) {
-    if (row.metrics && row.metrics[PER_KG[key]] != null) valid += 1
-    else missing.push({ row, reason: missingReason(row.metrics, key, row.error) })
+  for (const farm of farms) {
+    if (farm[PER_KG[key]] != null) valid += 1
+    else missing.push({ farm, reason: missingReason(farm, key) })
   }
-  return { total: rows.length, valid, missing }
+  return { total: farms.length, valid, missing }
 }
 
-/** "Dựa trên 3/10 vụ đủ dữ liệu" — always said beside an aggregate. */
-export const coverageLine = (c: Coverage) => `Dựa trên ${c.valid}/${c.total} vụ đủ dữ liệu`
+/** "Dựa trên 1/3 nông hộ đủ dữ liệu" — always said beside an aggregate. */
+export const coverageLine = (c: Coverage) => `Dựa trên ${c.valid}/${c.total} nông hộ đủ dữ liệu`
 
-export interface CoverageState { rows: SeasonMetricRow[]; loading: boolean; read: number; error: string | null }
-
-const CONCURRENCY = 4
-
-export function useSeasonCoverage(organizationId: string | null): CoverageState {
-  const [state, setState] = useState<CoverageState>({ rows: [], loading: Boolean(organizationId), read: 0, error: null })
-  useEffect(() => {
-    if (!organizationId) { setState({ rows: [], loading: false, read: 0, error: null }); return }
-    let live = true
-    setState({ rows: [], loading: true, read: 0, error: null })
-    void (async () => {
-      try {
-        // RLS scopes /v1/farms to what this manager may see — the same set the
-        // organisation rollup is computed over.
-        const farms = await listFarms()
-        const perFarm = await Promise.all(farms.map(async (f) => {
-          const [seasons, plots] = await Promise.all([
-            getFarmCropSeasons(f.id).catch(() => [] as CropSeason[]),
-            getPlotsForFarm(f.id).catch(() => [] as Plot[]),
-          ])
-          const plotName = new Map(plots.map((p) => [p.id, p.name]))
-          return seasons.map((s): SeasonMetricRow => ({ seasonId: s.id, seasonName: s.name, farmName: f.name, plotName: plotName.get(s.plotId), metrics: null }))
-        }))
-        const rows = perFarm.flat()
-        let read = 0
-        let next = 0
-        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, async () => {
-          for (;;) {
-            const i = next++
-            if (i >= rows.length) return
-            try { rows[i] = { ...rows[i], metrics: await getResourceMetrics(rows[i].seasonId) } }
-            catch (e) { rows[i] = { ...rows[i], error: e instanceof Error ? e.message : 'lỗi không rõ' } }
-            read += 1
-            if (live) setState({ rows: [...rows], loading: read < rows.length, read, error: null })
-          }
-        }))
-        if (live) setState({ rows: [...rows], loading: false, read: rows.length, error: null })
-      } catch (e) {
-        if (live) setState({ rows: [], loading: false, read: 0, error: e instanceof Error ? e.message : 'Không đọc được danh sách vụ.' })
-      }
-    })()
-    return () => { live = false }
-  }, [organizationId])
-  return state
-}
+/** What the page cannot state yet, and why. */
+export const SEASON_COVERAGE_PENDING = 'Chưa có dữ liệu tổng hợp — cần endpoint chỉ số theo lô.'

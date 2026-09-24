@@ -3,7 +3,7 @@ import { perKg } from '../format'
 import { Async, EmptyState, PageHead, Section, useAsync } from '../ui'
 import { AggregateMetric } from '../components/AggregateMetric'
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
-import { coverageOf, useSeasonCoverage } from './coverage'
+import { coverageOf } from './coverage'
 
 export function PerformancePage({ organizationId }: { organizationId: string | null }) {
   return (
@@ -11,7 +11,7 @@ export function PerformancePage({ organizationId }: { organizationId: string | n
       <PageHead
         eyebrow="Hiệu suất"
         title="Hiệu suất vùng"
-        meta={[<>Chỉ số trên mỗi kg thóc của toàn HTX, kèm số vụ đứng sau từng con số</>]}
+        meta={[<>Chỉ số trên mỗi kg thóc của toàn HTX, kèm số nông hộ đứng sau từng con số</>]}
       />
       {!organizationId ? (
         <EmptyState icon="analytics" title="Tài khoản chưa gắn với tổ chức" body="Cần một phạm vi HTX để tổng hợp hiệu suất vùng." />
@@ -26,20 +26,20 @@ function PerformanceBody({ organizationId }: { organizationId: string }) {
   const org = useAsync(() => getOrganization(organizationId), [organizationId])
   const metrics = useAsync(() => getOrganizationMetrics(organizationId), [organizationId])
   const performance = useAsync(() => getFarmPerformance(organizationId), [organizationId])
-  const seasons = useSeasonCoverage(organizationId)
+  // Coverage per farm, from the farm-performance rows this page already
+  // loads for its comparison table — no request of its own.
   const cov = (key: 'water' | 'fertilizer' | 'cost' | 'carbon') =>
-    seasons.error ? null : coverageOf(seasons.rows, key)
-  const scope = `${org.data?.name ?? 'HTX hiện tại'} · ${seasons.loading && !seasons.rows.length ? 'đang đếm vụ' : `${seasons.rows.length} vụ`}`
-  const shared = { scope, loadingCoverage: seasons.loading, readCount: seasons.read }
+    performance.data ? coverageOf(performance.data, key) : null
+  const scope = `${org.data?.name ?? 'HTX hiện tại'} · ${performance.data ? `${performance.data.length} nông hộ` : 'đang đếm nông hộ'}`
+  const shared = { scope, loadingCoverage: performance.loading }
 
   return (
     <>
-      {seasons.error && <p className="ops-error" role="alert">Không đọc được danh sách vụ để tính độ phủ: {seasons.error}</p>}
       {/* Three groups, not one row of four look-alike cards. Cost per kg is an
         * accounting figure the cooperative records directly; CO₂e per kg is a
         * methodology result that depends on emission factors. Sitting next to
         * each other in identical tiles they read as two outputs of one
-        * calculation. Every figure now carries the seasons behind it. */}
+        * calculation. Every figure now carries the farms behind it. */}
       <Async state={metrics} skeleton="kpis">
         {(m) => (
           <>

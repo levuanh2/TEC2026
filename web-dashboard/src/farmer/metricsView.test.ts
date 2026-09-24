@@ -166,3 +166,49 @@ describe('Home', () => {
     expect(homeSummary(metrics(), noFacts).map((s) => s.key)).toEqual(['water', 'fertilizer'])
   })
 })
+
+describe('presentation math (Round 4.3 gate)', () => {
+  // The QA season: 5.200 kg thóc, 330 m³, 150 kg phân, harvested 1,2 ha on a 1,3 ha plot.
+  const real = metrics({ waterPerKg: 0.063 })
+  const facts = seasonFacts([act('harvest', { yield_kg: 5200, harvested_area_ha: 1.2 }), act('fertilizer', { amount_kg: 150 })], 1.3)
+
+  it('0,063 m³/kg = 63 lít/kg', () => {
+    expect(detail(metricDetails(real, facts), 'water').primary).toEqual({ value: '63', unit: 'lít nước / kg lúa' })
+  })
+
+  it('150 kg / 1,2 ha = 125 kg/ha — on the harvested area, not the 1,3 ha plot', () => {
+    const f = detail(metricDetails(real, facts), 'fertilizer')
+    expect(f.primary).toEqual({ value: '125', unit: 'kg phân / ha' })
+    expect(150 / 1.3).not.toBeCloseTo(125) // the plot area would have given 115
+    expect(f.basis).toContain('1,2 ha diện tích thu hoạch đã ghi')
+    expect(f.method).toContain('kg/ha dùng diện tích thu hoạch đã ghi: 1,2 ha.')
+  })
+
+  it('5.200 kg / 1,2 ha ≈ 4,3 tấn/ha, labelled with the harvested area', () => {
+    const y = yieldContext(real, facts)
+    expect(y.tonnesPerHa).toBe('4,3')
+    expect(y.areaHa).toBe(1.2)
+    expect(y.areaLabel).toBe('Diện tích thu hoạch')
+  })
+
+  it('the UI sentence says product mass, not N/P/K, and names the denominator', () => {
+    const f = detail(metricDetails(real, facts), 'fertilizer')
+    expect(f.meaning).toBe('Khối lượng sản phẩm phân bón (không phải lượng N/P/K) đã ghi trên mỗi ha diện tích thu hoạch đã ghi — dùng để so với liều bón bạn dự định.')
+  })
+
+  it('never feeds a rounded figure into the next step', () => {
+    // 100 kg on 0,3333 ha = 300,03 kg/ha → "300". Had the area been rounded to
+    // 0,33 first, the result would be 303.
+    const f = detail(metricDetails(metrics({ fertilizerKg: 100 }), seasonFacts([act('harvest', { harvested_area_ha: 0.3333 })], null)), 'fertilizer')
+    expect(f.primary?.value).toBe('300')
+    // 330 m³ on 1,2 ha = 275 m³/ha from the raw total, not from the rounded 63 l/kg.
+    expect(detail(metricDetails(real, facts), 'water').secondary).toContainEqual({ value: '275', unit: 'm³ / ha' })
+  })
+
+  it('the server metric object is returned untouched', () => {
+    const before = structuredClone(real)
+    metricDetails(real, facts)
+    yieldContext(real, facts)
+    expect(real).toEqual(before)
+  })
+})
