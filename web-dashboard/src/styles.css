@@ -595,7 +595,10 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .kpi__value { font-size: 21px; }
 }
 @media (max-width: 1024px) {
-  :root { --sidebar-w: 192px; }
+  /* 216, not 192: at 192 the longest Management row ("Tổng quan vận hành",
+   * 132px of bold 13px text) ran 20px past the rail and was clipped. Both
+   * roles take this width from here (Round 4.2). */
+  :root { --sidebar-w: 216px; }
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi:nth-child(2n+1) { padding-left: 0; border-left: 0; }
   .grid-4, .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
