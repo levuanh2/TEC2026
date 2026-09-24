@@ -900,6 +900,13 @@ a.btn, a.btn:hover { text-decoration: none; }
 
 /* The workspace column never grows to its widest table. */
 .ops, .ops > *, .ops-table__wrap { min-width: 0; max-width: 100%; }
+/* The wrapper is also the containing block of what sits in it. The actions
+ * header's `.sr-only` label is `position: absolute`; with <body> as its
+ * containing block it escaped the wrapper's horizontal scroll at its
+ * static position past the last column, and on real data widened the page
+ * at 1024px — /seasons by 38px and /data-gaps by 66px before Round 4.2's
+ * 216px rail, 62px and 90px after (Round 4.2 real-data QA). */
+.ops-table__wrap { position: relative; }
 
 /* ---------------------------------------------------------- /carbon rows
  * Six columns: identity (farm · plot · season), one Carbon state, one cell
