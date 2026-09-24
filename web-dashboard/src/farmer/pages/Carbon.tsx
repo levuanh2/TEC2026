@@ -5,6 +5,8 @@ import { dateTime, perKg } from '../../format'
 import type { ActivityMutations, SeasonContext } from '../ActivityForms'
 import { fmtNumber } from '../activityView'
 import { CarbonRepairHub } from '../CarbonRepair'
+import { Disclosure } from '../metricRows'
+import { SOURCE_LABEL } from '../metricsView'
 import { Ico } from '../icons'
 import { Chip, ErrorPanel, IconTile, Section, Sk, SkBlock } from '../kit'
 import { carbonInputsChangedAt, invalidateQueries, keys } from '../data'
@@ -94,21 +96,11 @@ function CarbonEmpty({ reason }: { reason: 'no_calculation' | null }) {
   )
 }
 
-/** Plain Vietnamese for the engine's source codes. Display only — the code
- * itself stays visible so a result can still be matched to the methodology. */
-const SOURCE_LABEL: Record<string, string> = {
-  ch4_rice_cultivation: 'Khí mê-tan từ ruộng lúa',
-  ch4_straw_burning: 'Đốt rơm rạ (CH₄)',
-  n2o_straw_burning: 'Đốt rơm rạ (N₂O)',
-  n2o_fertilizer_direct: 'Phân đạm — phát thải trực tiếp',
-  n2o_fertilizer_indirect: 'Phân đạm — phát thải gián tiếp',
-  co2_fuel_combustion: 'Nhiên liệu máy móc',
-}
-
 function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolean }) {
   const total = result.total_co2e_kg ?? result.co2e_total_kg ?? null
   const scenario = result.water_regime_scenario ?? result.scenario
   const sources = [...result.breakdown].sort((a, b) => b.co2e_kg - a.co2e_kg)
+  const top = sources[0] ?? null
   return (
     <>
       {/* The farmer's question first ("how much did this season emit?"), then
@@ -134,9 +126,15 @@ function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolea
         <div>
           <small>Tính lúc</small>
           <b className="is-empty">{result.calculated_at ? dateTime(result.calculated_at) : 'Chưa có dữ liệu'}</b>
-          <span>Kịch bản: {scenario ? (SCENARIO[scenario] ?? scenario) : 'Chưa có dữ liệu'}</span>
+          <span data-testid="carbon-result-state">{stale ? 'Cần tính lại' : 'Kết quả mới nhất'} · {scenario ? (SCENARIO[scenario] ?? scenario) : 'Chưa rõ kịch bản'}</span>
         </div>
       </div>
+      {top && (
+        <p className="fw-carbon-top" data-testid="carbon-top-source">
+          <Ico name="carbon" />Nguồn đóng góp nhiều nhất: <b>{SOURCE_LABEL[top.source] ?? 'Nguồn khác'}</b>
+          {total && total > 0 ? <> — {Math.round((Math.max(0, top.co2e_kg) / total) * 100)}% tổng phát thải</> : null}
+        </p>
+      )}
       <Section title="Nguồn phát thải chính" icon="carbon" tone="carbon">
         <div className="fw-sources">
           {sources.map((item, index) => {
@@ -152,17 +150,16 @@ function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolea
         </div>
       </Section>
       <p className="fw-disclaimer"><Ico name="info" />Kết quả là ước tính theo bộ phương pháp hiện tại; không phải chứng nhận hoặc tín chỉ carbon.</p>
-      <details className="fw-disclosure">
-        <summary><Ico name="method" />Cách tính<Ico name="chevron" /></summary>
-        <div className="fw-disclosure__body">
-          <dl className="fw-detail">
-            <div><dt>Phiên bản bộ hệ số</dt><dd>{result.ef_config_version ?? 'Chưa có dữ liệu'}</dd></div>
-            <div><dt>Phiên bản công cụ tính</dt><dd>{result.engine_version ?? 'Chưa có dữ liệu'}</dd></div>
-            <div><dt>Kịch bản nước</dt><dd>{scenario ? (SCENARIO[scenario] ?? scenario) : 'Chưa có dữ liệu'}</dd></div>
-            {result.warnings.length > 0 && <div><dt>Cảnh báo</dt><dd>{result.warnings.join('; ')}</dd></div>}
-          </dl>
-        </div>
-      </details>
+      <Disclosure label="Cách tính và dữ liệu sử dụng">
+        <dl className="fw-detail">
+          <div><dt>Dữ liệu sử dụng</dt><dd>Các hoạt động đã ghi của vụ (bón phân, rơm rạ, nhiên liệu…), chế độ nước và sản lượng thóc. Chi phí không được dùng.</dd></div>
+          <div><dt>Phiên bản bộ hệ số</dt><dd>{result.ef_config_version ?? 'Chưa có dữ liệu'}</dd></div>
+          <div><dt>Phiên bản công cụ tính</dt><dd>{result.engine_version ?? 'Chưa có dữ liệu'}</dd></div>
+          <div><dt>Kịch bản nước</dt><dd>{scenario ? (SCENARIO[scenario] ?? scenario) : 'Chưa có dữ liệu'}</dd></div>
+          <div><dt>So sánh</dt><dd>Chưa có mốc so sánh cho phát thải của vụ này.</dd></div>
+          {result.warnings.length > 0 && <div><dt>Cảnh báo</dt><dd>{result.warnings.join('; ')}</dd></div>}
+        </dl>
+      </Disclosure>
     </>
   )
 }

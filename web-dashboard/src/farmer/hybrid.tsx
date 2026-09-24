@@ -5,10 +5,11 @@ import type { SeasonMetrics } from '../api/metrics'
 import { date, daysSince, ha } from '../format'
 import type { Activity } from '../types'
 import { Link } from '../ui'
-import { fmtNumber, localDay } from './activityView'
+import { localDay } from './activityView'
 import type { QueryState } from './data'
 import { Ico, type IconName } from './icons'
 import { Sk } from './kit'
+import { homeSummary, journalLine, metricDetails, readable, type Reading, type SeasonFacts } from './metricsView'
 import { seasonStatusLabel, type SeasonCtx } from './scope'
 
 /* The hybrid Farmer surface: identity, ONE next action, and a compact read of
@@ -156,17 +157,25 @@ export function PrimaryNextAction({ action, onAct, to, loading }: {
   )
 }
 
-/** Row 3 — the season at a glance. Five facts, no charts. */
-export function SummaryStrip({ activities, metrics, readiness, loading }: {
+/** Row 3 — the season at a glance: two resource readings in the unit a
+ *  farmer reads, the Carbon state, and the journal count as a plain line.
+ *
+ * The activity count used to be a green KPI tile beside water, fertiliser and
+ * Carbon, which read as "more records = better season". It is a fact about
+ * the journal, so it is said as one, in neutral text, with its link. Each
+ * reading carries one short sentence and "Xem chi tiết"; the arithmetic, the
+ * basis and the methodology live on Performance. */
+export function SummaryStrip({ activities, metrics, readiness, facts, loading }: {
   activities: QueryState<Activity[]>
   metrics: QueryState<SeasonMetrics>
   readiness: QueryState<CarbonReadiness | null>
+  facts: SeasonFacts
   loading?: boolean
 }) {
   if (loading || activities.loading || metrics.loading) {
     return (
       <div className="fw-summary" aria-busy="true">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="fw-summary__item"><Sk w="55%" h={12} /><Sk w="45%" h={22} /><Sk w="70%" h={11} /></div>)}
+        {[0, 1, 2].map((i) => <div key={i} className="fw-summary__item"><Sk w="55%" h={12} /><Sk w="45%" h={22} /><Sk w="70%" h={11} /></div>)}
       </div>
     )
   }
@@ -176,7 +185,7 @@ export function SummaryStrip({ activities, metrics, readiness, loading }: {
   // Carbon screen next door says a factor is missing.
   const view = carbonView({
     readiness: readiness.data,
-    hasResult: m?.co2ePerKg != null,
+    hasResult: m?.co2ePerKg != null || m?.totalCo2eKg != null,
   })
   const fixable = view.userFixableGaps.length
   const limits = view.methodologyLimitations.length
@@ -186,42 +195,48 @@ export function SummaryStrip({ activities, metrics, readiness, loading }: {
   const carbon: { label: string; role: Role } = readiness.loading
     ? { label: 'Đang kiểm tra', role: 'neutral' }
     : { label: view.label, role: TONE[view.tone] ?? 'neutral' }
+  const total = m?.totalCo2eKg
   return (
-    <div className="fw-summary">
-      {/* Zero activities recorded is not a completed state. */}
-      <Tile role={count > 0 ? 'positive' : 'neutral'} icon="journal" label="Hoạt động đã ghi" value={`${count}`} unit="hoạt động" />
-      <Tile role="water" icon="irrigation" label="Nước" value={m?.waterPerKg != null ? fmtNumber(m.waterPerKg) : null} unit="m³ / kg lúa" empty="Chưa đủ dữ liệu" />
-      <Tile role="positive" icon="fertilizer" label="Phân bón" value={m?.fertilizerPerKg != null ? fmtNumber(m.fertilizerPerKg) : null} unit="kg / kg lúa" empty="Chưa đủ dữ liệu" />
-      <Tile
-        role={carbon.role} icon="carbon" label="Carbon" value={m?.co2ePerKg != null ? fmtNumber(m.co2ePerKg) : null}
-        unit={m?.co2ePerKg != null ? 'kg CO₂e / kg lúa' : undefined} empty={carbon.label}
-        note={[fixable ? `Còn thiếu ${fixable} thông tin` : '', limits ? `${limits} giới hạn hệ số` : '']
-          .filter(Boolean).join(' · ') || undefined}
-      />
-    </div>
+    <>
+      <div className="fw-summary">
+        {homeSummary(m, facts).map((it) => (
+          <Tile key={it.key} icon={it.icon} label={it.label} value={it.value} hint={it.hint} more="/farmer/performance" />
+        ))}
+        <Tile
+          role={carbon.role} icon="carbon" label="Carbon"
+          value={total != null ? (total >= 1000 ? { value: readable(total / 1000), unit: 't CO₂e cả vụ' } : { value: readable(total), unit: 'kg CO₂e cả vụ' }) : null}
+          empty={carbon.label}
+          hint={fixable ? `Còn thiếu ${fixable} thông tin để tính Carbon` : limits ? `${limits} giới hạn hệ số — không cần bạn nhập` : total != null ? 'Phát thải ước tính của cả vụ' : view.detail}
+          more={fixable ? '/farmer/carbon' : '/farmer/performance'}
+          moreLabel={fixable ? 'Bổ sung ngay' : 'Xem chi tiết'}
+        />
+      </div>
+      <p className="fw-journal-line">
+        <Ico name="journal" /><span>{journalLine(count)}</span>
+        <Link className="fw-link" to="/farmer/journal">Xem nhật ký<Ico name="arrow" /></Link>
+      </p>
+    </>
   )
 }
 
 type Role = 'positive' | 'water' | 'attention' | 'error' | 'info' | 'neutral'
 
-function Tile({ role, icon, label, value, unit, empty, note }: {
-  role: Role; icon: IconName; label: string; value?: string | null; unit?: string; empty?: string; note?: string
+function Tile({ role = 'neutral', icon, label, value, empty, hint, more, moreLabel = 'Xem chi tiết' }: {
+  role?: Role; icon: IconName; label: string; value?: Reading | null; empty?: string; hint?: string; more?: string; moreLabel?: string
 }) {
-  // The tone follows the state, not the metric. "Nước — Chưa đủ dữ liệu" and
-  // "Phân bón — Chưa đủ dữ liệu" were painted in healthy green and mint
-  // because the role was fixed per row, so the colour said the season was
-  // fine while the words said nothing had been recorded. A tile with no
-  // figure is neutral — unless the caller is deliberately flagging a problem,
-  // which Carbon readiness does.
+  // A reading is neutral: there is no benchmark that would make a water
+  // figure healthy or poor, so it is never painted as one. Only a state the
+  // caller deliberately flags — Carbon readiness — carries a tone.
   const flagged = role === 'attention' || role === 'error' || role === 'info'
-  const shown: Role = value != null || flagged ? role : 'neutral'
+  const shown: Role = flagged ? role : 'neutral'
   return (
     <div className={`fw-summary__item fw-role fw-role--${shown}`}>
       <span className="fw-summary__label"><Ico name={icon} />{label}</span>
       {value != null
-        ? <span className="fw-summary__value">{value}{unit && <small>{unit}</small>}</span>
+        ? <span className="fw-summary__value">{value.value}{'\u00a0'}<small>{value.unit}</small></span>
         : <span className="fw-summary__value is-empty">{empty ?? 'Chưa đủ dữ liệu'}</span>}
-      {note && <span className="fw-summary__note">{note}</span>}
+      {hint && <span className="fw-summary__note">{hint}</span>}
+      {more && <Link className="fw-link fw-summary__more" to={more}>{moreLabel}<Ico name="arrow" /></Link>}
     </div>
   )
 }
@@ -230,19 +245,23 @@ function Tile({ role, icon, label, value, unit, empty, note }: {
  *
  * Money is not an input to any emission factor. Putting the two side by side
  * is what makes a farmer believe spending less would lower their CO₂e. */
-export function CostPanel({ metrics, moreTo }: { metrics: QueryState<SeasonMetrics>; moreTo?: string }) {
+export function CostPanel({ metrics, facts, moreTo }: { metrics: QueryState<SeasonMetrics>; facts: SeasonFacts; moreTo?: string }) {
   if (metrics.loading) return <div className="fw-cost" aria-busy="true"><Sk w="40%" h={14} /><Sk w="55%" h={24} /></div>
-  const cost = metrics.data?.costPerKg
+  const d = metrics.data ? metricDetails(metrics.data, facts).find((x) => x.key === 'cost')! : null
+  const perKg = d?.secondary.find((r) => r.unit.startsWith('₫ / kg'))
   return (
     <div className="fw-cost">
-      {moreTo && <Link className="fw-link fw-cost__more" to={moreTo}>Xem ở Hiệu suất<Ico name="arrow" /></Link>}
-      <span className="fw-cost__label"><Ico name="money" />Chi phí trực tiếp đã ghi nhận</span>
-      {cost != null
-        ? <span className="fw-cost__value">{new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(cost)}<small>₫ / kg lúa</small></span>
-        : <span className="fw-cost__value is-empty">Chưa có chi phí đã ghi</span>}
+      <span className="fw-cost__label"><Ico name="money" />Chi phí trực tiếp đã ghi</span>
+      {d?.primary
+        ? <span className="fw-cost__value">{d.primary.value}{' '}<small>{d.primary.unit}</small></span>
+        : <span className="fw-cost__value is-empty">Chưa đủ dữ liệu chi phí</span>}
       <p className="fw-cost__note">
-        Chi phí vật tư, nhiên liệu và nhân công đã nhập trong hoạt động.
-        <b> Không dùng để tính CO₂e</b> — phát thải chỉ tính từ dữ liệu canh tác.
+        {perKg ? `${perKg.value} ₫ cho mỗi kg lúa. ` : d && !d.primary && d.missing ? `${d.missing} ` : ''}
+        Không phải tổng chi phí sản xuất. <b>Không dùng để tính CO₂e.</b>
+      </p>
+      <p className="fw-cost__links">
+        {!d?.primary && <Link className="fw-link" to="/farmer/journal">Bổ sung chi phí trong Nhật ký<Ico name="arrow" /></Link>}
+        {moreTo && <Link className="fw-link" to={moreTo}>Xem chi tiết<Ico name="arrow" /></Link>}
       </p>
     </div>
   )

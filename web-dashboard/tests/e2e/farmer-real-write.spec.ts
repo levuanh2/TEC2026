@@ -70,7 +70,8 @@ test.describe('authenticated Farmer real write flows', () => {
     await expect(page).toHaveURL(/\/farmer$/)
     await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible({ timeout: 60_000 })
 
-    await page.getByRole('link', { name: 'Xem vụ' }).click()
+    // Home links its season as "Xem chi tiết vụ" (hybrid redesign).
+    await page.getByRole('link', { name: 'Xem chi tiết vụ' }).click()
     await expect(page.getByRole('tab', { name: 'Nhật ký' })).toBeVisible({ timeout: 60_000 })
     await page.getByRole('tab', { name: 'Nhật ký' }).click()
     await expect(page.getByRole('heading', { name: 'Nhật ký của vụ này' })).toBeVisible()
@@ -78,8 +79,9 @@ test.describe('authenticated Farmer real write flows', () => {
     await expect(addActivity).toBeVisible({ timeout: 60_000 })
 
     /* ------------------------------------------------------------- fertilizer */
+    // Picker buttons are named by their label and hint ("Bón phân Loại và lượng phân").
     await addActivity.click()
-    await page.getByRole('button', { name: 'Bón phân', exact: true }).click()
+    await page.getByRole('group', { name: 'Chọn loại hoạt động' }).getByRole('button', { name: /^Bón phân/ }).click()
     await expect(page.getByRole('dialog', { name: 'Bón phân' })).toBeVisible()
     await page.getByLabel('Loại phân').fill(`QA Urê ${marker}`)
     await page.getByLabel(/^Lượng bón/).fill('12')
@@ -112,7 +114,7 @@ test.describe('authenticated Farmer real write flows', () => {
 
     /* ------------------------------------------------------------- irrigation */
     await addActivity.click()
-    await page.getByRole('button', { name: 'Tưới nước', exact: true }).click()
+    await page.getByRole('group', { name: 'Chọn loại hoạt động' }).getByRole('button', { name: /^Tưới nước/ }).click()
     await expect(page.getByRole('dialog', { name: 'Ghi tưới nước' })).toBeVisible()
     await page.getByLabel('Hình thức tưới').selectOption('awd')
     // Blank-vs-zero (brief §12): water volume left blank on create.
@@ -124,7 +126,7 @@ test.describe('authenticated Farmer real write flows', () => {
     await expect(row).toBeVisible({ timeout: 30_000 })
     await row.locator('.fw-entry__open').click()
     await expect(page.getByRole('dialog')).toContainText(marker)
-    await expect(page.getByRole('dialog').getByText('Lượng nước (m³)')).toBeVisible()
+    await expect(page.getByRole('dialog').getByText('Nước tưới (m³)')).toBeVisible()
     await expect(page.getByRole('dialog').locator('dd', { hasText: '—' }).first()).toBeVisible()
     await page.getByRole('button', { name: 'Chỉnh sửa' }).click()
     await expect(page.getByRole('dialog', { name: 'Chỉnh sửa tưới nước' })).toBeVisible()
@@ -142,7 +144,7 @@ test.describe('authenticated Farmer real write flows', () => {
     // raced that refresh and read "—", the pre-edit blank.
     const waterVolume = page.getByRole('dialog')
       .locator('.fw-detail > div')
-      .filter({ has: page.getByText('Lượng nước (m³)', { exact: true }) })
+      .filter({ has: page.getByText('Nước tưới (m³)', { exact: true }) })
       .locator('dd')
     await expect(waterVolume).toHaveText('0', { timeout: 30_000 })
     // A delete invalidates that season's cached metrics, so its settled reload
@@ -156,7 +158,7 @@ test.describe('authenticated Farmer real write flows', () => {
 
     /* --------------------------------------------------------------- harvest */
     await addActivity.click()
-    await page.getByRole('button', { name: 'Thu hoạch', exact: true }).click()
+    await page.getByRole('group', { name: 'Chọn loại hoạt động' }).getByRole('button', { name: /^Thu hoạch/ }).click()
     await expect(page.getByRole('dialog', { name: 'Ghi thu hoạch' })).toBeVisible()
     await page.getByLabel(/^Sản lượng thu hoạch/).fill('5')
     await page.getByLabel(/^Ghi chú/).fill(marker)

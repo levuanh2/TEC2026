@@ -47,6 +47,7 @@ export function FarmerJournalPage() {
       ) : (
         <JournalView
           state={state}
+          initialType={new URLSearchParams(location.search).get('loai')}
           resetSignal={mutations.version}
           renderCardActions={seasonCtx ? (a) => <ActivityCardActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined}
           renderDetailActions={seasonCtx ? (a) => <ActivityDetailActions activity={a} season={seasonCtx} mutations={mutations} /> : undefined}

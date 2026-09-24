@@ -9,11 +9,17 @@ const baseURL = process.env.REAL_E2E_BASE_URL ?? 'http://127.0.0.1:5173'
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: /(?:web-real-data|farmer-real-data|farmer-real-write|farmer-real-recommendations|farmer-real-cv|farmer-real-carbon-quickfix|farmer-real-straw-quickfix|round4-real|round41-real|sidebar-parity-real)\.spec\.ts/,
+  testMatch: /(?:web-real-data|farmer-real-data|farmer-real-write|farmer-real-recommendations|farmer-real-cv|farmer-real-carbon-quickfix|farmer-real-straw-quickfix|round4-real|round41-real|sidebar-parity-real|round43-real)\.spec\.ts/,
   // Generous: a local backend talking to hosted Supabase can take tens of
   // seconds per aggregate rollup query. Progressive per-section loading keeps
   // the page usable meanwhile, but the full click-through still needs headroom.
   timeout: 180_000,
+  // One worker: every real spec signs in as the same shared QA identities, and
+  // round4-real / sidebar-parity-real end by signing out, which Supabase does
+  // with scope "global" — revoking the sessions of any spec running beside
+  // them (seen as /auth/v1/user 403 → /v1/me 401 → "Phiên đăng nhập đã hết
+  // hạn" mid-test when the suite ran on 8 workers).
+  workers: 1,
   expect: { timeout: 60_000 },
   use: {
     baseURL,

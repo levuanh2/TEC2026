@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { X } from 'lucide-react'
 import { Link } from '../ui'
 
 /* One sidebar for both roles (Round 4.2). The Farmer shell drew its own copy
@@ -22,20 +23,48 @@ export interface SideItem {
  *  would only repeat the one row beneath it for a screen reader. */
 export interface SideGroup { key: string; label?: string; labelHidden?: boolean; items: SideItem[] }
 
-export function Sidebar({ className, home, tagline, navLabel, groups, foot }: {
+export function Sidebar({ className, home, tagline, navLabel, groups, foot, drawer }: {
   className?: string
   home: string
   tagline: string
   navLabel: string
   groups: SideGroup[]
   foot: ReactNode
+  /** Management on phones: the sidebar is a modal drawer. Absent for the
+   *  Farmer shell, whose phones use the bottom navigation instead. */
+  drawer?: {
+    id: string
+    open: boolean
+    mobile: boolean
+    onClose: () => void
+    asideRef: RefObject<HTMLElement | null>
+    closeRef: RefObject<HTMLButtonElement | null>
+  }
 }) {
+  // Closed on a phone, the drawer is off-screen and must not take focus;
+  // open, it is a modal dialog over an inert workspace.
+  const modal = Boolean(drawer?.mobile && drawer.open)
   return (
-    <aside className={`sidebar${className ? ` ${className}` : ''}`}>
-      <Link to={home} className="brand">
-        AgriCarbon
-        <small>{tagline}</small>
-      </Link>
+    <aside
+      className={`sidebar${className ? ` ${className}` : ''}`}
+      id={drawer?.id}
+      ref={drawer?.asideRef}
+      inert={drawer?.mobile && !drawer.open ? true : undefined}
+      role={modal ? 'dialog' : undefined}
+      aria-modal={modal ? true : undefined}
+      aria-label={modal ? 'Menu điều hướng' : undefined}
+    >
+      <div className="sidebar__top">
+        <Link to={home} className="brand">
+          AgriCarbon
+          <small>{tagline}</small>
+        </Link>
+        {drawer && (
+          <button type="button" className="sidebar__close" aria-label="Đóng menu" ref={drawer.closeRef} onClick={drawer.onClose}>
+            <X size={20} aria-hidden="true" />
+          </button>
+        )}
+      </div>
       <nav className="nav" aria-label={navLabel}>
         {groups.map((g) => (
           <div className="nav-group" key={g.key}>

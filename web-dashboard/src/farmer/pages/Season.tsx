@@ -65,8 +65,8 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
         </Section>
       )}
       {tab === 'performance' && (
-        <Section title="Hiệu suất vụ này" icon="performance" description="Bốn chỉ số tính từ dữ liệu đã ghi của vụ; thiếu dữ liệu không bị thay bằng số 0.">
-          <MetricCards state={metrics} season={writeCtx} mutations={mutations} />
+        <Section title="Hiệu suất vụ này" icon="performance" description="Mỗi chỉ số kèm ý nghĩa và dữ liệu dùng để tính; thiếu dữ liệu không bị thay bằng số 0.">
+          <MetricCards state={metrics} activities={activities} ctx={ctx} season={writeCtx} mutations={mutations} carbonTo={`/farmer/crop-seasons/${id}/carbon`} />
         </Section>
       )}
       {tab === 'carbon' && (

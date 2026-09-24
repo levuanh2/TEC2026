@@ -1162,3 +1162,99 @@
 .fw-demo-tag svg { width: 15px; height: 15px; }
 .fw-demo-tag b { padding: 1px 8px; border-radius: 999px; background: var(--ac-role-info-bg); border: 1px solid var(--ac-role-info-line); font-weight: 650; }
 .fw-demo-tag span { color: var(--fw-muted); }
+
+/* -- Round 4.3: metrics that say what they mean ------------------------------
+ * One row pattern for every metric: the reading leads (value + unit, never
+ * split across lines), the words follow. Groups are panels, not cards per
+ * metric. Cost sits on a recessed dashed panel; resource and Carbon on the
+ * raised one — money and CO₂e never share a surface, and a reading is never
+ * painted healthy or poor, because no benchmark exists to say which. */
+.fw-perf { display: grid; gap: var(--fw-space-24); }
+.fw-perf > .fw-mgroup { margin-top: 0; }
+.fw-mgroup--resource, .fw-mgroup--carbon, .fw-yield {
+  padding: var(--fw-space-16) var(--fw-space-20); background: var(--fw-raise);
+  border: 1px solid var(--fw-rule); border-radius: var(--ac-radius);
+}
+.fw-mgroup--cost {
+  padding: var(--fw-space-16) var(--fw-space-20); background: var(--fw-paper-2);
+  border: 1px dashed var(--fw-rule-2); border-radius: var(--ac-radius);
+}
+.fw-reading { white-space: nowrap; }
+.fw-reading b { font-variant-numeric: tabular-nums; }
+
+.fw-mrows { display: grid; }
+.fw-mrow {
+  display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: var(--fw-space-8) var(--fw-space-32);
+  padding: var(--fw-space-16) 0; border-top: 1px solid var(--fw-rule);
+}
+.fw-mrows > .fw-mrow:first-child { border-top: 0; padding-top: var(--fw-space-4); }
+.fw-mrow__main { display: grid; gap: var(--fw-space-8); align-content: start; min-width: 0; }
+.fw-mrow__name { display: inline-flex; align-items: center; gap: var(--fw-space-8); margin: 0; font-family: var(--fw-display); font-size: var(--fw-text-md); font-weight: 650; color: var(--fw-ink); }
+.fw-mrow__name svg { width: 18px; height: 18px; color: var(--fw-muted); }
+.fw-mrow__value { margin: 0; }
+.fw-mrow__value b { font-family: var(--fw-display); font-size: var(--fw-text-2xl); line-height: 1.05; font-weight: 650; letter-spacing: -.02em; color: var(--fw-ink); }
+.fw-mrow__value .fw-reading > span { font-size: var(--fw-text-base); font-weight: 600; color: var(--fw-ink-2); }
+.fw-mrow__secondary { display: flex; flex-wrap: wrap; gap: var(--fw-space-4) var(--fw-space-16); margin: 0; padding: 0; list-style: none; font-size: var(--fw-text-sm); color: var(--fw-ink-2); }
+.fw-mrow__secondary b { font-weight: 650; color: var(--fw-ink); }
+.fw-mrow__empty b { color: var(--fw-ink-2); }
+.fw-mrow__empty p { color: var(--fw-ink-2); }
+.fw-mrow__words { display: grid; gap: var(--fw-space-6); align-content: start; font-size: 14px; color: var(--fw-ink-2); min-width: 0; }
+.fw-mrow__words p { margin: 0; max-width: var(--fw-measure); }
+.fw-mrow__status { display: inline-flex; align-items: center; gap: var(--fw-space-6); font-size: var(--fw-text-sm); font-weight: 650; }
+.fw-mrow__status svg { width: 15px; height: 15px; flex: none; }
+.fw-mrow__status.is-ok { color: var(--ac-role-positive-ink); }
+.fw-mrow__status.is-missing { color: var(--ac-role-attention-ink); }
+.fw-mrow__meaning { color: var(--fw-ink); }
+.fw-mrow__basis { color: var(--fw-ink-2); }
+.fw-mrow__compare { color: var(--fw-muted); font-style: italic; }
+.fw-mrow__act :where(a, button), .fw-mdisc__btn, .fw-journal-line .fw-link, .fw-summary__more, .fw-cost__links .fw-link, .fw-yield__missing .fw-btn {
+  min-height: 44px; display: inline-flex; align-items: center;
+}
+.fw-mdisc__btn {
+  gap: var(--fw-space-6); padding: 0; border: 0; background: none; font: inherit; font-size: var(--fw-text-sm); font-weight: 650;
+  color: var(--fw-ink-2); cursor: pointer;
+}
+.fw-mdisc__btn svg { width: 15px; height: 15px; }
+.fw-mdisc__chev { transition: transform var(--fw-dur) var(--fw-ease-out); }
+.fw-mdisc__btn[aria-expanded="true"] .fw-mdisc__chev { transform: rotate(90deg); }
+.fw-mdisc__btn:focus-visible { outline: 2px solid var(--fw-focus); outline-offset: 2px; border-radius: 4px; }
+.fw-mdisc__body { padding: var(--fw-space-4) 0 var(--fw-space-8); }
+.fw-mrow__method { margin: 0; padding-left: 1.1em; display: grid; gap: var(--fw-space-4); font-size: var(--fw-text-sm); color: var(--fw-ink-2); }
+
+.fw-costcov { display: flex; flex-wrap: wrap; gap: var(--fw-space-6) var(--fw-space-16); margin: 0 0 var(--fw-space-8); padding: 0; list-style: none; font-size: var(--fw-text-sm); }
+.fw-costcov li { display: inline-flex; align-items: center; gap: var(--fw-space-6); }
+.fw-costcov svg { width: 14px; height: 14px; flex: none; }
+.fw-costcov span { font-weight: 650; color: var(--fw-ink); }
+.fw-costcov small { color: var(--fw-ink-2); font-size: var(--fw-text-sm); }
+.fw-costcov .is-ok svg { color: var(--ac-role-positive-ink); }
+.fw-costcov .is-missing svg { color: var(--ac-role-attention-ink); }
+.fw-costcov .is-na svg { color: var(--fw-muted); }
+
+.fw-yield__facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--fw-space-12) var(--fw-space-24); margin: var(--fw-space-8) 0 0; }
+.fw-yield__facts dt { font-size: var(--fw-text-xs); font-weight: 650; color: var(--fw-muted); }
+.fw-yield__facts dd { margin: 2px 0 0; display: grid; font-size: var(--fw-text-md); }
+.fw-yield__facts dd b { font-weight: 650; }
+.fw-yield__facts dd small { font-size: var(--fw-text-sm); color: var(--fw-ink-2); }
+.fw-yield__facts .is-empty { font-size: var(--fw-text-sm); font-weight: 600; color: var(--fw-ink-2); }
+.fw-yield__missing { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-8); margin: var(--fw-space-12) 0 0; font-size: 14px; color: var(--ac-role-attention-ink); }
+.fw-yield__missing svg { width: 15px; height: 15px; }
+.fw-yield__note { margin: var(--fw-space-8) 0 0; font-size: var(--fw-text-sm); color: var(--fw-muted); }
+
+/* Home: the journal count is a line of text, not a tile. */
+.fw-journal-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-8); margin: var(--fw-space-12) 0 0; font-size: 14px; color: var(--fw-ink-2); }
+.fw-journal-line > svg { width: 15px; height: 15px; color: var(--fw-muted); }
+.fw-summary__more { font-size: var(--fw-text-sm); min-height: 40px; }
+.fw-cost__links { display: flex; flex-wrap: wrap; gap: var(--fw-space-16); margin: 0; }
+
+@media (max-width: 860px) {
+  .fw-mrow { grid-template-columns: minmax(0, 1fr); }
+  .fw-yield__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .fw-mgroup--resource, .fw-mgroup--carbon, .fw-mgroup--cost, .fw-yield { padding: var(--fw-space-12) var(--fw-space-16); }
+  .fw-mrow__value b { font-size: var(--fw-text-xl); }
+}
+.fw-carbon-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--fw-space-6); margin: var(--fw-space-12) 0 0; font-size: 15px; color: var(--fw-ink-2); }
+.fw-carbon-top svg { width: 16px; height: 16px; color: var(--fw-muted); }
+.fw-carbon-top b { color: var(--fw-ink); }
+.fw-mdisc__body[hidden] { display: none; }

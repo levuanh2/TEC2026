@@ -47,6 +47,11 @@ test.describe('authenticated Farmer real recommendations flow', () => {
     await expect(page).toHaveURL(/\/farmer$/)
     await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible({ timeout: 60_000 })
 
+    // Recommendations live on the season page since the hybrid redesign;
+    // Home links the season as "Xem chi tiết vụ".
+    await page.getByRole('link', { name: 'Xem chi tiết vụ' }).click()
+    const seasonTitle = page.getByRole('heading', { level: 1 })
+    await expect(page.getByRole('tab', { name: 'Tổng quan' })).toBeVisible({ timeout: 60_000 })
     const section = page.locator('section.fw-section', { has: page.getByRole('heading', { name: 'Khuyến nghị' }) })
     await expect(section).toBeVisible({ timeout: 60_000 })
     // Either a truthful empty state or real cards — never a fabricated number.
@@ -61,8 +66,8 @@ test.describe('authenticated Farmer real recommendations flow', () => {
     // Explicit refresh: the section updates, the rest of the page keeps working
     // while it runs, and one click means exactly one generation run.
     await section.getByRole('button', { name: 'Cập nhật khuyến nghị' }).click()
-    await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Tưới nước', exact: true })).toBeEnabled()
+    await expect(seasonTitle).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Ghi hoạt động' }).first()).toBeEnabled()
     await expect.poll(() => generateResponseBody, { timeout: 120_000 }).not.toBeNull()
     expect(generateRequests, 'one click must not fan out into several runs').toHaveLength(1)
 
