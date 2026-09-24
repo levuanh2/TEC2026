@@ -2,6 +2,7 @@ import './farmer.css'
 import { useEffect, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import type { CurrentUser } from '../api/me'
+import { AccountName, Sidebar } from '../components/Sidebar'
 import { Link } from '../ui'
 import { initials } from './activityView'
 import { Ico, type IconName } from './icons'
@@ -49,33 +50,41 @@ function FarmerShell({ session, viewer, path, children }: { session: Session | n
       {/* First stop for a keyboard or screen-reader user: the sidebar is a
         * long list of links to walk past on every page. */}
       <a className="skip-link" href="#main">Bỏ qua điều hướng, tới nội dung chính</a>
-      <aside className="fw-side">
-        <Link to="/farmer" className="fw-brand">
-          <b>AgriCarbon</b><small>Nông hộ</small>
-        </Link>
-        <nav className="fw-nav" aria-label="Điều hướng nông hộ">
-          {NAV.map((group) => (
-            <div key={group.group} className="fw-nav__group">
-              <p className="fw-nav__label" aria-hidden="true">{group.group}</p>
-              {group.items.map((item) => (
-                <Link key={item.to} to={item.to} className="fw-nav__item" aria-current={isCurrent(item.to, path) ? 'page' : undefined} onMouseEnter={warm(item.to)} onFocus={warm(item.to)}>
-                  <Ico name={item.icon} />{item.label}
-                </Link>
-              ))}
-            </div>
-          ))}
-        </nav>
-        {/* The sidebar names who is signed in and links to the one page that
-          * can act on it. Sign-out used to sit here as well as on that page,
-          * so both were on screen at once and neither was the obvious one. */}
-        <Link to="/farmer/account" className="fw-profile" aria-label={`Tài khoản của ${name}`}>
-          <span className="fw-avatar" aria-hidden="true">{avatar}</span>
-          <span className="fw-profile__id">
-            <b title={name}>{name}</b>
-            <small>Xem tài khoản</small>
-          </span>
-        </Link>
-      </aside>
+      {/* Same component, token and grid as the Management sidebar; only the
+        * brand line, the destinations and the account block are the role's. */}
+      <Sidebar
+        className="fw-side"
+        home="/farmer"
+        tagline="Nông hộ"
+        navLabel="Điều hướng nông hộ"
+        groups={NAV.map((group, gi) => ({
+          key: group.group,
+          // Like Management, the overview row sits under the brand with no
+          // heading of its own. The other labels are visual only: each would
+          // be read out next to the row it names.
+          label: gi === 0 ? undefined : group.group,
+          labelHidden: true,
+          items: group.items.map((item) => ({
+            to: item.to,
+            label: item.label,
+            icon: <Ico name={item.icon} size={15} />,
+            current: isCurrent(item.to, path),
+            onWarm: warm(item.to),
+          })),
+        }))}
+        foot={
+          /* The sidebar names who is signed in and links to the one page that
+           * can act on it. Sign-out used to sit here as well as on that page,
+           * so both were on screen at once and neither was the obvious one. */
+          <Link to="/farmer/account" className="sidebar__acct" aria-label={`Tài khoản của ${name}`}>
+            <span className="avatar" aria-hidden="true">{avatar}</span>
+            <span className="sidebar__id">
+              <AccountName text={name} />
+              <small>Xem tài khoản</small>
+            </span>
+          </Link>
+        }
+      />
 
       <div className="fw-main">
         <header className="fw-topbar">
