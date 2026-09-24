@@ -14,6 +14,12 @@ export default defineConfig({
   // seconds per aggregate rollup query. Progressive per-section loading keeps
   // the page usable meanwhile, but the full click-through still needs headroom.
   timeout: 180_000,
+  // One worker: every real spec signs in as the same shared QA identities, and
+  // round4-real / sidebar-parity-real end by signing out, which Supabase does
+  // with scope "global" — revoking the sessions of any spec running beside
+  // them (seen as /auth/v1/user 403 → /v1/me 401 → "Phiên đăng nhập đã hết
+  // hạn" mid-test when the suite ran on 8 workers).
+  workers: 1,
   expect: { timeout: 60_000 },
   use: {
     baseURL,

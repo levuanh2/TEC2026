@@ -44,6 +44,11 @@ test.describe('authenticated Farmer real CV flow', () => {
     await expect(page).toHaveURL(/\/farmer$/)
     await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible({ timeout: 60_000 })
 
+    // The leaf check lives on the season page since the hybrid redesign;
+    // Home links the season as "Xem chi tiết vụ".
+    await page.getByRole('link', { name: 'Xem chi tiết vụ' }).click()
+    await expect(page.getByRole('tab', { name: 'Tổng quan' })).toBeVisible({ timeout: 60_000 })
+
     /* --------------------------------------------------------- confident */
     await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
     await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
@@ -68,8 +73,8 @@ test.describe('authenticated Farmer real CV flow', () => {
     await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toHaveCount(0)
 
     /* --------------------------------------------------------------- history */
-    await page.getByRole('link', { name: 'Xem vụ' }).click()
-    await expect(page.getByRole('tab', { name: 'Tổng quan' })).toBeVisible({ timeout: 60_000 })
+    // Still on the season's overview tab, where the history lives.
+    await expect(page.getByRole('tab', { name: 'Tổng quan' })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByRole('heading', { name: 'Kiểm tra gần đây' })).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('.cv-history__item').first()).toBeVisible({ timeout: 30_000 })
 
