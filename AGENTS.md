@@ -379,6 +379,12 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 |---|---|---|---|
 | `web-dashboard/src/components/Sidebar.tsx` (new) + `Sidebar.dom.test.tsx` (new), `web-dashboard/src/{App.tsx,styles.css}`, `web-dashboard/src/farmer/{FarmerExperience.tsx,farmer.css}`, `web-dashboard/tests/e2e/sidebar-parity.spec.ts` (new), `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` (new) | — (released) | Một component sidebar + một token `--sidebar-w` cho cả hai vai trò (240px; 216px ở ≤1024px), drawer Quản lý đóng không còn nhận Tab. Không đụng backend/API/Carbon/MRV. | DONE — real-data QA pass (sidebar-real 3/3, redesign-qa 15/15, axe 0), 2 lỗi thật đã sửa (địa chỉ bị cắt ở 216px; `.sr-only` làm tràn `/seasons` `/data-gaps` ở 1024px). Merge `--no-ff` vào `main`, **không deploy**. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` §12. |
 
+## Round 4.4 (2026-09-25) — Management metrics truth & clarity (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `web-dashboard/src/**` (Management `/performance` copy + layout, drawer, font request), `web-dashboard/index.html`, `web-dashboard/tests/**` (Round 4.4 specs), `docs/WEB_UX_REDESIGN_ROUND4_4.md` (new) | — (released) | Thu hoạch một phần không còn ghi "Chưa ghi thu hoạch", bỏ developer copy, gộp câu độ phủ, cân bằng bố cục, bỏ Fraunces nếu không dùng. **Không** đổi backend/API/Carbon/MRV. Branch `fix/agricarbon-round4-4-management-metrics-truth`. | DONE — PASS WITH KNOWN LIMITATIONS: vitest 427, mock Playwright 90/0 fail, round43/44-real 7/7, redesign-qa 15/15, axe 0, backend diff 0. Commit local, **chưa push/merge/deploy** — chờ duyệt. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_4.md`. |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
