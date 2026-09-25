@@ -259,3 +259,24 @@ def test_no_client_deletes_detail_rows_directly(tx):
         assert tx.as_user(who, "delete from public.irrigation_events where activity_id = %s", (a,)) == ("err", "42501")
     # The supported removal still works: soft delete of the parent.
     assert tx.as_user(tx.owner, "select public.soft_delete_activity(%s)", (a,))[0] == "ok"
+
+
+def test_a_soft_deleted_activity_takes_no_detail_writes(tx):
+    """Detail rows of a soft-deleted activity cannot be written by a client.
+
+    Already true before 20260926120000: `activities_select` hides the parent
+    from the policy subqueries and triggers. That migration's explicit check is
+    defence in depth for the day a policy reads activities without RLS."""
+    a = tx.activity("active")
+    tx.cur.execute("update public.activities set deleted_at = now() where id = %s", (a,))
+    # The policy subquery reads `activities` through its own RLS, which hides a
+    # soft-deleted parent: the detail row is not even matched, and is unchanged.
+    assert tx.as_user(tx.owner, "update public.irrigation_events set water_volume_m3 = 9 where activity_id = %s", (a,)) == ("ok", 0)
+    tx.cur.execute("select water_volume_m3 from public.irrigation_events where activity_id = %s", (a,))
+    assert float(tx.cur.fetchone()[0]) == 1.0
+    b = tx.one("""insert into public.activities (production_batch_id, activity_type, occurred_at, recorded_at, source, recorded_by, note, deleted_at)
+                  values (%s, 'irrigation', now(), now(), 'web', %s, 'LC', now()) returning id""", (tx.batches["active"], tx.owner))
+    # Refused (the parent is invisible to the client, so the type trigger raises).
+    assert tx.as_user(tx.owner, "insert into public.irrigation_events (activity_id, method) values (%s, 'awd')", (b,))[0] == "err"
+    tx.cur.execute("select count(*) from public.irrigation_events where activity_id = %s", (b,))
+    assert tx.cur.fetchone()[0] == 0

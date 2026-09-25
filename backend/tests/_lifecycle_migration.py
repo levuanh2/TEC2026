@@ -14,6 +14,9 @@ _MIGRATIONS = [
      "where schemaname = 'public' and tablename = 'activities' and policyname = 'activities_update'), false)"),
     ("20260926110000_batch_lifecycle_and_detail_delete.sql",
      "select to_regprocedure('private.enforce_batch_season_open()') is not null"),
+    ("20260926120000_detail_rows_of_deleted_activities.sql",
+     "select position('activity_deleted' in prosrc) > 0 from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+     "where n.nspname = 'private' and p.proname = 'enforce_activity_detail_season_open'"),
 ]
 
 

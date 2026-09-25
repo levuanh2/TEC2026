@@ -1,4 +1,4 @@
-=== Direct PostgREST lifecycle probe - run a4bda6f2 ===
+=== Direct PostgREST lifecycle probe - run 2837dc94 ===
 
 operation                                    expected  actual
 owner insert activity [active]               OK        OK

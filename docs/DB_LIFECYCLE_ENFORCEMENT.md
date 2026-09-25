@@ -4,8 +4,9 @@ Branch `feat/agricarbon-db-lifecycle-enforcement`. Migrations:
 - `20260926090000_db_lifecycle_enforcement.sql`
 - `20260926100000_activity_update_denies_loudly.sql`
 - `20260926110000_batch_lifecycle_and_detail_delete.sql` (a follow-up from the independent review)
+- `20260926120000_detail_rows_of_deleted_activities.sql` (review round 2; defence in depth, see §8)
 
-**All three are applied on hosted** and recorded in `supabase_migrations.schema_migrations`.
+**All four are applied on hosted** and recorded in `supabase_migrations.schema_migrations`.
 The user approved the lifecycle migration; the two follow-ups were applied under the same
 approval.
 
@@ -147,6 +148,18 @@ Round 1 verdict: `CODEX REVIEW: NO BLOCKER`, with two findings. Both are fixed b
 |---|---|---|
 | MEDIUM | Flutter's `ensureDefaultBatch` upsert could create or update a batch in a finished season before the activity was refused | client batch writes need a live `planned`/`active` season (55000); `crop_season_id` is immutable |
 | LOW | a non-writer's direct detail DELETE matched 0 rows silently | `DELETE` on the detail tables is revoked from `authenticated` (explicit 42501); no client uses it |
+
+Round 2 verdict: `CODEX REVIEW: NO BLOCKER`. It confirmed both fixes above and raised one new MEDIUM:
+a detail row of a soft-deleted activity might still be insertable or updatable.
+
+Checking it on the database showed the scenario was **already refused before any fix**:
+- the detail policies and triggers read `activities` through its own RLS;
+- `activities_select` hides soft-deleted rows;
+- so an UPDATE matches nothing (the row is unchanged), and an INSERT is refused by the
+  baseline type trigger.
+
+`20260926120000` adds an explicit `activity_deleted` check as defence in depth; in client
+sessions it does not change the outcome. Tests: `test_a_soft_deleted_activity_takes_no_detail_writes`.
 
 ## 9. Remaining (not in this work)
 
