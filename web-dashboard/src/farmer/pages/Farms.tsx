@@ -8,6 +8,8 @@ import { Crumbs, Empty, ErrorPanel, IconTile, PageHeader, Section, Sk, SkBlock, 
 import {
   isActiveStatus, placeOf, plotsOfFarm, prefetchSeason, seasonStatusLabel, seasonsOfPlot, seasonsOfPlots, sumArea, useScope,
 } from '../scope'
+import { useStartSeason } from '../StartSeason'
+import { useCanWriteFarm } from '../writeAccess'
 
 const NOT_FOUND = 'Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.'
 
@@ -185,6 +187,8 @@ function SeasonRow({ season, plot, past }: { season: CropSeason; plot?: Plot; pa
 
 export function FarmerPlotPage({ id }: { id: string }) {
   const scope = useScope()
+  const canWrite = useCanWriteFarm()
+  const start = useStartSeason()
   if (scope.loading) return <DetailSkeleton />
   if (scope.error || !scope.data) return <ErrorPanel error={scope.error ?? 'Không có dữ liệu.'} onRetry={scope.reload} />
   const plot = scope.data.plots.find((p) => p.id === id)
@@ -194,6 +198,10 @@ export function FarmerPlotPage({ id }: { id: string }) {
   const active = seasons.find((s) => isActiveStatus(s.status))
   const days = active && !active.harvestDate ? daysSince(active.plantingDate) : null
   const past = seasons.filter((x) => x.id !== active?.id)
+  // Starting a season is offered only where the farm role allows writing and
+  // nothing is under cultivation — the server refuses anything else anyway.
+  const canStart = !active && canWrite(plot.farmId)
+  const startButton = <button type="button" className="fw-btn" onClick={() => start.open([plot])}><Ico name="plus" />Bắt đầu vụ mới</button>
   return (
     <>
       <Crumbs items={[{ label: 'Ruộng của tôi', to: '/farmer/farms' }, ...(farm ? [{ label: farm.name, to: `/farmer/farms/${farm.id}` }] : []), { label: plot.name }]} />
@@ -225,6 +233,15 @@ export function FarmerPlotPage({ id }: { id: string }) {
           <span className="fw-btn">Mở vụ<Ico name="arrow" /></span>
         </Link>
       )}
+      {seasons.length > 0 && !active && (
+        <div className="fw-current fw-current--idle">
+          <span>
+            <span className="fw-current__label">Chưa có vụ đang canh tác</span>
+            <small>{canStart ? 'Bắt đầu vụ mới để ghi nhật ký, theo dõi hiệu suất và tính Carbon.' : 'Bạn chưa có quyền tạo vụ canh tác.'}</small>
+          </span>
+          {canStart && startButton}
+        </div>
+      )}
       {past.length > 0 && (
         <Section title="Vụ đã kết thúc" icon="history" tone="sage" description={`${past.length} vụ trước trên thửa này`}>
           <div className="fw-seasons farmer-season-list">{past.map((s) => <SeasonRow key={s.id} season={s} plot={plot} past />)}</div>
@@ -232,7 +249,15 @@ export function FarmerPlotPage({ id }: { id: string }) {
       )}
       {!seasons.length && (
         <Section title="Mùa vụ" icon="history" tone="sage">
-          <Empty icon="seeding" tone="leaf" title="Thửa này chưa có vụ canh tác nào." body="Khi vụ mới được tạo cho thửa này, vụ sẽ xuất hiện ở đây." />
+          <Empty
+            icon="seeding"
+            tone="leaf"
+            title="Chưa có vụ canh tác"
+            body={canStart
+              ? 'Bạn đã có thửa ruộng. Bắt đầu vụ mới để ghi nhật ký, theo dõi hiệu suất và tính Carbon.'
+              : 'Bạn chưa có quyền tạo vụ canh tác. Liên hệ chủ hộ hoặc cán bộ hợp tác xã để bắt đầu vụ trên thửa này.'}
+            action={canStart ? startButton : undefined}
+          />
         </Section>
       )}
       {seasons.length > 0 && !active && !past.length && (
@@ -240,6 +265,7 @@ export function FarmerPlotPage({ id }: { id: string }) {
           <div className="fw-seasons farmer-season-list">{seasons.map((s) => <SeasonRow key={s.id} season={s} plot={plot} />)}</div>
         </Section>
       )}
+      {start.node}
     </>
   )
 }

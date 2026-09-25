@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
+import secrets
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +37,16 @@ from infrastructure.mrv_export_repo import (
     MrvExportNotFoundError,
     PostgresMrvExportRepository,
 )
-from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository
+from infrastructure.season_repo import PostgresSeasonRepository, SeasonScopeError
+from infrastructure.auth_admin import AuthUserExistsError, SupabaseAuthAdmin
+from infrastructure.provisioning_repo import (
+    AccountExistsError,
+    FarmCodeTakenError,
+    PlotCodeTakenError,
+    PostgresProvisioningRepository,
+    ProvisioningScopeError,
+)
+from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository, SeasonNotOpenError
 from mrv import manifest as mrv_manifest
 from mrv import report_pdf as mrv_report_pdf
 from mrv import workbook as mrv_workbook
@@ -290,6 +302,191 @@ class ActivityWriteService:
             )
         except (ReadNotFoundError, ActivityNotFoundError) as exc:
             raise ActivityWriteAccessError() from exc
+
+
+class SeasonService:
+    """Start a crop season on a plot: season + default production batch.
+
+    One path for Farmer Web and Management Web. Who may do it is not decided
+    here: the repository evaluates `private.user_can_write_farm` -- the rule
+    behind the `crop_seasons` INSERT policy -- for the JWT-verified caller, so a
+    farm owner/editor or an active cooperative manager of the farm's
+    cooperative may, and a farm viewer, enterprise viewer, regulator or an
+    out-of-scope caller gets the same 404 as a plot that does not exist.
+    """
+
+    def __init__(self, repository: PostgresSeasonRepository):
+        self._repository = repository
+
+    def create(
+        self, *, read_repository: SupabaseReadRepository, plot_id: str,
+        request: schemas.CropSeasonCreateRequest,
+    ) -> dict[str, Any]:
+        try:
+            uuid.UUID(plot_id)
+        except ValueError as exc:
+            raise SeasonScopeError() from exc
+        try:
+            actor_id = read_repository.user_id()
+        except ReadNotFoundError as exc:
+            raise SeasonScopeError() from exc
+        return self._repository.create(
+            plot_id=plot_id, actor_id=actor_id, season_code=request.season_code,
+            variety_name=request.variety_name, planting_date=request.planting_date,
+            expected_harvest_date=request.expected_harvest_date,
+            prepare=lambda out: schemas.success_payload(
+                schemas.CropSeasonCreateResponse, {**out[0], "idempotent_replay": out[1]}),
+        )
+
+
+_provisioning_log = logging.getLogger("agricarbon.provisioning")
+
+# No look-alikes (0/O, 1/l/I): the manager reads this out or writes it down.
+_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+
+
+def generate_temporary_password() -> str:
+    """12 random characters in three groups, for example Hk7m-Q2xa-9TfP.
+
+    About 70 bits from `secrets`; always has upper, lower, digit and a symbol so
+    it passes a strict Supabase password policy. Returned to the manager once
+    and never stored or logged by the application.
+    """
+    while True:
+        raw = "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(12))
+        if any(c.isupper() for c in raw) and any(c.islower() for c in raw) and any(c.isdigit() for c in raw):
+            return f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
+
+
+class ProvisioningFailedError(Exception):
+    """Provisioning did not complete. `compensated` says whether the Auth
+    identity created for it was removed (True) or could only be locked or not
+    cleaned up at all (False). Never reported as success."""
+
+    def __init__(self, *, compensated: bool):
+        super().__init__("farmer provisioning failed")
+        self.compensated = compensated
+
+
+class ProvisioningService:
+    """Management "Thêm nông hộ": a farmer account inside the manager's own
+    cooperative, optionally with its farm and first plot.
+
+    The Auth identity (Supabase Auth Admin API) and the application rows
+    (profile, membership, farm, farm member, plot) live in two systems, so
+    they cannot share one transaction. Strategy:
+
+    1. `preflight` -- authorization, duplicate email, taken farm code -- in the
+       database, before any identity exists;
+    2. create the identity;
+    3. write every application row in ONE transaction;
+    4. if 3 fails, delete the identity (fallback: lock it). The request fails
+       either way; there is no success for a half-provisioned farmer, and an
+       identity that could not be deleted is locked and holds no membership.
+    """
+
+    def __init__(self, repository: PostgresProvisioningRepository, auth_admin: SupabaseAuthAdmin,
+                 password_factory: Callable[[], str] = generate_temporary_password):
+        self._repository = repository
+        self._auth = auth_admin
+        self._password = password_factory
+
+    @staticmethod
+    def _actor(read_repository: SupabaseReadRepository, *ids: str) -> str:
+        for value in ids:
+            try:
+                uuid.UUID(value)
+            except ValueError as exc:
+                raise ProvisioningScopeError() from exc
+        try:
+            return read_repository.user_id()
+        except ReadNotFoundError as exc:
+            raise ProvisioningScopeError() from exc
+
+    def list_farmers(self, *, read_repository: SupabaseReadRepository, organization_id: str) -> list[dict[str, Any]]:
+        actor_id = self._actor(read_repository, organization_id)
+        rows = self._repository.list_farmers(organization_id=organization_id, actor_id=actor_id)
+        return [schemas.FarmerListItem.model_validate(r).model_dump(mode="json") for r in rows]
+
+    def _compensate(self, user_id: str) -> bool:
+        try:
+            self._auth.delete_user(user_id)
+            _provisioning_log.warning("farmer_provisioning_rolled_back user_id=%s identity=deleted", user_id)
+            return True
+        except Exception:  # noqa: BLE001
+            _provisioning_log.exception("farmer_provisioning_delete_failed user_id=%s", user_id)
+        try:
+            self._auth.ban_user(user_id)
+            _provisioning_log.error("farmer_provisioning_incomplete user_id=%s identity=locked_without_membership", user_id)
+        except Exception:  # noqa: BLE001
+            _provisioning_log.exception("farmer_provisioning_incomplete user_id=%s identity=UNCLEANED_without_membership", user_id)
+        return False
+
+    def provision(
+        self, *, read_repository: SupabaseReadRepository, organization_id: str,
+        request: schemas.FarmerProvisionRequest,
+    ) -> dict[str, Any]:
+        actor_id = self._actor(read_repository, organization_id)
+        farm = request.farm.model_dump() if request.farm else None
+        plot = request.plot.model_dump() if request.plot else None
+        self._repository.preflight(
+            organization_id=organization_id, actor_id=actor_id, email=request.email,
+            farm_code=farm["farm_code"] if farm else None,
+        )
+        password = self._password()
+        attempt = str(uuid.uuid4())
+        try:
+            user_id = self._auth.create_user(email=request.email, password=password, full_name=request.full_name, attempt=attempt)
+        except AuthUserExistsError as exc:
+            # Created between preflight and now: classify it the same way.
+            self._repository.preflight(organization_id=organization_id, actor_id=actor_id, email=request.email, farm_code=None)
+            raise AccountExistsError() from exc
+        except Exception as exc:
+            # Ambiguous: Auth may have created the user and the response was
+            # lost. Find an identity this attempt created and remove it.
+            try:
+                orphan = self._repository.find_orphan_identity(email=request.email, attempt=attempt)
+            except Exception:  # noqa: BLE001
+                _provisioning_log.exception("farmer_provisioning_orphan_lookup_failed email_domain=%s",
+                                            request.email.rsplit("@", 1)[-1])
+                raise ProvisioningFailedError(compensated=False) from exc
+            raise ProvisioningFailedError(compensated=self._compensate(orphan) if orphan else True) from exc
+        try:
+            body = self._repository.provision(
+                organization_id=organization_id, actor_id=actor_id, user_id=user_id,
+                full_name=request.full_name, phone=request.phone, farm=farm, plot=plot,
+                prepare=lambda out: schemas.success_payload(schemas.FarmerProvisionResponse, {
+                    **out, "email": request.email, "full_name": request.full_name,
+                    "phone": request.phone, "temporary_password": password,
+                }),
+            )
+        except Exception as exc:
+            compensated = self._compensate(user_id)
+            if compensated and isinstance(exc, (FarmCodeTakenError, PlotCodeTakenError, ProvisioningScopeError)):
+                raise
+            raise ProvisioningFailedError(compensated=compensated) from exc
+        _provisioning_log.info("farmer_provisioned organization_id=%s actor_id=%s user_id=%s farm=%s plot=%s",
+                               organization_id, actor_id, user_id, bool(farm), bool(plot))
+        return body
+
+    def create_farm(
+        self, *, read_repository: SupabaseReadRepository, organization_id: str, request: schemas.FarmCreateRequest,
+    ) -> dict[str, Any]:
+        actor_id = self._actor(read_repository, organization_id)
+        fields = request.model_dump(exclude={"owner_user_id"})
+        return self._repository.create_farm(
+            organization_id=organization_id, actor_id=actor_id, owner_user_id=str(request.owner_user_id), farm=fields,
+            prepare=lambda out: schemas.success_payload(schemas.FarmCreatedResponse, out),
+        )
+
+    def create_plot(
+        self, *, read_repository: SupabaseReadRepository, farm_id: str, request: schemas.PlotCreateRequest,
+    ) -> dict[str, Any]:
+        actor_id = self._actor(read_repository, farm_id)
+        return self._repository.create_plot(
+            farm_id=farm_id, actor_id=actor_id, plot=request.model_dump(),
+            prepare=lambda out: schemas.success_payload(schemas.PlotCreatedResponse, out),
+        )
 
 
 class RecommendationAccessError(Exception):

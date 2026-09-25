@@ -503,6 +503,14 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .form-field[aria-invalid="true"] input, .form-field[aria-invalid="true"] select { border-bottom: 2px solid var(--danger); }
 .form-field__hint { color: var(--text-muted); font-weight: 400; font-size: var(--fs-caption); }
 .form-field__required { color: var(--danger); font-weight: 700; }
+/* "Bắt đầu vụ mới" — shared by the Farmer sheet and the Management sheet. */
+.start-season { display: grid; gap: 14px; }
+.start-season .form-field__opt { margin-left: 6px; color: var(--text-muted); font-weight: 400; font-size: var(--fs-caption); }
+.start-season__target { margin: 0; color: var(--text-secondary); }
+.start-season__dates { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.start-season__note { margin: 0; color: var(--text-muted); font-size: var(--fs-caption); line-height: 1.5; }
+.start-season__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.start-season .form-error { color: var(--danger); font-weight: 650; font-size: var(--fs-sm); }
 /* Methodology choices: each option carries a plain-language explanation, so the
    row needs two lines rather than the single-line radio the rest of the app uses. */
 .form-fieldset { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 16px 0 0; margin: 0; display: grid; gap: 8px; }
@@ -1024,3 +1032,50 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
 @media (prefers-reduced-motion: reduce) { .shell-backdrop { animation: none; } }
 /* A list that sets its own display must still honour `hidden`. */
 .agg__list[hidden] { display: none; }
+
+/* -- Round 4.4: /performance fills its rows ---------------------------------
+ * Water + fertiliser are one section in two columns; cost and Carbon are two
+ * sections that share the next row, so neither leaves half the width empty.
+ * Below 1100px (tablet rail, phone) everything is one column — a 360px card
+ * beside a 216px rail squeezes the coverage sentence into five lines. */
+.perf-grid { display: grid; gap: 0 var(--gap); grid-template-columns: minmax(0, 1fr); }
+.perf-pair { display: grid; gap: 0 var(--gap); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .perf-grid, .perf-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* The facts every aggregate shares, said once above them. */
+.agg-basis { display: grid; gap: 2px; margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--fs-sm); color: var(--text-secondary); }
+.agg-basis div { display: flex; flex-wrap: wrap; gap: 4px; }
+.agg-basis dt { font-weight: 650; color: var(--text-muted); }
+.agg-basis dt::after { content: ":"; }
+.agg-basis dd { margin: 0; }
+/* Touch target: the missing-farm links were 32px tall. */
+.agg__list a { min-height: 40px; }
+
+/* ---------------------------------------------- Tài khoản nông hộ (Management) */
+.acct-name { display: grid; gap: 2px; }
+.acct-name small { color: var(--text-muted); font-size: var(--fs-caption); }
+.acct-form { display: grid; gap: 16px; }
+.acct-form--page { max-width: 880px; }
+.acct-form .form-field__opt { margin-left: 6px; color: var(--text-muted); font-weight: 400; font-size: var(--fs-caption); }
+.acct-form .form-error { color: var(--danger); font-weight: 650; }
+.acct-form .form-check { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 600; }
+.acct-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.acct-grid + .acct-grid { margin-top: 12px; }
+.acct-grid--3 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.acct-form__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.acct-form__actions--start { justify-content: flex-start; }
+.acct-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--fs-sm); color: var(--text-muted); }
+.acct-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.acct-steps span { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); font-size: var(--fs-caption); font-weight: 700; }
+.acct-steps .is-current { color: var(--text-primary); font-weight: 650; }
+.acct-steps .is-current span { border-color: var(--accent); color: var(--accent); }
+.acct-steps .is-done span { background: var(--accent); border-color: var(--accent); color: #fff; }
+.acct-done { display: grid; gap: 16px; max-width: 720px; }
+.acct-done h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.acct-cred { display: grid; gap: 10px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); }
+.acct-cred div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.acct-cred dt { color: var(--text-muted); font-size: var(--fs-sm); }
+.acct-cred dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.acct-cred code { font-size: 1.15em; letter-spacing: .04em; }
+@media (max-width: 560px) { .acct-cred div { grid-template-columns: minmax(0, 1fr); } }

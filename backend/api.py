@@ -49,11 +49,23 @@ from service import (
     MrvExportAccessError,
     MrvExportService,
     RecommendationAccessError,
+    ProvisioningFailedError,
+    ProvisioningService,
     RecommendationService,
+    SeasonService,
     UnsupportedExportFormatError,
 )
 from infrastructure.mrv_export_repo import MrvArtifactCorruptError, MrvArtifactMissingError
-from infrastructure.write_repo import IdempotencyConflictError
+from infrastructure.season_repo import ActiveSeasonExistsError, SeasonCodeTakenError, SeasonScopeError
+from infrastructure.provisioning_repo import (
+    AccountExistsError,
+    FarmCodeTakenError,
+    FarmerAlreadyMemberError,
+    MembershipInactiveError,
+    PlotCodeTakenError,
+    ProvisioningScopeError,
+)
+from infrastructure.write_repo import IdempotencyConflictError, SeasonNotOpenError
 
 router = APIRouter(prefix="/v1")
 logger = logging.getLogger("agricarbon.api")
@@ -110,6 +122,10 @@ def _read_repo(authorization: str | None = Header(default=None)) -> SupabaseRead
 
 def _activity_write_service() -> ActivityWriteService:
     raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Activity write repository is not configured."))
+
+
+def _season_service() -> SeasonService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Crop season write repository is not configured."))
 
 
 def _recommendation_service() -> RecommendationService:
@@ -374,6 +390,37 @@ def list_plot_seasons(plot_id: str, repo: SupabaseReadRepository = Depends(_read
     return _read_or_404(lambda: {"items": repo.seasons_for_plot(plot_id)})
 
 
+@router.post(
+    "/plots/{plot_id}/crop-seasons", tags=['Crop Seasons'], status_code=201,
+    response_model=schemas.CropSeasonCreateResponse,
+)
+def create_crop_season(
+    plot_id: str, payload: schemas.CropSeasonCreateRequest, response: Response,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: SeasonService = Depends(_season_service),
+) -> dict[str, Any]:
+    """Start a crop season on a plot, with its default production batch.
+
+    Both rows are written in one transaction, so a season returned here can take
+    activities immediately. Allowed for a farm owner/editor and for an active
+    cooperative manager of the farm's cooperative (`private.user_can_write_farm`);
+    anyone else -- and a plot that does not exist -- gets the same 404.
+    Repeating the exact same request returns the season it created (200,
+    `idempotent_replay: true`) instead of a second season.
+    """
+    try:
+        body = service.create(read_repository=repo, plot_id=plot_id, request=payload)
+    except SeasonScopeError as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.")) from exc
+    except ActiveSeasonExistsError as exc:
+        raise HTTPException(status_code=409, detail=error_detail("active_season_exists", "Thửa này đang có một vụ đang canh tác. Kết thúc vụ đó trước khi bắt đầu vụ mới.")) from exc
+    except SeasonCodeTakenError as exc:
+        raise HTTPException(status_code=409, detail=error_detail("season_code_exists", "Thửa này đã có một vụ với mã này. Hãy dùng mã vụ khác.")) from exc
+    if body["idempotent_replay"]:
+        response.status_code = 200
+    return body
+
+
 @router.get("/crop-seasons/{crop_season_id}", tags=['Crop Seasons'], response_model=schemas.CropSeasonResponse)
 def get_crop_season(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.season(crop_season_id))
@@ -397,7 +444,9 @@ def _write_or_http(callback):
         return callback()
     except ActivityWriteAccessError as exc:
         raise HTTPException(status_code=404, detail=error_detail("not_found", "Activity not found or outside your scope.")) from exc
-    except InvalidCropSeasonStateError as exc:
+    except (InvalidCropSeasonStateError, SeasonNotOpenError) as exc:
+        # SeasonNotOpenError: the same rule, re-checked under a lock inside the
+        # write transaction (a season closed after the service's first read).
         raise HTTPException(status_code=422, detail=error_detail("invalid_crop_season_state", "Crop season is not open for journal writes.")) from exc
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=409, detail=error_detail("duplicate_event", "Idempotency key was already used with different activity data.")) from exc
@@ -568,6 +617,97 @@ def get_organization_metrics(organization_id: str, repo: SupabaseReadRepository 
 @router.get("/organizations/{organization_id}/farm-performance", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.FarmPerformanceResponse])
 def farm_performance(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: {"items": repo.farm_performance(organization_id)})
+
+# -- Management: farmer provisioning ------------------------------------------
+
+def _provisioning_service() -> ProvisioningService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Farmer provisioning is not configured."))
+
+
+_PROVISIONING_CONFLICTS: list[tuple[type[Exception], str, str]] = [
+    (FarmerAlreadyMemberError, "farmer_already_member", "Email này đã là tài khoản thành viên của HTX. Tìm nông hộ trong danh sách thay vì tạo mới."),
+    (MembershipInactiveError, "membership_inactive", "Email này thuộc một thành viên đã ngừng tham gia HTX. Việc kích hoạt lại cần quản trị hệ thống thực hiện."),
+    # Deliberately says nothing about where the account belongs.
+    (AccountExistsError, "account_exists", "Email này đã được dùng cho một tài khoản khác. Dùng email khác hoặc liên hệ quản trị hệ thống."),
+    (FarmCodeTakenError, "farm_code_exists", "HTX đã có nông hộ với mã này. Hãy dùng mã hộ khác."),
+    (PlotCodeTakenError, "plot_code_exists", "Nông hộ đã có thửa với mã này. Hãy dùng mã thửa khác."),
+]
+
+
+def _provisioning_or_http(callback):
+    try:
+        return callback()
+    except ProvisioningScopeError as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.")) from exc
+    except ProvisioningFailedError as exc:
+        if exc.compensated:
+            raise HTTPException(status_code=500, detail=error_detail(
+                "provisioning_failed", "Chưa tạo được tài khoản nông hộ. Không có dữ liệu nào được lưu; hãy thử lại.")) from exc
+        raise HTTPException(status_code=500, detail=error_detail(
+            "provisioning_incomplete",
+            "Chưa tạo được tài khoản nông hộ. Có thể còn một tài khoản đăng nhập chưa thuộc HTX (đã khoá nếu hệ thống khoá được); báo quản trị hệ thống kiểm tra.")) from exc
+    except tuple(t for t, _, _ in _PROVISIONING_CONFLICTS) as exc:
+        code, message = next((c, m) for t, c, m in _PROVISIONING_CONFLICTS if isinstance(exc, t))
+        raise HTTPException(status_code=409, detail=error_detail(code, message)) from exc
+
+
+@router.get(
+    "/organizations/{organization_id}/farmers", tags=['Organizations'],
+    response_model=schemas.ItemsResponse[schemas.FarmerListItem],
+)
+def list_organization_farmers(
+    organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ProvisioningService = Depends(_provisioning_service),
+) -> dict[str, Any]:
+    """Farmer accounts of the cooperative with their onboarding stage.
+    Active cooperative manager of this cooperative only; anyone else 404."""
+    return {"items": _provisioning_or_http(lambda: service.list_farmers(read_repository=repo, organization_id=organization_id))}
+
+
+@router.post(
+    "/organizations/{organization_id}/farmers", tags=['Organizations'], status_code=201,
+    response_model=schemas.FarmerProvisionResponse,
+)
+def provision_farmer(
+    organization_id: str, payload: schemas.FarmerProvisionRequest, response: Response,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ProvisioningService = Depends(_provisioning_service),
+) -> dict[str, Any]:
+    """Create a farmer account in the cooperative ("Thêm nông hộ"), optionally
+    with the farm (the farmer as owner) and its first plot.
+
+    There is no public sign-up: accounts are provisioned here, server-side,
+    with a temporary password returned ONCE for the manager to hand over.
+    """
+    # The body carries a password: no cache may keep it.
+    response.headers["Cache-Control"] = "no-store"
+    return _provisioning_or_http(lambda: service.provision(read_repository=repo, organization_id=organization_id, request=payload))
+
+
+@router.post(
+    "/organizations/{organization_id}/farms", tags=['Organizations'], status_code=201,
+    response_model=schemas.FarmCreatedResponse,
+)
+def create_organization_farm(
+    organization_id: str, payload: schemas.FarmCreateRequest,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ProvisioningService = Depends(_provisioning_service),
+) -> dict[str, Any]:
+    """A farm for a farmer who already belongs to the cooperative (owner)."""
+    return _provisioning_or_http(lambda: service.create_farm(read_repository=repo, organization_id=organization_id, request=payload))
+
+
+@router.post("/farms/{farm_id}/plots", tags=['Plots'], status_code=201, response_model=schemas.PlotCreatedResponse)
+def create_farm_plot(
+    farm_id: str, payload: schemas.PlotCreateRequest,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: ProvisioningService = Depends(_provisioning_service),
+) -> dict[str, Any]:
+    """Record a plot on a farm. Cooperative manager of the farm's cooperative
+    only: the official plot structure is the cooperative's, so a farm owner
+    cannot add plots here even though RLS would let them."""
+    return _provisioning_or_http(lambda: service.create_plot(read_repository=repo, farm_id=farm_id, request=payload))
+
 
 @router.get("/mrv/cases", tags=['MRV'], response_model=schemas.PaginatedResponse[schemas.MrvCaseResponse])
 def mrv_cases(

@@ -379,6 +379,18 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 |---|---|---|---|
 | `web-dashboard/src/components/Sidebar.tsx` (new) + `Sidebar.dom.test.tsx` (new), `web-dashboard/src/{App.tsx,styles.css}`, `web-dashboard/src/farmer/{FarmerExperience.tsx,farmer.css}`, `web-dashboard/tests/e2e/sidebar-parity.spec.ts` (new), `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` (new) | — (released) | Một component sidebar + một token `--sidebar-w` cho cả hai vai trò (240px; 216px ở ≤1024px), drawer Quản lý đóng không còn nhận Tab. Không đụng backend/API/Carbon/MRV. | DONE — real-data QA pass (sidebar-real 3/3, redesign-qa 15/15, axe 0), 2 lỗi thật đã sửa (địa chỉ bị cắt ở 216px; `.sr-only` làm tràn `/seasons` `/data-gaps` ở 1024px). Merge `--no-ff` vào `main`, **không deploy**. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_2_SIDEBAR.md` §12. |
 
+## Round 4.4 (2026-09-25) — Management metrics truth & clarity (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `web-dashboard/src/**` (Management `/performance` copy + layout, drawer, font request), `web-dashboard/index.html`, `web-dashboard/tests/**` (Round 4.4 specs), `docs/WEB_UX_REDESIGN_ROUND4_4.md` (new) | — (released) | Thu hoạch một phần không còn ghi "Chưa ghi thu hoạch", bỏ developer copy, gộp câu độ phủ, cân bằng bố cục, bỏ Fraunces nếu không dùng. **Không** đổi backend/API/Carbon/MRV. Branch `fix/agricarbon-round4-4-management-metrics-truth`. | Final gate **BLOCKED** trên `f5abf4c` (thêm fix auth race): full real 24 pass / 2 fail do Supabase (PGRST303, upstream disconnect). Chưa push/merge/deploy. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_4.md` §19. |
+
+## Season lifecycle + farmer provisioning (2026-09-25) (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/api.py`, `backend/schemas.py`, `backend/service.py`, `backend/main.py`, `backend/infrastructure/season_repo.py` (new), `backend/infrastructure/provisioning_repo.py` (new), `backend/tests/test_season_create.py` (new), `backend/tests/test_farmer_provisioning.py` (new), `web-dashboard/src/**` (Farmer no-season UX, create-season flow, closed-season write gate, Management create-season + Nông hộ provisioning), `web-dashboard/tests/**`, `docs/SEASON_LIFECYCLE_AND_PROVISIONING.md` (new) | — (released) | POST tạo vụ + batch mặc định trong một transaction; UX không có vụ; chặn ghi vào vụ đã đóng; Management tạo vụ và cấp tài khoản nông hộ qua FastAPI. **Không** đổi Carbon engine/hệ số/MRV/Flutter sync/Render. Branch `feat/agricarbon-season-lifecycle`. | DONE (2026-09-26): Codex read-only review 3 vòng → NO BLOCKER (sửa: khoá + kiểm tra lại trạng thái vụ trong transaction ghi, yêu cầu membership còn hiệu lực, bù trừ Auth theo marker từng lần). Backend 780 pass/0 fail; vitest 465; tsc+build; mock Playwright 90; real 25 pass/0 fail/10 skip (opt-in hoặc script); hosted smoke 22/22; signup công khai đã tắt trên hosted và kiểm chứng 5/5. Follow-up P1/P2: `docs/SEASON_LIFECYCLE_AND_PROVISIONING.md` §9. |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash

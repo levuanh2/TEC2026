@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
@@ -10,6 +10,7 @@ import { buildNav } from './nav'
 import { go, Link, Notice } from './ui'
 import { DashboardPage } from './pages/dashboard'
 import { OrganizationsPage, FarmsPage, FarmPage, PlotPage } from './pages/directory'
+import { FarmerAccountsPage, ProvisionFarmerPage } from './pages/farmers'
 import { PerformancePage } from './pages/performance'
 import { SeasonHub, type SeasonTab } from './pages/season'
 import { MrvPage } from './pages/mrv'
@@ -191,6 +192,10 @@ function render(path: string, viewer: CurrentUser): ReactNode {
       return <PerformancePage organizationId={viewer.organizationId} />
     case 'farms':
       return <FarmsPage />
+    case 'farmer-accounts':
+      return <FarmerAccountsPage organizationId={viewer.organizationId} role={viewer.role} />
+    case 'farmer-account-new':
+      return <ProvisionFarmerPage organizationId={viewer.organizationId} role={viewer.role} />
     case 'seasons':
       return <SeasonsWorkspace organizationId={viewer.organizationId} />
     case 'data-gaps':
@@ -200,7 +205,7 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'farm':
       return <FarmPage id={id} />
     case 'plot':
-      return <PlotPage id={id} />
+      return <PlotPage id={id} role={viewer.role} />
     case 'season':
       return <SeasonHub id={id} tab="overview" />
     case 'activities':
@@ -257,6 +262,12 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [viewerReady, setViewerReady] = useState(false)
   const [ended, setEnded] = useState<AuthEndReason | null>(null)
+  // The session a /v1/me answer belongs to, cleared *synchronously* when the
+  // session ends. The effect's own `alive` flag only flips when React commits
+  // the next render, and a /v1/me whose 401 ends the session rejects before
+  // that commit — its catch then ran the role redirect from /login to /farmer
+  // and the person lost the page to return to (Round 4.4 final gate).
+  const liveSession = useRef<Session | null>(null)
 
   useEffect(() => {
     const update = () => setPath(location.pathname)
@@ -269,6 +280,7 @@ export default function App() {
   // so nothing signed-in is left mounted and there is no redirect back into
   // the app from a stale session value.
   useEffect(() => onAuthEnded((reason) => {
+    liveSession.current = null
     setSession(null)
     setViewer({ role: 'farmer', organizationId: null })
     setEnded(reason)
@@ -309,6 +321,8 @@ export default function App() {
       return
     }
     let alive = true
+    liveSession.current = session
+    const current = () => alive && liveSession.current === session
     // A cached role hint for this same user lets a refresh/deep link paint
     // its shell immediately; /v1/me still revalidates below and its result
     // (not the hint) drives the redirect, exactly as before.
@@ -326,13 +340,13 @@ export default function App() {
     if (!hint || hint.role === 'farmer') prefetchFarmerScope()
     void getMe()
       .then((v) => {
-        if (!alive) return
+        if (!current()) return
         setViewer(v)
         writeViewerHint(session.user.id, v)
         if (!usingMockData) applyRoleRedirect(v.role, location.pathname)
       })
       .catch(() => {
-        if (!alive) return
+        if (!current()) return
         setViewer({ role: 'farmer', organizationId: null })
         if (!usingMockData) applyRoleRedirect('farmer', location.pathname)
       })

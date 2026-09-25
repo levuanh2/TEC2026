@@ -38,7 +38,10 @@ from infrastructure.recommendation_repo import PostgresRecommendationRepository
 from infrastructure.cv_repo import PostgresCvRepository
 from infrastructure.auth import InvalidTokenError, MissingAuthError, extract_bearer_token
 from infrastructure.request_context import RequestIdMiddleware
-from service import ActivityWriteService, CarbonService, CvService, MrvExportService, RecommendationService
+from infrastructure.season_repo import PostgresSeasonRepository
+from infrastructure.provisioning_repo import PostgresProvisioningRepository
+from infrastructure.auth_admin import SupabaseAuthAdmin
+from service import ActivityWriteService, CarbonService, CvService, MrvExportService, ProvisioningService, RecommendationService, SeasonService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -163,6 +166,16 @@ if settings.auth_configured and settings.supabase_db_url:
 if settings.auth_configured and settings.supabase_db_url:
     _activity_write_service_singleton = ActivityWriteService(PostgresActivityWriteRepository(settings))
     app.dependency_overrides[api._activity_write_service] = lambda: _activity_write_service_singleton
+    _season_service_singleton = SeasonService(PostgresSeasonRepository(settings))
+    app.dependency_overrides[api._season_service] = lambda: _season_service_singleton
+
+if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
+    # The service-role key stays here, server-side: Management Web reaches the
+    # Auth Admin API only through these routes.
+    _provisioning_service_singleton = ProvisioningService(
+        PostgresProvisioningRepository(settings), SupabaseAuthAdmin(settings)
+    )
+    app.dependency_overrides[api._provisioning_service] = lambda: _provisioning_service_singleton
 
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
     _recommendation_service_singleton = RecommendationService(_service_singleton, PostgresRecommendationRepository(settings))

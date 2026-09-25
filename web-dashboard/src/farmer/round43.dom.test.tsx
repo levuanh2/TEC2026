@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { SeasonMetrics } from '../api/metrics'
 import type { Activity } from '../types'
-import { AggregateMetric } from '../components/AggregateMetric'
+import { AggregateBasis, AggregateMetric } from '../components/AggregateMetric'
 import type { FarmPerformance } from '../api/organizations'
 import { coverageOf } from '../pages/coverage'
 import type { QueryState } from './data'
@@ -108,8 +108,9 @@ describe('Management aggregate', () => {
   }))
 
   it('always states coverage, and "N nông hộ thiếu dữ liệu" opens exactly those farms', () => {
-    render(<AggregateMetric name="Nước / kg thóc" value={null} unit="m³/kg" formula="f" coverage={coverageOf(farms, 'water')} scope="HTX · 10 nông hộ" />)
-    expect(screen.getByTestId('aggregate-coverage').textContent).toMatch(/^Dựa trên 3\/10 nông hộ đủ dữ liệu/)
+    render(<AggregateMetric name="Nước / kg thóc" value={null} unit="m³/kg" formula="f" coverage={coverageOf(farms, 'water')}  />)
+    // Round 4.4 wording: one sentence, cause included.
+    expect(screen.getByTestId('aggregate-coverage').textContent).toBe('Chưa công bố chỉ số toàn HTX — mới có 3/10 nông hộ đủ dữ liệu.')
     const toggle = screen.getByRole('button', { name: /7 nông hộ thiếu dữ liệu/ })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect((document.getElementById(toggle.getAttribute('aria-controls')!) as HTMLElement).hidden).toBe(true)
@@ -117,24 +118,27 @@ describe('Management aggregate', () => {
     const links = screen.getAllByRole('link')
     expect(links).toHaveLength(7)
     expect(links.map((a) => a.getAttribute('href'))).toEqual(farms.slice(3).map((f) => `/farms/${f.farmId}`))
-    expect(screen.getByText('Chưa có mốc so sánh')).toBeTruthy()
+    // Round 4.4: the benchmark line is said once for the page (AggregateBasis).
+    cleanup(); render(<AggregateBasis scope="HTX · 10 nông hộ" />)
+    expect(screen.getByText(/^Chưa có mốc so sánh/)).toBeTruthy()
   })
 
-  it('never shows a season count it cannot derive — it says the endpoint is missing', () => {
-    render(<AggregateMetric name="x" value={null} unit="u" formula="f" coverage={coverageOf(farms, 'water')} scope="s" />)
-    expect(screen.getByTestId('aggregate-season-coverage').textContent).toBe('Chưa có dữ liệu tổng hợp — cần endpoint chỉ số theo lô.')
+  it('never shows a season count it cannot derive — it says coverage is per farm', () => {
+    render(<><AggregateBasis scope="s" /><AggregateMetric name="x" value={null} unit="u" formula="f" coverage={coverageOf(farms, 'water')} /></>)
+    // Round 4.4: the per-season gap is stated in user terms, not "endpoint".
+    expect(screen.getByTestId('aggregate-season-coverage').textContent).toBe('Tính theo nông hộ; chưa có tổng hợp chi tiết theo từng vụ.')
     expect(document.body.textContent).not.toMatch(/\d+\/\d+ vụ/)
   })
 
   it('a computed aggregate still says what it is based on', () => {
     const all = farms.map((f) => ({ ...f, yieldKg: 5000, waterPerKg: 0.06 }))
-    render(<AggregateMetric name="Nước / kg thóc" value="0,063" unit="m³/kg" formula="f" coverage={coverageOf(all, 'water')} scope="HTX · 10 nông hộ" />)
-    expect(screen.getByTestId('aggregate-coverage').textContent).toBe('Dựa trên 10/10 nông hộ đủ dữ liệu')
+    render(<AggregateMetric name="Nước / kg thóc" value="0,063" unit="m³/kg" formula="f" coverage={coverageOf(all, 'water')}  />)
+    expect(screen.getByTestId('aggregate-coverage').textContent).toBe('Tính trên 10/10 nông hộ đủ dữ liệu.')
     expect(screen.queryByRole('button', { name: /thiếu dữ liệu/ })).toBeNull()
   })
 
   it('while the farm rows load, it says so instead of implying full coverage', () => {
-    render(<AggregateMetric name="x" value="1" unit="u" formula="f" coverage={null} scope="s" loadingCoverage />)
+    render(<AggregateMetric name="x" value="1" unit="u" formula="f" coverage={null} loadingCoverage />)
     expect(screen.getByTestId('aggregate-coverage').textContent).toMatch(/Đang đọc độ phủ dữ liệu/)
   })
 })

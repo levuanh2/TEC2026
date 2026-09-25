@@ -1,7 +1,7 @@
 import { getOrganization, getOrganizationMetrics, getFarmPerformance } from '../api/organizations'
 import { perKg } from '../format'
 import { Async, EmptyState, PageHead, Section, useAsync } from '../ui'
-import { AggregateMetric } from '../components/AggregateMetric'
+import { AggregateBasis, AggregateMetric } from '../components/AggregateMetric'
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
 import { coverageOf } from './coverage'
 
@@ -31,7 +31,7 @@ function PerformanceBody({ organizationId }: { organizationId: string }) {
   const cov = (key: 'water' | 'fertilizer' | 'cost' | 'carbon') =>
     performance.data ? coverageOf(performance.data, key) : null
   const scope = `${org.data?.name ?? 'HTX hiện tại'} · ${performance.data ? `${performance.data.length} nông hộ` : 'đang đếm nông hộ'}`
-  const shared = { scope, loadingCoverage: performance.loading }
+  const shared = { loadingCoverage: performance.loading }
 
   return (
     <>
@@ -40,25 +40,28 @@ function PerformanceBody({ organizationId }: { organizationId: string }) {
         * methodology result that depends on emission factors. Sitting next to
         * each other in identical tiles they read as two outputs of one
         * calculation. Every figure now carries the farms behind it. */}
+      <AggregateBasis scope={scope} />
       <Async state={metrics} skeleton="kpis">
         {(m) => (
           <>
             <Section title="Hiệu quả tài nguyên" description="Lượng đầu vào thực tế trên mỗi kg thóc đã thu hoạch">
-              <div className="grid grid-2">
+              <div className="perf-grid">
                 <AggregateMetric name="Nước / kg thóc" value={m.waterPerKg == null ? null : perKg(m.waterPerKg, '')} unit="m³/kg" formula="Tổng m³ nước ÷ tổng kg thóc của mọi vụ" coverage={cov('water')} {...shared} />
                 <AggregateMetric name="Phân bón / kg thóc" value={m.fertilizerPerKg == null ? null : perKg(m.fertilizerPerKg, '')} unit="kg/kg" formula="Tổng kg phân (khối lượng sản phẩm) ÷ tổng kg thóc" coverage={cov('fertilizer')} {...shared} />
               </div>
             </Section>
-            <Section title="Chi phí trực tiếp đã ghi" description="Chi phí do nông hộ nhập cùng hoạt động — không phải tổng chi phí sản xuất, không suy ra từ hệ số nào">
-              <div className="grid grid-2">
+            {/* Round 4.4: cost and Carbon each held one card in a two-column
+              * grid, leaving half of every row empty. They now share a row as
+              * two sections — separate headings, separate descriptions, never
+              * one grid — and stack below the wide breakpoint. */}
+            <div className="perf-pair">
+              <Section title="Chi phí trực tiếp đã ghi" description="Chi phí do nông hộ nhập cùng hoạt động — không phải tổng chi phí sản xuất, không suy ra từ hệ số nào">
                 <AggregateMetric name="Chi phí / kg thóc" value={m.costPerKg == null ? null : perKg(m.costPerKg, '')} unit="₫/kg" formula="Tổng chi phí đã ghi ÷ tổng kg thóc" coverage={cov('cost')} {...shared} />
-              </div>
-            </Section>
-            <Section title="Carbon" description="Kết quả tính theo phương pháp MRV — phụ thuộc hệ số phát thải, không phải một khoản chi">
-              <div className="grid grid-2">
+              </Section>
+              <Section title="Carbon" description="Kết quả tính theo phương pháp MRV — phụ thuộc hệ số phát thải, không phải một khoản chi">
                 <AggregateMetric name="CO₂e / kg thóc" value={m.co2ePerKg == null ? null : perKg(m.co2ePerKg, '')} unit="kg CO₂e/kg" formula="Tổng CO₂e các kết quả đã lưu ÷ tổng kg thóc" coverage={cov('carbon')} {...shared} />
-              </div>
-            </Section>
+              </Section>
+            </div>
           </>
         )}
       </Async>

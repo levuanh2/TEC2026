@@ -25,7 +25,7 @@ import { Ico } from './icons'
  * Validation stays where it already is: the shared activity form and the API.
  */
 
-export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId, writeCtx, activities, mutations, onSeasonSaved }: {
+export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId, writeCtx, canEditSeason, activities, mutations, onSeasonSaved }: {
   seasonId: string
   readiness: CarbonReadiness
   /** A stored Carbon result exists, so the ready-state action is "Tính lại". */
@@ -35,10 +35,14 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
   plotId?: string | null
   /** The season as a write target; null for a viewer, who gets no edit controls. */
   writeCtx: SeasonContext | null
+  /** May edit the season's own fields and calculate. A finished season: true
+   * while `writeCtx` (journal writes) is null. Defaults to `writeCtx != null`. */
+  canEditSeason?: boolean
   activities?: Activity[]
   mutations?: ActivityMutations
   onSeasonSaved?: () => void
 }) {
+  const canEdit = canEditSeason ?? Boolean(writeCtx)
   const blocking = readiness.missing_inputs.filter((m) => m.blocking)
   const optional = readiness.missing_inputs.filter((m) => !m.blocking)
   const titleId = useId()
@@ -61,7 +65,7 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
             : hasResult ? 'Vụ này đã có kết quả phát thải.' : 'Đã đủ dữ liệu để tính phát thải.'}
         </h2>
         {optional.map((m) => <p key={m.code} className="fw-note">{m.label} — {m.detail}</p>)}
-        {writeCtx
+        {canEdit
           ? <CalculateAction seasonId={seasonId} again={hasResult} />
           : <p className="fw-note">Chủ hộ hoặc cán bộ hợp tác xã có quyền ghi sẽ tính kết quả cho vụ này.</p>}
       </section>
@@ -86,11 +90,15 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
         Cần bổ sung {blocking.filter((m) => m.flow !== 'factor_unavailable').length} thông tin để tính phát thải
       </h2>
       <p className="fw-note">
-        {writeCtx ? 'Sửa trực tiếp tại đây — mục đã xong sẽ tự biến mất.' : 'Bạn chỉ có quyền xem. Hãy liên hệ chủ hộ hoặc cán bộ hợp tác xã để bổ sung.'}
+        {writeCtx
+          ? 'Sửa trực tiếp tại đây — mục đã xong sẽ tự biến mất.'
+          : canEdit
+            ? 'Vụ này đã kết thúc nên nhật ký chỉ còn để xem. Thông tin phương pháp của vụ vẫn sửa được tại đây.'
+            : 'Bạn chỉ có quyền xem. Hãy liên hệ chủ hộ hoặc cán bộ hợp tác xã để bổ sung.'}
       </p>
       <ol className="fw-repair__list" data-testid="carbon-missing">
         {blocking.map((m) => (
-          <RepairItem key={m.code} issue={m} seasonId={seasonId} plotId={plotId} writeCtx={writeCtx} byId={byId} gapsByRecord={gapsByRecord} mutations={mutations} onSeasonSaved={onSeasonSaved} />
+          <RepairItem key={m.code} issue={m} seasonId={seasonId} plotId={plotId} writeCtx={writeCtx} canEditSeason={canEdit} byId={byId} gapsByRecord={gapsByRecord} mutations={mutations} onSeasonSaved={onSeasonSaved} />
         ))}
       </ol>
       {optional.map((m) => <p key={m.code} className="fw-note">{m.label} — {m.detail}</p>)}
@@ -98,11 +106,12 @@ export function CarbonRepairHub({ seasonId, readiness, hasResult, stale, plotId,
   )
 }
 
-function RepairItem({ issue, seasonId, plotId, writeCtx, byId, gapsByRecord, mutations, onSeasonSaved }: {
+function RepairItem({ issue, seasonId, plotId, writeCtx, canEditSeason, byId, gapsByRecord, mutations, onSeasonSaved }: {
   issue: CarbonMissingInput
   seasonId: string
   plotId?: string | null
   writeCtx: SeasonContext | null
+  canEditSeason: boolean
   byId: Map<string, Activity>
   gapsByRecord: Map<string, string[]>
   mutations?: ActivityMutations
@@ -114,7 +123,7 @@ function RepairItem({ issue, seasonId, plotId, writeCtx, byId, gapsByRecord, mut
   let action: ReactNode = null
 
   if (issue.flow === 'carbon_methodology') {
-    action = writeCtx
+    action = canEditSeason
       ? <SeasonFieldFix code={issue.code} seasonId={seasonId} labelledBy={titleId} onSaved={onSeasonSaved} />
       : null
   } else if (issue.flow === 'activity') {

@@ -4,7 +4,7 @@ import {
   FileSearch, FlaskConical, Fuel, Gauge, History, House, ImagePlus, Info, LandPlot, LayoutDashboard, Leaf, Lightbulb,
   ListChecks, LoaderCircle, Lock, LogOut, MapPin, MapPinned, Menu, NotebookPen, Paperclip, Pencil, Plus, RefreshCw,
   Ellipsis, Ruler, ScanSearch, Scissors, Search, ShieldCheck, SlidersHorizontal, Sprout, Sun, Tractor, Trash2, TriangleAlert,
-  UserRound, WalletCards, Wheat, X,
+  UserRound, UsersRound, WalletCards, Wheat, X,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -32,6 +32,7 @@ const ICONS = {
   performance: Gauge,
   analytics: ChartNoAxesCombined,
   account: UserRound,
+  users: UsersRound,
   mrv: ClipboardCheck,
 
   /* --- field operations (shared with Farmer) -------------------------- */
