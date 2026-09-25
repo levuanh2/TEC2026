@@ -34,23 +34,6 @@ class SeasonNotOpenError(Exception):
     of the write, checked under a row lock inside the write's transaction."""
 
 
-#: `private.user_can_write_*` accept an owner/editor `farm_members` row even
-#: after the person left the cooperative, and do not look at `farms.deleted_at`
-#: (baseline RLS; changing it needs a migration). FastAPI writes add this rule:
-#: an active cooperative manager, or an ACTIVE member of the farm's cooperative,
-#: on a farm that is not deleted. Evaluated with the transaction-local claim set.
-ACTIVE_FARM_MEMBERSHIP_SQL = """
-    f.deleted_at is null and (
-      private.user_is_org_manager(f.cooperative_id)
-      or exists (
-        select 1 from public.organization_memberships om
-        where om.organization_id = f.cooperative_id and om.user_id = (select auth.uid())
-          and (om.ended_at is null or om.ended_at > now())
-      )
-    )
-"""
-
-
 _DETAILS: dict[str, tuple[str, tuple[str, ...]]] = {
     "fertilizer": ("fertilizer_applications", ("fertilizer_name", "fertilizer_type", "amount_kg", "nitrogen_percent", "phosphorus_percent", "potassium_percent", "total_cost_vnd")),
     "irrigation": ("irrigation_events", ("method", "water_volume_m3", "duration_minutes", "water_level_cm", "pump_energy_kwh", "total_cost_vnd")),
@@ -146,27 +129,26 @@ class PostgresActivityWriteRepository:
             "select set_config('request.jwt.claims', %s, true)",
             [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
         )
+        # Both answers come from the database helpers every client is held to
+        # (migration 20260926090000): authorization, including an ACTIVE
+        # cooperative membership, and the season lifecycle -- no copy of either
+        # rule lives here. The share lock on the season row makes the lifecycle
+        # answer hold until this transaction ends: a concurrent close waits
+        # for it, or this write sees the close.
         cur.execute(
-            f"""select private.user_can_write_batch(pb.id) and {ACTIVE_FARM_MEMBERSHIP_SQL} as allowed,
-                       cs.status::text as season_status, cs.deleted_at is null as season_live,
-                       pb.status::text as batch_status
-                from public.production_batches pb
-                join public.crop_seasons cs on cs.id = pb.crop_season_id
-                join public.plots p on p.id = cs.plot_id
-                join public.farms f on f.id = p.farm_id
-                where pb.id = %s::uuid
-                for share of cs""",  # noqa: S608 -- static SQL fragment
+            """select private.user_can_write_batch(pb.id) as allowed,
+                      private.activity_batch_open(pb.id) as open
+               from public.production_batches pb
+               join public.crop_seasons cs on cs.id = pb.crop_season_id
+               where pb.id = %s::uuid
+               for share of cs""",
             [production_batch_id],
         )
         row = cur.fetchone()
         cur.execute("select set_config('request.jwt.claims', '', true)")
         if row is None or not row["allowed"]:
             raise ActivityWritePermissionError()
-        # Re-checked here, under a share lock on the season row: the service's
-        # earlier status read went through PostgREST, outside this transaction,
-        # so a season closed in between must still refuse the write. A
-        # concurrent close waits for this transaction, or this one sees it.
-        if row["season_status"] != "active" or not row["season_live"] or row["batch_status"] in ("closed", "cancelled"):
+        if not row["open"]:
             raise SeasonNotOpenError()
 
     def _assert_can_write_activity(self, cur: Any, *, activity_id: str, actor_id: str) -> None:
@@ -314,16 +296,8 @@ class PostgresActivityWriteRepository:
             "select set_config('request.jwt.claims', %s, true)",
             [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
         )
-        cur.execute(
-            f"""select private.user_can_write_crop(cs.id) and {ACTIVE_FARM_MEMBERSHIP_SQL} as allowed
-                from public.crop_seasons cs
-                join public.plots p on p.id = cs.plot_id
-                join public.farms f on f.id = p.farm_id
-                where cs.id = %s::uuid""",  # noqa: S608 -- static SQL fragment
-            [crop_season_id],
-        )
-        row = cur.fetchone()
-        allowed = bool(row and row["allowed"])
+        cur.execute("select private.user_can_write_crop(%s::uuid) as allowed", [crop_season_id])
+        allowed = bool(cur.fetchone()["allowed"])
         cur.execute("select set_config('request.jwt.claims', '', true)")
         if not allowed:
             raise ActivityWritePermissionError()

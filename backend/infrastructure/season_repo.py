@@ -15,7 +15,6 @@ from typing import Any, Callable
 
 from . import pg_pool
 from .config import Settings
-from .write_repo import ACTIVE_FARM_MEMBERSHIP_SQL
 
 #: The batch every season starts with. Same code the Flutter sync upserts
 #: (`app/lib/services/sync_gateway.dart`), so a season created on the Web and
@@ -36,6 +35,10 @@ class SeasonScopeError(Exception):
 
 class ActiveSeasonExistsError(Exception):
     """The plot already has a season under cultivation."""
+
+
+class IllegalSeasonTransitionError(Exception):
+    """`private.crop_season_transition_allowed` refuses this status change."""
 
 
 class SeasonCodeTakenError(Exception):
@@ -80,22 +83,16 @@ class PostgresSeasonRepository:
     def _assert_can_write_farm(cur: Any, *, farm_id: str, actor_id: str) -> None:
         """Ask the RLS rule itself, `private.user_can_write_farm` -- the helper
         behind the `crop_seasons` INSERT policy: farm owner/editor, or an active
-        cooperative manager of the farm's cooperative -- plus
-        `ACTIVE_FARM_MEMBERSHIP_SQL`: a farm role outlives a membership that
-        has ended, and a deleted farm takes no new seasons. The JWT claim is
+        cooperative manager of the farm's cooperative; since migration
+        20260926090000 it requires an ACTIVE membership and a live farm. The JWT claim is
         transaction-local and cleared before any row is written, exactly as the
         activity repository does."""
         cur.execute(
             "select set_config('request.jwt.claims', %s, true)",
             [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
         )
-        cur.execute(
-            f"""select private.user_can_write_farm(f.id) and {ACTIVE_FARM_MEMBERSHIP_SQL} as allowed
-                from public.farms f where f.id = %s::uuid""",  # noqa: S608 -- static SQL fragment
-            [farm_id],
-        )
-        row = cur.fetchone()
-        allowed = bool(row and row["allowed"])
+        cur.execute("select private.user_can_write_farm(%s::uuid) as allowed", [farm_id])
+        allowed = bool(cur.fetchone()["allowed"])
         cur.execute("select set_config('request.jwt.claims', '', true)")
         if not allowed:
             raise SeasonScopeError()
@@ -172,3 +169,50 @@ class PostgresSeasonRepository:
         )
         row = cur.fetchone()
         return {**season, "default_production_batch_id": row["id"] if row else None}
+
+    def transition(
+        self, *, crop_season_id: str, actor_id: str, to_status: str, actual_harvest_date: Any,
+        prepare: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
+        """Move a season along its lifecycle (e.g. active -> harvested).
+
+        Same transition table as the client trigger
+        (`private.crop_season_transition_allowed`), evaluated in the database,
+        so FastAPI and Flutter cannot drift apart. Authorization is
+        `private.user_can_write_crop` for the caller. The season row is locked
+        FOR UPDATE: an activity write holding its share lock finishes first,
+        and every later write sees the new status.
+        """
+        with self._connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select status::text as status from public.crop_seasons where id = %s and deleted_at is null for update",
+                [crop_season_id],
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise SeasonScopeError()
+            cur.execute(
+                "select set_config('request.jwt.claims', %s, true)",
+                [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
+            )
+            cur.execute("select private.user_can_write_crop(%s::uuid) as allowed", [crop_season_id])
+            allowed = bool(cur.fetchone()["allowed"])
+            cur.execute("select set_config('request.jwt.claims', '', true)")
+            if not allowed:
+                raise SeasonScopeError()
+            cur.execute(
+                "select private.crop_season_transition_allowed(%s::public.crop_status, %s::public.crop_status) as ok",
+                [row["status"], to_status],
+            )
+            if not cur.fetchone()["ok"]:
+                raise IllegalSeasonTransitionError()
+            cur.execute(
+                f"""update public.crop_seasons
+                    set status = %s::public.crop_status,
+                        actual_harvest_date = coalesce(%s, actual_harvest_date),
+                        updated_at = now()
+                    where id = %s
+                    returning {_SEASON_COLUMNS}""",  # noqa: S608 -- static columns
+                [to_status, actual_harvest_date, crop_season_id],
+            )
+            return _prepared(prepare, dict(cur.fetchone()))

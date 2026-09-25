@@ -199,7 +199,7 @@ class ScriptedCursor:
         text = sql.lower()
         if "user_can_write_batch" in text:
             # The same query also reports the season/batch state it locked.
-            self._next = {"allowed": self.allowed, "season_status": "active", "season_live": True, "batch_status": "planned"}
+            self._next = {"allowed": self.allowed, "open": True}
         elif "select production_batch_id" in text:
             self._next = {"production_batch_id": "batch-1"} if self.activity else None
         elif "from public.activities a" in text:
