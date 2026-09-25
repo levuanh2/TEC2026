@@ -104,3 +104,31 @@ export async function signOut() {
   finish('signed_out')
   void remote.finally(() => { signingOut = false })
 }
+
+/** Supabase's password-change refusals, in the words the Account page uses. */
+export function passwordChangeErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (/should be different|same.*password/i.test(raw)) return 'Mật khẩu mới phải khác mật khẩu hiện tại.'
+  if (/weak|at least|characters|password.*(short|length)/i.test(raw)) return 'Mật khẩu mới quá yếu. Dùng ít nhất 8 ký tự, có chữ hoa, chữ thường và số.'
+  if (/reauthenticat|nonce/i.test(raw)) return 'Vui lòng đăng xuất, đăng nhập lại rồi đổi mật khẩu.'
+  if (/failed to fetch|network|load failed/i.test(raw)) return 'Không kết nối được máy chủ. Kiểm tra kết nối mạng rồi thử lại.'
+  return 'Chưa đổi được mật khẩu. Vui lòng thử lại.'
+}
+
+/**
+ * Change the signed-in person's own password.
+ *
+ * The current password is checked first by signing in with it: that proves it
+ * is the account holder at the keyboard (not an unlocked, unattended tab) and
+ * gives a fresh session, which Supabase's secure password change requires.
+ * This is the person's own Auth session -- nothing here holds or needs a
+ * service-role credential.
+ */
+export async function changePassword(email: string, current: string, next: string): Promise<void> {
+  const client = requireAuthClient()
+  const { data, error } = await client.auth.signInWithPassword({ email, password: current })
+  if (error) throw new Error(/invalid login credentials/i.test(error.message) ? 'Mật khẩu hiện tại không đúng.' : signInErrorMessage(error))
+  setAccessToken(data.session?.access_token ?? null)
+  const { error: updateError } = await client.auth.updateUser({ password: next })
+  if (updateError) throw new Error(passwordChangeErrorMessage(updateError))
+}

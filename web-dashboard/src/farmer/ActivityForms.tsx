@@ -64,7 +64,7 @@ export const numOrUndef = (v: unknown): number | undefined => {
 
 /* --------------------------------------------------------------- fields */
 
-const OPTIONAL = 'Không bắt buộc'
+export const OPTIONAL = 'Không bắt buộc'
 /** Not required to save the record, but required for the Carbon result. */
 const CARBON_NEEDS = 'Cần để tính phát thải'
 const NO_GAPS: readonly string[] = []
@@ -79,7 +79,7 @@ function LabelText({ label, required, hint }: { label: string; required?: boolea
   )
 }
 
-function TextField({ label, value, onChange, type = 'text', required, error, hint, autoFocus }: {
+export function TextField({ label, value, onChange, type = 'text', required, error, hint, autoFocus }: {
   label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean
   error?: string; hint?: string; autoFocus?: boolean
 }) {
@@ -164,7 +164,7 @@ function TextAreaField({ label, value, onChange, hint }: { label: string; value:
   )
 }
 
-function SelectField({ label, value, onChange, options, error, required, field }: {
+export function SelectField({ label, value, onChange, options, error, required, field }: {
   label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; error?: string
   required?: boolean; field?: string
 }) {

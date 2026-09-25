@@ -572,6 +572,14 @@
 .fw-current__label { font-size: var(--fw-text-xs); font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--fw-accent-deep); }
 .fw-current b { display: block; font-family: var(--fw-display); font-size: var(--fw-text-xl); font-weight: 600; letter-spacing: -.015em; margin: var(--fw-space-2) 0; }
 .fw-current small { color: var(--fw-muted); font-size: 14px; }
+/* No season under cultivation: same row, a quiet rule instead of the accent. */
+.fw-current--idle { border-top-color: var(--fw-rule); }
+.fw-current--idle .fw-current__label { color: var(--fw-ink-2); }
+.fw-current--idle small { display: block; margin-top: var(--fw-space-2); }
+/* The first-step callout on a season that was just started. */
+.fw-started { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--fw-space-12);
+  padding: var(--fw-space-12) var(--fw-space-16); border-left: 3px solid var(--fw-accent); background: var(--fw-paper-2); }
+.fw-started p { margin: 0; }
 
 /* ------------------------------------------------------- season workspace */
 /* One masthead owns the season; the tabs hang off it so every tab reads as a
@@ -1258,3 +1266,7 @@
 .fw-carbon-top svg { width: 16px; height: 16px; color: var(--fw-muted); }
 .fw-carbon-top b { color: var(--fw-ink); }
 .fw-mdisc__body[hidden] { display: none; }
+
+/* Tôi → Đổi mật khẩu */
+.fw-password { display: grid; gap: var(--fw-space-12); max-width: 420px; }
+.fw-password .form-field__error { display: flex; align-items: center; gap: 6px; margin: 0; }

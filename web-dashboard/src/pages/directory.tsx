@@ -23,9 +23,12 @@ import {
   Section,
   useAsync,
   go,
+  Sheet,
 } from '../ui'
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
 import { farmArea, type FarmArea } from '../utils/area'
+import { StartSeasonForm } from '../features/startSeason'
+import type { Role } from '../types'
 
 const isActiveSeason = (status: string | null | undefined) =>
   ['active', 'in_progress', 'planted'].includes(String(status ?? '').toLowerCase())
@@ -282,17 +285,29 @@ export function FarmPage({ id }: { id: string }) {
 
 /* =============================================================== Plot page */
 
-export function PlotPage({ id }: { id: string }) {
+/** Only an active cooperative manager may start a season from Management
+ * (`private.user_can_write_farm`); enterprise viewers and regulators read. The
+ * server decides either way -- this only avoids offering a button that fails. */
+const canStartSeasons = (role: Role | undefined) => role === 'cooperative_manager'
+
+export function PlotPage({ id, role }: { id: string; role?: Role }) {
   const state = useAsync(async () => {
     const [plot, seasons] = await Promise.all([getPlot(id), getCropSeasons(id)])
     return { plot, seasons }
   }, [id])
+  const [starting, setStarting] = useState(false)
 
   return (
     <Async state={state} isEmpty={(d) => !d.plot}>
       {({ plot, seasons }) => {
         if (!plot) return <EmptyState icon="search" title="Không tìm thấy thửa ruộng" />
         const active = seasons.find((s) => (s.status ?? '').toLowerCase().includes('active') || (s.status ?? '').includes('canh tác'))
+        const canStart = !active && canStartSeasons(role)
+        const startButton = (
+          <button className="btn btn--primary" onClick={() => setStarting(true)}>
+            <Ico name="plus" size={14} /> Bắt đầu vụ mới
+          </button>
+        )
         return (
           <>
             <Breadcrumb
@@ -312,12 +327,19 @@ export function PlotPage({ id }: { id: string }) {
                 <button className="btn btn--ghost" onClick={() => go(`/crop-seasons/${active.id}`)}>
                   Vụ đang canh tác: {active.name} <Ico name="arrow" size={14} />
                 </button>
-              ) : undefined}
+              ) : canStart ? startButton : undefined}
             />
 
             <Section title="Vụ canh tác" description={active ? undefined : 'Chưa có vụ nào đang hoạt động trên thửa này'}>
               {seasons.length === 0 ? (
-                <EmptyState icon="seeding" title="Thửa này chưa có vụ canh tác nào" />
+                <EmptyState
+                  icon="seeding"
+                  title="Chưa có vụ canh tác"
+                  body={canStart
+                    ? 'Thửa đã sẵn sàng. Bắt đầu vụ mới để nông hộ ghi nhật ký, theo dõi hiệu suất và tính Carbon.'
+                    : 'Thửa này chưa có vụ canh tác nào.'}
+                  action={canStart ? startButton : undefined}
+                />
               ) : (
                 <DataTable
                   rows={seasons}
@@ -334,6 +356,16 @@ export function PlotPage({ id }: { id: string }) {
                 />
               )}
             </Section>
+            {starting && (
+              <Sheet title="Bắt đầu vụ mới" subtitle={`Thửa ${plot.name} · Mã ${plot.code}`} onClose={() => setStarting(false)}>
+                <StartSeasonForm
+                  variant="management"
+                  plots={[plot]}
+                  onCancel={() => setStarting(false)}
+                  onStarted={(started) => { setStarting(false); go(`/crop-seasons/${started.season.id}`) }}
+                />
+              </Sheet>
+            )}
           </>
         )
       }}

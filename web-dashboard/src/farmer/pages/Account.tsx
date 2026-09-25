@@ -1,5 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import { signOut } from '../../api/auth'
+import { ChangePasswordSection } from '../ChangePassword'
 import type { CurrentUser } from '../../api/me'
 import { getOrganization } from '../../api/organizations'
 import { Link } from '../../ui'
@@ -82,6 +83,8 @@ export function FarmerAccountPage({ session, viewer }: { session: Session | null
           </div>
         )}
       </Section>
+
+      <ChangePasswordSection email={email} />
 
       <Section title="Về dữ liệu của bạn" icon="info" tone="info">
         <div className="fw-card fw-card--pad">

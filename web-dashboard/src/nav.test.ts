@@ -21,6 +21,14 @@ describe('sidebar IA', () => {
     const items = buildNav('cooperative_manager').flatMap((g) => g.items.map((i) => i.to))
     expect(items.some((to) => to.startsWith('/crop-seasons/'))).toBe(false)
     expect(items.some((to) => to.startsWith('/plots/'))).toBe(false)
-    expect(items).toEqual(['/dashboard', '/farms', '/seasons', '/data-gaps', '/carbon', '/performance', '/mrv', '/organizations'])
+    expect(items).toEqual(['/dashboard', '/farms', '/accounts/farmers', '/seasons', '/data-gaps', '/carbon', '/performance', '/mrv', '/organizations'])
+  })
+
+  it('only a cooperative manager is offered farmer account provisioning', () => {
+    const to = (role: Parameters<typeof buildNav>[0]) => buildNav(role).flatMap((g) => g.items.map((i) => i.to))
+    expect(to('cooperative_manager')).toContain('/accounts/farmers')
+    expect(to('enterprise_viewer')).not.toContain('/accounts/farmers')
+    expect(to('regulator')).not.toContain('/accounts/farmers')
+    expect(to('farmer')).not.toContain('/accounts/farmers')
   })
 })

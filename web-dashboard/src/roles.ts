@@ -7,7 +7,11 @@ const MANAGER_ROUTES = ['/dashboard', '/farms', '/seasons', '/data-gaps', '/carb
 // are routed into the separate FarmerExperience shell, whose navigation lives
 // alongside that shell rather than inside the Management sidebar.
 const FARMER_ROUTES = ['/dashboard', '/farms']
+// Provisioning farmer accounts is the cooperative manager's alone
+// (`private.user_is_org_manager`); enterprise viewers and regulators read.
+const PROVISIONING_ROUTES = ['/accounts/farmers']
 
 export function visibleNav(role: Role): string[] {
-  return role === 'farmer' ? FARMER_ROUTES : MANAGER_ROUTES
+  if (role === 'farmer') return FARMER_ROUTES
+  return role === 'cooperative_manager' ? [...MANAGER_ROUTES, ...PROVISIONING_ROUTES] : MANAGER_ROUTES
 }

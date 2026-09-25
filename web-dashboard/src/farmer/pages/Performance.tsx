@@ -10,6 +10,7 @@ import { MetricRow, YieldContextPanel } from '../metricRows'
 import { metricGroups, seasonFacts, yieldContext, type CarbonInputs } from '../metricsView'
 import { prefetchSeason, primarySeason, useActivities, useCarbon, useCarbonReadiness, useMetrics, useScope, type SeasonCtx } from '../scope'
 import { useWritableSeason } from '../writeAccess'
+import { NoActiveSeason } from '../StartSeason'
 
 /** Performance, in four groups (Round 4.3): the season's context, resource
  *  efficiency, recorded direct cost, and Carbon. Cost and Carbon never share a
@@ -130,7 +131,7 @@ export function FarmerPerformancePage() {
       {scope.error ? (
         <ErrorPanel error={scope.error} onRetry={scope.reload} />
       ) : !scope.loading && !primary ? (
-        <Empty icon="performance" title="Chưa có vụ đang canh tác" body="Chỉ số sẽ xuất hiện khi một vụ đang hoạt động có dữ liệu ghi nhận." action={<Link to="/farmer/farms" className="fw-btn fw-btn--soft">Xem ruộng của tôi</Link>} />
+        <NoActiveSeason purpose="performance" />
       ) : null}
       <Flash message={mutations.flash} />
       {(scope.loading || primary) && (

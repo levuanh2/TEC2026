@@ -10,6 +10,7 @@ import { buildNav } from './nav'
 import { go, Link, Notice } from './ui'
 import { DashboardPage } from './pages/dashboard'
 import { OrganizationsPage, FarmsPage, FarmPage, PlotPage } from './pages/directory'
+import { FarmerAccountsPage, ProvisionFarmerPage } from './pages/farmers'
 import { PerformancePage } from './pages/performance'
 import { SeasonHub, type SeasonTab } from './pages/season'
 import { MrvPage } from './pages/mrv'
@@ -191,6 +192,10 @@ function render(path: string, viewer: CurrentUser): ReactNode {
       return <PerformancePage organizationId={viewer.organizationId} />
     case 'farms':
       return <FarmsPage />
+    case 'farmer-accounts':
+      return <FarmerAccountsPage organizationId={viewer.organizationId} role={viewer.role} />
+    case 'farmer-account-new':
+      return <ProvisionFarmerPage organizationId={viewer.organizationId} role={viewer.role} />
     case 'seasons':
       return <SeasonsWorkspace organizationId={viewer.organizationId} />
     case 'data-gaps':
@@ -200,7 +205,7 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'farm':
       return <FarmPage id={id} />
     case 'plot':
-      return <PlotPage id={id} />
+      return <PlotPage id={id} role={viewer.role} />
     case 'season':
       return <SeasonHub id={id} tab="overview" />
     case 'activities':

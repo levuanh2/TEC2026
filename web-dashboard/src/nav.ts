@@ -14,6 +14,7 @@ const STATIC: NavGroup[] = [
     label: 'Quản lý',
     items: [
       { to: '/farms', label: 'Nông hộ & ruộng', icon: 'farms' },
+      { to: '/accounts/farmers', label: 'Tài khoản nông hộ', icon: 'users' },
       { to: '/seasons', label: 'Vụ mùa', icon: 'season' },
       { to: '/data-gaps', label: 'Dữ liệu thiếu', icon: 'warning' },
     ],

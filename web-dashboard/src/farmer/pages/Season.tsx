@@ -15,7 +15,8 @@ import { RecommendationsSection } from '../Recommendations'
 import { isActiveStatus, resolveSeason, seasonStatusLabel, useActivities, useMetrics, useScope, type SeasonCtx } from '../scope'
 import { SeasonCarbon } from './Carbon'
 import { MetricCards } from './Performance'
-import { useWritableSeason } from '../writeAccess'
+import { useCanEditSeason, useWritableSeason } from '../writeAccess'
+import { NEW_SEASON_PARAM } from '../StartSeason'
 
 export type SeasonTab = 'overview' | 'journal' | 'performance' | 'carbon'
 const NOT_FOUND = 'Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.'
@@ -29,6 +30,9 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
   const seasonCtx = ctx ? toSeasonContext(ctx.season, ctx.plot) : null
   // Journal write affordances only where the farm role allows writing.
   const writeCtx = useWritableSeason(ctx)
+  const canEditSeason = useCanEditSeason(ctx)
+  // Opened straight after "Bắt đầu vụ mới": offer the first record once.
+  const justStarted = new URLSearchParams(location.search).has(NEW_SEASON_PARAM)
   const base = `/farmer/crop-seasons/${id}`
   const tabs: { label: string; to: string; icon: IconName; current: boolean }[] = [
     { label: 'Tổng quan', to: base, icon: 'overview', current: tab === 'overview' },
@@ -47,6 +51,12 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
       {ctx ? <SeasonHeader ctx={ctx} /> : <SeasonHeaderSkeleton />}
       <Tabs items={tabs} />
       <Flash message={mutations.flash} />
+      {writeCtx && justStarted && !activities.data?.length && mutations.version === 0 && (
+        <div className="fw-started" role="status">
+          <p>Đã bắt đầu vụ <b>{ctx?.season.name}</b>. Vụ đã sẵn sàng để ghi nhật ký.</p>
+          <button type="button" className="fw-btn" onClick={() => mutations.openPicker(writeCtx)}><Ico name="plus" />Ghi hoạt động đầu tiên</button>
+        </div>
+      )}
       {tab === 'overview' && <SeasonOverview id={id} ctx={ctx} seasonCtx={seasonCtx} writeCtx={writeCtx} metrics={metrics} activities={activities} mutations={mutations} />}
       {tab === 'journal' && (
         <Section
@@ -71,7 +81,7 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
       )}
       {tab === 'carbon' && (
         <SeasonCarbon
-          seasonId={id} season={ctx?.season ?? null} plotId={ctx?.plot?.id ?? null} writeCtx={writeCtx}
+          seasonId={id} season={ctx?.season ?? null} plotId={ctx?.plot?.id ?? null} writeCtx={writeCtx} canEditSeason={canEditSeason}
           activities={activities.data} mutations={mutations} onSaved={scope.reload}
         />
       )}

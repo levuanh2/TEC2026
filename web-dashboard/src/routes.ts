@@ -4,6 +4,8 @@ export type RouteName =
   | 'organizations'
   | 'performance'
   | 'farms'
+  | 'farmer-accounts'
+  | 'farmer-account-new'
   | 'seasons'
   | 'data-gaps'
   | 'ops-carbon'
@@ -25,6 +27,10 @@ export function routeName(path: string): RouteName {
   if (path === '/organizations') return 'organizations'
   if (path === '/performance') return 'performance'
   if (path === '/farms') return 'farms'
+  // Not under /farmer: that prefix belongs to the Farmer experience and the
+  // role redirect sends a manager away from anything starting with it.
+  if (path === '/accounts/farmers') return 'farmer-accounts'
+  if (path === '/accounts/farmers/new') return 'farmer-account-new'
   // Management entry points into the season workspace. The per-season URLs
   // (/crop-seasons/:id/...) are unchanged and still resolve below.
   if (path === '/seasons') return 'seasons'

@@ -16,19 +16,23 @@ const SCENARIO: Record<string, string> = {
   as_recorded: 'Theo dữ liệu đã ghi', awd: 'Ướt khô xen kẽ (AWD)', continuous_flooding: 'Ngập liên tục',
 }
 
-export function SeasonCarbon({ seasonId, season, plotId, writeCtx = null, activities, mutations, onSaved }: {
+export function SeasonCarbon({ seasonId, season, plotId, writeCtx = null, canEditSeason, activities, mutations, onSaved }: {
   seasonId: string
   /** The season row, so the methodology panel can show what is already recorded. */
   season?: CropSeason | null
   plotId?: string | null
   /** The season as a write target; null for a viewer — no edit controls at all. */
   writeCtx?: SeasonContext | null
+  /** May change the season record and calculate, whatever its status. Defaults
+   * to `writeCtx != null`; a finished season passes true with a null writeCtx. */
+  canEditSeason?: boolean
   /** The season's records, so "Sửa ngay" can open the exact one readiness names. */
   activities?: Activity[]
   /** The page's single edit-sheet owner — the same form the journal uses. */
   mutations?: ActivityMutations
   onSaved?: () => void
 }) {
+  const canEdit = canEditSeason ?? Boolean(writeCtx)
   const state = useCarbon(seasonId)
   const readiness = useCarbonReadiness(seasonId)
   const hasResult = state.data?.kind === 'result'
@@ -44,13 +48,13 @@ export function SeasonCarbon({ seasonId, season, plotId, writeCtx = null, activi
   const hub = readiness.data ? (
     <CarbonRepairHub
       seasonId={seasonId} readiness={readiness.data} hasResult={hasResult} stale={stale} plotId={plotId}
-      writeCtx={writeCtx} activities={activities} mutations={mutations} onSeasonSaved={seasonSaved}
+      writeCtx={writeCtx} canEditSeason={canEdit} activities={activities} mutations={mutations} onSeasonSaved={seasonSaved}
     />
   ) : null
   /* The full methodology panel stays for reviewing or changing values that are
    * already set. It is the same panel Management uses — one implementation. */
   const inputs = season ? (
-    <SeasonMethodologyPanel season={season} canEdit={Boolean(writeCtx)} onSaved={seasonSaved} />
+    <SeasonMethodologyPanel season={season} canEdit={canEdit} onSaved={seasonSaved} />
   ) : null
   if (state.loading) {
     return (

@@ -8,6 +8,7 @@ import { Chip, Empty, ErrorPanel, Flash, MoreLink, Section, Sk, SkBlock } from '
 import { CostPanel, PrimaryNextAction, SeasonContextBar, SummaryStrip, nextAction } from '../hybrid'
 import { seasonFacts } from '../metricsView'
 import { useWritableSeason } from '../writeAccess'
+import { NoActiveSeason } from '../StartSeason'
 import { primarySeason, useActivities, useCarbonReadiness, useMetrics, useScope, type SeasonCtx } from '../scope'
 
 /** While the scope itself is loading, dependent sections are still "loading" too. */
@@ -93,10 +94,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
 function HomeHero({ scope, primary }: { scope: QueryState<{ farms: unknown[] }>; primary: SeasonCtx | null }) {
   if (scope.loading) return <HeroSkeleton />
   if (scope.error) return <ErrorPanel error={scope.error} onRetry={scope.reload} />
-  if (!scope.data?.farms.length) return <Empty icon="farm" title="Chưa có ruộng trong phạm vi của bạn" body="Liên hệ quản lý HTX để được gán nông hộ hoặc thửa ruộng." />
-  if (!primary) {
-    return <Empty icon="seeding" tone="leaf" title="Chưa có vụ đang canh tác" body="Bạn vẫn có thể xem các ruộng và vụ đã ghi nhận." action={<Link to="/farmer/farms" className="fw-btn fw-btn--soft">Xem ruộng của tôi</Link>} />
-  }
+  if (!primary) return <NoActiveSeason purpose="home" />
   return <SeasonContextBar ctx={primary} />
 }
 
