@@ -12,6 +12,8 @@ _MIGRATIONS = [
     ("20260926100000_activity_update_denies_loudly.sql",
      "select coalesce((select qual like '%user_can_read_batch%' from pg_policies "
      "where schemaname = 'public' and tablename = 'activities' and policyname = 'activities_update'), false)"),
+    ("20260926110000_batch_lifecycle_and_detail_delete.sql",
+     "select to_regprocedure('private.enforce_batch_season_open()') is not null"),
 ]
 
 

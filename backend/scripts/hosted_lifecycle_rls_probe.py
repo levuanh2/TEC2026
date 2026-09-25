@@ -141,8 +141,14 @@ def probe(ctx: dict) -> list[tuple[str, str, str]]:
         record(f"owner update activity [{status}]", ok, rep)
         record(f"owner upsert detail [{status}]", ok, call(owner, "POST", "irrigation_events", params={"on_conflict": "activity_id"},
                json={"activity_id": aid, "method": "awd", "water_volume_m3": 2}) if True else "")
-        record(f"owner delete detail [{status}]", ok,
+        # Direct detail deletes are not a client operation (20260926110000):
+        # refused in every season; activities are removed via the RPC.
+        record(f"owner delete detail [{status}]", False,
                call(owner, "DELETE", "irrigation_events", params={"activity_id": f"eq.{aid}"}))
+        # Flutter's ensureDefaultBatch upsert.
+        record(f"owner upsert default batch [{status}]", status in ("active", "planned"),
+               call(owner, "POST", "production_batches", params={"on_conflict": "crop_season_id,batch_code"},
+                    json={"crop_season_id": ctx["seasons"][status]["season"], "batch_code": "default"}))
         record(f"owner soft_delete RPC [{status}]", ok, call(owner, "POST", "rpc/soft_delete_activity", json={"p_activity_id": aid}, rep=False))
 
     for who in ("former", "viewer", "outsider", "expired_manager"):

@@ -133,7 +133,8 @@ def test_detail_tables_are_not_a_side_door(tx, status):
                 on conflict (activity_id) do update set water_volume_m3 = excluded.water_volume_m3"""
     assert tx.as_user(tx.owner, upsert, (a,)) == ("err", "55000")
     assert tx.as_user(tx.owner, "update public.irrigation_events set water_volume_m3 = 9 where activity_id = %s", (a,)) == ("err", "55000")
-    assert tx.as_user(tx.owner, "delete from public.irrigation_events where activity_id = %s", (a,)) == ("err", "55000")
+    # Direct detail deletes are not a client operation at all (20260926110000).
+    assert tx.as_user(tx.owner, "delete from public.irrigation_events where activity_id = %s", (a,)) == ("err", "42501")
 
 
 def test_a_closed_batch_in_an_active_season_is_closed_too(tx):
@@ -234,3 +235,27 @@ def test_backend_sessions_are_not_subject_to_client_triggers(tx):
     a = tx.activity("closed")
     tx.cur.execute("delete from public.irrigation_events where activity_id = %s", (a,))
     tx.cur.execute("delete from public.activities where id = %s", (a,))
+
+
+# -------------------------------------------------- batches (20260926110000)
+
+@pytest.mark.parametrize(("status", "ok"), [("active", True), ("planned", True), ("harvested", False), ("closed", False), ("cancelled", False)])
+def test_clients_create_or_touch_batches_only_in_an_open_season(tx, status, ok):
+    upsert = """insert into public.production_batches (crop_season_id, batch_code) values (%s, 'default')
+                on conflict (crop_season_id, batch_code) do update set batch_code = excluded.batch_code"""
+    res = tx.as_user(tx.owner, upsert, (tx.seasons[status],))
+    assert (res == ("ok", 1)) if ok else (res == ("err", "55000"))
+
+
+def test_a_batch_cannot_be_moved_to_another_season(tx):
+    res = tx.as_user(tx.owner, "update public.production_batches set crop_season_id = %s where id = %s",
+                     (tx.seasons["planned"], tx.batches["active"]))
+    assert res == ("err", "42501")
+
+
+def test_no_client_deletes_detail_rows_directly(tx):
+    a = tx.activity("active")
+    for who in (tx.owner, tx.viewer, tx.former):
+        assert tx.as_user(who, "delete from public.irrigation_events where activity_id = %s", (a,)) == ("err", "42501")
+    # The supported removal still works: soft delete of the parent.
+    assert tx.as_user(tx.owner, "select public.soft_delete_activity(%s)", (a,))[0] == "ok"

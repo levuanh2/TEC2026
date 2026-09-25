@@ -1,9 +1,13 @@
 # P1: season lifecycle + active membership, enforced in the database (2026-09-26)
 
-Branch `feat/agricarbon-db-lifecycle-enforcement`. Migrations
-`20260926090000_db_lifecycle_enforcement.sql` and
-`20260926100000_activity_update_denies_loudly.sql`. **Both are applied on hosted**
-(user-approved; recorded in `supabase_migrations.schema_migrations`).
+Branch `feat/agricarbon-db-lifecycle-enforcement`. Migrations:
+- `20260926090000_db_lifecycle_enforcement.sql`
+- `20260926100000_activity_update_denies_loudly.sql`
+- `20260926110000_batch_lifecycle_and_detail_delete.sql` (a follow-up from the independent review)
+
+**All three are applied on hosted** and recorded in `supabase_migrations.schema_migrations`.
+The user approved the lifecycle migration; the two follow-ups were applied under the same
+approval.
 
 Scope limits held in this work:
 - Flutter writes still go straight to PostgREST; they were not moved behind FastAPI.
@@ -20,10 +24,10 @@ Scope limits held in this work:
 | soft delete | activities | RPC `soft_delete_activity` | `user_can_delete_activity` | none → **active** (55000) | none → **required** | recorder only |
 | INSERT | 7 detail tables | `*_insert` | → `user_can_write_activity_batch` of the parent | none → **active** (+ trigger) | **required** | via parent |
 | UPDATE | 7 detail tables | `*_update` | USING read, WITH CHECK `user_can_write_activity_batch` | none → **active** (trigger) | **required** | **`activity_id` immutable** |
-| DELETE | 7 detail tables | `*_delete` | `user_can_write_batch` | none → **active** (trigger 55000) | **required** | via parent |
+| DELETE | 7 detail tables | `*_delete` → **privilege revoked** | — | **not a client operation** (42501) | — | parents are removed via the RPC |
 | INSERT | crop_seasons | `crop_seasons_insert` | `user_can_write_farm` | client may create only `planned`/`active` (trigger) | none → **required** | — |
 | UPDATE | crop_seasons | `crop_seasons_update` | `user_can_write_crop` | **legal transitions only** (trigger) | none → **required** | — |
-| INSERT/UPDATE | production_batches | unchanged | `user_can_write_crop` / `_batch` | — | **required** (inherited) | — |
+| INSERT/UPDATE | production_batches | unchanged policies | `user_can_write_crop` / `_batch` | none → **season live and planned/active** (trigger 55000) | **required** (inherited) | **`crop_season_id` immutable** |
 
 - **Membership:** `user_can_write_farm` and `user_can_manage_farm_members` now require an
   ACTIVE membership in the farm's cooperative, and a farm that is not deleted.
@@ -120,8 +124,9 @@ guard now calls `private.activity_batch_open` and relies on the DB helpers for m
 - **DB/RLS:** `test_db_lifecycle_rls.py` runs against real Postgres as `authenticated`.
   It covers the lifecycle, detail tables, batch/activity immutability, membership
   revocation, transitions and backend exemptions.
-- **Hosted PostgREST probe after the fix:** 32/32
-  (`docs/evidence/lifecycle-rls-probe-after.txt`).
+- **Hosted PostgREST probe after the fix:** 36/36
+  (`docs/evidence/lifecycle-rls-probe-after.txt`). The probe also covers the default-batch
+  upsert and direct detail deletes.
 - **Flutter emulator + hosted:** `backend/scripts/hosted_flutter_lifecycle_e2e.py`
   (drives `app/integration_test/hosted_season_lifecycle_test.dart`), 6/6.
   1. Start a season on the phone.
@@ -134,13 +139,19 @@ guard now calls `private.activity_batch_open` and relies on the DB helpers for m
   6. The next pull brings the season down as `harvested`.
   7. Cleanup restores the row counts.
 
-## 8. Remaining (not in this work)
+## 8. Independent review (Codex, read-only)
+
+Round 1 verdict: `CODEX REVIEW: NO BLOCKER`, with two findings. Both are fixed by `20260926110000`.
+
+| Severity | Finding | Fix |
+|---|---|---|
+| MEDIUM | Flutter's `ensureDefaultBatch` upsert could create or update a batch in a finished season before the activity was refused | client batch writes need a live `planned`/`active` season (55000); `crop_season_id` is immutable |
+| LOW | a non-writer's direct detail DELETE matched 0 rows silently | `DELETE` on the detail tables is revoked from `authenticated` (explicit 42501); no client uses it |
+
+## 9. Remaining (not in this work)
 
 - Reads by a former member are unchanged. They were not a business write, so they were
   out of scope.
-- A non-writer's direct DELETE on a detail table still matches 0 rows silently: a DELETE
-  has no WITH CHECK, so a read-scope USING would let readers delete. No client deletes
-  detail rows directly.
 - A Flutter build released before this change creates `planned` seasons. Until the app is
   updated, the DB refuses its activity writes (55000, shown as a permanent failure, never
   lost).
