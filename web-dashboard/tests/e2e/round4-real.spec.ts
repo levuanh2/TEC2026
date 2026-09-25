@@ -20,7 +20,9 @@ async function signIn(page: Page, who: { email?: string; password?: string }) {
   await page.waitForURL(/\/(farmer|dashboard)/, { timeout: 120_000 })
 }
 const signedOut = async (page: Page) => {
-  await expect(page.locator('input[type=password]')).toBeVisible({ timeout: 15_000 })
+  // The login form's own field: the Farmer account page also has password
+  // inputs (Đổi mật khẩu), so a bare input[type=password] no longer means /login.
+  await expect(page.getByLabel('Mật khẩu', { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('.fw-shell, .shell')).toHaveCount(0)
 }
 
