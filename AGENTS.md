@@ -391,6 +391,12 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 |---|---|---|---|
 | `backend/api.py`, `backend/schemas.py`, `backend/service.py`, `backend/main.py`, `backend/infrastructure/season_repo.py` (new), `backend/infrastructure/provisioning_repo.py` (new), `backend/tests/test_season_create.py` (new), `backend/tests/test_farmer_provisioning.py` (new), `web-dashboard/src/**` (Farmer no-season UX, create-season flow, closed-season write gate, Management create-season + Nông hộ provisioning), `web-dashboard/tests/**`, `docs/SEASON_LIFECYCLE_AND_PROVISIONING.md` (new) | — (released) | POST tạo vụ + batch mặc định trong một transaction; UX không có vụ; chặn ghi vào vụ đã đóng; Management tạo vụ và cấp tài khoản nông hộ qua FastAPI. **Không** đổi Carbon engine/hệ số/MRV/Flutter sync/Render. Branch `feat/agricarbon-season-lifecycle`. | DONE (2026-09-26): Codex read-only review 3 vòng → NO BLOCKER (sửa: khoá + kiểm tra lại trạng thái vụ trong transaction ghi, yêu cầu membership còn hiệu lực, bù trừ Auth theo marker từng lần). Backend 780 pass/0 fail; vitest 465; tsc+build; mock Playwright 90; real 25 pass/0 fail/10 skip (opt-in hoặc script); hosted smoke 22/22; signup công khai đã tắt trên hosted và kiểm chứng 5/5. Follow-up P1/P2: `docs/SEASON_LIFECYCLE_AND_PROVISIONING.md` §9. |
 
+## P1 DB lifecycle enforcement (2026-09-26) (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `supabase/migrations/*` (new migration), `backend/**` (season status endpoint, tests), `web-dashboard/src/**` ("Kết thúc vụ"), `app/lib/**` (season lifecycle + sync conflict), `app/test/**`, `docs/DB_LIFECYCLE_ENFORCEMENT.md` (new) | **Claude** (đang giữ) | Quy tắc vòng đời vụ + membership còn hiệu lực ở tầng DB cho mọi client (FastAPI + Flutter PostgREST); endpoint kết thúc vụ; Flutter tạo/kích hoạt vụ đồng bộ. Branch `feat/agricarbon-db-lifecycle-enforcement`. | đang làm |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
