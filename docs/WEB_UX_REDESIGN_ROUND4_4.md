@@ -4,7 +4,7 @@
 
 Phạm vi: chỉ lớp trình bày `web-dashboard/`. **Không** sửa backend, Supabase, API contract, công thức, hệ số, GWP, readiness, methodology hay MRV state machine.
 
-**Kết luận: PASS WITH KNOWN LIMITATIONS** (giới hạn ở §16).
+**Kết luận vòng sửa: PASS WITH KNOWN LIMITATIONS** (giới hạn ở §16). **Final gate trước merge (§19): BLOCKED** — full real trên `f5abf4c` còn 2 fail do hạ tầng Supabase; chưa push, chưa merge.
 
 ## 1. Branch, commit
 
@@ -194,3 +194,95 @@ git diff 70af50c..HEAD -- backend supabase app ml | wc -l   →   0
 - Real config chạy `trace: 'off'`; `signIn` xoá ô mật khẩu trước khi rethrow.
 - Quét chuỗi mật khẩu trong `test-results/`, `playwright-report/`, `.qa-screenshots/`, `docs/`, `AGENTS.md`, `src/`, `tests/`, log scratchpad, output task nền và `git log -p 70af50c..HEAD`: **0 kết quả**. Log real/redesign/uvicorn và script probe đã xoá.
 - Baseline worktree: xoá junction `node_modules` trước (kiểm `LinkType = Junction`), rồi `git worktree remove` + `prune`. Preview 5173 và uvicorn 8010 đã dừng.
+
+## 19. Final gate before merge (2026-09-25)
+
+SHA đã test: **`f5abf4c`** (`260ffa8` + một fix auth, §19.2). `origin/main` = `70af50c` suốt gate, branch không stale. Kết luận gate: **BLOCKED** — điều kiện 6 (full real 0 fail) chưa đạt; theo brief không push, không merge.
+
+### 19.1 Lần chạy đầu trên `260ffa8`
+
+| Gate | Kết quả |
+|---|---|
+| `npm ci` / tsc / vitest / build | lockfile không đổi · tsc pass · 52 file / 427 test · build pass |
+| `farmer-web` ×5 (1 worker, 0 retry) | **5/5**. Lần fail trước (§12) xảy ra khi chạy 8 worker song song, không tái hiện ở 1 worker. |
+| Full mock (1 worker, 0 retry) | **90 passed / 0 failed / 48 skipped** — 48 skip đều thuộc spec real/opt-in (không có credential ở mock mode). |
+| Full real (1 worker, 0 retry, write + recommendations bật) | 25 passed / **1 failed** / 7 skipped — `round4-real` "an expired session lands on login…": URL ở `/farmer` thay vì `/login?next=%2Ffarmer%2Fjournal`. |
+
+Lịch sử: lần fail trước của `round44-real` (đếm request thô trên Vite dev, §12) là lỗi **test**, đã sửa ở `4d37164`; trong cả hai full real của gate này `round44-real` 3/3 pass với đúng 5 endpoint distinct.
+
+### 19.2 Lỗi app thật: expired session mất đường quay lại
+
+- **Triệu chứng:** màn "Phiên đăng nhập đã hết hạn" + "Đăng nhập lại" đúng, nhưng URL là `/farmer`, nên đăng nhập lại không quay về trang đang dở. Lặp riêng test: một loạt ×5 fail 5/5, loạt sau pass 5/5 — phụ thuộc thời điểm.
+- **Root cause:** khi `/v1/me` đang chạy và chính 401 của nó kết thúc phiên, handler kết thúc phiên thay URL bằng `/login?next=…`, rồi `getMe()` reject trong cùng chuỗi microtask — **trước** khi React commit render làm cờ `alive` của effect thành false. Catch chạy `applyRoleRedirect('farmer', '/login')` → `/farmer`. Có xảy ra hay không tuỳ timing khoá refresh của Supabase. Có từ trước Round 4.4 (auth không đổi từ Round 4.3).
+- **Sửa (`f5abf4c`, commit riêng):** callback `/v1/me` kiểm thêm một ref giữ phiên mà nó thuộc về, được xoá **đồng bộ** trong handler kết thúc phiên (12 dòng trong `App.tsx`).
+- **Regression test:** `src/authEndRace.dom.test.tsx` ép đúng thứ tự (kết thúc phiên rồi reject `/v1/me`, không có commit ở giữa). Trước sửa: fail với `/farmer`; sau sửa: pass. Một bản E2E ép thứ tự bằng route delay đã thử và **không** tái hiện được bug trên code cũ, nên bỏ, không commit.
+
+### 19.3 Chạy lại toàn bộ gate trên `f5abf4c`
+
+| Gate | Kết quả |
+|---|---|
+| `npm ci` | 0 vulnerabilities, `package-lock.json` không đổi |
+| `npx tsc --noEmit` | pass |
+| `npx vitest run` | **53 file / 428 test pass** |
+| `npm run build` | pass |
+| `farmer-web` ×5 | **5/5** |
+| Full mock | **90 passed / 0 failed / 48 skipped** |
+| Full real | **24 passed / 2 failed / 7 skipped / 0 not-run** — §19.4 |
+| `round4-real` (test fail ở 19.1) | pass trong full real này |
+| `sidebar-parity-real` riêng | **3/3** |
+| `round44-real` riêng | **3/3** |
+| `redesign-qa` | **15/15** (default config + `REDESIGN_QA=true` trên real-data preview). Spec này không nằm trong `testMatch` của `playwright.real.config.ts` — chạy với config đó báo "No tests found", nên không thể nằm trong full real run. |
+
+Skip trong full real (7): `farmer-real-carbon-quickfix` ×2 và `farmer-real-straw-quickfix` ×2 (thiếu QF/SQF owner/viewer credential); MRV export trong `web-real-data` và `farmer-real-data` (chưa bật / chưa có cleanup storage); **`farmer-real-cv` ×1** — cố ý không bật: spec ghi `plant_images`, `cv_inferences` và object storage mà **không có cleanup**, nên không đạt điều kiện "cleanup contract an toàn".
+
+### 19.4 Hai fail còn lại — hạ tầng Supabase, không phải app/test
+
+| Test | Trình duyệt thấy | Nguyên nhân (log uvicorn) |
+|---|---|---|
+| `farmer-real-data` "uses Supabase Auth and FastAPI only…" | console: CORS bị chặn trên `/v1/farmer/scope` | backend 500: `postgrest.exceptions.APIError: JWT issued at future (PGRST303)` — PostgREST hosted từ chối token vừa cấp. Response 500 không có header CORS nên trình duyệt báo CORS. Đồng hồ local lệch Supabase 0–1 s (header `Date`), nên đây là lệch giữa Auth và PostgREST phía hosted. |
+| `round41-real` "/carbon: every primary and secondary action…" | 55/60 bounding-box check (thiếu 1 hàng × 5 viewport) | `GET /v1/crop-seasons/{id}/carbon/readiness` 500 sau 7,2 s (db 6,8 s): `httpx.RemoteProtocolError: Server disconnected` từ Supabase, nên hàng đó không có nút. |
+
+Cả hai test đã pass ở full real 19.1 và các lần trước; không file nào của hai luồng này đổi trong Round 4.4. Không chạy lại full real để "tình cờ pass" — quyết định chạy lại thuộc về người duyệt. Ngoài phạm vi, không sửa: backend trả 500 cho PGRST303 và cho mất kết nối upstream, thay vì 401/503 có header CORS.
+
+### 19.5 Request / performance (production preview `f5abf4c`, backend local, cùng tenant, 3 lượt)
+
+| Chỉ số | Median |
+|---|---|
+| Request vật lý `/v1/*` | 5 |
+| Endpoint distinct | **5** (`/v1/farmer/scope`, `/v1/me`, `/v1/organizations/{id}`, `…/metrics`, `…/farm-performance`) |
+| `/crop-seasons/{id}/metrics` | **0** |
+| Thẻ aggregate đầu tiên (first meaningful) | 1938 ms (3495 / 1925 / 1938) |
+| Settled | 2578 ms (3756 / 2578 / 2262) |
+
+Dev server (real config) gọi đôi do StrictMode: 7 request vật lý nhưng vẫn 5 endpoint — lý do real spec đếm distinct. Không so với staging. Request không tăng theo số vụ: `round44.dom.test.tsx` (1 vs 40 nông hộ, cùng 3 endpoint org).
+
+### 19.6 Rendered contract (dữ liệu thật, `f5abf4c`)
+
+43 lượt route × viewport: 0 overflow ngang (1440/1348/1024/768/390), 0 UUID/ISO/enum/field name, 0 developer term, 1 `h1`/trang. Hộ demo 1 và Hộ demo 2: "Có vụ chưa ghi sản lượng thu hoạch"; không "Chưa ghi thu hoạch", không "… đã ghi · 1/2 vụ", không số aggregate toàn HTX. Font request chỉ Be Vietnam Pro; computed font heading/body Be Vietnam Pro. Farmer: 5.200 kg, 1,2 ha, 4,3 tấn/ha, 63 lít, 125 kg phân/ha. Console: 0 trên `/performance`; route khác chỉ có log trình duyệt của `404 /v1/crop-seasons/{id}/carbon` (vụ chưa có kết quả Carbon). Drawer 768 + 390: backdrop, chạm ngoài đóng, Escape đóng, nút đóng 44×44 nhận focus, 40 lần Tab không thoát, `main` inert, body không cuộn, focus trả về nút mở, đổi route tự đóng.
+
+### 19.7 Accessibility (axe-core 4.13, wcag2a/2aa/21a/21aa)
+
+| Lượt quét | Viewport | Serious/critical | Incomplete (cần xem tay) |
+|---|---|---|---|
+| Farmer Performance | 1348 | 0 | 0 |
+| Farmer Performance | 390 | 0 | color-contrast ×6 — link bottom nav `.fw-bottom > a` (nền trong mờ) |
+| Management Performance | 1348, 1024, 768, 390 | 0 | 0 |
+| Management Performance, danh sách thiếu mở | 1348 | 0 | 0 |
+| Management drawer mở | 390 | 0 | color-contrast ×2 — `.brand > small`, `b` trên sidebar dưới backdrop |
+
+8 lượt trong audit, cộng axe trong `round44-real` (1348/1024/390) và `round43-qa`. Hai nhóm incomplete thuộc thành phần không đổi từ Round 4.3; axe không tính được tương phản trên nền trong mờ/chồng lớp — chưa xem tay. Không tuyên bố đạt WCAG.
+
+### 19.8 Cleanup
+
+- QA record: `farmer-real-write` chạy 2 lần (19.1, 19.3) và tự xoá mọi dòng `QA-FW2-*`. Kiểm tra qua API bằng Farmer QA sau mỗi lần: **0 dòng `QA-FW2`**; 12 hoạt động demo có sẵn không bị đụng. CV không chạy nên không có ảnh/inference QA.
+- Credential: file `qa.env` tạm trong scratchpad phiên (ngoài repo) đã xoá. `--trace=retain-on-failure` (theo brief) ghi đè `trace: 'off'` của real config, nên **3 trace của lần fail có chứa mật khẩu đã gõ** — chỉ nằm trong `test-results/` và bản sao scratchpad để chẩn đoán; đã xoá toàn bộ. Quét lại `web-dashboard/` (trừ `node_modules`), `docs/`, `AGENTS.md`, output task nền và scratchpad: **0 kết quả**; `git log -p 70af50c..HEAD`: 0.
+- Server 5173/8010 đã dừng; `git worktree list` chỉ còn repo chính.
+- Backend/Carbon: `git diff 70af50c..HEAD -- backend supabase app ml` = **0 dòng**.
+
+### 19.9 Known limitations (giữ nguyên)
+
+1. Chưa hiển thị được "5.200 kg đã ghi · 1/2 vụ" — backend `farm-performance` thiếu trường tổng một phần / số vụ.
+2. CTA mở hồ sơ nông hộ, chưa mở thẳng đúng vụ thiếu.
+3. Chưa kiểm trên staging — chưa deploy.
+
+Thêm từ gate này: backend trả 500 (không có CORS) cho PGRST303 và cho mất kết nối upstream; `farmer-real-cv` không có cleanup nên không chạy trong gate.

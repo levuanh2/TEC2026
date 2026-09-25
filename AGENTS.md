@@ -383,7 +383,7 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 
 | Files | Owner | Task | Trạng thái |
 |---|---|---|---|
-| `web-dashboard/src/**` (Management `/performance` copy + layout, drawer, font request), `web-dashboard/index.html`, `web-dashboard/tests/**` (Round 4.4 specs), `docs/WEB_UX_REDESIGN_ROUND4_4.md` (new) | — (released) | Thu hoạch một phần không còn ghi "Chưa ghi thu hoạch", bỏ developer copy, gộp câu độ phủ, cân bằng bố cục, bỏ Fraunces nếu không dùng. **Không** đổi backend/API/Carbon/MRV. Branch `fix/agricarbon-round4-4-management-metrics-truth`. | DONE — PASS WITH KNOWN LIMITATIONS: vitest 427, mock Playwright 90/0 fail, round43/44-real 7/7, redesign-qa 15/15, axe 0, backend diff 0. Commit local, **chưa push/merge/deploy** — chờ duyệt. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_4.md`. |
+| `web-dashboard/src/**` (Management `/performance` copy + layout, drawer, font request), `web-dashboard/index.html`, `web-dashboard/tests/**` (Round 4.4 specs), `docs/WEB_UX_REDESIGN_ROUND4_4.md` (new) | — (released) | Thu hoạch một phần không còn ghi "Chưa ghi thu hoạch", bỏ developer copy, gộp câu độ phủ, cân bằng bố cục, bỏ Fraunces nếu không dùng. **Không** đổi backend/API/Carbon/MRV. Branch `fix/agricarbon-round4-4-management-metrics-truth`. | Final gate **BLOCKED** trên `f5abf4c` (thêm fix auth race): full real 24 pass / 2 fail do Supabase (PGRST303, upstream disconnect). Chưa push/merge/deploy. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_4.md` §19. |
 
 ## Uncommitted changes rule
 
