@@ -385,6 +385,12 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 |---|---|---|---|
 | `web-dashboard/src/**` (Management `/performance` copy + layout, drawer, font request), `web-dashboard/index.html`, `web-dashboard/tests/**` (Round 4.4 specs), `docs/WEB_UX_REDESIGN_ROUND4_4.md` (new) | — (released) | Thu hoạch một phần không còn ghi "Chưa ghi thu hoạch", bỏ developer copy, gộp câu độ phủ, cân bằng bố cục, bỏ Fraunces nếu không dùng. **Không** đổi backend/API/Carbon/MRV. Branch `fix/agricarbon-round4-4-management-metrics-truth`. | Final gate **BLOCKED** trên `f5abf4c` (thêm fix auth race): full real 24 pass / 2 fail do Supabase (PGRST303, upstream disconnect). Chưa push/merge/deploy. Chi tiết: `docs/WEB_UX_REDESIGN_ROUND4_4.md` §19. |
 
+## Season lifecycle + farmer provisioning (2026-09-25) (Claude)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/api.py`, `backend/schemas.py`, `backend/service.py`, `backend/main.py`, `backend/infrastructure/season_repo.py` (new), `backend/infrastructure/provisioning_repo.py` (new), `backend/tests/test_season_create.py` (new), `backend/tests/test_farmer_provisioning.py` (new), `web-dashboard/src/**` (Farmer no-season UX, create-season flow, closed-season write gate, Management create-season + Nông hộ provisioning), `web-dashboard/tests/**`, `docs/SEASON_LIFECYCLE_AND_PROVISIONING.md` (new) | — (released) | POST tạo vụ + batch mặc định trong một transaction; UX không có vụ; chặn ghi vào vụ đã đóng; Management tạo vụ và cấp tài khoản nông hộ qua FastAPI. **Không** đổi Carbon engine/hệ số/MRV/Flutter sync/Render. Branch `feat/agricarbon-season-lifecycle`. | DONE, **chờ Codex review** (không có pane Codex trong session): backend 769 pass (có test DB thật rollback), vitest 465 pass, build pass, mock Playwright 90 pass, real 25 pass/10 gated, hosted smoke tenant dùng một lần 22/22. Chưa push/merge/deploy. Chi tiết: `docs/SEASON_LIFECYCLE_AND_PROVISIONING.md`. |
+
 ## Uncommitted changes rule
 
 Không `git reset --hard` / `git checkout -- <file>` / `git restore` / stash
