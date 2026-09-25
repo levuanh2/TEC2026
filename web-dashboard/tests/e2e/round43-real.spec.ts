@@ -97,9 +97,10 @@ test('Manager: every aggregate states its farm coverage, opens its missing farms
   await page.goto('/performance')
   const coverage = page.getByTestId('aggregate-coverage')
   await expect(coverage).toHaveCount(4, { timeout: 120_000 })
-  for (const c of await coverage.all()) await expect(c).toContainText(/^Dựa trên \d+\/\d+ nông hộ đủ dữ liệu/, { timeout: 120_000 })
+  // Round 4.4 wording: one sentence per aggregate with its farm coverage.
+  for (const c of await coverage.all()) await expect(c).toContainText(/\d+\/\d+ nông hộ/, { timeout: 120_000 })
   for (const c of await page.getByTestId('aggregate-season-coverage').all()) {
-    await expect(c).toHaveText('Chưa có dữ liệu tổng hợp — cần endpoint chỉ số theo lô.')
+    await expect(c).toHaveText('Tính theo nông hộ; chưa có tổng hợp chi tiết theo từng vụ.')
   }
   for (const card of await page.getByTestId('aggregate-metric').all()) {
     const toggle = card.getByRole('button', { name: /\d+ nông hộ thiếu dữ liệu/ })
