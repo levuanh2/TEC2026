@@ -395,7 +395,7 @@ Home đã ~1s. Lý do đầy đủ ở §6 của báo cáo.
 
 | Files | Owner | Task | Trạng thái |
 |---|---|---|---|
-| `supabase/migrations/*` (new migration), `backend/**` (season status endpoint, tests), `web-dashboard/src/**` ("Kết thúc vụ"), `app/lib/**` (season lifecycle + sync conflict), `app/test/**`, `docs/DB_LIFECYCLE_ENFORCEMENT.md` (new) | **Claude** (đang giữ) | Quy tắc vòng đời vụ + membership còn hiệu lực ở tầng DB cho mọi client (FastAPI + Flutter PostgREST); endpoint kết thúc vụ; Flutter tạo/kích hoạt vụ đồng bộ. Branch `feat/agricarbon-db-lifecycle-enforcement`. | đang làm |
+| `supabase/migrations/*` (new migration), `backend/**` (season status endpoint, tests), `web-dashboard/src/**` ("Kết thúc vụ"), `app/lib/**` (season lifecycle + sync conflict), `app/test/**`, `docs/DB_LIFECYCLE_ENFORCEMENT.md` (new) | — (released) | Quy tắc vòng đời vụ + membership còn hiệu lực ở tầng DB cho mọi client (FastAPI + Flutter PostgREST); endpoint kết thúc vụ; Flutter tạo/kích hoạt vụ đồng bộ. Branch `feat/agricarbon-db-lifecycle-enforcement`. | DONE (2026-09-26), chưa merge/push: 4 migration đã áp hosted (có duyệt); probe PostgREST hosted 14/32 → 36/36; test RLS thật 50; Flutter emulator E2E 6/6; backend 840/0; vitest 472; tsc+build; mock 90/0; real 25/0/10 skip; flutter analyze sạch, flutter test 401; Codex read-only 2 vòng NO BLOCKER. Chi tiết: `docs/DB_LIFECYCLE_ENFORCEMENT.md`. |
 
 ## Uncommitted changes rule
 
