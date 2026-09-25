@@ -1,0 +1,38 @@
+=== Direct PostgREST lifecycle probe - run b2ac9638 ===
+
+operation                                    expected  actual
+owner insert activity [active]               OK        OK
+owner update activity [active]               OK        OK
+owner upsert detail [active]                 OK        OK
+owner delete detail [active]                 OK        OK
+owner soft_delete RPC [active]               OK        OK
+owner insert activity [harvested]            DENIED    DENIED:55000
+owner update activity [harvested]            DENIED    DENIED:55000
+owner upsert detail [harvested]              DENIED    DENIED:55000
+owner delete detail [harvested]              DENIED    DENIED:55000
+owner soft_delete RPC [harvested]            DENIED    DENIED:55000
+owner insert activity [closed]               DENIED    DENIED:55000
+owner update activity [closed]               DENIED    DENIED:55000
+owner upsert detail [closed]                 DENIED    DENIED:55000
+owner delete detail [closed]                 DENIED    DENIED:55000
+owner soft_delete RPC [closed]               DENIED    DENIED:55000
+owner insert activity [planned]              DENIED    DENIED:55000
+owner update activity [planned]              DENIED    DENIED:55000
+owner upsert detail [planned]                DENIED    DENIED:55000
+owner delete detail [planned]                DENIED    DENIED:55000
+owner soft_delete RPC [planned]              DENIED    DENIED:55000
+former insert activity [active]              DENIED    DENIED:42501
+former update activity [active]              DENIED    DENIED:42501
+former create season                         DENIED    DENIED:42501
+viewer insert activity [active]              DENIED    DENIED:42501
+viewer update activity [active]              DENIED    DENIED:42501
+viewer create season                         DENIED    DENIED:42501
+outsider insert activity [active]            DENIED    DENIED:42501
+outsider update activity [active]            HIDDEN    HIDDEN (0 rows, not readable)
+outsider create season                       DENIED    DENIED:42501
+expired_manager insert activity [active]     DENIED    DENIED:42501
+expired_manager update activity [active]     HIDDEN    HIDDEN (0 rows, not readable)
+expired_manager create season                DENIED    DENIED:42501
+
+cleanup row counts restored: True 
+32/32 match the lifecycle contract
