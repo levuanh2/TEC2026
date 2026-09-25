@@ -77,7 +77,7 @@ const MESSAGES: Record<string, string> = {
   plot_code_exists: 'Nông hộ đã có thửa với mã này. Hãy dùng mã thửa khác.',
   not_found: 'Bạn không có quyền thực hiện thao tác này cho HTX.',
   provisioning_failed: 'Chưa tạo được tài khoản nông hộ. Không có dữ liệu nào được lưu; hãy thử lại.',
-  provisioning_incomplete: 'Chưa tạo được tài khoản nông hộ. Tài khoản đăng nhập đã bị khoá và chưa thuộc HTX; báo quản trị hệ thống.',
+  provisioning_incomplete: 'Chưa tạo được tài khoản nông hộ. Có thể còn một tài khoản đăng nhập chưa thuộc HTX; báo quản trị hệ thống kiểm tra.',
   offline: 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.',
 }
 

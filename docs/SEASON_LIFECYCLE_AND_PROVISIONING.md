@@ -134,11 +134,40 @@ HTX manager grants the farmer an account → assigns a farm and plot → the far
 the farmer or the manager starts a season → the system creates the default production batch →
 the farmer records activities → Resource Metrics → Carbon → Management/MRV.
 
-## 7. Known gaps (not changed in this sprint)
+## 7. Independent review (Codex, read-only) — findings and disposition
 
-* The hosted Supabase project still accepts public sign-up (`enable_signup = true` in `config.toml`).
-  The Web app has no sign-up screen, and an account created that way has no membership, so it sees no data.
-  Turning sign-up off is an infrastructure change for the project owner.
+| # | Codex | Disposition |
+|---|---|---|
+| 1 | BLOCKER: the activity write checked `status='active'` via PostgREST *before* the write transaction; direct PostgREST/Flutter writes are not status-checked by RLS | **Web path fixed:** `_assert_can_write_batch` now re-reads season + batch status under `FOR SHARE` of the season row inside the write transaction (`SeasonNotOpenError` → 422). A concurrent close either waits or is seen. **Direct PostgREST (Flutter offline sync) not changed:** Flutter creates seasons `planned` and syncs activities straight through RLS, so an RLS/trigger `status='active'` rule would reject every Flutter write; it needs a Flutter lifecycle change first (P1 below). |
+| 2 | HIGH: `user_can_write_farm` honours an owner/editor `farm_members` row after the org membership ended, and ignores `farms.deleted_at` | **FastAPI writes fixed** (season create, activity create/edit/delete, methodology): `ACTIVE_FARM_MEMBERSHIP_SQL` additionally requires an active cooperative manager or an ACTIVE member of the farm's cooperative, on a non-deleted farm. The SQL helper itself needs a migration (P1 below). |
+| 3 | HIGH: an ambiguous Auth Admin failure (user created, response lost) left an orphan identity | **Fixed:** on any non-duplicate failure the service looks up an identity with that email created during this attempt and holding no membership, and deletes (fallback: bans) it; if the lookup itself fails the response is 500 `provisioning_incomplete`. |
+
+## 8. Public sign-up
+
+Product rule: no public farmer registration. `supabase/config.toml` now sets `[auth] enable_signup = false` and `[auth.email] enable_signup = false` (email/password **sign-in** unchanged; Admin API provisioning is not affected by this setting).
+
+The hosted project is changed in the dashboard (Authentication → Sign In / Providers → "Allow new users to sign up" off) or with the Management API — not by pushing this whole `config.toml`, whose `site_url` and other values are local-dev values. Verify with:
+
+```
+python backend/scripts/verify_public_signup_disabled.py
+```
+(`/auth/v1/settings.disable_signup` is true, a public `/auth/v1/signup` is refused with `signup_disabled`, an Admin-created user can still sign in; probe users are deleted.)
+
+## 9. Follow-ups (not in this sprint)
+
+P1
+* `FORCE_TEMP_PASSWORD_CHANGE_ON_FIRST_LOGIN`
+* reactivate an inactive membership
+* attach an existing farm to an existing account
+* crop-season close / harvest endpoint
+* DB-level journal rule for every client (RLS/trigger `status='active'`), after Flutter moves seasons out of `planned`
+* migration: `private.user_can_write_farm/_crop/_batch` require an active org membership and a non-deleted farm
+
+P2
+* invitation/email provisioning once SMTP and a set-password page exist
+
+## 10. Known gaps (not changed in this sprint)
+
 * Nothing forces the farmer to change the temporary password.
 * A former member cannot be reactivated from the UI.
 * A farmer cannot be assigned to an *existing* farm from the UI.

@@ -163,6 +163,22 @@ class PostgresProvisioningRepository:
             if farm_code is not None:
                 self._assert_farm_code_free(cur, organization_id=organization_id, farm_code=farm_code)
 
+    def find_orphan_identity(self, *, email: str, created_since: Any) -> str | None:
+        """An Auth identity with this email, created by this attempt: after
+        `created_since` and holding no organization membership. Used when the
+        Admin API call failed ambiguously (it may have created the user before
+        the response was lost), so compensation can still remove it -- and
+        never touches an identity someone else already uses."""
+        with self._connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """select u.id::text as id from auth.users u
+                   where lower(u.email) = lower(%s) and u.created_at >= %s
+                     and not exists (select 1 from public.organization_memberships om where om.user_id = u.id)""",
+                [email, created_since],
+            )
+            row = cur.fetchone()
+        return row["id"] if row else None
+
     @staticmethod
     def _assert_email_free(cur: Any, *, organization_id: str, email: str) -> None:
         cur.execute(

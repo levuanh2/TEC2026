@@ -367,3 +367,62 @@ def test_create_response_schema_requires_the_batch():
         schemas.CropSeasonCreateResponse.model_validate({
             "id": "s", "plot_id": "p", "season_code": "c", "crop_type": "rice", "status": "active",
         })
+
+
+# -- Codex review hardening ----------------------------------------------------
+
+from infrastructure.write_repo import ActivityWritePermissionError, SeasonNotOpenError  # noqa: E402
+
+IRRIGATION = {"method": "awd", "water_volume_m3": 3, "duration_minutes": None, "water_level_cm": None,
+              "pump_energy_kwh": None, "total_cost_vnd": None}
+
+
+def _record(world, batch, actor):
+    writes = PostgresActivityWriteRepository(settings=None, connect=_savepoint_factory(world.conn))
+    return writes.create(
+        crop_season_id="unused", production_batch_id=batch, actor_id=actor, idempotency_key=str(uuid.uuid4()),
+        activity_type="irrigation", occurred_at=datetime(2026, 5, 20, tzinfo=timezone.utc), note="SEASON-TEST",
+        data=IRRIGATION,
+    )
+
+
+@real_db
+@pytest.mark.parametrize("status", ["harvested", "closed", "cancelled", "planned"])
+def test_the_write_transaction_itself_refuses_a_season_that_is_no_longer_active(world, status):
+    """The service reads the status through PostgREST before the write; a season
+    closed in between must still be refused, inside the write's transaction."""
+    season, _ = create(world, world.owner)
+    world.conn.execute("update public.crop_seasons set status = %s where id = %s", (status, season["id"]))
+    with pytest.raises(SeasonNotOpenError):
+        _record(world, season["default_production_batch_id"], world.owner)
+    assert world.conn.execute("select count(*) as n from public.activities a join public.production_batches pb "
+                              "on pb.id = a.production_batch_id where pb.crop_season_id = %s", (season["id"],)).fetchone()["n"] == 0
+
+
+@real_db
+def test_a_closed_batch_is_refused_inside_the_transaction(world):
+    season, _ = create(world, world.owner)
+    world.conn.execute("update public.production_batches set status = 'closed' where id = %s", (season["default_production_batch_id"],))
+    with pytest.raises(SeasonNotOpenError):
+        _record(world, season["default_production_batch_id"], world.owner)
+
+
+@real_db
+def test_a_farm_role_that_outlived_its_membership_grants_nothing(world):
+    """`user_can_write_farm` accepts a stale owner row; the FastAPI writes do not."""
+    season, _ = create(world, world.owner)
+    world.conn.execute("update public.organization_memberships set ended_at = now() - interval '1 hour' "
+                       "where user_id = %s", (world.editor,))
+    with pytest.raises(SeasonScopeError):
+        world.conn.execute("update public.crop_seasons set status = 'harvested' where id = %s", (season["id"],))
+        create(world, world.editor, code="DX-2026")
+    world.conn.execute("update public.crop_seasons set status = 'active' where id = %s", (season["id"],))
+    with pytest.raises(ActivityWritePermissionError):
+        _record(world, season["default_production_batch_id"], world.editor)
+
+
+@real_db
+def test_a_deleted_farm_takes_no_new_season(world):
+    world.conn.execute("update public.farms set deleted_at = now() where id = %s", (world.farm,))
+    with pytest.raises(SeasonScopeError):
+        create(world, world.manager)

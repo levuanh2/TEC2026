@@ -13,7 +13,7 @@ import secrets
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -46,7 +46,7 @@ from infrastructure.provisioning_repo import (
     PostgresProvisioningRepository,
     ProvisioningScopeError,
 )
-from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository
+from infrastructure.write_repo import ActivityNotFoundError, PostgresActivityWriteRepository, SeasonNotOpenError
 from mrv import manifest as mrv_manifest
 from mrv import report_pdf as mrv_report_pdf
 from mrv import workbook as mrv_workbook
@@ -434,12 +434,23 @@ class ProvisioningService:
             farm_code=farm["farm_code"] if farm else None,
         )
         password = self._password()
+        started = datetime.now(timezone.utc) - timedelta(seconds=5)  # tolerate clock skew with Auth
         try:
             user_id = self._auth.create_user(email=request.email, password=password, full_name=request.full_name)
         except AuthUserExistsError as exc:
             # Created between preflight and now: classify it the same way.
             self._repository.preflight(organization_id=organization_id, actor_id=actor_id, email=request.email, farm_code=None)
             raise AccountExistsError() from exc
+        except Exception as exc:
+            # Ambiguous: Auth may have created the user and the response was
+            # lost. Find an identity this attempt created and remove it.
+            try:
+                orphan = self._repository.find_orphan_identity(email=request.email, created_since=started)
+            except Exception:  # noqa: BLE001
+                _provisioning_log.exception("farmer_provisioning_orphan_lookup_failed email_domain=%s",
+                                            request.email.rsplit("@", 1)[-1])
+                raise ProvisioningFailedError(compensated=False) from exc
+            raise ProvisioningFailedError(compensated=self._compensate(orphan) if orphan else True) from exc
         try:
             body = self._repository.provision(
                 organization_id=organization_id, actor_id=actor_id, user_id=user_id,

@@ -65,7 +65,7 @@ from infrastructure.provisioning_repo import (
     PlotCodeTakenError,
     ProvisioningScopeError,
 )
-from infrastructure.write_repo import IdempotencyConflictError
+from infrastructure.write_repo import IdempotencyConflictError, SeasonNotOpenError
 
 router = APIRouter(prefix="/v1")
 logger = logging.getLogger("agricarbon.api")
@@ -444,7 +444,9 @@ def _write_or_http(callback):
         return callback()
     except ActivityWriteAccessError as exc:
         raise HTTPException(status_code=404, detail=error_detail("not_found", "Activity not found or outside your scope.")) from exc
-    except InvalidCropSeasonStateError as exc:
+    except (InvalidCropSeasonStateError, SeasonNotOpenError) as exc:
+        # SeasonNotOpenError: the same rule, re-checked under a lock inside the
+        # write transaction (a season closed after the service's first read).
         raise HTTPException(status_code=422, detail=error_detail("invalid_crop_season_state", "Crop season is not open for journal writes.")) from exc
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=409, detail=error_detail("duplicate_event", "Idempotency key was already used with different activity data.")) from exc
@@ -643,7 +645,7 @@ def _provisioning_or_http(callback):
                 "provisioning_failed", "Chưa tạo được tài khoản nông hộ. Không có dữ liệu nào được lưu; hãy thử lại.")) from exc
         raise HTTPException(status_code=500, detail=error_detail(
             "provisioning_incomplete",
-            "Chưa tạo được tài khoản nông hộ. Tài khoản đăng nhập đã bị khoá và chưa thuộc HTX; báo quản trị hệ thống để dọn.")) from exc
+            "Chưa tạo được tài khoản nông hộ. Có thể còn một tài khoản đăng nhập chưa thuộc HTX (đã khoá nếu hệ thống khoá được); báo quản trị hệ thống kiểm tra.")) from exc
     except tuple(t for t, _, _ in _PROVISIONING_CONFLICTS) as exc:
         code, message = next((c, m) for t, c, m in _PROVISIONING_CONFLICTS if isinstance(exc, t))
         raise HTTPException(status_code=409, detail=error_detail(code, message)) from exc

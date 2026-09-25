@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from . import pg_pool
 from .config import Settings
+from .write_repo import ACTIVE_FARM_MEMBERSHIP_SQL
 
 #: The batch every season starts with. Same code the Flutter sync upserts
 #: (`app/lib/services/sync_gateway.dart`), so a season created on the Web and
@@ -79,15 +80,22 @@ class PostgresSeasonRepository:
     def _assert_can_write_farm(cur: Any, *, farm_id: str, actor_id: str) -> None:
         """Ask the RLS rule itself, `private.user_can_write_farm` -- the helper
         behind the `crop_seasons` INSERT policy: farm owner/editor, or an active
-        cooperative manager of the farm's cooperative. The JWT claim is
+        cooperative manager of the farm's cooperative -- plus
+        `ACTIVE_FARM_MEMBERSHIP_SQL`: a farm role outlives a membership that
+        has ended, and a deleted farm takes no new seasons. The JWT claim is
         transaction-local and cleared before any row is written, exactly as the
         activity repository does."""
         cur.execute(
             "select set_config('request.jwt.claims', %s, true)",
             [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
         )
-        cur.execute("select private.user_can_write_farm(%s::uuid) as allowed", [farm_id])
-        allowed = bool(cur.fetchone()["allowed"])
+        cur.execute(
+            f"""select private.user_can_write_farm(f.id) and {ACTIVE_FARM_MEMBERSHIP_SQL} as allowed
+                from public.farms f where f.id = %s::uuid""",  # noqa: S608 -- static SQL fragment
+            [farm_id],
+        )
+        row = cur.fetchone()
+        allowed = bool(row and row["allowed"])
         cur.execute("select set_config('request.jwt.claims', '', true)")
         if not allowed:
             raise SeasonScopeError()

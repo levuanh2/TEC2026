@@ -52,13 +52,16 @@ class FakeRead:
 
 
 class FakeAuth:
-    def __init__(self, *, exists=False, delete_fails=False, ban_fails=False):
+    def __init__(self, *, exists=False, delete_fails=False, ban_fails=False, ambiguous=False):
         self.exists, self.delete_fails, self.ban_fails = exists, delete_fails, ban_fails
+        self.ambiguous = ambiguous
         self.created, self.deleted, self.banned = [], [], []
 
     def create_user(self, *, email, password, full_name):
         if self.exists:
             raise AuthUserExistsError()
+        if self.ambiguous:
+            raise TimeoutError("response lost after the user was created")
         self.created.append({"email": email, "password": password, "full_name": full_name})
         return "new-user"
 
@@ -74,8 +77,10 @@ class FakeAuth:
 
 
 class FakeRepo:
-    def __init__(self, *, preflight_error=None, provision_error=None, second_preflight_error=None):
+    def __init__(self, *, preflight_error=None, provision_error=None, second_preflight_error=None,
+                 orphan=None, orphan_lookup_fails=False):
         self.preflight_error, self.provision_error = preflight_error, provision_error
+        self.orphan, self.orphan_lookup_fails = orphan, orphan_lookup_fails
         self.second_preflight_error = second_preflight_error
         self.preflights, self.provisions = 0, []
 
@@ -94,6 +99,11 @@ class FakeRepo:
 
     def list_farmers(self, **kwargs):
         return []
+
+    def find_orphan_identity(self, **kwargs):
+        if self.orphan_lookup_fails:
+            raise RuntimeError("db down")
+        return self.orphan
 
 
 def client(repo=None, auth=None, *, with_read=True):
@@ -192,6 +202,27 @@ def test_when_delete_fails_the_identity_is_locked_and_the_failure_is_explicit():
     assert response.status_code == 500
     assert response.json()["detail"]["error"]["code"] == "provisioning_incomplete"
     assert auth.banned == ["new-user"]
+
+
+def test_an_identity_created_before_a_lost_response_is_found_and_deleted():
+    auth = FakeAuth(ambiguous=True)
+    response = client(FakeRepo(orphan="orphan-1"), auth).post(URL, json=BODY)
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "provisioning_failed"
+    assert auth.deleted == ["orphan-1"]
+
+
+def test_an_ambiguous_failure_with_no_identity_created_deletes_nothing():
+    auth = FakeAuth(ambiguous=True)
+    response = client(FakeRepo(orphan=None), auth).post(URL, json=BODY)
+    assert response.json()["detail"]["error"]["code"] == "provisioning_failed"
+    assert auth.deleted == [] and auth.banned == []
+
+
+def test_an_ambiguous_failure_that_cannot_be_checked_is_reported_incomplete():
+    response = client(FakeRepo(orphan_lookup_fails=True), FakeAuth(ambiguous=True)).post(URL, json=BODY)
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "provisioning_incomplete"
 
 
 def test_the_password_is_never_logged(caplog):
@@ -303,7 +334,8 @@ class World:
         """An Auth identity (what the Admin API creates), optionally a member."""
         user = str(uuid.uuid4())
         self.conn.execute(
-            "insert into auth.users (id, email, aud, role, raw_user_meta_data) values (%s, %s, 'authenticated', 'authenticated', '{}'::jsonb)",
+            # created_at as GoTrue sets it (the column has no default).
+            "insert into auth.users (id, email, aud, role, raw_user_meta_data, created_at) values (%s, %s, 'authenticated', 'authenticated', '{}'::jsonb, now())",
             (user, email or f"prov-{user[:8]}@agricarbon-test.invalid"),
         )
         if member_of:
@@ -449,3 +481,15 @@ def test_a_farm_for_an_existing_farmer_only_inside_the_cooperative(world):
 def test_response_model_requires_the_password_field():
     with pytest.raises(Exception):
         schemas.FarmerProvisionResponse.model_validate({"user_id": "u", "email": "e", "full_name": "f", "organization_id": "o"})
+
+
+@real_db
+def test_orphan_lookup_finds_only_a_fresh_identity_without_membership(world):
+    from datetime import datetime, timedelta, timezone
+    since = datetime.now(timezone.utc) - timedelta(minutes=1)
+    fresh = world.identity(email=f"orphan-{world.tag}@agricarbon-test.invalid")
+    assert repo(world).find_orphan_identity(email=f"ORPHAN-{world.tag}@agricarbon-test.invalid", created_since=since) == fresh
+    # Someone already in a cooperative is never an orphan of this attempt.
+    assert repo(world).find_orphan_identity(email=world.email_of(world.farmer), created_since=since) is None
+    # Nor is an identity older than the attempt.
+    assert repo(world).find_orphan_identity(email=world.email_of(fresh), created_since=datetime.now(timezone.utc) + timedelta(minutes=5)) is None
