@@ -88,7 +88,13 @@ test('Manager /performance: partial harvest is never "no harvest", one sentence 
 
   await page.waitForLoadState('networkidle')
   expect(seasonMetrics, 'no per-season /metrics on Management Performance').toEqual([])
-  expect(api.length, api.join('\n')).toBeLessThanOrEqual(5)
+  // Distinct endpoints, not raw requests: the real config serves the Vite dev
+  // server, where React StrictMode fires every useAsync twice. A production
+  // preview makes exactly these five calls once each (Round 4.4 report §9).
+  const distinct = [...new Set(api.map((u) => new URL(u).pathname.replace(/[0-9a-f-]{36}/g, '{id}')))].sort()
+  expect(distinct).toEqual([
+    '/v1/farmer/scope', '/v1/me', '/v1/organizations/{id}', '/v1/organizations/{id}/farm-performance', '/v1/organizations/{id}/metrics',
+  ])
   const v = blocking(await axe(page))
   expect(v, JSON.stringify(v, null, 2)).toEqual([])
 })
