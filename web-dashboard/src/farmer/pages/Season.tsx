@@ -17,6 +17,7 @@ import { SeasonCarbon } from './Carbon'
 import { MetricCards } from './Performance'
 import { useCanEditSeason, useWritableSeason } from '../writeAccess'
 import { NEW_SEASON_PARAM } from '../StartSeason'
+import { EndSeasonButton } from '../EndSeason'
 
 export type SeasonTab = 'overview' | 'journal' | 'performance' | 'carbon'
 const NOT_FOUND = 'Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.'
@@ -48,7 +49,7 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
 
   return (
     <>
-      {ctx ? <SeasonHeader ctx={ctx} /> : <SeasonHeaderSkeleton />}
+      {ctx ? <SeasonHeader ctx={ctx} canEnd={Boolean(writeCtx)} /> : <SeasonHeaderSkeleton />}
       <Tabs items={tabs} />
       <Flash message={mutations.flash} />
       {writeCtx && justStarted && !activities.data?.length && mutations.version === 0 && (
@@ -90,7 +91,7 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
   )
 }
 
-function SeasonHeader({ ctx }: { ctx: SeasonCtx }) {
+function SeasonHeader({ ctx, canEnd }: { ctx: SeasonCtx; canEnd?: boolean }) {
   const { season, plot, farm } = ctx
   const active = isActiveStatus(season.status)
   const days = !season.harvestDate ? daysSince(season.plantingDate) : null
@@ -109,6 +110,7 @@ function SeasonHeader({ ctx }: { ctx: SeasonCtx }) {
           <h1>{season.name}</h1>
         </div>
         <span className={`fw-chip fw-chip--dot tone-${active ? 'leaf' : 'sage'}`}>{seasonStatusLabel(season.status)}</span>
+        {canEnd && <EndSeasonButton season={season} />}
       </div>
       <div className="fw-ws-head__facts">
         <Fact icon="plot" label="Thửa" value={plot ? `${plot.name}${plot.areaHa != null ? ` · ${ha(plot.areaHa)}` : ''}` : null} />

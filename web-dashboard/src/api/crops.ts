@@ -65,3 +65,30 @@ export async function startCropSeason(plotId: string, input: StartSeasonInput): 
   const x = await apiRequest<any>(`/v1/plots/${plotId}/crop-seasons`, { method: 'POST', body: JSON.stringify(body) })
   return { season: season(x), defaultBatchId: x.default_production_batch_id, replay: Boolean(x.idempotent_replay) }
 }
+
+/** "Kết thúc vụ": `PATCH /v1/crop-seasons/{id}/status`. The server decides
+ * which moves are legal (never a reopening); afterwards every client -- Web
+ * and the Flutter app -- is refused new journal writes for this season. */
+export async function endCropSeason(cropSeasonId: string, actualHarvestDate?: string | null): Promise<CropSeason> {
+  if (usingMockData) {
+    const s = cropSeasons.find((x) => x.id === cropSeasonId)
+    if (!s) throw new ApiError(404, 'not_found', 'Không tìm thấy vụ.')
+    if (s.status !== 'active') throw new ApiError(409, 'illegal_crop_season_transition', 'Vụ đã kết thúc.')
+    s.status = 'harvested'
+    if (actualHarvestDate) s.harvestDate = actualHarvestDate
+    return s
+  }
+  const body: Record<string, unknown> = { status: 'harvested' }
+  if (actualHarvestDate) body.actual_harvest_date = actualHarvestDate
+  return season(await apiRequest<any>(`/v1/crop-seasons/${cropSeasonId}/status`, { method: 'PATCH', body: JSON.stringify(body) }))
+}
+
+export function endSeasonErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === 'illegal_crop_season_transition') return 'Vụ này đã kết thúc; vụ đã kết thúc không mở lại được.'
+    if (err.status === 404) return 'Bạn không có quyền kết thúc vụ này.'
+    if (err.status === 422) return 'Ngày thu hoạch chưa hợp lệ (không được trước ngày gieo sạ).'
+    if (err.code === 'offline') return 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.'
+  }
+  return 'Chưa kết thúc được vụ. Vui lòng thử lại.'
+}

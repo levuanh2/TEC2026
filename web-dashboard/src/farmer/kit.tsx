@@ -215,15 +215,17 @@ export function FarmerSheet({ title, subtitle, icon, tone = 'forest', onClose, b
   )
 }
 
-export function FarmerConfirm({ title, body, confirmLabel, busy, onConfirm, onCancel }: {
+export function FarmerConfirm({ title, body, confirmLabel, busy, onConfirm, onCancel, icon = 'delete' }: {
   title: string; body: ReactNode; confirmLabel: string; busy?: boolean; onConfirm: () => void; onCancel: () => void
+  /** The mark beside the title; a delete by default. */
+  icon?: IconName
 }) {
   useEscape(onCancel, busy)
   const ref = useFocusOnOpen()
   return (
     <div className="fw-overlay" onClick={() => !busy && onCancel()}>
       <div ref={ref} tabIndex={-1} className="fw-confirm" role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
-        <IconTile name="delete" tone="terracotta" />
+        <IconTile name={icon} tone="terracotta" />
         <h3>{title}</h3>
         <div className="fw-confirm__body">{body}</div>
         <div className="fw-confirm__actions">
