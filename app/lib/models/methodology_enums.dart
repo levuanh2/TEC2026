@@ -103,6 +103,13 @@ enum CropSeasonStatus {
       _fromWire(CropSeasonStatus.values, wire) ?? CropSeasonStatus.planned;
 }
 
+/// Vụ còn nhận ghi / sửa công việc trên máy không. `active` là trạng thái hệ
+/// thống nhận hoạt động; `planned` (bản app cũ) vẫn cho ghi trên máy vì lượt
+/// đồng bộ sẽ chuyển vụ sang `active` trước khi gửi công việc. Vụ đã thu
+/// hoạch / chốt / huỷ thì không — cơ sở dữ liệu cũng từ chối.
+bool seasonAcceptsActivities(CropSeasonStatus status) =>
+    status == CropSeasonStatus.active || status == CropSeasonStatus.planned;
+
 T? _fromWire<T extends Enum>(List<T> values, String? wire) {
   if (wire == null) return null;
   for (final v in values) {

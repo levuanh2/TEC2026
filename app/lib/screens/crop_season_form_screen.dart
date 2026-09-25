@@ -151,7 +151,9 @@ class _CropSeasonFormScreenState extends State<CropSeasonFormScreen> {
       preSeasonWaterRegime: _preSeason,
       cultivationDays: days,
       drainageEventCount: drainage,
-      status: e?.status ?? CropSeasonStatus.planned,
+      // Tạo vụ ở đây là BẮT ĐẦU vụ: nông dân ghi công việc ngay sau đó, và hệ
+      // thống chỉ nhận công việc của vụ đang canh tác. Cùng quy ước với Web.
+      status: e?.status ?? CropSeasonStatus.active,
       // Bản mới hoặc bản đã đồng bộ mà bị sửa → phải gửi lại.
       syncState: (e == null || e.isSynced) ? SyncState.pending : e.syncState,
       retryCount: e?.retryCount ?? 0,

@@ -688,6 +688,18 @@ class LocalDatabase {
     );
   }
 
+  /// Vụ `planned` (bản app cũ) đang có công việc chờ gửi -> `active` + chờ
+  /// đồng bộ lại. Chỉ đụng vụ thực sự có công việc chưa lên hệ thống.
+  Future<int> activatePlannedSeasonsWithPendingActivities() {
+    return _require.rawUpdate(
+      "update crop_seasons set status = 'active', sync_state = 'pending', "
+      "updated_at = ? where status = 'planned' and id in ("
+      "select crop_season_id from activities where deleted_locally = 0 "
+      "and ${_retryableWhere(errorColumn: 'sync_error')})",
+      [DateTime.now().toIso8601String()],
+    );
+  }
+
   Future<void> markCropSeasonSyncFailed(
       String clientId, String errorCode) async {
     await _require.rawUpdate(

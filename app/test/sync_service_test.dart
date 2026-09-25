@@ -35,10 +35,13 @@ class _FakeGateway implements SyncGateway {
   Future<String> upsertPlot(Map<String, dynamic> row) async => 'srv-plot';
 
   final seasonUpserts = <Map<String, dynamic>>[];
+  Object? seasonUpsertThrows;
 
   @override
   Future<String> upsertCropSeason(Map<String, dynamic> row) async {
     seasonUpserts.add(row);
+    final t = seasonUpsertThrows;
+    if (t != null) throw t;
     return 'srv-cs1';
   }
 
@@ -559,6 +562,84 @@ void main() {
       final up = _gw.activityUpserts.single;
       expect(up['device_id'], 'dev-1');
       expect(up['client_event_id'], 'straw-1');
+    });
+  });
+
+  group('vụ đã kết thúc trên hệ thống (P1 lifecycle, SQLSTATE 55000)', () {
+    const closed = PostgrestException(
+        message: 'crop_season_not_open: the crop season of this activity is not active',
+        code: '55000');
+
+    test('công việc chờ gửi bị từ chối -> failed/seasonClosed, KHÔNG mất, KHÔNG thử lại mãi',
+        () async {
+      await _db.saveActivity(_act(id: 'late-1'));
+      _gw.upsertThrows = closed;
+      final first = await _sync.syncAll();
+      expect(first.failures.single.kind, SyncErrorKind.seasonClosed);
+      final kept = await _db.getActivity('late-1');
+      expect(kept, isNotNull, reason: 'mutation not silently dropped');
+      expect(kept!.syncState, SyncState.failed);
+      expect(_gw.activityUpserts, hasLength(1));
+
+      // Lượt sau KHÔNG chọn lại (lỗi vĩnh viễn) -> không bão request.
+      await _sync.syncAll();
+      await _sync.syncAll();
+      expect(_gw.activityUpserts, hasLength(1));
+    });
+
+    test('xoá một bản ghi của vụ đã kết thúc -> giữ tombstone, failed/seasonClosed',
+        () async {
+      await _db.saveActivity(
+          _act(id: 'old-1', state: SyncState.synced, serverId: 'srv-old-1'));
+      await _db.tombstoneActivity('old-1');
+      _gw.softDeleteThrows = closed;
+      final s = await _sync.syncAll();
+      expect(s.failures.single.kind, SyncErrorKind.seasonClosed);
+      expect(await _db.getActivity('old-1'), isNotNull);
+    });
+
+    test('bản vụ trên máy muốn mở lại vụ đã kết thúc -> máy chủ thắng, không thử lại',
+        () async {
+      final season = (await _db.getCropSeasonByClientId('cs1'))!;
+      await _db.upsertCropSeason(season.copyWith(
+          syncState: SyncState.pending, updatedAt: DateTime(2026, 4)));
+      _gw.seasonUpsertThrows = const PostgrestException(
+          message: 'illegal_crop_season_transition: harvested -> active is not allowed',
+          code: '55000');
+      final s = await _sync.syncAll();
+      expect(s.failures.single.kind, SyncErrorKind.seasonClosed);
+      final after = (await _db.getCropSeasonByClientId('cs1'))!;
+      expect(after.syncState, SyncState.synced,
+          reason: 'lượt kéo kế tiếp nhận trạng thái thật từ máy chủ');
+      await _sync.syncAll();
+      expect(_gw.seasonUpserts, hasLength(1));
+    });
+
+    test('vụ planned (bản app cũ) có công việc chờ -> được đẩy lên là active TRƯỚC công việc',
+        () async {
+      final season = (await _db.getCropSeasonByClientId('cs1'))!;
+      await _db.upsertCropSeason(season.copyWith(status: CropSeasonStatus.planned));
+      await _db.saveActivity(_act(id: 'first-1'));
+      await _sync.syncAll();
+      expect(_gw.seasonUpserts.single['status'], 'active');
+      expect(_gw.activityUpserts, hasLength(1));
+      expect((await _db.getCropSeasonByClientId('cs1'))!.status, CropSeasonStatus.active);
+    });
+
+    test('vụ planned KHÔNG có công việc chờ -> giữ nguyên, không gửi', () async {
+      final season = (await _db.getCropSeasonByClientId('cs1'))!;
+      await _db.upsertCropSeason(season.copyWith(status: CropSeasonStatus.planned));
+      await _sync.syncAll();
+      expect(_gw.seasonUpserts, isEmpty);
+      expect((await _db.getCropSeasonByClientId('cs1'))!.status, CropSeasonStatus.planned);
+    });
+
+    test('chỉ vụ đang canh tác (hoặc planned cũ) nhận công việc trên máy', () {
+      expect(seasonAcceptsActivities(CropSeasonStatus.active), isTrue);
+      expect(seasonAcceptsActivities(CropSeasonStatus.planned), isTrue);
+      expect(seasonAcceptsActivities(CropSeasonStatus.harvested), isFalse);
+      expect(seasonAcceptsActivities(CropSeasonStatus.closed), isFalse);
+      expect(seasonAcceptsActivities(CropSeasonStatus.cancelled), isFalse);
     });
   });
 }

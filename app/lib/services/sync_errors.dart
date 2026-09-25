@@ -13,6 +13,12 @@ enum SyncErrorKind {
   /// Máy chủ không xác nhận đã ghi (update trả 0 dòng / dòng lạ) — không phải
   /// exception, nhưng cũng KHÔNG được coi là thành công.
   notConfirmed,
+
+  /// Vụ đã kết thúc (hoặc chưa bắt đầu) trên hệ thống: cơ sở dữ liệu từ chối
+  /// ghi/sửa/xoá hoạt động của vụ đó (SQLSTATE 55000 `crop_season_not_open`),
+  /// hoặc từ chối mở lại vụ (`illegal_crop_season_transition`). Vĩnh viễn:
+  /// thử lại y nguyên sẽ luôn hỏng, và app KHÔNG tự mở lại vụ.
+  seasonClosed,
   unknown,
 }
 
@@ -20,6 +26,13 @@ SyncErrorKind classifySyncError(Object error) {
   if (error is PostgrestException) {
     final code = error.code ?? '';
     final msg = error.message.toLowerCase();
+    // Trước RLS: một lỗi vòng đời vụ có mã và thông điệp riêng (migration
+    // 20260926090000), không phải "không có quyền".
+    if (code == '55000' ||
+        msg.contains('crop_season_not_open') ||
+        msg.contains('illegal_crop_season_transition')) {
+      return SyncErrorKind.seasonClosed;
+    }
     if (code == '42501' ||
         msg.contains('row-level security') ||
         msg.contains('permission denied')) {
@@ -71,6 +84,7 @@ extension SyncErrorKindRetry on SyncErrorKind {
         SyncErrorKind.auth => false,
         SyncErrorKind.duplicate => false,
         SyncErrorKind.validation => false,
+        SyncErrorKind.seasonClosed => false,
       };
 
   /// Thử lại y nguyên payload/phiên hiện tại sẽ luôn hỏng như cũ — phải có ai
@@ -103,5 +117,8 @@ String syncErrorMessage(SyncErrorKind kind) {
       return 'Máy chủ chưa xác nhận thao tác. Dữ liệu vẫn giữ trên máy, sẽ thử lại.';
     case SyncErrorKind.unknown:
       return 'Chưa gửi được lên hệ thống. Sẽ thử lại sau.';
+    case SyncErrorKind.seasonClosed:
+      return 'Vụ này đã kết thúc trên hệ thống nên không nhận thêm thay đổi. '
+          'Bản ghi vẫn giữ trên máy; liên hệ cán bộ HTX nếu cần ghi bổ sung.';
   }
 }
