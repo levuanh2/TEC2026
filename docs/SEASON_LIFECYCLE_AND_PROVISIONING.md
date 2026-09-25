@@ -156,10 +156,12 @@ python backend/scripts/verify_public_signup_disabled.py
 ```
 (`/auth/v1/settings.disable_signup` is true, a public `/auth/v1/signup` is refused with `signup_disabled`, an Admin-created user can still sign in; probe users are deleted.)
 
+Hosted state verified 2026-09-26 after the dashboard switch: `verify_public_signup_disabled.py` 5/5 (`disable_signup=true`, public sign-up refused with `signup_disabled`, email sign-in on, Admin-created user can sign in).
+
 ## 9. Follow-ups (not in this sprint)
 
 P1
-* `FORCE_TEMP_PASSWORD_CHANGE_ON_FIRST_LOGIN`
+* `FORCE_TEMP_PASSWORD_CHANGE_ON_FIRST_LOGIN` (the temporary password is shown once, never stored/logged, and the farmer can change it under Tôi; not a merge blocker for demo/staging)
 * reactivate an inactive membership
 * attach an existing farm to an existing account
 * crop-season close / harvest endpoint
@@ -176,3 +178,14 @@ P2
 * A farmer cannot be assigned to an *existing* farm from the UI.
 * There is no Web endpoint to move a season to `harvested`/`closed`.
 * `farmer@agricarbon.local` (HTX-DEMO-001, 0 seasons) is intentionally left as the real no-season onboarding account.
+
+## 11. Final gate (2026-09-26, before merge)
+
+| Gate | Result |
+|---|---|
+| Codex read-only review | 3 rounds; round 3 `CODEX REVIEW: NO BLOCKER` |
+| Backend full pytest | 780 passed, 0 failed, 0 skipped |
+| Web | Vitest 465 passed; tsc; build; mock Playwright 90 passed (50 skipped = real/opt-in specs) |
+| Real-data suite | 25 passed, 0 failed, 10 skipped: 6 script-driven disposable-tenant smokes (carbon quick-fix ×2, straw quick-fix ×2, season-provisioning ×2 — the last run separately below), 4 opt-in specs that write shared hosted QA data (MRV export ×2, CV inference, recommendation generation) |
+| Hosted season + provisioning smoke | 22/22, row counts restored, Case A unchanged (after the signup switch, so Admin provisioning still works) |
+| Public sign-up | disabled on hosted, verified 5/5 |
