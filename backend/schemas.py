@@ -12,7 +12,7 @@ trả `dict[str, Any]` ở đó, models trong file này dùng để TÀI LIỆU 
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 
@@ -106,6 +106,40 @@ class CropSeasonResponse(BaseModel):
     ipcc_water_regime: str | None = None
     pre_season_water_regime: str | None = None
     cultivation_days: int | None = None
+
+
+class CropSeasonCreateRequest(BaseModel):
+    """POST body for starting a crop season on a plot.
+
+    Only what a farmer knows when starting a season. The plot comes from the URL;
+    crop type keeps the column default (rice); status is not chosen by the
+    client -- starting a season makes it `active`; the default production batch
+    is created by the server. IPCC methodology inputs are recorded later through
+    `PATCH /crop-seasons/{id}/methodology`, never defaulted here.
+    """
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    season_code: str = Field(min_length=1, max_length=64)
+    variety_name: str | None = Field(default=None, max_length=120)
+    planting_date: date | None = None
+    expected_harvest_date: date | None = None
+
+    @model_validator(mode="after")
+    def check(self) -> "CropSeasonCreateRequest":
+        if self.variety_name == "":
+            self.variety_name = None
+        # Same rule as `crop_seasons_harvest_dates_chk`, answered as a 422
+        # before the database has to refuse it.
+        if self.planting_date and self.expected_harvest_date and self.expected_harvest_date < self.planting_date:
+            raise ValueError("expected_harvest_date must not be before planting_date.")
+        return self
+
+
+class CropSeasonCreateResponse(CropSeasonResponse):
+    #: Present on every successful create: the season can take activities now.
+    default_production_batch_id: str
+    #: True when this exact season already existed (a repeated submit).
+    idempotent_replay: bool = False
 
 
 # These two mirror `carbon.models.WATER_REGIMES` / `PRE_SEASON_REGIMES` and the
@@ -674,3 +708,103 @@ class HealthResponse(BaseModel):
     carbon_production_ready: bool
     mrv_compliant: bool
     note: str
+
+
+# -- Management: farmer provisioning -----------------------------------------
+
+_EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+class FarmCreateFields(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    farm_code: str = Field(min_length=1, max_length=64)
+    farm_name: str = Field(min_length=1, max_length=160)
+    province_name: str | None = Field(default=None, max_length=120)
+    district_name: str | None = Field(default=None, max_length=120)
+    commune_name: str | None = Field(default=None, max_length=120)
+
+
+class PlotCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    plot_code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=160)
+    # `plots.area_ha numeric(10,4) not null check (area_ha > 0)`.
+    area_ha: float = Field(gt=0, le=100000)
+
+
+class FarmerProvisionRequest(BaseModel):
+    """Only fields the domain stores: `profiles.full_name`, `profiles.phone`
+    and the login email. The cooperative comes from the URL, the role is
+    always `farmer`, the account starts active. Farm and plot are optional
+    so an account can be created before its land is recorded."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    full_name: str = Field(min_length=1, max_length=160)
+    email: str = Field(min_length=3, max_length=254, pattern=_EMAIL)
+    phone: str | None = Field(default=None, max_length=32)
+    farm: FarmCreateFields | None = None
+    plot: PlotCreateRequest | None = None
+
+    @model_validator(mode="after")
+    def check(self) -> "FarmerProvisionRequest":
+        self.email = self.email.lower()
+        if self.phone == "":
+            self.phone = None
+        if self.plot is not None and self.farm is None:
+            raise ValueError("A plot needs a farm: add farm details or leave the plot out.")
+        return self
+
+
+class FarmerProvisionResponse(BaseModel):
+    user_id: str
+    email: str
+    full_name: str
+    phone: str | None = None
+    organization_id: str
+    farm_id: str | None = None
+    plot_id: str | None = None
+    #: Shown to the manager ONCE, to hand to the farmer. Never stored in an
+    #: application table, never logged, not retrievable again.
+    temporary_password: str
+
+
+class FarmCreateRequest(FarmCreateFields):
+    owner_user_id: UUID
+
+
+class FarmCreatedResponse(BaseModel):
+    id: str
+    farm_code: str
+    farm_name: str
+
+
+class PlotCreatedResponse(BaseModel):
+    id: str
+    farm_id: str
+    plot_code: str
+    name: str
+    area_ha: float
+
+
+class FarmerFarmRef(BaseModel):
+    id: str
+    farm_code: str
+    farm_name: str
+    farm_role: str
+
+
+class FarmerListItem(BaseModel):
+    user_id: str
+    email: str | None = None
+    full_name: str | None = None
+    phone: str | None = None
+    account_status: Literal["active", "locked", "ended"]
+    farms: list[FarmerFarmRef]
+    plot_count: int
+    season_count: int
+    active_season_count: int
+    stage: Literal["no_farm", "no_plot", "no_season", "active_season", "history_only"]
+    primary_farm_id: str | None = None
+    idle_plot_id: str | None = None
