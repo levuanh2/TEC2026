@@ -13,7 +13,7 @@ import secrets
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -434,9 +434,9 @@ class ProvisioningService:
             farm_code=farm["farm_code"] if farm else None,
         )
         password = self._password()
-        started = datetime.now(timezone.utc) - timedelta(seconds=5)  # tolerate clock skew with Auth
+        attempt = str(uuid.uuid4())
         try:
-            user_id = self._auth.create_user(email=request.email, password=password, full_name=request.full_name)
+            user_id = self._auth.create_user(email=request.email, password=password, full_name=request.full_name, attempt=attempt)
         except AuthUserExistsError as exc:
             # Created between preflight and now: classify it the same way.
             self._repository.preflight(organization_id=organization_id, actor_id=actor_id, email=request.email, farm_code=None)
@@ -445,7 +445,7 @@ class ProvisioningService:
             # Ambiguous: Auth may have created the user and the response was
             # lost. Find an identity this attempt created and remove it.
             try:
-                orphan = self._repository.find_orphan_identity(email=request.email, created_since=started)
+                orphan = self._repository.find_orphan_identity(email=request.email, attempt=attempt)
             except Exception:  # noqa: BLE001
                 _provisioning_log.exception("farmer_provisioning_orphan_lookup_failed email_domain=%s",
                                             request.email.rsplit("@", 1)[-1])

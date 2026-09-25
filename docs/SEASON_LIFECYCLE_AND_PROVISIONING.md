@@ -140,7 +140,10 @@ the farmer records activities → Resource Metrics → Carbon → Management/MRV
 |---|---|---|
 | 1 | BLOCKER: the activity write checked `status='active'` via PostgREST *before* the write transaction; direct PostgREST/Flutter writes are not status-checked by RLS | **Web path fixed:** `_assert_can_write_batch` now re-reads season + batch status under `FOR SHARE` of the season row inside the write transaction (`SeasonNotOpenError` → 422). A concurrent close either waits or is seen. **Direct PostgREST (Flutter offline sync) not changed:** Flutter creates seasons `planned` and syncs activities straight through RLS, so an RLS/trigger `status='active'` rule would reject every Flutter write; it needs a Flutter lifecycle change first (P1 below). |
 | 2 | HIGH: `user_can_write_farm` honours an owner/editor `farm_members` row after the org membership ended, and ignores `farms.deleted_at` | **FastAPI writes fixed** (season create, activity create/edit/delete, methodology): `ACTIVE_FARM_MEMBERSHIP_SQL` additionally requires an active cooperative manager or an ACTIVE member of the farm's cooperative, on a non-deleted farm. The SQL helper itself needs a migration (P1 below). |
-| 3 | HIGH: an ambiguous Auth Admin failure (user created, response lost) left an orphan identity | **Fixed:** on any non-duplicate failure the service looks up an identity with that email created during this attempt and holding no membership, and deletes (fallback: bans) it; if the lookup itself fails the response is 500 `provisioning_incomplete`. |
+| 3 | HIGH: an ambiguous Auth Admin failure (user created, response lost) left an orphan identity | **Fixed:** each attempt puts a random `provisioning_attempt` marker in the identity's user metadata; on any non-duplicate failure the service looks up the identity with that email AND that marker AND no membership, and deletes (fallback: bans) it; if the lookup itself fails the response is 500 `provisioning_incomplete`. |
+| 4 | (round 2) HIGH: a time-window orphan lookup could delete a concurrent request's identity | **Fixed** by the per-attempt marker above: another request's identity carries a different marker and is never touched. |
+
+Round 2 verdict: `CODEX REVIEW: NO BLOCKER` (#1 and #2 direct-RLS parts confirmed as pre-existing follow-ups not changed by this branch).
 
 ## 8. Public sign-up
 

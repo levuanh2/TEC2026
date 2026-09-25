@@ -198,7 +198,8 @@ class ScriptedCursor:
         self.statements.append((" ".join(sql.split()), list(params or [])))
         text = sql.lower()
         if "user_can_write_batch" in text:
-            self._next = {"allowed": self.allowed}
+            # The same query also reports the season/batch state it locked.
+            self._next = {"allowed": self.allowed, "season_status": "active", "season_live": True, "batch_status": "planned"}
         elif "select production_batch_id" in text:
             self._next = {"production_batch_id": "batch-1"} if self.activity else None
         elif "from public.activities a" in text:

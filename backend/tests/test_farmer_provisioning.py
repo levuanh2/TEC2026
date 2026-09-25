@@ -55,9 +55,10 @@ class FakeAuth:
     def __init__(self, *, exists=False, delete_fails=False, ban_fails=False, ambiguous=False):
         self.exists, self.delete_fails, self.ban_fails = exists, delete_fails, ban_fails
         self.ambiguous = ambiguous
-        self.created, self.deleted, self.banned = [], [], []
+        self.created, self.deleted, self.banned, self.attempts = [], [], [], []
 
-    def create_user(self, *, email, password, full_name):
+    def create_user(self, *, email, password, full_name, attempt):
+        self.attempts.append(attempt)
         if self.exists:
             raise AuthUserExistsError()
         if self.ambiguous:
@@ -81,6 +82,7 @@ class FakeRepo:
                  orphan=None, orphan_lookup_fails=False):
         self.preflight_error, self.provision_error = preflight_error, provision_error
         self.orphan, self.orphan_lookup_fails = orphan, orphan_lookup_fails
+        self.orphan_queries = []
         self.second_preflight_error = second_preflight_error
         self.preflights, self.provisions = 0, []
 
@@ -101,6 +103,7 @@ class FakeRepo:
         return []
 
     def find_orphan_identity(self, **kwargs):
+        self.orphan_queries.append(kwargs)
         if self.orphan_lookup_fails:
             raise RuntimeError("db down")
         return self.orphan
@@ -205,11 +208,13 @@ def test_when_delete_fails_the_identity_is_locked_and_the_failure_is_explicit():
 
 
 def test_an_identity_created_before_a_lost_response_is_found_and_deleted():
-    auth = FakeAuth(ambiguous=True)
-    response = client(FakeRepo(orphan="orphan-1"), auth).post(URL, json=BODY)
+    auth, repo_ = FakeAuth(ambiguous=True), FakeRepo(orphan="orphan-1")
+    response = client(repo_, auth).post(URL, json=BODY)
     assert response.status_code == 500
     assert response.json()["detail"]["error"]["code"] == "provisioning_failed"
     assert auth.deleted == ["orphan-1"]
+    # Looked up by THIS attempt's marker, the one sent to Auth -- never by email alone.
+    assert repo_.orphan_queries == [{"email": "binh@example.vn", "attempt": auth.attempts[0]}]
 
 
 def test_an_ambiguous_failure_with_no_identity_created_deletes_nothing():
@@ -484,12 +489,14 @@ def test_response_model_requires_the_password_field():
 
 
 @real_db
-def test_orphan_lookup_finds_only_a_fresh_identity_without_membership(world):
-    from datetime import datetime, timedelta, timezone
-    since = datetime.now(timezone.utc) - timedelta(minutes=1)
-    fresh = world.identity(email=f"orphan-{world.tag}@agricarbon-test.invalid")
-    assert repo(world).find_orphan_identity(email=f"ORPHAN-{world.tag}@agricarbon-test.invalid", created_since=since) == fresh
-    # Someone already in a cooperative is never an orphan of this attempt.
-    assert repo(world).find_orphan_identity(email=world.email_of(world.farmer), created_since=since) is None
-    # Nor is an identity older than the attempt.
-    assert repo(world).find_orphan_identity(email=world.email_of(fresh), created_since=datetime.now(timezone.utc) + timedelta(minutes=5)) is None
+def test_orphan_lookup_finds_only_this_attempts_identity(world):
+    mine, theirs = str(uuid.uuid4()), str(uuid.uuid4())
+    email = f"orphan-{world.tag}@agricarbon-test.invalid"
+    user = world.identity(email=email)
+    world.conn.execute("update auth.users set raw_user_meta_data = jsonb_build_object('provisioning_attempt', %s::text) where id = %s", (mine, user))
+    assert repo(world).find_orphan_identity(email=email.upper(), attempt=mine) == user
+    # A concurrent request for the same email carries another marker: untouched.
+    assert repo(world).find_orphan_identity(email=email, attempt=theirs) is None
+    # Once it holds a membership it is nobody's orphan.
+    world.conn.execute("insert into public.organization_memberships (organization_id, user_id, role) values (%s, %s, 'farmer')", (world.coop, user))
+    assert repo(world).find_orphan_identity(email=email, attempt=mine) is None

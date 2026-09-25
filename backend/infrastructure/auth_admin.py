@@ -31,17 +31,20 @@ class SupabaseAuthAdmin:
             self._client = create_client(url, key)
         return self._client.auth.admin
 
-    def create_user(self, *, email: str, password: str, full_name: str) -> str:
+    def create_user(self, *, email: str, password: str, full_name: str, attempt: str) -> str:
         """Create a confirmed email/password identity; returns its user id.
 
         `email_confirm`: the cooperative vouches for the address -- there is no
         public sign-up or confirmation mail in this product. `full_name` rides
         in user metadata so the `on_auth_user_created` trigger fills the profile.
+        `attempt` marks the identity as this provisioning attempt's own, so a
+        compensation after an ambiguous failure can never remove another
+        request's identity.
         """
         try:
             response = self._admin().create_user({
                 "email": email, "password": password, "email_confirm": True,
-                "user_metadata": {"full_name": full_name},
+                "user_metadata": {"full_name": full_name, "provisioning_attempt": attempt},
             })
         except Exception as exc:  # noqa: BLE001 - classify, never echo the payload
             code = getattr(exc, "code", None)
