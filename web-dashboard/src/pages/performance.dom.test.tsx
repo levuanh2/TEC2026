@@ -38,16 +38,20 @@ afterEach(cleanup)
 describe('Management Performance request budget', () => {
   it('reads three org endpoints once each and no per-season /metrics', async () => {
     render(<PerformancePage organizationId="o" />)
-    await waitFor(() => expect(screen.getAllByTestId('aggregate-coverage')[0].textContent).toMatch(/^Dựa trên 1\/2 nông hộ/))
+    await waitFor(() => expect(screen.getAllByTestId('aggregate-coverage')[0].textContent).toMatch(/1\/2 nông hộ/))
     expect([...calls].sort()).toEqual(['farm-performance', 'metrics', 'organization'])
     expect(perSeason).not.toHaveBeenCalled()
     expect(farmsApi).not.toHaveBeenCalled()
     // Water: one farm of two. Fertiliser: both. Cost and Carbon: none.
-    expect(screen.getAllByTestId('aggregate-coverage').map((n) => n.textContent!.match(/^Dựa trên \d+\/\d+ nông hộ/)![0])).toEqual([
-      'Dựa trên 1/2 nông hộ', 'Dựa trên 2/2 nông hộ', 'Dựa trên 0/2 nông hộ', 'Dựa trên 0/2 nông hộ',
+    // Round 4.4: one sentence per aggregate; a count of farms, never a grade.
+    expect(screen.getAllByTestId('aggregate-coverage').map((n) => n.textContent)).toEqual([
+      'Chưa công bố chỉ số toàn HTX — mới có 1/2 nông hộ đủ dữ liệu.',
+      'Tính trên 2/2 nông hộ đủ dữ liệu.',
+      'Chưa công bố chỉ số toàn HTX — 2/2 nông hộ còn thiếu dữ liệu.',
+      'Chưa công bố chỉ số toàn HTX — 2/2 nông hộ còn thiếu dữ liệu.',
     ])
     for (const n of screen.getAllByTestId('aggregate-season-coverage')) {
-      expect(n.textContent).toBe('Chưa có dữ liệu tổng hợp — cần endpoint chỉ số theo lô.')
+      expect(n.textContent).toBe('Tính theo nông hộ; chưa có tổng hợp chi tiết theo từng vụ.')
     }
   })
 })

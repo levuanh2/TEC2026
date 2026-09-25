@@ -1,6 +1,7 @@
 import type { FarmPerformance } from '../api/organizations'
 import { ha, kg, num, vnd } from '../format'
 import { DataStatusBadge, EmptyState, Link } from '../ui'
+import { HARVEST_COPY, harvestState } from '../pages/coverage'
 
 /** Why one cell is empty, in the words of the thing that has to be recorded.
  *
@@ -11,13 +12,24 @@ import { DataStatusBadge, EmptyState, Link } from '../ui'
  * per-kg metrics — without it, no column can resolve, and pointing at water
  * would send the reader after the wrong record. */
 function blocker(row: FarmPerformance, metric: 'water' | 'fertilizer' | 'carbon' | 'cost'): string {
-  if (row.yieldKg == null) return 'Thiếu sản lượng thu hoạch'
+  // The yield cell already names the cause; the four per-kg cells only point
+  // back to it instead of repeating it four times per row (Round 4.4).
+  if (row.yieldKg == null) return 'Chờ sản lượng'
   switch (metric) {
     case 'water': return 'Thiếu số liệu tưới nước'
     case 'fertilizer': return 'Thiếu số liệu bón phân'
     case 'cost': return 'Thiếu chi phí đầu vào'
     case 'carbon': return 'Chờ hệ số phát thải'
   }
+}
+
+/** The yield cell (Round 4.4). A null farm yield means "some season has no
+ *  harvest", not "no harvest" — see `harvestState`. It used to read "Chưa ghi
+ *  thu hoạch" for a farm whose other season had 5 200 kg on record. */
+function yieldCell(row: FarmPerformance) {
+  const state = harvestState(row)
+  if (state === 'recorded') return kg(row.yieldKg!)
+  return <span className="cell-empty" data-harvest={state}>{HARVEST_COPY[state]}</span>
 }
 
 const cell = (row: FarmPerformance, metric: 'water' | 'fertilizer' | 'carbon' | 'cost', v: number | null | undefined, fmt: (n: number) => string) =>
@@ -64,7 +76,7 @@ export function FarmPerformanceTable({ items }: { items: FarmPerformance[] }) {
                 <Link to={`/farms/${f.farmId}`} className="rowlink" aria-label={`Mở hồ sơ nông hộ ${f.farmName}`}>{f.farmName}</Link>
               </td>
               <td data-label="Diện tích" className="num">{f.areaHa == null ? <span className="cell-empty">—</span> : ha(f.areaHa)}</td>
-              <td data-label="Sản lượng" className="num">{f.yieldKg == null ? <span className="cell-empty">Chưa ghi thu hoạch</span> : kg(f.yieldKg)}</td>
+              <td data-label="Sản lượng" className="num">{yieldCell(f)}</td>
               <td data-label="Nước / kg thóc" className="num">{cell(f, 'water', f.waterPerKg, (n) => num(n, { max: 3 }))}</td>
               <td data-label="Phân / kg thóc" className="num">{cell(f, 'fertilizer', f.fertilizerPerKg, (n) => num(n, { max: 3 }))}</td>
               <td data-label="Chi phí / kg thóc" className="num">{cell(f, 'cost', f.costPerKg, (n) => vnd(n))}</td>

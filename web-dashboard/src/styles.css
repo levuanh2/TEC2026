@@ -1024,3 +1024,22 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
 @media (prefers-reduced-motion: reduce) { .shell-backdrop { animation: none; } }
 /* A list that sets its own display must still honour `hidden`. */
 .agg__list[hidden] { display: none; }
+
+/* -- Round 4.4: /performance fills its rows ---------------------------------
+ * Water + fertiliser are one section in two columns; cost and Carbon are two
+ * sections that share the next row, so neither leaves half the width empty.
+ * Below 1100px (tablet rail, phone) everything is one column — a 360px card
+ * beside a 216px rail squeezes the coverage sentence into five lines. */
+.perf-grid { display: grid; gap: 0 var(--gap); grid-template-columns: minmax(0, 1fr); }
+.perf-pair { display: grid; gap: 0 var(--gap); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .perf-grid, .perf-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* The facts every aggregate shares, said once above them. */
+.agg-basis { display: grid; gap: 2px; margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--fs-sm); color: var(--text-secondary); }
+.agg-basis div { display: flex; flex-wrap: wrap; gap: 4px; }
+.agg-basis dt { font-weight: 650; color: var(--text-muted); }
+.agg-basis dt::after { content: ":"; }
+.agg-basis dd { margin: 0; }
+/* Touch target: the missing-farm links were 32px tall. */
+.agg__list a { min-height: 40px; }
