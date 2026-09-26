@@ -41,7 +41,7 @@ from infrastructure.request_context import RequestIdMiddleware
 from infrastructure.season_repo import PostgresSeasonRepository
 from infrastructure.provisioning_repo import PostgresProvisioningRepository
 from infrastructure.auth_admin import SupabaseAuthAdmin
-from service import ActivityWriteService, CarbonService, CvService, MrvExportService, ProvisioningService, RecommendationService, SeasonService
+from service import ActivityWriteService, CarbonService, CvService, MrvExportService, ProvisioningService, RecommendationService, SeasonService, SeasonTransitionService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -168,6 +168,8 @@ if settings.auth_configured and settings.supabase_db_url:
     app.dependency_overrides[api._activity_write_service] = lambda: _activity_write_service_singleton
     _season_service_singleton = SeasonService(PostgresSeasonRepository(settings))
     app.dependency_overrides[api._season_service] = lambda: _season_service_singleton
+    _season_transition_singleton = SeasonTransitionService(PostgresSeasonRepository(settings))
+    app.dependency_overrides[api._season_transition_service] = lambda: _season_transition_singleton
 
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
     # The service-role key stays here, server-side: Management Web reaches the

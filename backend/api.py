@@ -53,10 +53,11 @@ from service import (
     ProvisioningService,
     RecommendationService,
     SeasonService,
+    SeasonTransitionService,
     UnsupportedExportFormatError,
 )
 from infrastructure.mrv_export_repo import MrvArtifactCorruptError, MrvArtifactMissingError
-from infrastructure.season_repo import ActiveSeasonExistsError, SeasonCodeTakenError, SeasonScopeError
+from infrastructure.season_repo import ActiveSeasonExistsError, IllegalSeasonTransitionError, SeasonCodeTakenError, SeasonScopeError
 from infrastructure.provisioning_repo import (
     AccountExistsError,
     FarmCodeTakenError,
@@ -125,6 +126,10 @@ def _activity_write_service() -> ActivityWriteService:
 
 
 def _season_service() -> SeasonService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Crop season write repository is not configured."))
+
+
+def _season_transition_service() -> SeasonTransitionService:
     raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Crop season write repository is not configured."))
 
 
@@ -490,6 +495,30 @@ def update_crop_season_methodology(
             read_repository=repo, crop_season_id=crop_season_id, request=payload,
         )
     )
+
+
+@router.patch(
+    "/crop-seasons/{crop_season_id}/status", tags=['Crop Seasons'],
+    response_model=schemas.CropSeasonResponse,
+)
+def update_crop_season_status(
+    crop_season_id: str, payload: schemas.CropSeasonStatusUpdate,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: SeasonTransitionService = Depends(_season_transition_service),
+) -> dict[str, Any]:
+    """End a season: `active -> harvested | closed`, `harvested -> closed`.
+
+    After it the journal is read-only for every client (the database refuses
+    activity writes to a season that is not active); metrics, Carbon results
+    and methodology stay as they are. A season is never reopened here.
+    Writers only (`private.user_can_write_crop`); anyone else gets 404.
+    """
+    try:
+        return service.transition(read_repository=repo, crop_season_id=crop_season_id, request=payload)
+    except SeasonScopeError as exc:
+        raise HTTPException(status_code=404, detail=error_detail("not_found", "Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.")) from exc
+    except IllegalSeasonTransitionError as exc:
+        raise HTTPException(status_code=409, detail=error_detail("illegal_crop_season_transition", "Vụ này không thể chuyển sang trạng thái đó; vụ đã kết thúc không mở lại được.")) from exc
 
 
 @router.delete("/activities/{activity_id}", tags=['Activities'], status_code=204, response_model=None)

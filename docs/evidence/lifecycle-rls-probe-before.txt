@@ -1,0 +1,38 @@
+=== Direct PostgREST lifecycle probe - run 34238b2f ===
+
+operation                                    expected  actual
+owner insert activity [active]               OK        OK
+owner update activity [active]               OK        OK
+owner upsert detail [active]                 OK        DENIED:23505   <-- GAP
+owner delete detail [active]                 OK        OK
+owner soft_delete RPC [active]               OK        OK
+owner insert activity [harvested]            DENIED    OK   <-- GAP
+owner update activity [harvested]            DENIED    OK   <-- GAP
+owner upsert detail [harvested]              DENIED    DENIED:23505
+owner delete detail [harvested]              DENIED    OK   <-- GAP
+owner soft_delete RPC [harvested]            DENIED    OK   <-- GAP
+owner insert activity [closed]               DENIED    OK   <-- GAP
+owner update activity [closed]               DENIED    OK   <-- GAP
+owner upsert detail [closed]                 DENIED    DENIED:23505
+owner delete detail [closed]                 DENIED    OK   <-- GAP
+owner soft_delete RPC [closed]               DENIED    OK   <-- GAP
+owner insert activity [planned]              DENIED    OK   <-- GAP
+owner update activity [planned]              DENIED    OK   <-- GAP
+owner upsert detail [planned]                DENIED    DENIED:23505
+owner delete detail [planned]                DENIED    OK   <-- GAP
+owner soft_delete RPC [planned]              DENIED    OK   <-- GAP
+former insert activity [active]              DENIED    OK   <-- GAP
+former update activity [active]              DENIED    DENIED:42501
+former create season                         DENIED    OK   <-- GAP
+viewer insert activity [active]              DENIED    DENIED:42501
+viewer update activity [active]              DENIED    SILENT   <-- GAP
+viewer create season                         DENIED    DENIED:42501
+outsider insert activity [active]            DENIED    DENIED:42501
+outsider update activity [active]            DENIED    SILENT   <-- GAP
+outsider create season                       DENIED    DENIED:42501
+expired_manager insert activity [active]     DENIED    DENIED:42501
+expired_manager update activity [active]     DENIED    SILENT   <-- GAP
+expired_manager create season                DENIED    DENIED:42501
+
+cleanup row counts restored: True 
+14/32 match the lifecycle contract

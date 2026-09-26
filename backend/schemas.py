@@ -135,6 +135,15 @@ class CropSeasonCreateRequest(BaseModel):
         return self
 
 
+class CropSeasonStatusUpdate(BaseModel):
+    """End a season. Only the finishing states are offered through the API;
+    which moves are legal is `private.crop_season_transition_allowed`."""
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["harvested", "closed"]
+    actual_harvest_date: date | None = None
+
+
 class CropSeasonCreateResponse(CropSeasonResponse):
     #: Present on every successful create: the season can take activities now.
     default_production_batch_id: str

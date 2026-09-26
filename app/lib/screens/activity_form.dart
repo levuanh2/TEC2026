@@ -7,6 +7,7 @@ import '../models/activity.dart';
 import '../models/activity_field_spec.dart';
 import '../models/activity_validation.dart';
 import '../models/crop_season.dart';
+import '../models/methodology_enums.dart';
 
 final _uuid = Uuid();
 
@@ -236,6 +237,18 @@ class _ActivityFormState extends State<ActivityForm> {
         title: 'Loại công việc không hợp lệ',
         message:
             'Không ghi được công việc này. Vui lòng chọn lại từ danh sách.',
+      );
+    }
+
+    // Vụ đã kết thúc (thu hoạch / chốt / huỷ): nhật ký chỉ còn để xem. Chặn ở
+    // form dùng chung nên mọi lối vào (Trang chủ, Ghi nhanh, chi tiết vụ, sửa)
+    // đều như nhau; hệ thống cũng từ chối nếu một bản ghi cũ vẫn được gửi.
+    final season = _activeSeason;
+    if (season != null && !seasonAcceptsActivities(season.status)) {
+      return const ErrorState(
+        title: 'Vụ đã kết thúc',
+        message: 'Vụ này đã kết thúc nên không ghi hay sửa công việc được nữa. '
+            'Nhật ký của vụ vẫn xem được.',
       );
     }
 

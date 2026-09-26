@@ -292,8 +292,10 @@ def test_b3_viewer_can_read_but_not_write_directly(tx):
         (batch, farmer, device),
     )
     assert (status, out) == ("err", "42501")
-    assert tx.run_as("authenticated", farmer, "update public.activities set note = 'x' where id = %s", (own,)) == ("ok", 0)
-    assert tx.run_as("authenticated", farmer, "update public.irrigation_events set water_volume_m3 = 9 where activity_id = %s", (own,)) == ("ok", 0)
+    # Refused with an error since 20260926100000 (was a silent 0-row match,
+    # which a client that does not read the row back takes as success).
+    assert tx.run_as("authenticated", farmer, "update public.activities set note = 'x' where id = %s", (own,)) == ("err", "42501")
+    assert tx.run_as("authenticated", farmer, "update public.irrigation_events set water_volume_m3 = 9 where activity_id = %s", (own,)) == ("err", "42501")
     assert tx.run_as("authenticated", farmer, "select public.soft_delete_activity(%s)", (own,)) == ("err", "42501")
 
 

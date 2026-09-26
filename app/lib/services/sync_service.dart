@@ -57,6 +57,11 @@ class SyncService {
   Future<SyncSummary> _syncAllOnce() async {
     final summary = SyncSummary();
     await _pushPlots(summary);
+    // Vụ cũ tạo từ bản app trước còn `planned` nhưng đã có công việc chờ gửi:
+    // ghi công việc nghĩa là vụ đã bắt đầu. Chuyển sang `active` (planned ->
+    // active là chuyển đổi hợp lệ) để lượt này đẩy vụ trước, rồi mới tới công
+    // việc — cơ sở dữ liệu chỉ nhận hoạt động của vụ đang canh tác.
+    await _db.activatePlannedSeasonsWithPendingActivities();
     await _pushCropSeasons(summary);
     await _pushActivities(summary);
     // Ghi mốc "gửi gần nhất" khi có tiến triển hoặc không lỗi (Trang chủ đọc lại).
@@ -103,7 +108,15 @@ class SyncService {
         summary.cropSeasonsSynced++;
       } catch (error) {
         final kind = classifySyncError(error);
-        await _db.markCropSeasonSyncFailed(season.clientId, kind.name);
+        final serverId = season.serverId;
+        if (kind == SyncErrorKind.seasonClosed && serverId != null) {
+          // Hệ thống đã kết thúc vụ; bản trên máy muốn đổi trạng thái ngược
+          // lại. Máy chủ là nguồn đúng: KHÔNG thử lại mãi, KHÔNG mở lại vụ —
+          // đánh dấu đã khớp để lượt kéo kế tiếp nhận trạng thái thật về máy.
+          await _db.markCropSeasonSynced(season.clientId, serverId);
+        } else {
+          await _db.markCropSeasonSyncFailed(season.clientId, kind.name);
+        }
         summary.record('Vụ ${season.seasonCode}', kind);
       }
     }

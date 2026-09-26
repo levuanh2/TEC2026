@@ -489,6 +489,28 @@ class ProvisioningService:
         )
 
 
+class SeasonTransitionService:
+    """End a crop season ("Kết thúc vụ") -- one path for Farmer and Management."""
+
+    def __init__(self, repository: PostgresSeasonRepository):
+        self._repository = repository
+
+    def transition(
+        self, *, read_repository: SupabaseReadRepository, crop_season_id: str,
+        request: schemas.CropSeasonStatusUpdate,
+    ) -> dict[str, Any]:
+        try:
+            uuid.UUID(crop_season_id)
+            actor_id = read_repository.user_id()
+        except (ValueError, ReadNotFoundError) as exc:
+            raise SeasonScopeError() from exc
+        return self._repository.transition(
+            crop_season_id=crop_season_id, actor_id=actor_id, to_status=request.status,
+            actual_harvest_date=request.actual_harvest_date,
+            prepare=lambda row: schemas.success_payload(schemas.CropSeasonResponse, row),
+        )
+
+
 class RecommendationAccessError(Exception):
     """Normalized to 404 so scope cannot enumerate other farmers' seasons."""
 

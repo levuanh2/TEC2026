@@ -1,7 +1,8 @@
 import { Ico } from '../icons'
 import { useCarbonView } from '../carbon/useCarbonView'
 import { label, seasonStatus } from '../vocab'
-import { getCropSeason, getActivities, getProductionBatches } from '../api/crops'
+import { getCropSeason, getActivities, getProductionBatches, endCropSeason, endSeasonErrorMessage } from '../api/crops'
+import { useState } from 'react'
 import { getPlot } from '../api/farms'
 import { getResourceMetrics } from '../api/metrics'
 import { ha, kg, date, perKg } from '../format'
@@ -20,6 +21,7 @@ import {
   useAsync,
   go,
   type Tone,
+  ConfirmDialog,
 } from '../ui'
 import { ActivityTimeline, ActivityCoverage } from '../features/activities'
 import { CarbonPanel } from '../features/carbon'
@@ -48,6 +50,9 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
   const metrics = useAsync(() => getResourceMetrics(id), [id])
   const activities = useAsync(() => getActivities(id), [id])
   const batches = useAsync(() => getProductionBatches(id), [id])
+  const [ending, setEnding] = useState(false)
+  const [endBusy, setEndBusy] = useState(false)
+  const [endError, setEndError] = useState<string | null>(null)
 
   const base = `/crop-seasons/${id}`
   const tabs = [
@@ -83,14 +88,40 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
                 </>,
                 <>Trạng thái: {seasonStatus(season.status)}</>,
               ]}
-              actions={tab === 'carbon' ? undefined : (
-                <button className="btn btn--ghost" onClick={() => go(`${base}/carbon`)}>
-                  Xem Carbon
-                </button>
-              )}
+              actions={<>
+                {tab !== 'carbon' && (
+                  <button className="btn btn--ghost" onClick={() => go(`${base}/carbon`)}>
+                    Xem Carbon
+                  </button>
+                )}
+                {/* Only an active cooperative manager may end a season from
+                  * Management; the server decides (user_can_write_crop). */}
+                {role === 'cooperative_manager' && season.status === 'active' && (
+                  <button className="btn btn--ghost" onClick={() => setEnding(true)}>Kết thúc vụ</button>
+                )}
+              </>}
             />
 
             <Tabs items={tabs} />
+            {ending && (
+              <ConfirmDialog
+                title={`Kết thúc vụ ${season.name}?`}
+                body={<>
+                  <p>Sau khi kết thúc, nhật ký vụ chỉ còn để xem: nông hộ không ghi, sửa hay xóa hoạt động nữa, kể cả từ ứng dụng điện thoại. Hiệu suất và Carbon giữ nguyên. Vụ đã kết thúc không mở lại được.</p>
+                  {endError && <p className="form-field__error" role="alert">{endError}</p>}
+                </>}
+                confirmLabel="Kết thúc vụ"
+                tone="danger"
+                busy={endBusy}
+                onCancel={() => { setEnding(false); setEndError(null) }}
+                onConfirm={async () => {
+                  setEndBusy(true); setEndError(null)
+                  try { await endCropSeason(season.id); setEnding(false); frame.reload() }
+                  catch (err) { setEndError(endSeasonErrorMessage(err)) }
+                  finally { setEndBusy(false) }
+                }}
+              />
+            )}
 
             {tab === 'overview' && (
               <Overview season={season} plot={plot} metrics={metrics} activities={activities} batches={batches} base={base} />

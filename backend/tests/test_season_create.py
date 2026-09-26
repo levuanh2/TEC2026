@@ -36,6 +36,7 @@ from infrastructure.season_repo import (  # noqa: E402
 )
 from infrastructure.write_repo import PostgresActivityWriteRepository  # noqa: E402
 from service import SeasonService  # noqa: E402
+from tests._lifecycle_migration import ensure_lifecycle_migration  # noqa: E402
 
 PLOT = str(uuid.uuid4())
 
@@ -165,6 +166,7 @@ class World:
 
     def __init__(self, conn):
         self.conn = conn
+        ensure_lifecycle_migration(conn)
         tag = uuid.uuid4().hex[:8]
         self.coop = self._org(f"SEASON-TEST-{tag}")
         self.other_coop = self._org(f"SEASON-TEST-OTHER-{tag}")
@@ -426,3 +428,80 @@ def test_a_deleted_farm_takes_no_new_season(world):
     world.conn.execute("update public.farms set deleted_at = now() where id = %s", (world.farm,))
     with pytest.raises(SeasonScopeError):
         create(world, world.manager)
+
+
+# -- Ending a season: PATCH /v1/crop-seasons/{id}/status -----------------------
+
+from infrastructure.season_repo import IllegalSeasonTransitionError  # noqa: E402
+from service import SeasonTransitionService  # noqa: E402
+
+
+class FakeTransitions:
+    def __init__(self, error=None):
+        self.error, self.calls = error, []
+
+    def transition(self, *, prepare=None, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return prepare({"id": "s", "plot_id": "p", "season_code": "HT", "crop_type": "rice", "status": kwargs["to_status"]})
+
+
+def transition_client(repo, *, with_read=True):
+    app = FastAPI()
+    app.include_router(api.router)
+    if with_read:
+        app.dependency_overrides[api._read_repo] = lambda: FakeRead()
+    app.dependency_overrides[api._season_transition_service] = lambda: SeasonTransitionService(repo)
+    return TestClient(app)
+
+
+SEASON_ID = str(uuid.uuid4())
+
+
+def test_end_season_route_contract():
+    repo = FakeTransitions()
+    ok = transition_client(repo).patch(f"/v1/crop-seasons/{SEASON_ID}/status", json={"status": "harvested", "actual_harvest_date": "2026-09-01"})
+    assert ok.status_code == 200 and ok.json()["status"] == "harvested"
+    assert repo.calls[0]["to_status"] == "harvested"
+    assert transition_client(FakeTransitions(), with_read=False).patch(f"/v1/crop-seasons/{SEASON_ID}/status", json={"status": "closed"}).status_code == 401
+    for body in ({"status": "active"}, {"status": "planned"}, {"status": "closed", "extra": 1}):
+        assert transition_client(FakeTransitions()).patch(f"/v1/crop-seasons/{SEASON_ID}/status", json=body).status_code == 422
+    denied = transition_client(FakeTransitions(SeasonScopeError())).patch(f"/v1/crop-seasons/{SEASON_ID}/status", json={"status": "closed"})
+    assert denied.status_code == 404
+    illegal = transition_client(FakeTransitions(IllegalSeasonTransitionError())).patch(f"/v1/crop-seasons/{SEASON_ID}/status", json={"status": "harvested"})
+    assert illegal.status_code == 409 and illegal.json()["detail"]["error"]["code"] == "illegal_crop_season_transition"
+
+
+def _transition(world, actor, season_id, to, date_=None):
+    return repo_for(world).transition(crop_season_id=season_id, actor_id=actor, to_status=to, actual_harvest_date=date_)
+
+
+@real_db
+@pytest.mark.parametrize("who", ["owner", "editor", "manager"])
+def test_writers_end_a_season_and_the_journal_closes(world, who):
+    season, _ = create(world, world.owner)
+    row = _transition(world, getattr(world, who), season["id"], "harvested", date(2026, 9, 1))
+    assert row["status"] == "harvested" and row["actual_harvest_date"] == "2026-09-01"
+    with pytest.raises(SeasonNotOpenError):
+        _record(world, season["default_production_batch_id"], world.owner)
+    assert _transition(world, world.owner, season["id"], "closed")["status"] == "closed"
+
+
+@real_db
+@pytest.mark.parametrize("who", ["viewer", "other_manager", "enterprise", "regulator", "ended_manager"])
+def test_non_writers_cannot_end_a_season(world, who):
+    season, _ = create(world, world.owner)
+    with pytest.raises(SeasonScopeError):
+        _transition(world, getattr(world, who), season["id"], "harvested")
+
+
+@real_db
+def test_a_finished_season_is_never_reopened_or_moved_backwards(world):
+    season, _ = create(world, world.owner)
+    _transition(world, world.owner, season["id"], "closed")
+    with pytest.raises(IllegalSeasonTransitionError):
+        _transition(world, world.owner, season["id"], "harvested")
+    world.conn.execute("update public.crop_seasons set status = 'planned' where id = %s", (season["id"],))
+    with pytest.raises(IllegalSeasonTransitionError):
+        _transition(world, world.owner, season["id"], "harvested")

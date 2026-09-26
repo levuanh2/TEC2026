@@ -268,7 +268,7 @@ def test_postgres_repository_inserts_into_the_correct_detail_table(activity_type
     }
     cursor = _FakeCursor([
         # 0. private.user_can_write_batch (B3) + locked season/batch state — set_config calls fetch nothing
-        {"allowed": True, "season_status": "active", "season_live": True, "batch_status": "planned"},
+        {"allowed": True, "open": True},
         None,                    # 1. idempotency replay lookup: no existing row
         {"id": "activity-1"},    # 2. insert into activities ... returning id
         # 3. insert into public.<table> — no fetchone() call

@@ -45,4 +45,17 @@ void main() {
       expect(msg.toLowerCase(), isNot(contains('exception')));
     }
   });
+
+  test('vòng đời vụ 55000 -> seasonClosed, vĩnh viễn (không phải lỗi quyền)', () {
+    for (final e in const [
+      PostgrestException(message: 'crop_season_not_open: x', code: '55000'),
+      PostgrestException(message: 'illegal_crop_season_transition: closed -> active', code: 'P0001'),
+    ]) {
+      final k = classifySyncError(e);
+      expect(k, SyncErrorKind.seasonClosed);
+      expect(k.isPermanent, isTrue);
+      expect(kTransientErrorCodes, isNot(contains(k.name)));
+    }
+    expect(syncErrorMessage(SyncErrorKind.seasonClosed), contains('đã kết thúc'));
+  });
 }
