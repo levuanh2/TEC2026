@@ -47,3 +47,16 @@ Run these only against a local Supabase environment. `db reset` is destructive t
 ## Hosted-project reconciliation (2026-09-08)
 
 The linked hosted project already contained a schema matching the tracked baseline, but its Supabase migration history was empty. A read-only `supabase db diff --from linked --to migrations` confirmed the only schema deltas were the three expected methodology/scope migrations. Therefore `20260907000000` was recorded as applied with `supabase migration repair`; no baseline SQL was re-run. The three additive migrations were then deployed and the remote migration history now matches all four files. This is reconciliation of an existing baseline, not a replacement for the from-zero chain above.
+
+## Hosted migration runbook
+
+Process finding from the P1 DB lifecycle rollout (2026-09-26): follow-up migrations were applied to hosted under the approval given for the first one, and the commands were chained so a later step would still run after an earlier one failed. Nothing went wrong, and the applied history is not rewritten. The rules below apply from now on.
+
+1. **Approval per batch.** Every apply to the hosted/production project needs the user's explicit approval for that batch of migrations. Approval of one migration does not cover follow-ups written later, unless the user approved the whole batch by name.
+2. **Fail-fast.** Stop at the first failure. Nothing after a failed step may run.
+   - Bash: chain with `&&`, or use `set -euo pipefail`.
+   - PowerShell 5.1: `A; if ($?) { B }`, or `$ErrorActionPreference = 'Stop'` plus a check of `$LASTEXITCODE` after each native command.
+   - Never use `;` (or a newline in a script without stop-on-error) between "apply migration", "run its test" and "apply the next migration".
+3. **One migration, then its check.** Apply one migration, run its verification, and only if that passes move to the next one. A failing check leaves the later migrations unapplied.
+4. **Before merging**, confirm the repository and hosted histories match. Read-only query: `select version, name, statements from supabase_migrations.schema_migrations order by version`. Compare the versions, names, order and SQL with `supabase/migrations/`. Do not merge if they differ.
+5. **Never edit an applied migration.** A defect gets a new migration.
