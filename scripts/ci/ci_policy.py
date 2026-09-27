@@ -16,6 +16,7 @@ WORKFLOWS (.github/workflows/*.yml)
   CI_UNGUARDED_SCRIPT       a workflow runs a script outside policy guarded_paths
   CI_UNGUARDED_TEST         a protected_tests module is outside policy guarded_paths
   DEP_SOURCE                a lockfile/requirements entry installs from outside the public registry
+  TEST_ENV_DETECTION        production code references the test runner or CI environment
   CI_GUARDED_CHANGE         a file under policy guarded_paths changed without the trailer
   CI_GATE_INCOMPLETE        ci-gate needs every other ci.yml job, and fails on non-success
   CI_MISSING_SCRIPT         every scripts/... path a workflow runs exists
@@ -331,6 +332,35 @@ def check_npm(wf: str, job_id: str, run: str, policy: dict) -> None:
                                             "which is not under guarded_paths")
 
 
+ENV_DETECTION = {
+    "py": re.compile(r"^\s*(?:import|from)\s+(?:pytest|_pytest|hypothesis)\b|\.modules\b|[\"'](?:_?pytest|hypothesis|unittest)[\"']|PYTEST_|GITHUB_ACTIONS"
+                     r"|environ(?:\.get)?\s*[\(\[]\s*[\"']CI[\"']|getenv\(\s*[\"']CI[\"']"),
+    "ts": re.compile(r"\bVITEST\b|import\.meta\.vitest|navigator\.webdriver|GITHUB_ACTIONS|process\.env\.CI\b"
+                     r"|__playwright|PLAYWRIGHT"),
+    "dart": re.compile(r"FLUTTER_TEST|Platform\.environment|GITHUB_ACTIONS"),
+}
+
+
+def check_env_detection(policy: dict) -> None:
+    """Production code must not detect the test runner or CI: code that behaves
+    only under pytest / vitest / Playwright / flutter test would pass every gate
+    and ship something else. Exact `file: line` exceptions only."""
+    allow = set(policy.get("env_detection_allow", []))
+    trees = [("py", ROOT / "backend", "*.py"), ("ts", ROOT / "web-dashboard" / "src", "*.ts*"),
+             ("dart", ROOT / "app" / "lib", "*.dart")]
+    for kind, base, pat in trees:
+        for f in base.rglob(pat):
+            r = rel(f)
+            if kind == "py" and (set(f.relative_to(base).parts) & {"tests", "tests_strict", "scripts", ".venv"}):
+                continue
+            if kind == "ts" and (".test." in f.name or "/mocks/" in r):
+                continue
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("#", 1)[0] if kind == "py" else line.split("//", 1)[0]
+                if ENV_DETECTION[kind].search(code) and f"{r}: {line.strip()}" not in allow:
+                    fail("TEST_ENV_DETECTION", f"{r}:{n}: production code detects the test runner/CI: `{line.strip()}`")
+
+
 def check_dependency_sources() -> None:
     """Test runners and tools come from the dependency manifests, so a manifest
     that installs from an arbitrary tarball/URL/index could ship a fake pytest,
@@ -443,6 +473,7 @@ def main() -> int:
     check_config()
     check_codeowners(policy)
     check_dependency_sources()
+    check_env_detection(policy)
     if args.base_ref:
         check_relaxation(args.base_ref, policy)
     print(f"ci_policy: {'FAIL' if errors else 'PASS'} ({len(errors)} violation(s))")

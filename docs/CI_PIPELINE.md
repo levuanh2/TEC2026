@@ -514,6 +514,16 @@ Every gate script a workflow executes is guarded (the application code under tes
 `backend/scripts/` print the very `50/50` lines the gate trusts), and
 `CI_UNGUARDED_TEST` requires every `protected_tests` module to be guarded.
 
+Test-aware application code (a "defeat device" that behaves only under the
+test runner) is narrowed in two ways: `TEST_ENV_DETECTION` fails when
+production code (`backend/` outside tests/scripts, `web-dashboard/src`,
+`app/lib`) references pytest / `sys.modules` / `PYTEST_*` / `CI` /
+`GITHUB_ACTIONS` / `VITEST` / `navigator.webdriver` / `FLUTTER_TEST` /
+`Platform.environment` (exact exceptions: `policy.json` `env_detection_allow`),
+and backend-startup re-runs the 401 sweep against the live `uvicorn main:app`
+process -- the Render start command, with no pytest loaded. Obfuscated
+detection can still evade a static scan; that remains code review.
+
 Residual risk, by design: an assertion weakened inside a test that is neither
 protected nor guarded (most feature tests, the mock Playwright specs) keeps
 counts and coverage green. That is ordinary code review; strict-ci mutation
