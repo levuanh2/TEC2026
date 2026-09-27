@@ -534,15 +534,23 @@ model of the production architecture (CI has no checkpoint); upload, scope,
 Storage and rows are real. The tenant is deleted afterwards. The manifest and
 both tests are guarded with protected minimums (54 and 8 passed).
 
-**Why `backend/main.py` is not a CODEOWNERS path.** It is application wiring,
-not CI policy, and every product PR would otherwise need the CI trailer. What it
-wires is checked from the outside: the route inventory is generated from its
-OpenAPI, the public/protected classification is exact, every protected
-operation has a positive and a negative auth case against the live stack, the
-live 401 sweep runs on `uvicorn main:app` without pytest, `HIDDEN_ROUTE` and
-`TEST_ENV_DETECTION` block the known ways to hide from that, and the OpenAPI
-contract gate detects route wiring changes. It moves to CODEOWNERS only if a
-concrete bypass of all of these is shown.
+**`backend/main.py` is a CODEOWNERS path (since 2026-09-27).** The rule was:
+application wiring stays outside CI policy unless a concrete bypass of every
+gate is shown. The adversarial review showed one: a lifespan in `main.py` can
+schedule a task that inserts a route *after* startup, which no import- or
+lifespan-time inventory sees. So `main.py` (the app, its middleware and its
+lifespan) is guarded, and `ROUTE_MUTATION` (workflow-policy) fails when any
+backend/ml production module edits the routing table directly
+(`.routes.append/insert/...`, `routes[...] =`), calls `add_route` /
+`add_api_route` / `mount`, uses `setattr`, or touches `lifespan` /
+`lifespan_context` -- routes come only from `@router.<method>` decorators.
+Exact exception: the reviewed `FastAPI(..., lifespan=lifespan)` line (the
+lifespan only releases pools on shutdown).
+
+Residual, by design (like obfuscated environment detection): code written to
+defeat the scanners -- attribute names assembled at runtime, `getattr` tricks,
+eval -- that mutates routing later. No static or dynamic test can rule out
+arbitrary self-modifying code; that is code review.
 
 Every gate script a workflow executes is guarded (the application code under test -- `backend/main.py` and the modules it imports, `web-dashboard/src`, `app/lib` -- is not: it is what production runs, it is reviewed like any product change, and the protected suites exercise it): `CI_UNGUARDED_SCRIPT` fails when a
 `run:` step calls a script outside `guarded_paths` (the security probes in

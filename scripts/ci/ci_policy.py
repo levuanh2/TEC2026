@@ -18,6 +18,7 @@ WORKFLOWS (.github/workflows/*.yml)
   DEP_SOURCE                a lockfile/requirements entry installs from outside the public registry
   TEST_ENV_DETECTION        production code references the test runner or CI environment
   HIDDEN_ROUTE              production code uses include_in_schema (routes invisible to the sweeps)
+  ROUTE_MUTATION            product code edits the routing table / lifespan outside router decorators
   CI_GUARDED_CHANGE         a file under policy guarded_paths changed without the trailer
   CI_GATE_INCOMPLETE        ci-gate needs every other ci.yml job, and fails on non-success
   CI_MISSING_SCRIPT         every scripts/... path a workflow runs exists
@@ -369,6 +370,29 @@ def py_code_lines(text: str) -> list[str]:
     return lines
 
 
+ROUTE_MUTATION = re.compile(
+    r"\.routes\s*(?:\.(?:append|insert|extend|remove|pop|clear)\b|\[|=(?!=))|lifespan_context|\blifespan\s*="
+    r"|\badd_(?:api_)?(?:websocket_)?route\s*\(|\.mount\s*\(|\bsetattr\s*\(")
+
+
+def check_route_mutation(policy: dict) -> None:
+    """Routes come only from decorators on routers: code that edits the routing
+    table directly, mounts sub-apps, sets route attributes dynamically or plugs
+    into the lifespan (where a delayed task could add a route after the
+    inventory looked) could serve an operation the auth inventory never sees.
+    Exact `file: line` exceptions only (policy.json route_mutation_allow)."""
+    allow = set(policy.get("route_mutation_allow", []))
+    for base in (ROOT / "backend", ROOT / "ml"):
+        for f in base.rglob("*.py"):
+            if set(f.relative_to(base).parts) & {"tests", "tests_strict", "scripts", ".venv", "runs", "datasets"}:
+                continue
+            r = rel(f)
+            text = f.read_text(encoding="utf-8")
+            for n, (line, code) in enumerate(zip(text.splitlines(), py_code_lines(text)), 1):
+                if ROUTE_MUTATION.search(code) and f"{r}: {line.strip()}" not in allow:
+                    fail("ROUTE_MUTATION", f"{r}:{n}: routing table / lifespan changed outside router decorators: `{line.strip()}`")
+
+
 def check_env_detection(policy: dict) -> None:
     """Production code must not detect the test runner or CI: code that behaves
     only under pytest / vitest / Playwright / flutter test would pass every gate
@@ -510,6 +534,7 @@ def main() -> int:
     check_codeowners(policy)
     check_dependency_sources()
     check_env_detection(policy)
+    check_route_mutation(policy)
     if args.base_ref:
         check_relaxation(args.base_ref, policy)
     print(f"ci_policy: {'FAIL' if errors else 'PASS'} ({len(errors)} violation(s))")

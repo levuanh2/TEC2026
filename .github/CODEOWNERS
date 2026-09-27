@@ -60,3 +60,4 @@
 /backend/tests/route_auth_manifest.py @levuanh2
 /backend/tests/test_route_positive_auth.py @levuanh2
 /backend/tests/test_route_auth_inventory.py @levuanh2
+/backend/main.py @levuanh2

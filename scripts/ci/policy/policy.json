@@ -206,6 +206,10 @@
     "app/pubspec.lock",
     "backend/tests/route_auth_manifest.py",
     "backend/tests/test_route_positive_auth.py",
-    "backend/tests/test_route_auth_inventory.py"
+    "backend/tests/test_route_auth_inventory.py",
+    "backend/main.py"
+  ],
+  "route_mutation_allow": [
+    "backend/main.py: app = FastAPI(title=\"AgriCarbon API\", version=\"0.2.0\", openapi_tags=OPENAPI_TAGS, lifespan=lifespan)"
   ]
 }
