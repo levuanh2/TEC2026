@@ -97,6 +97,13 @@ carbon = {("POST", "/v1/carbon/calculate"), ("GET", "/v1/crop-seasons/{crop_seas
 ops = [(m.upper(), p) for p, item in spec["paths"].items() if p.startswith("/v1")
        for m in item if m in {"get", "post", "put", "patch", "delete"}]
 bad = []
+for method, path in public:  # the documented public routes must stay public
+    try:
+        status = urllib.request.urlopen(urllib.request.Request(base + path, method=method), timeout=10).status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    if (method, path) not in set(ops) or status != 200:
+        bad.append(f"public {method} {path} -> {status}")
 for method, path in ops:
     if (method, path) in public:
         continue

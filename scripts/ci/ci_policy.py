@@ -17,7 +17,7 @@ WORKFLOWS (.github/workflows/*.yml)
   CI_UNGUARDED_TEST         a protected_tests module is outside policy guarded_paths
   DEP_SOURCE                a lockfile/requirements entry installs from outside the public registry
   TEST_ENV_DETECTION        production code references the test runner or CI environment
-  HIDDEN_ROUTE              a production route uses include_in_schema=False (invisible to the sweeps)
+  HIDDEN_ROUTE              production code uses include_in_schema (routes invisible to the sweeps)
   CI_GUARDED_CHANGE         a file under policy guarded_paths changed without the trailer
   CI_GATE_INCOMPLETE        ci-gate needs every other ci.yml job, and fails on non-success
   CI_MISSING_SCRIPT         every scripts/... path a workflow runs exists
@@ -345,12 +345,14 @@ ENV_DETECTION = {
     # SSR, destructuring and bracket access are how Vite code tells it is tested.
     "ts": re.compile(r"\bVITEST\b|import\.meta\.vitest|import\.meta\.env(?!\.VITE_[A-Z0-9_]+\b)|__vitest|__VITEST"
                      r"|navigator\.webdriver|GITHUB_ACTIONS|process\.env"
+                     r"|\bprocess\s*\[|import\.meta\s*\[|\[\s*[\"'`](?:webdriver|env)[\"'`]\s*\]"
                      r"|[\"'`](?:CI|VITEST|PLAYWRIGHT)[\"'`]|__playwright|PLAYWRIGHT"),
     "dart": re.compile(r"FLUTTER_TEST|Platform\.environment|GITHUB_ACTIONS|[\"'](?:CI)[\"']"),
 }
 
 
-HIDDEN_ROUTE = re.compile(r"include_in_schema\s*=\s*False")
+# Any use at all: an alias (`include_in_schema=EXPOSED`) hides a route just as well.
+HIDDEN_ROUTE = re.compile(r"include_in_schema")
 
 
 def py_code_lines(text: str) -> list[str]:
@@ -384,7 +386,7 @@ def check_env_detection(policy: dict) -> None:
             if kind == "py" and HIDDEN_ROUTE.search("\n".join(py_code_lines(f.read_text(encoding="utf-8")))):
                 # The route sweeps (pytest and live) enumerate the OpenAPI
                 # schema; a route hidden from it is never checked.
-                fail("HIDDEN_ROUTE", f"{r}: include_in_schema=False hides a route from the auth/contract sweeps")
+                fail("HIDDEN_ROUTE", f"{r}: include_in_schema hides routes from the auth/contract sweeps")
             # Nothing under web-dashboard/src or app/lib is exempt by name: a
             # `.test.`/mocks module can be imported by production code.
             text = f.read_text(encoding="utf-8")
