@@ -102,9 +102,10 @@ pipeline exists to catch. Revisit only with measured run times, and keep
 | All `ci.yml` jobs | ✓ | ✓ | ✓ | |
 | `web-dist-ci-placeholder-endpoints` artifact | | ✓ | ✓ | |
 | `android-debug-apk-NOT-FOR-DISTRIBUTION` artifact | | ✓ | ✓ | |
-| Render health + cold start, authenticated reads | | | | ✓ |
-| Disposable-tenant probes on hosted Supabase | | | | ✓ (input `db_probes`) |
-| Read-only real-data browser specs | | | | ✓ (input `browser_readonly`) |
+| Render health + cold start | | | | ✓ |
+| Render API flow on a disposable tenant | | | | ✓ |
+| Disposable-tenant PostgREST probes on hosted Supabase | | | | ✓ (input `db_probes`, default on) |
+| Read-only real-data browser specs | | | | opt-in (input `browser_readonly`, default off) |
 
 ### Real / hosted Playwright specs never run in `ci.yml`
 
@@ -122,51 +123,68 @@ loudly instead of being silently skipped.
 
 ## 3. Staging E2E (`staging-e2e.yml`)
 
-Manual (`workflow_dispatch`) from `main` only; the preflight job refuses any
-other ref. There is no `pull_request` or `pull_request_target` trigger, so fork
-PRs can never reach it or its secrets. The concurrency group never cancels,
-because an interrupted probe could skip its cleanup.
+Manual (`workflow_dispatch`) from `main`. Every job that reads a secret
+re-checks, in its own `if:`, that the repository is `levuanh2/TEC2026` and that
+the event and ref are trusted. There is no `pull_request` or
+`pull_request_target` trigger, so fork PRs and arbitrary branches can never
+reach it or its secrets. The concurrency group never cancels, because an
+interrupted script could skip its cleanup. No shared QA identity is needed.
 
 | Job | Mutates? | What |
 |---|---|---|
-| `preflight` | no | `main` only; fails as **BLOCKED** and lists every missing secret |
+| `preflight` | no | trusted repo/ref; the 3 secrets present; URL is a hosted `https://*.supabase.co` |
 | `render` | no | wakes the API (Render Free cold start tolerated up to 180 s, reported separately from warm latency), `/docs`, web `/` and an SPA deep link |
-| `authenticated-read` | no | Farmer and Manager password sign-in → Render `/v1/me`, `/v1/farmer/scope`, `/v1/organizations` = 200; anonymous `/v1/farms` = 401. Tokens are masked. |
-| `db-probes` | **disposable tenants only** | lifecycle PostgREST probe, P0, P1, sign-up disabled. Each creates a tenant under a unique run tag, deletes it (Auth users and Storage included) in `finally`, and exits 1 if any table's row count differs from before, naming the tag. |
-| `browser-readonly` | no | `web-real-data` + `farmer-real-data` against the Render web app with the shared QA identities. The MRV export spec (writes) stays off, and traces stay off (they would record the typed password). |
+| `render-flow` | **disposable tenant only** | `backend/scripts/staging_render_flow.py` through the **deployed Render API**: manager `/v1/me` → provision a farmer with farm + plot → farmer sign-in with the temporary password → `/v1/farmer/scope` → create season (+ default batch) → irrigation activity create / idempotent replay / edit / list → Carbon readiness → manager MRV case list → mark harvested → new write refused `422 invalid_crop_season_state` → anonymous read 401 |
+| `db-probes` | **disposable tenant only** | hosted PostgREST lifecycle probe (36 cases, the Flutter sync calls) + public sign-up disabled; catches a hosted project that drifted from `supabase/migrations` |
+| `browser-readonly` | no | **opt-in** (`browser_readonly`, default off, never on push): `web-real-data` + `farmer-real-data` on the Render web app; needs the optional QA identity secrets |
+
+**Cleanup guarantee.** Each script tags everything with a unique run id,
+deletes it in `finally` (rows, the farmer that the API provisioned, the
+manager, profiles), then fails the run if any counted table's row count
+differs from before **or** any Auth user with the run's e-mail prefix still
+exists. On failure it prints the run tag and the created ids (never tokens or
+passwords). This was verified by making Auth user deletion raise: the run
+exited 1 with `cleanup_no_auth_users_left` failing and the ids listed.
+
+`hosted_p0_security_smoke.py` and `hosted_p1_correctness_smoke.py` are **not**
+in the staging workflow: they open raw `psycopg` connections, which would put
+the hosted Postgres URL into CI. They run in `ci.yml` (`rls-security`) against
+the identical migrated schema.
 
 Cold start measured on 2026-09-27: `/health` answered 200 after **33.8 s**.
 
-Not covered by the staging workflow yet: the browser-driven provisioning and
-season/activity write flow (`season-provisioning-real` via
-`hosted_season_provisioning_smoke.py`), which today expects a local backend on
-:8010. The disposable-tenant probes cover the same writes through `main.app`
-in-process against hosted Supabase.
+### Secrets (repository secrets, minimum set)
 
-### Setup (once)
-
-Repository → Settings → Secrets and variables → Actions:
-
-| Name | Kind | Value |
+| Name | Used by | Why |
 |---|---|---|
-| `STAGING_SUPABASE_URL` | secret | hosted project URL |
-| `STAGING_SUPABASE_PUBLISHABLE_KEY` | secret | publishable key |
-| `STAGING_SUPABASE_SERVICE_ROLE_KEY` | secret | service role key (the probes create and delete disposable tenants) |
-| `STAGING_MANAGER_EMAIL` / `STAGING_MANAGER_PASSWORD` | secret | Manager QA identity (read-only use) |
-| `STAGING_FARMER_EMAIL` / `STAGING_FARMER_PASSWORD` | secret | Farmer QA identity (read-only use) |
-| `STAGING_API_URL` / `STAGING_WEB_URL` | variable (optional) | default to the `*.onrender.com` staging URLs |
+| `STAGING_SUPABASE_URL` | preflight, render-flow, db-probes | hosted project |
+| `STAGING_SUPABASE_PUBLISHABLE_KEY` | render-flow, db-probes | sign in the disposable users |
+| `STAGING_SUPABASE_SERVICE_ROLE_KEY` | render-flow, db-probes | create and delete the disposable tenant and users |
+| `STAGING_MANAGER_EMAIL`/`_PASSWORD`, `STAGING_FARMER_EMAIL`/`_PASSWORD` | browser-readonly only | optional; **not set** |
+| `STAGING_API_URL`, `STAGING_WEB_URL` | variables, optional | default to the `*.onrender.com` staging URLs |
+
+No `SUPABASE_DB_URL` secret exists: nothing in CI needs the hosted Postgres
+connection string. The hosted project is the staging/demo project that Render
+staging uses; no production credential is stored.
 
 **Plan limitation.** The repository is private on the GitHub Free plan.
 Environment secrets, required reviewers and branch protection for private
-repos need GitHub Pro/Team (the branch-protection API answers 403 today). The
-jobs declare `environment: staging`. Until the plan allows environment
-secrets, store the values above as **repository** secrets, which the same
-`secrets.*` names resolve to. After upgrading, move them into the `staging`
-environment and add a required reviewer.
+repos need GitHub Pro/Team (the branch-protection API answers 403). The
+secrets are therefore **repository** secrets. Repository secrets are readable
+by any workflow on a pushed branch of this repo, so the rule is enforced by
+review: `ci.yml` must never reference `secrets.*` (it references none), and
+only `staging-e2e.yml` may. After upgrading, move the three into a `staging`
+environment with a required reviewer and add `environment: staging` to the
+secret-bearing jobs. Recommended later: a `production` environment (required
+reviewers, `main` only, no automatic trigger). There is no production CD here.
 
-Recommended environments: `staging` (as above) and, later, `production`
-(required reviewers, `main` only, no automatic trigger). There is no production
-CD in this pipeline.
+### Bootstrap (one-time, before the first merge)
+
+`workflow_dispatch` only works once the workflow file is on the default
+branch. The first validation therefore used a **temporary** `push` trigger for
+exactly `ci/agricarbon-production-grade` (the branch of PR #1), plus a
+matching `push` leg in every job's `if:`. Both are removed before merge; the
+merged file only has `workflow_dispatch`.
 
 ## 4. Secrets and configuration
 
@@ -174,12 +192,37 @@ CD in this pipeline.
 |---|---|---|
 | Public test config | in the workflow file | `VITE_USE_MOCK_DATA=false`, placeholder `https://api.ci.invalid`, local Supabase demo keys printed by `supabase status` |
 | Secret CI config | none | `ci.yml` needs no secrets at all |
-| Hosted E2E config | staging secrets (above) | service role, QA credentials |
+| Hosted E2E config | 3 repository secrets (above) | hosted URL, publishable key, service role |
 
 No developer `.env` is read in CI: runners have none, and `load_settings()`
 only reads `backend/.env` when it exists. No `.env.ci.example` is needed. Never
 commit `.jks`, `key.properties`, signing passwords or base64 keys; the
 `secret-scan` job fails on any tracked keystore/`key.properties`/`.env`.
+
+### Python interpreters (never the developer's global Python)
+
+* `scripts/ci/backend_startup_smoke.sh` is the only helper that creates a venv.
+  It calls `<venv>/bin/python` (or `Scripts/python.exe`) directly, never
+  `activate`, and aborts **before any install** unless `sys.prefix` is exactly
+  that venv. Verified: global Python → refused, another venv → refused, the
+  right venv → allowed.
+* `ci_report.py`, `check_migrations.py` and the JSON parse in
+  `supabase_stack.sh` are standard-library only and install nothing.
+  `seed_ci_db.py` re-uses its own interpreter (`sys.executable`).
+* In the workflows, `pip install` targets the runner's `actions/setup-python`
+  interpreter on a throw-away VM.
+
+**Known local contamination (2026-09-27, developer machine only).** Before the
+guard existed, the first local startup-smoke run sourced a Windows venv's
+`activate` under Git Bash, which left PATH on the global Python 3.11, so pip
+installed there: **pip 24.0 → 26.2.1, pydantic → 2.13.5, pydantic_core →
+2.46.5**. The previous pydantic version was not recorded, so no rollback was
+guessed. `pip check` afterwards reports 19 conflicts; exactly one comes from
+this upgrade, **`openrouter 1.0.18` requires `pydantic<2.13`**, and the other 18
+involve packages this work never touched. Status:
+**LOCAL_GLOBAL_PYTHON_NEEDS_MANUAL_REPAIR** (the owner decides the pydantic
+version). This does not affect repository CI, which never uses that
+interpreter.
 
 ## 5. Migration policy
 
@@ -247,10 +290,16 @@ output.
 | Web (`src/**`, excl. tests and mocks) | 63.8% (statements 60.6%, branches 51.1%, functions 53.3%) | `web-unit`, `vite.config.ts` |
 | Flutter (`lib/`) | 66.1% | `flutter-unit` (`flutter test --coverage`) |
 
-Proposal: **no-regression** rather than a fixed number. Once three consecutive
-`main` runs agree, fail a PR when its layer's line coverage drops more than
-0.5 points below `main`'s. A fixed threshold would be arbitrary, and 80% would
-block the web layer for reasons unrelated to the change.
+**Policy for now: report-only. No threshold is enforced** (not even the
+no-regression gate below). Every run prints each layer's line coverage in its
+job summary and uploads the XML/lcov/json files.
+
+Proposed for a later PR: **no-regression** rather than a fixed number. Once
+`main` has a persisted baseline to compare against (e.g. the coverage
+artifact of the latest green `main` run), fail a PR when its layer's line
+coverage drops more than 0.5 points below `main`'s. A fixed threshold would be
+arbitrary, and 80% would block the web layer for reasons unrelated to the
+change.
 
 ## 9. Resource control
 
@@ -322,10 +371,24 @@ the files. Tear it down with
   configured; CI runs what exists (`compileall`, `tsc -b`, `flutter analyze`).
   `dart format` is not enforced (16 files differ today).
 * `ml/tests` (CV training utilities) is not in CI.
-* `backend/scripts/hosted_e2e_rest.py` is stale against the current MRV export
-  model (a bare PDF export row now violates `mrv_export_snapshot_lineage_chk`,
-  and the export read path changed after 09-08), so it is in neither workflow.
-  P0 `m7_*` and the backend `test_mrv_*` suites cover MRV export access.
+* See "Legacy scripts" for `hosted_e2e_rest.py`.
 * Flutter `integration_test/` needs an emulator and the hosted project; it is
   not run in CI.
 * No iOS build.
+
+## 14. Legacy scripts
+
+`backend/scripts/hosted_e2e_rest.py` is **LEGACY / NOT PART OF CURRENT CI**
+(its header says so; it is kept, not deleted). It last matched the schema on
+2026-09-08: its seeded PDF export row violates `mrv_export_snapshot_lineage_chk`
+(20260913150000, pdf/xlsx must reference their JSON snapshot), and the MRV
+export read path has changed since. Its MRV coverage is replaced by:
+
+| Replacement | Where | Covers |
+|---|---|---|
+| `test_mrv_export.py` (59), `test_mrv_pdf.py` (39), `test_mrv_xlsx.py` (42), `test_mrv_canonical_carbon.py` (6), `test_mrv_factor_provenance.py` (3) | `ci.yml` backend jobs (DB job against real Postgres) | snapshot manifest and lineage, PDF/XLSX rendering, canonical Carbon, factor provenance |
+| `hosted_p0_security_smoke.py` `m7_*` (12 checks) | `ci.yml` `rls-security` | manager creates an XLSX export, rows written, FastAPI download + SHA, snapshot download, metadata, object stored, bucket private, anonymous/public-URL read denied, client upload/delete denied |
+| `staging_render_flow.py` `manager_mrv_cases_read_200` | `staging-e2e.yml` | MRV case read on the deployed Render API |
+
+Its non-MRV reads (hierarchy, tenant isolation 404s) are covered by
+`test_read_repository.py`, the P0 smoke and the lifecycle probe.

@@ -24,7 +24,15 @@ python -m venv "$VENV"
 # and every install below would then land there.
 PY="$VENV/bin/python"
 [ -x "$PY" ] || PY="$VENV/Scripts/python.exe"
-"$PY" -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else "not a venv interpreter")'
+# Guard: abort before any install unless the interpreter IS this venv.
+# (cygpath turns Git Bash's /c/... into the C:\... form Python reports.)
+VENV_NATIVE="$(cygpath -w "$VENV" 2>/dev/null || printf '%s' "$VENV")"
+"$PY" - "$VENV_NATIVE" <<'GUARD'
+import os, sys
+norm = lambda p: os.path.normcase(os.path.realpath(p))
+if sys.prefix == sys.base_prefix or norm(sys.prefix) != norm(sys.argv[1]):
+    sys.exit(f"refusing to install: {sys.executable} is not the interpreter of the venv {sys.argv[1]}")
+GUARD
 "$PY" -m pip install --quiet --upgrade pip
 "$PY" -m pip install --quiet -r "$ROOT/backend/requirements.txt"
 

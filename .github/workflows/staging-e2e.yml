@@ -1,32 +1,44 @@
 # Hosted staging checks: Render (API + static web) and the hosted Supabase
 # project. NOT a pull-request check and never required by branch protection.
 #
-# * Manual only (workflow_dispatch), and only for main: it holds the service
-#   role key, so it must never run code from an unreviewed branch or a fork.
-#   No pull_request / pull_request_target trigger exists here on purpose.
+# * Manual only (workflow_dispatch) from main: it holds the service role key,
+#   so it must never run code from an unreviewed branch or a fork. There is no
+#   pull_request / pull_request_target trigger, and every secret-bearing job
+#   re-checks repository + event + ref in its own `if:`.
 # * Never deploys, never applies migrations (hosted migrations stay a manual,
 #   approved, one-batch-at-a-time operation -- docs/MIGRATION_HISTORY.md,
 #   "Hosted migration runbook").
-# * Mutations happen only in DISPOSABLE tenants that each probe creates under a
-#   unique run tag and deletes in `finally`, then proves the row counts are
-#   back to the baseline. The shared QA identities are used read-only.
+# * Mutations happen only in DISPOSABLE tenants that each script creates under
+#   a unique run tag and deletes in `finally`; the run fails if any row count
+#   differs afterwards or an Auth user of the run survives, and prints the tag
+#   and ids to clean. No shared QA identity is needed.
 #
-# Setup (secrets, variables, environment): docs/CI_PIPELINE.md, "Staging E2E".
+# Secrets (repository secrets; see docs/CI_PIPELINE.md, "Staging E2E"):
+#   STAGING_SUPABASE_URL, STAGING_SUPABASE_PUBLISHABLE_KEY,
+#   STAGING_SUPABASE_SERVICE_ROLE_KEY
+# Optional, only for the opt-in browser job: STAGING_MANAGER_EMAIL/_PASSWORD,
+#   STAGING_FARMER_EMAIL/_PASSWORD.
 name: Staging E2E (hosted, manual)
 
 on:
   workflow_dispatch:
     inputs:
       db_probes:
-        description: "Disposable-tenant DB/API probes against hosted Supabase (create -> verify -> delete)"
+        description: "Disposable-tenant PostgREST probes against hosted Supabase (create -> verify -> delete)"
         type: boolean
         default: true
       browser_readonly:
-        description: "Read-only Farmer + Management browser checks on the Render web app (shared QA identities)"
+        description: "Read-only browser specs on the Render web app (needs the STAGING_* QA identity secrets)"
         type: boolean
-        default: true
+        default: false
+  # BOOTSTRAP -- TEMPORARY, REMOVE BEFORE MERGE: workflow_dispatch only works
+  # once this file is on the default branch, so the first validation runs on
+  # a push to the trusted CI branch. Delete this trigger AND the matching
+  # `push` leg of every `if:` below in the same commit.
+  push:
+    branches: [ci/agricarbon-production-grade]
 
-# Never cancel a run: an interrupted probe could skip its cleanup.
+# Never cancel a run: an interrupted script could skip its cleanup.
 concurrency:
   group: staging-e2e
   cancel-in-progress: false
@@ -46,37 +58,32 @@ env:
 
 jobs:
   preflight:
-    name: Preflight (trusted ref, secrets present)
+    name: Preflight (trusted repo/ref, secrets present)
+    if: >-
+      github.repository == 'levuanh2/TEC2026' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    environment: staging
     steps:
-      - name: Only main may run with staging secrets
-        run: |
-          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "::error title=Staging E2E::run this workflow from main (got $GITHUB_REF)"
-            exit 1
-          fi
       - name: Required secrets are configured
         env:
           STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
           STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
-          STAGING_MANAGER_EMAIL: ${{ secrets.STAGING_MANAGER_EMAIL }}
-          STAGING_MANAGER_PASSWORD: ${{ secrets.STAGING_MANAGER_PASSWORD }}
-          STAGING_FARMER_EMAIL: ${{ secrets.STAGING_FARMER_EMAIL }}
-          STAGING_FARMER_PASSWORD: ${{ secrets.STAGING_FARMER_PASSWORD }}
         run: |
           missing=""
-          for name in STAGING_SUPABASE_URL STAGING_SUPABASE_PUBLISHABLE_KEY STAGING_SUPABASE_SERVICE_ROLE_KEY \
-                      STAGING_MANAGER_EMAIL STAGING_MANAGER_PASSWORD STAGING_FARMER_EMAIL STAGING_FARMER_PASSWORD; do
+          for name in STAGING_SUPABASE_URL STAGING_SUPABASE_PUBLISHABLE_KEY STAGING_SUPABASE_SERVICE_ROLE_KEY; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
             echo "::error title=Staging E2E BLOCKED::missing secrets:$missing (docs/CI_PIPELINE.md, Staging E2E)"
             exit 1
           fi
-          echo "all required staging secrets are set"
+          case "$STAGING_SUPABASE_URL" in
+            https://*.supabase.co) echo "hosted Supabase URL shape ok" ;;
+            *) echo "::error title=Staging E2E::STAGING_SUPABASE_URL is not a hosted https://*.supabase.co URL"; exit 1 ;;
+          esac
 
   render:
     name: Render health + cold start
@@ -116,50 +123,49 @@ jobs:
             [ "${pair#*:}" = "200" ] || { echo "::error title=Render::${pair%%:*} returned ${pair#*:}"; exit 1; }
           done
 
-  authenticated-read:
-    name: Authenticated safe reads (Render API)
+  # Provisioning -> season -> activity -> Carbon readiness -> MRV read ->
+  # closed-season refusal, all through the deployed Render API.
+  render-flow:
+    name: Render API flow (disposable tenant)
     needs: render
+    if: >-
+      github.repository == 'levuanh2/TEC2026' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment: staging
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
     env:
       SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
-      PUBLISHABLE: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+      STAGING_API_URL: ${{ vars.STAGING_API_URL || 'https://agricarbon-api-staging.onrender.com' }}
     steps:
-      - name: Farmer and Manager GET /v1/me, farmer scope, organizations
-        env:
-          FARMER_EMAIL: ${{ secrets.STAGING_FARMER_EMAIL }}
-          FARMER_PASSWORD: ${{ secrets.STAGING_FARMER_PASSWORD }}
-          MANAGER_EMAIL: ${{ secrets.STAGING_MANAGER_EMAIL }}
-          MANAGER_PASSWORD: ${{ secrets.STAGING_MANAGER_PASSWORD }}
-        run: |
-          token() {
-            local t
-            t="$(jq -n --arg e "$1" --arg p "$2" '{email:$e,password:$p}' \
-              | curl -fsS "$SUPABASE_URL/auth/v1/token?grant_type=password" -H "apikey: $PUBLISHABLE" \
-                  -H 'content-type: application/json' --data @- | jq -r .access_token)"
-            echo "::add-mask::$t"
-            printf '%s' "$t"
-          }
-          get() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" "$API_URL$2"; }
-          farmer="$(token "$FARMER_EMAIL" "$FARMER_PASSWORD")"
-          manager="$(token "$MANAGER_EMAIL" "$MANAGER_PASSWORD")"
-          fail=0
-          check() { echo "$1 -> $2 (want $3)"; [ "$2" = "$3" ] || fail=1; }
-          check "farmer  GET /v1/me"            "$(get "$farmer" /v1/me)" 200
-          check "farmer  GET /v1/farmer/scope"  "$(get "$farmer" /v1/farmer/scope)" 200
-          check "manager GET /v1/me"            "$(get "$manager" /v1/me)" 200
-          check "manager GET /v1/organizations" "$(get "$manager" /v1/organizations)" 200
-          check "anon    GET /v1/farms"         "$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/v1/farms")" 401
-          exit $fail
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Provision, season, activity, readiness, MRV, lifecycle, cleanup
+        run: python scripts/staging_render_flow.py
 
+  # The deployed database's own rules, straight through PostgREST (the Flutter
+  # path) -- catches a hosted project that drifted from supabase/migrations.
   db-probes:
-    name: Disposable-tenant DB/API probes (hosted Supabase)
+    name: Hosted PostgREST probes (disposable tenant)
     needs: preflight
-    if: ${{ inputs.db_probes }}
+    if: >-
+      github.repository == 'levuanh2/TEC2026' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.db_probes) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: staging
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -177,33 +183,24 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: python -m pip install -r requirements.txt
-      # Each script tags its tenant with a unique run id, deletes it in
-      # `finally` (Auth users included) and exits 1 if any table's row count
-      # differs from before the run -- the log then names the tag to clean.
-      - name: Lifecycle + membership via PostgREST
+      # Tag, delete in `finally`, row counts compared; exits 1 on any gap.
+      - name: Lifecycle + membership via PostgREST (36 cases)
         if: ${{ !cancelled() }}
         run: python scripts/hosted_lifecycle_rls_probe.py --enforce
-      - name: P0 security
-        if: ${{ !cancelled() }}
-        run: python scripts/hosted_p0_security_smoke.py
-      - name: P1 correctness
-        if: ${{ !cancelled() }}
-        run: python scripts/hosted_p1_correctness_smoke.py
       - name: Public sign-up disabled
         if: ${{ !cancelled() }}
         run: python scripts/verify_public_signup_disabled.py
-      - name: Cleanup failed -- identify leftovers
-        if: ${{ failure() }}
-        run: |
-          echo "::warning title=Staging E2E::a probe failed; if it reported 'cleanup ... False' or a row-count diff, the run tag printed above identifies the leftover tenant, users and storage objects"
 
+  # Opt-in only (never on the bootstrap push): uses the shared QA identities,
+  # read-only, against the deployed web app.
   browser-readonly:
     name: Browser read-only (Render web, shared QA identities)
     needs: render
-    if: ${{ inputs.browser_readonly }}
+    if: >-
+      github.repository == 'levuanh2/TEC2026' &&
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.browser_readonly
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: staging
     defaults:
       run:
         working-directory: web-dashboard
@@ -218,6 +215,11 @@ jobs:
       # Read-only: the MRV export spec writes, so it stays off.
       REAL_MRV_EXPORT_E2E: "false"
     steps:
+      - name: QA identity secrets are configured
+        run: |
+          for name in REAL_E2E_EMAIL REAL_E2E_PASSWORD FARMER_REAL_E2E_EMAIL FARMER_REAL_E2E_PASSWORD; do
+            [ -n "${!name}" ] || { echo "::error title=Browser read-only BLOCKED::STAGING_* QA identity secrets are not set"; exit 1; }
+          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
