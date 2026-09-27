@@ -1,4 +1,4 @@
-"""The auth coverage manifest must classify EVERY /v1 operation of the real app.
+"""The auth coverage manifest must classify EVERY operation the real app serves.
 
 Runs without a database: the inventory comes from `main.app.openapi()`, the same
 spec served in production. A protected route that is not in
@@ -12,7 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi.routing import APIRoute  # noqa: E402
+import fastapi.routing  # noqa: E402
+from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from starlette.routing import Route  # noqa: E402
 
 from main import app  # noqa: E402
@@ -42,14 +43,19 @@ def served_operations() -> set[tuple[str, str]]:
     from the schema): a route added with app.mount(), hidden with
     include_in_schema=False (even via setattr) or of an unknown kind fails."""
     ops: set[tuple[str, str]] = set()
+    # Exact types only, never duck typing or isinstance: a subclass or an object
+    # with a spoofed `original_router` attribute must not be taken for a plain route.
+    included = getattr(fastapi.routing, "_IncludedRouter", None)  # FastAPI >= 0.141
+    assert included is not None, "FastAPI's router wrapper moved: update this inventory walk"
 
     def walk(routes, prefix: str = "") -> None:
         for route in routes:
-            if hasattr(route, "original_router"):  # FastAPI >= 0.141: an included router
+            if type(route) is included:
                 context = route.include_context
+                assert type(route.original_router) is APIRouter, "UNINVENTORIED_ROUTE: included router is not a plain APIRouter"
                 assert context.include_in_schema, "UNINVENTORIED_ROUTE: a router is included with include_in_schema=False"
                 walk(route.original_router.routes, prefix + context.prefix)
-            elif isinstance(route, APIRoute):
+            elif type(route) is APIRoute:
                 assert route.include_in_schema, f"UNINVENTORIED_ROUTE: {route.path} is hidden from the schema"
                 # Every method counts (FastAPI adds no implicit HEAD to an APIRoute):
                 # an explicit HEAD/OPTIONS/TRACE route is not something the suites send.
