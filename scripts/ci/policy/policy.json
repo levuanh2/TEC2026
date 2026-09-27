@@ -1,0 +1,220 @@
+{
+  "_doc": "CI policy. Lowering a floor/minimum/baseline, raising a tolerance, or growing an allowlist is a relaxation: the workflow-policy job fails unless a commit in the PR carries a `CI-Policy-Change: <reason>` trailer. Exceptions are documented in docs/CI_PIPELINE.md, section 'CI exceptions'.",
+  "test_floors": {
+    "backend": 960,
+    "vitest": 460,
+    "playwright_mock": 97,
+    "flutter": 390
+  },
+  "skip_allowlist": {
+    "backend-unit": [
+      "reason:SUPABASE_DB_URL is not configured.",
+      "reason:SUPABASE_DB_URL is not configured; the RLS contract needs a real database.",
+      "reason:SUPABASE_DB_URL is not configured; the security contract needs a real database.",
+      "reason:SUPABASE_DB_URL is not configured; the atomicity invariant needs a real database.",
+      "reason:SUPABASE_DB_URL is not configured; persistence needs a real database.",
+      "reason:SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY are not configured; needs the configured main.app.",
+      "reason:no database configured",
+      "reason:No ml/runs/ checkpoint available in this environment."
+    ],
+    "backend-db": [
+      "test:tests.test_cv_real_model_smoke::test_real_baseline_checkpoint_infers_a_held_out_test_image",
+      "test:tests.test_cv_real_model_smoke::test_real_baseline_resolves_expected_threshold_and_temperature"
+    ],
+    "vitest": [],
+    "playwright_mock": [],
+    "flutter": []
+  },
+  "probe_minimums": {
+    "lifecycle": 36,
+    "p0_security": 50,
+    "p1_correctness": 30,
+    "write_reliability": 19,
+    "signup_disabled": 5
+  },
+  "protected_tests": {
+    "backend-db": {
+      "test_activity_rls_policies": 19,
+      "test_activity_write_permissions": 19,
+      "test_activity_writes": 40,
+      "test_activity_writes_expansion": 24,
+      "test_api_contract_hardening": 139,
+      "test_carbon_engine": 57,
+      "test_carbon_idempotent_save": 3,
+      "test_carbon_persist_authorization": 11,
+      "test_db_lifecycle_rls": 50,
+      "test_farmer_provisioning": 39,
+      "test_me_active_memberships": 12,
+      "test_memberships": 7,
+      "test_mrv_canonical_carbon": 6,
+      "test_mrv_export": 59,
+      "test_mrv_factor_provenance": 3,
+      "test_p0_security_policies": 13,
+      "test_season_create": 47,
+      "test_straw_quickfix_persistence": 5,
+      "test_write_response_atomicity": 8,
+      "test_route_positive_auth": 54,
+      "test_route_auth_inventory": 9
+    }
+  },
+  "coverage": {
+    "tolerance_pp": 0.5,
+    "changed_lines_min": 80,
+    "baseline": {
+      "backend": 89.35,
+      "web": 63.79,
+      "flutter": 66.06
+    },
+    "critical_backend": {
+      "infrastructure/auth.py": 88.0,
+      "infrastructure/auth_admin.py": 42.9,
+      "infrastructure/memberships.py": 100.0,
+      "infrastructure/persist_access.py": 86.8,
+      "infrastructure/read_repo.py": 80.7,
+      "infrastructure/write_repo.py": 86.6,
+      "infrastructure/season_repo.py": 97.4,
+      "infrastructure/provisioning_repo.py": 97.8,
+      "infrastructure/supabase_repo.py": 55.2,
+      "infrastructure/mrv_export_repo.py": 51.5,
+      "carbon/engine.py": 96.8,
+      "carbon/methodology.py": 96.1,
+      "carbon/readiness.py": 97.0,
+      "carbon/factor_register.py": 96.6,
+      "mrv/manifest.py": 96.1,
+      "recommendation/rules.py": 100.0
+    }
+  },
+  "bundle": {
+    "entry_js_bytes": 731850,
+    "css_bytes": 135629,
+    "total_dist_bytes": 869004,
+    "max_growth_pct": 20,
+    "min_size_pct": 50
+  },
+  "gate_optional_jobs": [],
+  "dart_analyzer_exclude": [
+    "build/**",
+    "android/**",
+    "ios/**"
+  ],
+  "bypass_allowlist": [],
+  "disabled_tests": {
+    "backend/tests/_markers.py": 1,
+    "backend/tests/test_activity_rls_policies.py": 2,
+    "backend/tests/test_carbon_repo_read_retry.py": 1,
+    "backend/tests/test_cv_real_model_smoke.py": 3,
+    "backend/tests/test_db_lifecycle_rls.py": 2,
+    "backend/tests/test_farmer_provisioning.py": 3,
+    "backend/tests/test_p0_security_policies.py": 3,
+    "backend/tests/test_p1_correctness_policies.py": 3,
+    "backend/tests/test_pg_pool.py": 1,
+    "backend/tests/test_pg_pool_health.py": 4,
+    "backend/tests/test_route_positive_auth.py": 4,
+    "backend/tests/test_season_create.py": 3,
+    "backend/tests/test_straw_quickfix_persistence.py": 2,
+    "backend/tests/test_write_response_atomicity.py": 2,
+    "web-dashboard/tests/e2e/farmer-real-carbon-quickfix.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-cv.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-data.spec.ts": 2,
+    "web-dashboard/tests/e2e/farmer-real-recommendations.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-straw-quickfix.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-write.spec.ts": 1,
+    "web-dashboard/tests/e2e/redesign-qa.spec.ts": 1,
+    "web-dashboard/tests/e2e/round4-real.spec.ts": 2,
+    "web-dashboard/tests/e2e/round41-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/round43-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/round44-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/season-provisioning-real.spec.ts": 3,
+    "web-dashboard/tests/e2e/sidebar-parity-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/web-real-data.spec.ts": 2
+  },
+  "ts_suppressions": {},
+  "dart_ignores": {
+    "app/integration_test/hosted_carbon_parity_test.dart": 1,
+    "app/integration_test/hosted_runtime_smoke_test.dart": 1,
+    "app/integration_test/hosted_season_lifecycle_test.dart": 1
+  },
+  "dependency_exceptions": [],
+  "db_exceptions": {
+    "anon_table_write": [
+      "season_recommendations"
+    ],
+    "function_execute": [
+      {
+        "function": "public.soft_delete_activity(p_activity_id uuid)",
+        "role": "anon"
+      },
+      {
+        "function": "public.soft_delete_activity(p_activity_id uuid)",
+        "role": "authenticated"
+      }
+    ],
+    "open_read_policies": [
+      "mrv_step_catalog.mrv_step_catalog_select"
+    ]
+  },
+  "guarded_paths": [
+    ".github/workflows/",
+    ".github/CODEOWNERS",
+    "scripts/ci/",
+    ".gitleaks.toml",
+    "backend/.coveragerc",
+    "backend/pytest.ini",
+    "backend/tests/conftest.py",
+    "backend/tests/_markers.py",
+    "web-dashboard/vite.config.ts",
+    "web-dashboard/playwright.config.ts",
+    "web-dashboard/tests/e2e/fixtures.ts",
+    "web-dashboard/tsconfig.json",
+    "web-dashboard/tsconfig.app.json",
+    "web-dashboard/eslint.config.js",
+    "app/analysis_options.yaml",
+    "app/dart_test.yaml",
+    "docs/API_BREAKING_CHANGES.md",
+    "docs/MIGRATION_DATA_CHANGES.md",
+    "supabase/config.toml",
+    "backend/pyproject.toml",
+    "backend/setup.cfg",
+    "backend/tox.ini",
+    "web-dashboard/vitest.config.ts",
+    "backend/scripts/",
+    "backend/tests/test_activity_rls_policies.py",
+    "backend/tests/test_activity_write_permissions.py",
+    "backend/tests/test_activity_writes.py",
+    "backend/tests/test_activity_writes_expansion.py",
+    "backend/tests/test_api_contract_hardening.py",
+    "backend/tests/test_carbon_engine.py",
+    "backend/tests/test_carbon_idempotent_save.py",
+    "backend/tests/test_carbon_persist_authorization.py",
+    "backend/tests/test_db_lifecycle_rls.py",
+    "backend/tests/test_farmer_provisioning.py",
+    "backend/tests/test_me_active_memberships.py",
+    "backend/tests/test_memberships.py",
+    "backend/tests/test_mrv_canonical_carbon.py",
+    "backend/tests/test_mrv_export.py",
+    "backend/tests/test_mrv_factor_provenance.py",
+    "backend/tests/test_p0_security_policies.py",
+    "backend/tests/test_season_create.py",
+    "backend/tests/test_straw_quickfix_persistence.py",
+    "backend/tests/test_write_response_atomicity.py",
+    "scripts/validate_supabase_schema.py",
+    "web-dashboard/package.json",
+    "backend/requirements.txt",
+    "ml/requirements.txt",
+    "web-dashboard/package-lock.json",
+    "app/pubspec.yaml",
+    "app/pubspec.lock",
+    "backend/tests/route_auth_manifest.py",
+    "backend/tests/test_route_positive_auth.py",
+    "backend/tests/test_route_auth_inventory.py",
+    "backend/main.py",
+    "backend/infrastructure/route_freeze.py"
+  ],
+  "route_mutation_allow": [
+    "backend/main.py: app = FastAPI(title=\"AgriCarbon API\", version=\"0.2.0\", openapi_tags=OPENAPI_TAGS, lifespan=lifespan)",
+    "backend/main.py: app.include_router(api.router)"
+  ],
+  "route_mutation_exempt_files": [
+    "backend/infrastructure/route_freeze.py"
+  ]
+}

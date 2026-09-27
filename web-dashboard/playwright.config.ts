@@ -28,5 +28,8 @@ export default defineConfig({
     trace: ci ? 'retain-on-failure' : 'off',
     screenshot: ci ? 'only-on-failure' : 'off',
   },
-  webServer: { command: 'npm run dev -- --host 127.0.0.1', url: 'http://127.0.0.1:5173', reuseExistingServer: !ci, env: { VITE_USE_MOCK_DATA: 'true', VITE_SUPABASE_URL: '', VITE_SUPABASE_PUBLISHABLE_KEY: '' } },
+  // VITE_API_BASE_URL is pinned to a closed port (9, "discard") so a developer's
+  // .env can never point the mock suite at a real backend: the few API modules
+  // that are not mock-gated yet fail fast instead (exception EXC-WEB-01).
+  webServer: { command: 'npm run dev -- --host 127.0.0.1', url: 'http://127.0.0.1:5173', reuseExistingServer: !ci, env: { VITE_USE_MOCK_DATA: 'true', VITE_API_BASE_URL: 'http://127.0.0.1:9', VITE_SUPABASE_URL: '', VITE_SUPABASE_PUBLISHABLE_KEY: '' } },
 })

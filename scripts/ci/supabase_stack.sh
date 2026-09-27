@@ -44,7 +44,8 @@ applied="$(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At \
   -c 'select version from supabase_migrations.schema_migrations order by version')"
 if [ "$expected" != "$applied" ]; then
   echo "::error title=Migrations::applied versions differ from supabase/migrations"
-  diff <(printf '%s\n' "$expected") <(printf '%s\n' "$applied") || true
+  echo "only in files:    $(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$applied") | tr '\n' ' ')"
+  echo "only in database: $(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$applied") | tr '\n' ' ')"
   exit 1
 fi
 echo "all $(printf '%s\n' "$expected" | wc -l) migrations applied from an empty database"

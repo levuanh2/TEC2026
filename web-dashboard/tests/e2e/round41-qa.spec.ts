@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import { isInstitutionalGreen } from './round41-helpers'
 
 /* Round 4.1 gates on the mock tenant — no credentials.

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import { axe, blocking } from './axe-helper'
 
 /* Round 4.3 mock gate — the Management drawer on phones, the rail everywhere

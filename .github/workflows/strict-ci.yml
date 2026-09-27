@@ -1,0 +1,148 @@
+# Strict / nightly checks: expensive or slow signals that should not gate every
+# PR, but must not rot silently -- a failure here is investigated like a red PR.
+# No secrets; local isolated Supabase only; never touches hosted services.
+name: Strict CI (nightly)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 19 * * *"   # 02:00 Asia/Ho_Chi_Minh
+
+concurrency:
+  group: strict-ci
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHON_VERSION: "3.11.9"
+  SUPABASE_CLI_VERSION: "2.118.0"
+
+jobs:
+  # Full backend suite against the DB in a deterministic RANDOM order (seed =
+  # run number, printed); then the historically sensitive suites twice more in
+  # a fresh process each -- both runs independently required, not retries.
+  backend-order-and-repeatability:
+    name: Backend random order + repeatability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            ml/requirements.txt
+      - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - run: bash scripts/ci/supabase_stack.sh
+      - name: Install
+        run: |
+          python -m pip install -r backend/requirements.txt "pytest-randomly==3.16.0" "hypothesis==6.140.2"
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.12" "torchvision>=0.29"
+          python -m pip install -r ml/requirements.txt
+      - run: python scripts/ci/seed_ci_db.py
+      - name: Randomized order (seed printed for reproduction)
+        working-directory: backend
+        env:
+          SEED: ${{ github.run_number }}
+        run: |
+          echo "reproduce with: python -m pytest tests -p randomly -p 'randomly' --randomly-seed=$SEED"
+          python -m pytest tests -q -p no:cacheprovider -p randomly --randomly-seed="$SEED" --junitxml=reports/random.xml
+          python ../scripts/ci/ci_report.py --label "Backend random order (seed $SEED)" --junit reports/random.xml --floor backend --skips backend-db
+      - name: Repeatability run 1
+        working-directory: backend
+        run: python -m pytest -q -p no:cacheprovider -p no:randomly tests/test_db_lifecycle_rls.py tests/test_activity_writes.py tests/test_season_create.py tests/test_farmer_provisioning.py tests/test_write_response_atomicity.py
+      - name: Repeatability run 2 (fresh process, same suites)
+        working-directory: backend
+        run: python -m pytest -q -p no:cacheprovider -p no:randomly tests/test_db_lifecycle_rls.py tests/test_activity_writes.py tests/test_season_create.py tests/test_farmer_provisioning.py tests/test_write_response_atomicity.py
+      - name: Property-based tests (Resource Metrics)
+        working-directory: backend
+        run: python -m pytest -q -p no:cacheprovider -p no:randomly tests_strict
+
+  # Selective mutation testing of critical pure logic. Reported, not gated yet;
+  # survivors triaged in docs/MUTATION_BASELINE.md (ratchet in a later PR).
+  mutation:
+    name: Mutation testing (critical modules, report)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { module: carbon/engine.py, tests: "tests/test_carbon_engine.py tests/test_carbon_real_factors.py tests/test_crop_season_methodology.py tests/test_factor_register.py tests/test_nitrogen_validation.py" }
+          - { module: recommendation/rules.py, tests: "tests/test_recommendation_engine.py tests/test_recommendation_no_carbon_duplication.py" }
+          - { module: infrastructure/memberships.py, tests: "tests/test_memberships.py tests/test_me_active_memberships.py" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r backend/requirements.txt "mutmut==2.5.1"
+      - name: mutmut ${{ matrix.target.module }}
+        working-directory: backend
+        env:
+          MODULE: ${{ matrix.target.module }}
+          TESTS: ${{ matrix.target.tests }}
+        run: |
+          # The suite must be green before mutating (else every mutant "dies").
+          # shellcheck disable=SC2086
+          python -m pytest -q -p no:cacheprovider $TESTS
+          status=0
+          mutmut run --paths-to-mutate "$MODULE" --tests-dir tests --runner "python -m pytest -x -q -p no:cacheprovider $TESTS" --no-progress || status=$?
+          # mutmut exits non-zero when mutants survive (bit flags); that is the
+          # report, not a CI failure yet -- exit codes >= 16 are tool errors.
+          if [ "$status" -ge 16 ]; then echo "::error::mutmut failed ($status)"; exit 1; fi
+          mutmut results | tee "$RUNNER_TEMP/mutmut.txt"
+          { echo "### Mutation: $MODULE"; echo '```'; tail -20 "$RUNNER_TEMP/mutmut.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # Every surviving mutant's diff, for triage against docs/MUTATION_BASELINE.md.
+          mkdir -p mutation-report
+          name="$(echo "$MODULE" | tr '/.' '__')"
+          cp "$RUNNER_TEMP/mutmut.txt" "mutation-report/$name.results.txt"
+          mutmut show all > "mutation-report/$name.survivors.diff"
+          mutmut junitxml > "mutation-report/$name.junit.xml"
+          python -c "import sys, xml.etree.ElementTree as E; c = list(E.parse(sys.argv[1]).iter('testcase')); s = sum(1 for t in c if t.find('failure') is not None); print(f'mutation score: {len(c) - s}/{len(c)} killed, {s} survived')" "mutation-report/$name.junit.xml" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: mutation-${{ strategy.job-index }}
+          path: backend/mutation-report/
+          if-no-files-found: error
+          retention-days: 30
+
+  # Resolved dependency drift is an error here (a warning on PRs), plus a
+  # license inventory of the production dependency set (report).
+  dependencies:
+    name: Dependency drift + licenses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Fresh venv from requirements.txt
+        run: |
+          python -m venv "$RUNNER_TEMP/v"
+          "$RUNNER_TEMP/v/bin/python" -m pip install --quiet -r backend/requirements.txt
+          "$RUNNER_TEMP/v/bin/python" -m pip freeze --exclude pip > backend-resolved.txt
+      - name: Drift vs committed snapshot (fails here)
+        run: python scripts/ci/dep_audit.py --drift backend-resolved.txt --strict
+      - name: License inventory (report GPL/AGPL/unknown)
+        run: "\"$RUNNER_TEMP/v/bin/python\" scripts/ci/licenses_report.py --npm-lock web-dashboard/package-lock.json"

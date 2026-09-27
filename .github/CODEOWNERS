@@ -1,0 +1,64 @@
+# CI-critical paths (docs/CI_PIPELINE.md, "CI change review").
+# GitHub reads this file from the BASE branch, so a PR cannot remove itself
+# from review. Effective only with branch protection on main:
+# "Require a pull request" + "Require review from Code Owners" + required
+# status check `ci-gate`. Must list every policy.json guarded_paths entry
+# (ci_policy.py CI_CODEOWNERS_MISSING) plus the migrations.
+
+/.github/workflows/ @levuanh2
+/.github/CODEOWNERS @levuanh2
+/scripts/ci/ @levuanh2
+/.gitleaks.toml @levuanh2
+/backend/.coveragerc @levuanh2
+/backend/pytest.ini @levuanh2
+/backend/tests/conftest.py @levuanh2
+/backend/tests/_markers.py @levuanh2
+/web-dashboard/vite.config.ts @levuanh2
+/web-dashboard/playwright.config.ts @levuanh2
+/web-dashboard/tests/e2e/fixtures.ts @levuanh2
+/web-dashboard/tsconfig.json @levuanh2
+/web-dashboard/tsconfig.app.json @levuanh2
+/web-dashboard/eslint.config.js @levuanh2
+/app/analysis_options.yaml @levuanh2
+/app/dart_test.yaml @levuanh2
+/docs/API_BREAKING_CHANGES.md @levuanh2
+/docs/MIGRATION_DATA_CHANGES.md @levuanh2
+/supabase/config.toml @levuanh2
+/backend/pyproject.toml @levuanh2
+/backend/setup.cfg @levuanh2
+/backend/tox.ini @levuanh2
+/web-dashboard/vitest.config.ts @levuanh2
+/supabase/migrations/ @levuanh2
+/scripts/ci/policy/ @levuanh2
+/backend/scripts/ @levuanh2
+/backend/tests/test_activity_rls_policies.py @levuanh2
+/backend/tests/test_activity_write_permissions.py @levuanh2
+/backend/tests/test_activity_writes.py @levuanh2
+/backend/tests/test_activity_writes_expansion.py @levuanh2
+/backend/tests/test_api_contract_hardening.py @levuanh2
+/backend/tests/test_carbon_engine.py @levuanh2
+/backend/tests/test_carbon_idempotent_save.py @levuanh2
+/backend/tests/test_carbon_persist_authorization.py @levuanh2
+/backend/tests/test_db_lifecycle_rls.py @levuanh2
+/backend/tests/test_farmer_provisioning.py @levuanh2
+/backend/tests/test_me_active_memberships.py @levuanh2
+/backend/tests/test_memberships.py @levuanh2
+/backend/tests/test_mrv_canonical_carbon.py @levuanh2
+/backend/tests/test_mrv_export.py @levuanh2
+/backend/tests/test_mrv_factor_provenance.py @levuanh2
+/backend/tests/test_p0_security_policies.py @levuanh2
+/backend/tests/test_season_create.py @levuanh2
+/backend/tests/test_straw_quickfix_persistence.py @levuanh2
+/backend/tests/test_write_response_atomicity.py @levuanh2
+/scripts/validate_supabase_schema.py @levuanh2
+/web-dashboard/package.json @levuanh2
+/backend/requirements.txt @levuanh2
+/ml/requirements.txt @levuanh2
+/web-dashboard/package-lock.json @levuanh2
+/app/pubspec.yaml @levuanh2
+/app/pubspec.lock @levuanh2
+/backend/tests/route_auth_manifest.py @levuanh2
+/backend/tests/test_route_positive_auth.py @levuanh2
+/backend/tests/test_route_auth_inventory.py @levuanh2
+/backend/main.py @levuanh2
+/backend/infrastructure/route_freeze.py @levuanh2

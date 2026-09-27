@@ -148,6 +148,17 @@ def _read_or_404(callback):
         raise HTTPException(status_code=404, detail=error_detail("not_found", "Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.")) from exc
 
 
+def _require_bearer(authorization: str | None = Header(default=None)) -> None:
+    """Route-level: a caller with no token gets 401 before body validation (422)
+    or an unconfigured-service 503. Carbon keeps its `missing_authorization` code."""
+    try:
+        extract_bearer_token(authorization)
+    except MissingAuthError as exc:
+        raise HTTPException(
+            status_code=401, detail=error_detail("missing_authorization", str(exc))
+        ) from exc
+
+
 def _require_caller(
     authorization: str | None, checker: CropAccessChecker, crop_season_id: str
 ) -> None:
@@ -236,7 +247,7 @@ def _raise_http(exc: Exception, request_id: str) -> None:
     ) from exc
 
 
-@router.post("/carbon/calculate", tags=['Carbon'])
+@router.post("/carbon/calculate", tags=['Carbon'], dependencies=[Depends(_require_bearer)])
 def calculate_carbon_endpoint(
     payload: CalculateRequest,
     request: Request,
@@ -283,7 +294,7 @@ def calculate_carbon_endpoint(
     return {**outcome.prepared, "calculation_id": outcome.calculation_id}
 
 
-@router.get("/crop-seasons/{crop_season_id}/carbon", tags=['Carbon'])
+@router.get("/crop-seasons/{crop_season_id}/carbon", tags=['Carbon'], dependencies=[Depends(_require_bearer)])
 def get_crop_carbon(
     crop_season_id: str,
     scenario: Scenario | None = None,
@@ -315,7 +326,7 @@ def get_crop_carbon(
 
 
 @router.get(
-    "/crop-seasons/{crop_season_id}/carbon/readiness", tags=['Carbon'],
+    "/crop-seasons/{crop_season_id}/carbon/readiness", tags=['Carbon'], dependencies=[Depends(_require_bearer)],
     response_model=schemas.CarbonReadinessResponse,
 )
 def get_crop_carbon_readiness(

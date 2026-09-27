@@ -419,3 +419,202 @@ export read path has changed since. Its MRV coverage is replaced by:
 
 Its non-MRV reads (hierarchy, tenant isolation 404s) are covered by
 `test_read_repository.py`, the P0 smoke and the lifecycle probe.
+
+## 15. Hardening v2: strict quality gates
+
+Every gate fails closed with a stable error code. Policy data lives in
+`scripts/ci/policy/` (`policy.json`, `migrations.sha256`, `schema-audit.json`).
+Relaxing it (lower floor/baseline/minimum, larger tolerance or allowlist) fails
+`workflow-policy` unless a PR commit carries `CI-Policy-Change: <reason>`.
+Coverage baselines are always read from the **base branch**, so a PR cannot
+lower its own bar.
+
+| Gate | Job | Codes |
+|---|---|---|
+| actionlint + shellcheck, SHA pins, timeouts, permissions, bypass patterns (`\|\| true`, `set +e`, `continue-on-error`, `except: pass`), ci-gate completeness, missing scripts, syntax, `pull_request_target` | workflow-policy | `CI_*` |
+| skip/xfail/fixme/todo and `@ts-ignore`/Dart ignore inventories (increase fails), `.only`, analyzer relaxation, auth sign-up config, gitleaks allowlist shape | workflow-policy | `DISABLED_TEST_ADDED`, `FOCUSED_TEST`, `TS_SUPPRESSION_ADDED`, `DART_IGNORE_ADDED`, `ANALYZER_RELAXED`, `AUTH_SIGNUP_POLICY`, `GITLEAKS_BROAD_ALLOWLIST` |
+| discovery floors, exact skip budget, security probe minimums, per-module minimums for security-critical test files (`protected_tests`: deleting them and padding elsewhere fails) | every test job | `TEST_DISCOVERY_REGRESSION`, `UNEXPECTED_SKIP`, `PROBE_REGRESSION`, `PROTECTED_TEST_REGRESSION` |
+| coverage: global (-0.5 pp), 16 critical backend modules, changed lines >= 80% | backend-db-integration, web-unit, flutter-unit | `COVERAGE_REGRESSION`, `CRITICAL_COVERAGE_REGRESSION`, `CHANGED_CODE_COVERAGE` |
+| migration checksum manifest | migration-static | `MIGRATION_MODIFIED/DELETED/UNREGISTERED`, `MANIFEST_REWRITTEN` |
+| migration upgrade: seeded base -> head (N-1 -> N when none added); every base table keeps its row count and base-column checksum unless `docs/MIGRATION_DATA_CHANGES.md` ACKs it; catalog == fresh; lifecycle 36/36 | migration-upgrade | `MIGRATION_DATA_CHANGED` |
+| schema invariants, RLS on all tables, no anon/`true` policies, no privilege broadening, SECURITY DEFINER search_path/dynamic SQL, catalog snapshot | backend-db-integration (`db_audit.py`) | `SCHEMA_INVARIANT`, `RLS_*`, `PRIVILEGE_BROADENED`, `SECURITY_DEFINER`, `SCHEMA_AUDIT_DRIFT` |
+| OpenAPI == generated; breaking changes need `ACK` in `docs/API_BREAKING_CHANGES.md` | openapi-contract | `OPENAPI_DRIFT`, `OPENAPI_BREAKING` |
+| error envelope on every route, 401 semantics, validation 422, finite numbers, boundaries, malformed input, log safety | backend tests (`test_api_contract_hardening.py`) | - |
+| fresh-venv isolation, all production modules import, undeclared deps, resolved drift (warn) | backend-startup (`python_deps_check.py`) | `ENV_NOT_ISOLATED`, `IMPORT_BOUNDARY`, `UNDECLARED_DEPENDENCY` |
+| web dist: mock ids, dev API, server secrets (value shapes), test artifacts, bundle growth > 20% | web-build | `DIST_*`, `BUNDLE_GROWTH` |
+| console/page errors, failed requests, HTTP errors in every mock test; axe serious/critical = 0 and no overflow at 390/768/1024/1440 on 6 key screens | playwright-mock | - |
+| release debug-signing guard, cleartext, debuggable, exported components, permissions, APK identity/mode, APK secrets | flutter-android (`android_check.py`) | `RELEASE_DEBUG_SIGNING`, `APK_*`, `MANIFEST_*` |
+| advisories with id/reason/owner/expiry exceptions, dependency diff summary | dependency-audit | `DEP_*` |
+| artifacts carry commit + SHA-256 + build mode | web-build, flutter-android | - |
+
+`strict-ci.yml` (nightly + manual): backend suite in random order (seed =
+run number, printed), critical DB suites twice in fresh processes, property
+tests (`backend/tests_strict`), mutation testing (report; triaged baseline in
+`docs/MUTATION_BASELINE.md`), resolved-dependency drift (fails),
+license inventory (report).
+
+**Resolved-dependency baseline.** `backend/requirements.txt` uses floating
+`>=` ranges. `scripts/ci/policy/backend-resolved.txt` is the `pip freeze` of the
+clean venv on the Linux runner (taken from the `backend-startup` artifact, not a
+developer machine). PR CI prints every resolved change as a warning; strict-ci
+fails on it. Refresh it deliberately, together with `docs/openapi.json`: a
+FastAPI upgrade alone changes the generated spec (0.141 renders uploads as
+`contentMediaType` and adds `input`/`ctx` to `ValidationError`) and nests
+included routers so a flat `app.routes` walk sees no `/v1` routes -- the route
+sweep therefore enumerates `app.openapi()["paths"]`.
+
+### CI exceptions
+
+| ID | Rule | Reason | Scope | Owner | Added | Review/expiry |
+|---|---|---|---|---|---|---|
+| EXC-SKIP-CV | skip budget | real-model CV smoke needs an uncommitted `ml/runs/` checkpoint | 2 exact test ids, backend-db | backend | 2026-09-27 | when a CI model artifact exists |
+| EXC-DB-01 | PRIVILEGE_BROADENED | legacy default grant: anon has write grants on `season_recommendations`; RLS on, no anon policy | 1 table | backend | 2026-09-27 | 2026-12-31 (revoke via migration) |
+| EXC-DB-02 | function EXECUTE | `soft_delete_activity` (SECURITY DEFINER) executable by anon/authenticated; checks `user_can_delete_activity` first, raises 42501 (verified as anon) | 1 RPC | backend | 2026-09-27 | 2026-12-31 |
+| EXC-API-01 | 401 sweep | `GET /v1/carbon/scenarios` is public: static scenario names, no tenant data | 1 route | backend | 2026-09-27 | 2026-12-31 |
+| EXC-API-02 | 401 sweep | the 3 Carbon routes answer 401 `missing_authorization` (Flutter `carbon_api_service` maps it); every other route `unauthenticated`. All answer 401 before 422/503 | 3 routes | backend | 2026-09-27 | 2026-12-31 |
+| EXC-DB-03 | RLS_PERMISSIVE | `mrv_step_catalog_select` is `USING (true)` for authenticated: static MRV step catalog, no tenant data | 1 policy | backend | 2026-09-27 | 2026-12-31 |
+| EXC-WEB-01 | page-health | `api/carbon.ts`, `api/engine.ts`, `api/organizations.ts` are not mock-gated; in mock mode they hit a port Chrome refuses (127.0.0.1:9) | 6 exact requests + 1 console text | web | 2026-09-27 | 2026-12-31 (mock-gate the modules) |
+| EXC-ANDROID-01 | RELEASE_DEBUG_SIGNING | `main` still signs release with the debug key; fail-closed signing is on the unmerged release branch | `app/android/app/build.gradle.kts` | app | 2026-09-27 | **2026-10-31, enforced in code** |
+
+DB exceptions (EXC-DB-01..03) are data in `policy.json` `db_exceptions`, read by
+`db_audit.py`; growing them is a policy relaxation.
+
+### CI change review
+
+These are high-impact: `.github/workflows/`, `scripts/ci/` (gates and
+`policy/`), `supabase/migrations/`, and every file in `policy.json`
+`guarded_paths` -- including the configs that decide what is measured
+(`backend/.coveragerc`, `web-dashboard/vite.config.ts` coverage excludes, the
+page-health `ALLOWED` list in `tests/e2e/fixtures.ts`, `app/analysis_options.yaml`,
+`.gitleaks.toml`, pytest config/conftest/markers, `docs/API_BREAKING_CHANGES.md`,
+`docs/MIGRATION_DATA_CHANGES.md`).
+
+- `workflow-policy` fails (`CI_GUARDED_CHANGE` / `CI_POLICY_RELAXED`) unless a
+  commit in the PR carries `CI-Policy-Change: <reason>`; the changed files and
+  relaxations are listed in the job summary.
+- The trailer is self-declared. It makes the change explicit; it is not an
+  approval. Approval is **CODEOWNERS**: `.github/CODEOWNERS` owns every guarded
+  path (`CI_CODEOWNERS_MISSING` keeps it in sync), and GitHub reads it from the
+  base branch, so a PR cannot drop itself out of review.
+- **Required repository setting** (not something a workflow can enforce): branch
+  protection on `main` with "Require a pull request", "Require review from Code
+  Owners" and required status check `ci-gate`. Without it, CI is advisory.
+
+Dependency manifests are guarded too (`backend/requirements.txt`,
+`ml/requirements.txt`, `web-dashboard/package.json` + `package-lock.json`,
+`app/pubspec.yaml` + `pubspec.lock`): they decide which pytest / vitest /
+playwright binary runs the gates. `DEP_SOURCE` additionally requires every entry
+to come from the public registry (npm: registry.npmjs.org + sha512 integrity;
+pub: pub.dev; pip: no URL, path or index option). A dependency bump therefore
+carries the trailer and gets CODEOWNERS review, next to the dependency-audit
+diff summary.
+
+**Positive auth coverage for every protected route.** A "no token -> 401" sweep
+also passes a route that rejects *every* caller. `backend/tests/route_auth_manifest.py`
+classifies every operation of the app's OpenAPI (not only `/v1`) as `PUBLIC`
+(only `GET /v1/carbon/scenarios` and `GET /health`), `POSITIVE` or `EXCEPTION`
+(documented `EXC-AUTH-*` id; none today). The inventory also walks the app's
+real routing table, before and inside its lifespan: served operations must
+equal the OpenAPI ones, and a mount, a websocket/raw route, any
+`include_in_schema=False` (even set at runtime), an `on_event` hook or an
+unreviewed middleware fails (`UNINVENTORIED_ROUTE`) -- so nothing the app
+serves can sit outside the manifest. `test_route_auth_inventory.py` (no database, both backend jobs)
+fails with `PROTECTED_ROUTE_POSITIVE_COVERAGE_MISSING` for an operation missing
+from the manifest, rejects stale entries, a non-2xx `POSITIVE` expectation and
+any write that is not `POSITIVE`. `test_route_positive_auth.py` (DB job) then
+builds a disposable tenant on the local stack -- Auth Admin users, password
+grant, real GoTrue JWTs -- and drives all 53 protected operations over HTTP
+through `main.app`: the persona gets the SUCCESS status (season + batch,
+activities, Carbon result, recommendation, CV inference, MRV export/render/
+download, provisioning ...), the same request without a token gets 401, and
+where the manifest says `deny`, an active manager of another cooperative gets
+403/404 first. A manifest entry whose request never ran fails with
+`PROTECTED_ROUTE_POSITIVE_CASE_MISSING`. CV inference runs with an untrained
+model of the production architecture (CI has no checkpoint); upload, scope,
+Storage and rows are real. The tenant is deleted afterwards. The manifest and
+both tests are guarded with protected minimums (54 and 9 passed).
+
+**`backend/main.py` is a CODEOWNERS path (since 2026-09-27).** The rule was:
+application wiring stays outside CI policy unless a concrete bypass of every
+gate is shown. The adversarial review showed one: a lifespan in `main.py` can
+schedule a task that inserts a route *after* startup, which no import- or
+lifespan-time inventory sees. So `main.py` (the app, its middleware and its
+lifespan) is guarded, and `ROUTE_MUTATION` (workflow-policy) fails when any
+backend/ml production module edits the routing table directly
+(`.routes.append/insert/...`, `routes[...] =`), calls `add_route` /
+`add_api_route` / `mount`, uses `setattr`, or touches `lifespan` /
+`lifespan_context`, calls `include_router` (outside the reviewed line in
+`main.py`), or calls a route method as a plain function -- routes come only
+from `@router.<method>` decorators on MODULE-LEVEL functions (the AST rejects
+a route decorator inside a function or class: it would register when called,
+e.g. from a timer), and the inventory requires every module that declares
+routes to be loaded once `main` is imported (no late `importlib` routes).
+Exact exception: the reviewed `FastAPI(..., lifespan=lifespan)` line (the
+lifespan only releases pools on shutdown).
+
+**The routing table is frozen at runtime.** Static rules cannot see every
+alias (`route = app.get` inside a function a timer calls later), so `main.py`
+ends with `freeze_routing(app)` (`backend/infrastructure/route_freeze.py`,
+guarded): every router's route list becomes a tuple and every registration
+method -- `add_api_route`, `include_router`, `mount`, the `get`/`post`/...
+decorators, `on_event` -- raises, as does rebinding `routes`, `router` or
+`lifespan_context`. A late registration now fails loudly in production instead
+of serving an uninventoried operation. `test_routing_is_frozen_after_import`
+asserts the frozen state and tries each path. Undoing the freeze
+(`__class__ =`, `object.__setattr__`, `frozen_class`) is a `ROUTE_MUTATION`
+outside the freezer file itself.
+
+Residual, by design (like obfuscated environment detection): code written to
+defeat the scanners -- attribute names assembled at runtime, `getattr` tricks,
+eval -- that mutates routing later. No static or dynamic test can rule out
+arbitrary self-modifying code; that is code review.
+
+Every gate script a workflow executes is guarded (the application code under test -- `backend/main.py` and the modules it imports, `web-dashboard/src`, `app/lib` -- is not: it is what production runs, it is reviewed like any product change, and the protected suites exercise it): `CI_UNGUARDED_SCRIPT` fails when a
+`run:` step calls a script outside `guarded_paths` (the security probes in
+`backend/scripts/` print the very `50/50` lines the gate trusts), and
+`CI_UNGUARDED_TEST` requires every `protected_tests` module to be guarded.
+
+Test-aware application code (a "defeat device" that behaves only under the
+test runner) is narrowed in two ways: `TEST_ENV_DETECTION` fails when
+production code (`backend/` outside tests/scripts, `web-dashboard/src`,
+`app/lib`) references pytest / `sys.modules` / `PYTEST_*` / `CI` /
+`GITHUB_ACTIONS` / `VITEST` / `navigator.webdriver` / `FLUTTER_TEST` /
+`Platform.environment` (exact exceptions: `policy.json` `env_detection_allow`),
+and backend-startup re-runs the 401 sweep against the live `uvicorn main:app`
+process -- the Render start command, with no pytest loaded. Obfuscated
+detection can still evade a static scan; that remains code review.
+
+Residual risk, by design: an assertion weakened inside a test that is neither
+protected nor guarded (most feature tests, the mock Playwright specs) keeps
+counts and coverage green. That is ordinary code review; strict-ci mutation
+testing is the automated signal for it.
+
+Residual risk, by design: PR CI runs the PR's own workflow and helper code, so a
+PR that edits a gate can make that gate lie. No in-repo check can prevent that
+without `pull_request_target` (excluded: it would run with repository secrets
+in reach). The defence is the review rule above. Secret scans match value
+shapes; a secret deliberately split or encoded to evade them is out of scope
+(the scans target accidental leaks).
+
+Dependency advisory exceptions go in `policy.json` `dependency_exceptions`
+(id, package, reason, owner, added, expires); expired ones fail CI. There are
+none today.
+
+### High-impact changes (review carefully)
+
+`.github/workflows/`, `scripts/ci/`, `scripts/ci/policy/`, `supabase/migrations/`,
+`.gitleaks.toml`, `tests/e2e/fixtures.ts` (page-health allowlist),
+`docs/API_BREAKING_CHANGES.md`. A PR touching them changes what "green" means:
+reviewers check that no gate got weaker, and relaxations carry the trailer.
+
+### Findings from building these gates (product follow-ups, not fixed here unless noted)
+
+- Fixed: activity quantities accepted `Infinity` (NaN failed range checks); now finite-only.
+- Fixed: `index.html` declared no favicon: every page logged a 404.
+- `docs/openapi.json` was 11 operations stale; regenerated, 5 historical breaks acknowledged.
+- Mock mode leaks carbon/readiness/health/organizations calls to the network (EXC-WEB-01); locally they reached `.env`'s backend.
+- Resource Metrics use plain float `sum()`: record order changes the last digit (property test); `math.fsum` would make MRV-hashed values order-exact (F-METRICS-FSUM).
+- Production code imports `PIL`, `postgrest`, `starlette`, `supabase_auth` that are only transitive dependencies; declare them.
+- `infrastructure/auth_admin.py` coverage 42.9%; mutation score of `carbon/engine.py` ~50% despite 96.8% line coverage.
+- Android `allowBackup` is unset (backups on, incl. the Supabase session in SharedPreferences): needs a product decision.
+- Licenses: psycopg family is LGPL-3.0 (review).

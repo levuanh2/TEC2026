@@ -344,3 +344,10 @@ def health() -> dict:
 # TODO(1a): POST /v1/sync — nhận batch Activity offline từ app (FR-1a-07)
 # TODO(1b): GET /v1/plots/{id}/efficiency (FR-1b-05)
 # TODO(1c): GET /v1/reports/mrv (FR-1c-05)
+
+
+# Last statement: every route is declared above. From here on, nothing can add,
+# replace or hide a route (tests/test_route_auth_inventory.py asserts it).
+from infrastructure.route_freeze import freeze_routing  # noqa: E402
+
+freeze_routing(app)

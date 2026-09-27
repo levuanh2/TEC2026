@@ -11,7 +11,7 @@
           "Carbon"
         ],
         "summary": "Calculate Carbon Endpoint",
-        "description": "Tính CO2e cho một vụ và lưu kết quả.\n\nThiếu sản lượng nhưng đủ hệ số -> vẫn trả `co2e_total_kg`, `co2e_per_kg = null`,\nkèm cảnh báo. Thiếu hệ số bắt buộc (ví dụ GWP) -> 422, KHÔNG trả 0.",
+        "description": "Tính CO2e cho một vụ và lưu kết quả.\n\nThiếu sản lượng nhưng đủ hệ số -> vẫn trả `co2e_total_kg`, `co2e_per_kg = null`,\nkèm cảnh báo. Thiếu hệ số bắt buộc (ví dụ GWP) -> 422, KHÔNG trả 0.\nChỉ người ghi được vụ (`private.user_can_write_crop`) mới lưu được bản tính.",
         "operationId": "calculate_carbon_endpoint_v1_carbon_calculate_post",
         "parameters": [
           {
@@ -137,6 +137,70 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Get Crop Carbon V1 Crop Seasons  Crop Season Id  Carbon Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/carbon/readiness": {
+      "get": {
+        "tags": [
+          "Carbon"
+        ],
+        "summary": "Get Crop Carbon Readiness",
+        "description": "Những đầu vào Carbon vụ này còn thiếu, và chỗ bổ sung từng thứ.\n\nLets a client say \"Thiếu chế độ nước trước vụ\" instead of a generic failure,\nwithout holding any methodology itself: the list is derived from the same\n`CropActivityData` the engine consumes. Read-only, so plain read scope is\nenough — the same callers who may view a result may see why there isn't one.",
+        "operationId": "get_crop_carbon_readiness_v1_crop_seasons__crop_season_id__carbon_readiness_get",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarbonReadinessResponse"
                 }
               }
             }
@@ -487,6 +551,78 @@
             "bearerAuth": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "Plots"
+        ],
+        "summary": "Create Farm Plot",
+        "description": "Record a plot on a farm. Cooperative manager of the farm's cooperative\nonly: the official plot structure is the cooperative's, so a farm owner\ncannot add plots here even though RLS would let them.",
+        "operationId": "create_farm_plot_v1_farms__farm_id__plots_post",
+        "parameters": [
+          {
+            "name": "farm_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Farm Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlotCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlotCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/farms/{farm_id}/crop-seasons": {
@@ -720,6 +856,78 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ItemsResponse_CropSeasonResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Crop Seasons"
+        ],
+        "summary": "Create Crop Season",
+        "description": "Start a crop season on a plot, with its default production batch.\n\nBoth rows are written in one transaction, so a season returned here can take\nactivities immediately. Allowed for a farm owner/editor and for an active\ncooperative manager of the farm's cooperative (`private.user_can_write_farm`);\nanyone else -- and a plot that does not exist -- gets the same 404.\nRepeating the exact same request returns the season it created (200,\n`idempotent_replay: true`) instead of a second season.",
+        "operationId": "create_crop_season_v1_plots__plot_id__crop_seasons_post",
+        "parameters": [
+          {
+            "name": "plot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plot Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CropSeasonCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CropSeasonCreateResponse"
                 }
               }
             }
@@ -1128,6 +1336,154 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/methodology": {
+      "patch": {
+        "tags": [
+          "Crop Seasons"
+        ],
+        "summary": "Update Crop Season Methodology",
+        "description": "Record the IPCC water-regime inputs the Carbon engine reads off the season.\n\nWithout this route the three columns could only be written by the Flutter app\n(which upserts `crop_seasons` straight through PostgREST), so a Farmer Web-only\nuser could never supply SFw/SFp and never obtain a Carbon result.",
+        "operationId": "update_crop_season_methodology_v1_crop_seasons__crop_season_id__methodology_patch",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CropSeasonMethodologyUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CropSeasonResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/status": {
+      "patch": {
+        "tags": [
+          "Crop Seasons"
+        ],
+        "summary": "Update Crop Season Status",
+        "description": "End a season: `active -> harvested | closed`, `harvested -> closed`.\n\nAfter it the journal is read-only for every client (the database refuses\nactivity writes to a season that is not active); metrics, Carbon results\nand methodology stay as they are. A season is never reopened here.\nWriters only (`private.user_can_write_crop`); anyone else gets 404.",
+        "operationId": "update_crop_season_status_v1_crop_seasons__crop_season_id__status_patch",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CropSeasonStatusUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CropSeasonResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -1913,6 +2269,78 @@
             "bearerAuth": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Create Organization Farm",
+        "description": "A farm for a farmer who already belongs to the cooperative (owner).",
+        "operationId": "create_organization_farm_v1_organizations__organization_id__farms_post",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FarmCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/organizations/{organization_id}/summary": {
@@ -2082,6 +2510,142 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ItemsResponse_FarmPerformanceResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/organizations/{organization_id}/farmers": {
+      "get": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "List Organization Farmers",
+        "description": "Farmer accounts of the cooperative with their onboarding stage.\nActive cooperative manager of this cooperative only; anyone else 404.",
+        "operationId": "list_organization_farmers_v1_organizations__organization_id__farmers_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemsResponse_FarmerListItem_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Provision Farmer",
+        "description": "Create a farmer account in the cooperative (\"Thêm nông hộ\"), optionally\nwith the farm (the farmer as owner) and its first plot.\n\nThere is no public sign-up: accounts are provisioned here, server-side,\nwith a temporary password returned ONCE for the manager to hand over.",
+        "operationId": "provision_farmer_v1_organizations__organization_id__farmers_post",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FarmerProvisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmerProvisionResponse"
                 }
               }
             }
@@ -2494,6 +3058,85 @@
             "bearerAuth": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "MRV"
+        ],
+        "summary": "Create Mrv Export",
+        "description": "Generate an MRV evidence package for one case: the canonical JSON snapshot,\nor that snapshot rendered as XLSX or PDF in the same call.\n\nThe package is a snapshot of current data and its provenance. It is not a\ncertification, a verification or a compliance statement, and it carries its\nown disclaimer plus machine-readable warnings for whatever is incomplete.",
+        "operationId": "create_mrv_export_v1_mrv_cases__mrv_case_id__exports_post",
+        "parameters": [
+          {
+            "name": "mrv_case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mrv Case Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MrvExportRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MrvExportCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/mrv/exports/{mrv_export_id}": {
@@ -2538,6 +3181,149 @@
                 "schema": {
                   "$ref": "#/components/schemas/MrvExportResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/mrv/exports/{mrv_export_id}/render": {
+      "post": {
+        "tags": [
+          "MRV"
+        ],
+        "summary": "Render Mrv Export",
+        "description": "Render an artifact from an EXISTING canonical snapshot.\n\nThe auditable path: the workbook demonstrably comes from one stored manifest\nrather than from data as it happens to look now. Nothing is reassembled and\nno carbon or resource figure is recomputed.",
+        "operationId": "render_mrv_export_v1_mrv_exports__mrv_export_id__render_post",
+        "parameters": [
+          {
+            "name": "mrv_export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mrv Export Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MrvRenderRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MrvArtifactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/mrv/exports/{mrv_export_id}/download": {
+      "get": {
+        "tags": [
+          "MRV"
+        ],
+        "summary": "Download Mrv Export",
+        "description": "Re-serve the stored artifact byte-for-byte.\n\nNever rebuilt from live data: an export is evidence of what the system held\nwhen it was generated, so a later change to the case must not change it. The\nbytes are checked against their recorded digest before being served.",
+        "operationId": "download_mrv_export_v1_mrv_exports__mrv_export_id__download_get",
+        "parameters": [
+          {
+            "name": "mrv_export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mrv Export Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -2746,7 +3532,7 @@
           "Health"
         ],
         "summary": "Health",
-        "description": "Nói thật trạng thái. Lightweight — chỉ đọc file YAML, KHÔNG query Supabase.\n\n`carbon_production_ready` chỉ true khi GWP đã xác minh.",
+        "description": "Nói thật trạng thái. Lightweight — chỉ đọc file YAML, KHÔNG query Supabase.\n\n`carbon_scientific_readiness` = `carbon.factor_register.readiness` (READY_FOR_DEMO khi mọi hệ số lõi\nVERIFIED + GWP đã chọn + đơn vị khớp; READY_FOR_PILOT chỉ khi thêm rà soát chuyên gia hoàn tất).\n`carbon_production_ready` chỉ true khi READY_FOR_PILOT — tức đã có rà soát chuyên gia; hệ số đủ\nthôi là CHƯA đủ. `mrv_compliant` luôn false (chưa có hệ số QĐ 4801/QĐ-BNNMT).",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -2954,7 +3740,14 @@
             "title": "Data"
           },
           "created_by": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Created By"
           },
           "created_at": {
@@ -2980,7 +3773,6 @@
           "activity_type",
           "occurred_at",
           "data",
-          "created_by",
           "created_at",
           "updated_at"
         ],
@@ -2990,7 +3782,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -3024,6 +3816,121 @@
         ],
         "title": "CalculateRequest"
       },
+      "CarbonMissingInput": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "flow": {
+            "type": "string",
+            "title": "Flow"
+          },
+          "activity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Type"
+          },
+          "blocking": {
+            "type": "boolean",
+            "title": "Blocking"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/CarbonMissingRecord"
+            },
+            "type": "array",
+            "title": "Records",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "label",
+          "detail",
+          "flow",
+          "blocking"
+        ],
+        "title": "CarbonMissingInput",
+        "description": "One Carbon input the season lacks, plus where the user supplies it.\n\n`flow` is what the client routes on (\"carbon_methodology\" | \"activity\" |\n\"plot\" | \"factor_unavailable\"); it never has to decide which input belongs\nto which screen. \"factor_unavailable\" is a limitation, not a form."
+      },
+      "CarbonMissingRecord": {
+        "properties": {
+          "activity_id": {
+            "type": "string",
+            "title": "Activity Id"
+          },
+          "occurred_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred On"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "activity_id"
+        ],
+        "title": "CarbonMissingRecord",
+        "description": "The stored activity record an issue is about, so the client can open it."
+      },
+      "CarbonReadinessResponse": {
+        "properties": {
+          "can_calculate": {
+            "type": "boolean",
+            "title": "Can Calculate"
+          },
+          "blocking_count": {
+            "type": "integer",
+            "title": "Blocking Count"
+          },
+          "missing_inputs": {
+            "items": {
+              "$ref": "#/components/schemas/CarbonMissingInput"
+            },
+            "type": "array",
+            "title": "Missing Inputs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "can_calculate",
+          "blocking_count",
+          "missing_inputs"
+        ],
+        "title": "CarbonReadinessResponse"
+      },
       "CarbonScenarioResponse": {
         "properties": {
           "scenarios": {
@@ -3039,6 +3946,236 @@
           "scenarios"
         ],
         "title": "CarbonScenarioResponse"
+      },
+      "CropSeasonCreateRequest": {
+        "properties": {
+          "season_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Season Code"
+          },
+          "variety_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variety Name"
+          },
+          "planting_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planting Date"
+          },
+          "expected_harvest_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Harvest Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "season_code"
+        ],
+        "title": "CropSeasonCreateRequest",
+        "description": "POST body for starting a crop season on a plot.\n\nOnly what a farmer knows when starting a season. The plot comes from the URL;\ncrop type keeps the column default (rice); status is not chosen by the\nclient -- starting a season makes it `active`; the default production batch\nis created by the server. IPCC methodology inputs are recorded later through\n`PATCH /crop-seasons/{id}/methodology`, never defaulted here."
+      },
+      "CropSeasonCreateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "plot_id": {
+            "type": "string",
+            "title": "Plot Id"
+          },
+          "season_code": {
+            "type": "string",
+            "title": "Season Code"
+          },
+          "crop_type": {
+            "type": "string",
+            "title": "Crop Type"
+          },
+          "variety_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variety Name"
+          },
+          "planting_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planting Date"
+          },
+          "expected_harvest_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Harvest Date"
+          },
+          "actual_harvest_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Harvest Date"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "ipcc_water_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ipcc Water Regime"
+          },
+          "pre_season_water_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Season Water Regime"
+          },
+          "cultivation_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cultivation Days"
+          },
+          "default_production_batch_id": {
+            "type": "string",
+            "title": "Default Production Batch Id"
+          },
+          "idempotent_replay": {
+            "type": "boolean",
+            "title": "Idempotent Replay",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "plot_id",
+          "season_code",
+          "crop_type",
+          "status",
+          "default_production_batch_id"
+        ],
+        "title": "CropSeasonCreateResponse"
+      },
+      "CropSeasonMethodologyUpdate": {
+        "properties": {
+          "ipcc_water_regime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "irrigated_continuous_flooding",
+                  "irrigated_single_drainage",
+                  "irrigated_multiple_drainage",
+                  "rainfed_regular",
+                  "rainfed_drought_prone",
+                  "deep_water",
+                  "upland"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ipcc Water Regime"
+          },
+          "pre_season_water_regime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "non_flooded_pre_season_lt_180d",
+                  "non_flooded_pre_season_gt_180d",
+                  "flooded_pre_season_gt_30d",
+                  "non_flooded_pre_season_gt_365d"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Season Water Regime"
+          },
+          "cultivation_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cultivation Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CropSeasonMethodologyUpdate",
+        "description": "PATCH body for the season's IPCC methodology inputs.\n\nEvery field is optional so a client may set one at a time, but an omitted\nfield is left alone while an explicit `null` clears it — the two are not the\nsame, and `model_fields_set` is what tells them apart."
       },
       "CropSeasonResponse": {
         "properties": {
@@ -3105,6 +4242,39 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "ipcc_water_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ipcc Water Regime"
+          },
+          "pre_season_water_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Season Water Regime"
+          },
+          "cultivation_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cultivation Days"
           }
         },
         "type": "object",
@@ -3116,6 +4286,37 @@
           "status"
         ],
         "title": "CropSeasonResponse"
+      },
+      "CropSeasonStatusUpdate": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "harvested",
+              "closed"
+            ],
+            "title": "Status"
+          },
+          "actual_harvest_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Harvest Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "CropSeasonStatusUpdate",
+        "description": "End a season. Only the finishing states are offered through the API;\nwhich moves are legal is `private.crop_season_transition_allowed`."
       },
       "CvInferenceResponse": {
         "properties": {
@@ -3215,7 +4416,14 @@
             "title": "Category"
           },
           "gas": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Gas"
           },
           "activity_unit": {
@@ -3252,7 +4460,6 @@
           "factor_set_id",
           "factor_code",
           "category",
-          "gas",
           "activity_unit",
           "result_unit",
           "factor_value",
@@ -3363,6 +4570,153 @@
           "status"
         ],
         "title": "EmissionFactorSetResponse"
+      },
+      "FarmCreateFields": {
+        "properties": {
+          "farm_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Farm Code"
+          },
+          "farm_name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Farm Name"
+          },
+          "province_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province Name"
+          },
+          "district_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "District Name"
+          },
+          "commune_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commune Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "farm_code",
+          "farm_name"
+        ],
+        "title": "FarmCreateFields"
+      },
+      "FarmCreateRequest": {
+        "properties": {
+          "farm_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Farm Code"
+          },
+          "farm_name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Farm Name"
+          },
+          "province_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province Name"
+          },
+          "district_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "District Name"
+          },
+          "commune_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commune Name"
+          },
+          "owner_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner User Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "farm_code",
+          "farm_name",
+          "owner_user_id"
+        ],
+        "title": "FarmCreateRequest"
+      },
+      "FarmCreatedResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "farm_code": {
+            "type": "string",
+            "title": "Farm Code"
+          },
+          "farm_name": {
+            "type": "string",
+            "title": "Farm Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "farm_code",
+          "farm_name"
+        ],
+        "title": "FarmCreatedResponse"
       },
       "FarmPerformanceResponse": {
         "properties": {
@@ -3518,6 +4872,270 @@
         ],
         "title": "FarmResponse"
       },
+      "FarmerFarmRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "farm_code": {
+            "type": "string",
+            "title": "Farm Code"
+          },
+          "farm_name": {
+            "type": "string",
+            "title": "Farm Name"
+          },
+          "farm_role": {
+            "type": "string",
+            "title": "Farm Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "farm_code",
+          "farm_name",
+          "farm_role"
+        ],
+        "title": "FarmerFarmRef"
+      },
+      "FarmerListItem": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "account_status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "locked",
+              "ended"
+            ],
+            "title": "Account Status"
+          },
+          "farms": {
+            "items": {
+              "$ref": "#/components/schemas/FarmerFarmRef"
+            },
+            "type": "array",
+            "title": "Farms"
+          },
+          "plot_count": {
+            "type": "integer",
+            "title": "Plot Count"
+          },
+          "season_count": {
+            "type": "integer",
+            "title": "Season Count"
+          },
+          "active_season_count": {
+            "type": "integer",
+            "title": "Active Season Count"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "no_farm",
+              "no_plot",
+              "no_season",
+              "active_season",
+              "history_only"
+            ],
+            "title": "Stage"
+          },
+          "primary_farm_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Farm Id"
+          },
+          "idle_plot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idle Plot Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "account_status",
+          "farms",
+          "plot_count",
+          "season_count",
+          "active_season_count",
+          "stage"
+        ],
+        "title": "FarmerListItem"
+      },
+      "FarmerProvisionRequest": {
+        "properties": {
+          "full_name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Full Name"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 3,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "farm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FarmCreateFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlotCreateRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "full_name",
+          "email"
+        ],
+        "title": "FarmerProvisionRequest",
+        "description": "Only fields the domain stores: `profiles.full_name`, `profiles.phone`\nand the login email. The cooperative comes from the URL, the role is\nalways `farmer`, the account starts active. Farm and plot are optional\nso an account can be created before its land is recorded."
+      },
+      "FarmerProvisionResponse": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "farm_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Farm Id"
+          },
+          "plot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plot Id"
+          },
+          "temporary_password": {
+            "type": "string",
+            "title": "Temporary Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "email",
+          "full_name",
+          "organization_id",
+          "temporary_password"
+        ],
+        "title": "FarmerProvisionResponse"
+      },
       "FarmerScopeResponse": {
         "properties": {
           "farms": {
@@ -3659,6 +5277,22 @@
           "items"
         ],
         "title": "ItemsResponse[FarmResponse]"
+      },
+      "ItemsResponse_FarmerListItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FarmerListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ItemsResponse[FarmerListItem]"
       },
       "ItemsResponse_MrvBatchResponse_": {
         "properties": {
@@ -3951,6 +5585,114 @@
         ],
         "title": "MetricResponse"
       },
+      "MrvArtifactResponse": {
+        "properties": {
+          "export_id": {
+            "type": "string",
+            "title": "Export Id"
+          },
+          "mrv_case_id": {
+            "type": "string",
+            "title": "Mrv Case Id"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "generated_by": {
+            "type": "string",
+            "title": "Generated By"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "payload_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Sha256"
+          },
+          "source_snapshot_export_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Snapshot Export Id"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "scope_description": {
+            "type": "string",
+            "title": "Scope Description"
+          },
+          "warning_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Text"
+          },
+          "is_finalized": {
+            "type": "boolean",
+            "title": "Is Finalized"
+          },
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "export_id",
+          "mrv_case_id",
+          "format",
+          "schema_version",
+          "status",
+          "generated_at",
+          "generated_by",
+          "file_sha256",
+          "file_name",
+          "scope_description",
+          "is_finalized"
+        ],
+        "title": "MrvArtifactResponse",
+        "description": "A rendered artifact (XLSX or PDF) and its lineage.\n\n`source_snapshot_export_id` names the canonical JSON snapshot this was\nrendered from; `payload_sha256` is that snapshot's digest and `file_sha256`\nis the artifact's own. The two being different is the point: one says which\ndata, the other says which file.\n\nNo storage bucket or object path is returned. They name a real private\nobject, and a client only ever needs the filename."
+      },
       "MrvBatchResponse": {
         "properties": {
           "production_batch_id": {
@@ -4115,6 +5857,140 @@
         ],
         "title": "MrvEvidenceResponse"
       },
+      "MrvExportCreatedResponse": {
+        "properties": {
+          "export_id": {
+            "type": "string",
+            "title": "Export Id"
+          },
+          "mrv_case_id": {
+            "type": "string",
+            "title": "Mrv Case Id"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "generated"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "generated_by": {
+            "type": "string",
+            "title": "Generated By"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "payload_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Sha256"
+          },
+          "source_snapshot_export_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Snapshot Export Id"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "scope_description": {
+            "type": "string",
+            "title": "Scope Description"
+          },
+          "warning_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Text"
+          },
+          "is_finalized": {
+            "type": "boolean",
+            "title": "Is Finalized"
+          },
+          "manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest"
+          },
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "export_id",
+          "mrv_case_id",
+          "format",
+          "schema_version",
+          "status",
+          "generated_at",
+          "generated_by",
+          "file_sha256",
+          "file_name",
+          "scope_description",
+          "is_finalized"
+        ],
+        "title": "MrvExportCreatedResponse",
+        "description": "The generated package's identity and audit metadata, plus the manifest.\n\n`manifest` is the stored snapshot verbatim -- the same object a later\ndownload returns. It is typed as a mapping rather than a fully nested model\non purpose: the manifest's own contract is versioned by `schema_version` and\ndocumented in docs/MRV_EXPORT_PACKAGE.md, and re-declaring every nested\nshape here would create a second contract to keep in step."
+      },
+      "MrvExportRequest": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "title": "Format",
+            "description": "'json' (the canonical snapshot), or 'xlsx' / 'pdf' (rendered from that snapshot in the same call).",
+            "default": "json"
+          }
+        },
+        "type": "object",
+        "title": "MrvExportRequest",
+        "description": "Deliberately not a `Literal`.\n\nAn unsupported format is a domain answer (\"that export does not exist yet\"),\nand routing it through the service keeps it in the shared error envelope\nrather than FastAPI's raw request-validation shape."
+      },
       "MrvExportResponse": {
         "properties": {
           "id": {
@@ -4130,7 +6006,14 @@
             "title": "Format"
           },
           "factor_set_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Factor Set Id"
           },
           "scope_description": {
@@ -4160,13 +6043,9 @@
             ],
             "title": "Warning Text"
           },
-          "storage_bucket": {
+          "file_name": {
             "type": "string",
-            "title": "Storage Bucket"
-          },
-          "storage_object_path": {
-            "type": "string",
-            "title": "Storage Object Path"
+            "title": "File Name"
           },
           "file_sha256": {
             "anyOf": [
@@ -4179,9 +6058,42 @@
             ],
             "title": "File Sha256"
           },
+          "payload_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Sha256"
+          },
+          "source_snapshot_export_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Snapshot Export Id"
+          },
           "generated_at": {
             "type": "string",
             "title": "Generated At"
+          },
+          "generated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated By"
           }
         },
         "type": "object",
@@ -4189,16 +6101,26 @@
           "id",
           "mrv_case_id",
           "format",
-          "factor_set_id",
           "scope_description",
           "data_as_of_at",
           "contains_sample_data",
           "is_finalized",
-          "storage_bucket",
-          "storage_object_path",
+          "file_name",
           "generated_at"
         ],
         "title": "MrvExportResponse"
+      },
+      "MrvRenderRequest": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "title": "Format",
+            "description": "Artifact format to render from a stored JSON snapshot: 'xlsx' or 'pdf'.",
+            "default": "xlsx"
+          }
+        },
+        "type": "object",
+        "title": "MrvRenderRequest"
       },
       "MrvStepResponse": {
         "properties": {
@@ -4498,6 +6420,69 @@
           "has_more"
         ],
         "title": "PaginatedResponse[MrvCaseResponse]"
+      },
+      "PlotCreateRequest": {
+        "properties": {
+          "plot_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Plot Code"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "area_ha": {
+            "type": "number",
+            "maximum": 100000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Area Ha"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "plot_code",
+          "name",
+          "area_ha"
+        ],
+        "title": "PlotCreateRequest"
+      },
+      "PlotCreatedResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "farm_id": {
+            "type": "string",
+            "title": "Farm Id"
+          },
+          "plot_code": {
+            "type": "string",
+            "title": "Plot Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "area_ha": {
+            "type": "number",
+            "title": "Area Ha"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "farm_id",
+          "plot_code",
+          "name",
+          "area_ha"
+        ],
+        "title": "PlotCreatedResponse"
       },
       "PlotResponse": {
         "properties": {
@@ -4835,6 +6820,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",

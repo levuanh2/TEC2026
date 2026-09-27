@@ -217,7 +217,14 @@ class ActivityResponse(BaseModel):
 
 # -- Farmer Web online activity writes ------------------------------------
 
-class FertilizerActivityData(BaseModel):
+class _ActivityData(BaseModel):
+    # JSON parsed by Python accepts NaN/Infinity. NaN already fails the range
+    # checks below, but Infinity passed `ge=0` and Postgres numeric stores it,
+    # which would turn resource metrics into inf. Quantities must be finite.
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class FertilizerActivityData(_ActivityData):
     fertilizer_name: str = Field(min_length=1)
     fertilizer_type: str | None = None
     amount_kg: float = Field(gt=0)
@@ -227,7 +234,7 @@ class FertilizerActivityData(BaseModel):
     total_cost_vnd: float | None = Field(default=None, ge=0)
 
 
-class IrrigationActivityData(BaseModel):
+class IrrigationActivityData(_ActivityData):
     method: Literal["awd", "continuous_flooding", "alternate", "other"]
     # Water is intentionally nullable: a recorded irrigation event without a
     # measurement remains unknown in metrics, never an invented zero.
@@ -238,14 +245,14 @@ class IrrigationActivityData(BaseModel):
     total_cost_vnd: float | None = Field(default=None, ge=0)
 
 
-class HarvestActivityData(BaseModel):
+class HarvestActivityData(_ActivityData):
     yield_kg: float = Field(gt=0)
     harvested_area_ha: float | None = Field(default=None, gt=0)
     moisture_percent: float | None = Field(default=None, ge=0, le=100)
     total_cost_vnd: float | None = Field(default=None, ge=0)
 
 
-class SeedingActivityData(BaseModel):
+class SeedingActivityData(_ActivityData):
     variety_name: str | None = None
     seed_kg: float = Field(gt=0)
     seeding_method: str | None = None
@@ -255,7 +262,7 @@ class SeedingActivityData(BaseModel):
     cost_vnd: float | None = Field(default=None, ge=0)
 
 
-class PesticideActivityData(BaseModel):
+class PesticideActivityData(_ActivityData):
     product_name: str = Field(min_length=1)
     active_ingredient: str | None = None
     amount: float = Field(gt=0)
@@ -263,7 +270,7 @@ class PesticideActivityData(BaseModel):
     total_cost_vnd: float | None = Field(default=None, ge=0)
 
 
-class StrawManagementActivityData(BaseModel):
+class StrawManagementActivityData(_ActivityData):
     method: Literal["incorporated", "removed", "burned", "composted", "other"]
     straw_mass_kg: float | None = Field(default=None, ge=0)
     total_cost_vnd: float | None = Field(default=None, ge=0)
@@ -459,7 +466,9 @@ class EmissionFactorResponse(BaseModel):
     factor_set_id: str
     factor_code: str
     category: str
-    gas: str
+    # NULL for parameters that are not a gas's emission factor (scaling factors,
+    # exponents, default values): `emission_factors.gas` is nullable.
+    gas: str | None = None
     activity_unit: str
     result_unit: str
     factor_value: float
