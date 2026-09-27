@@ -172,6 +172,27 @@
     "backend/pyproject.toml",
     "backend/setup.cfg",
     "backend/tox.ini",
-    "web-dashboard/vitest.config.ts"
+    "web-dashboard/vitest.config.ts",
+    "backend/scripts/",
+    "backend/tests/test_activity_rls_policies.py",
+    "backend/tests/test_activity_write_permissions.py",
+    "backend/tests/test_activity_writes.py",
+    "backend/tests/test_activity_writes_expansion.py",
+    "backend/tests/test_api_contract_hardening.py",
+    "backend/tests/test_carbon_engine.py",
+    "backend/tests/test_carbon_idempotent_save.py",
+    "backend/tests/test_carbon_persist_authorization.py",
+    "backend/tests/test_db_lifecycle_rls.py",
+    "backend/tests/test_farmer_provisioning.py",
+    "backend/tests/test_me_active_memberships.py",
+    "backend/tests/test_memberships.py",
+    "backend/tests/test_mrv_canonical_carbon.py",
+    "backend/tests/test_mrv_export.py",
+    "backend/tests/test_mrv_factor_provenance.py",
+    "backend/tests/test_p0_security_policies.py",
+    "backend/tests/test_season_create.py",
+    "backend/tests/test_straw_quickfix_persistence.py",
+    "backend/tests/test_write_response_atomicity.py",
+    "scripts/validate_supabase_schema.py"
   ]
 }

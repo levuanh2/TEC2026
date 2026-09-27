@@ -13,6 +13,8 @@ WORKFLOWS (.github/workflows/*.yml)
   CI_FORBIDDEN_TRIGGER      no pull_request_target anywhere
   CI_SECRETS_IN_PR_CI       ci.yml never references secrets.*
   CI_CODEOWNERS_MISSING     a guarded path (or supabase/migrations/) has no CODEOWNERS entry
+  CI_UNGUARDED_SCRIPT       a workflow runs a script outside policy guarded_paths
+  CI_UNGUARDED_TEST         a protected_tests module is outside policy guarded_paths
   CI_GUARDED_CHANGE         a file under policy guarded_paths changed without the trailer
   CI_GATE_INCOMPLETE        ci-gate needs every other ci.yml job, and fails on non-success
   CI_MISSING_SCRIPT         every scripts/... path a workflow runs exists
@@ -125,8 +127,15 @@ def check_workflows(policy: dict) -> None:
                         fail("CI_BYPASS", f"{rel(wf)} job {job_id}: `{line.strip()}` ({label})")
             for path in re.findall(r"(?<![\w/.-])((?:\.\./)*(?:scripts|backend/scripts)/[\w./-]+\.(?:py|sh))", run):
                 cands = [ROOT / path.lstrip("./"), ROOT / "backend" / path, ROOT / path.replace("../", "")]
-                if not any(c.is_file() for c in cands):
+                found = [c for c in cands if c.is_file()]
+                if not found:
                     fail("CI_MISSING_SCRIPT", f"{rel(wf)} job {job_id} runs {path}, which does not exist")
+                # Whatever a workflow executes decides a gate (a probe that prints
+                # "50/50 checks passed" IS the gate), so it must be guarded + owned.
+                for c in found:
+                    if not is_guarded(rel(c.resolve()), policy):
+                        fail("CI_UNGUARDED_SCRIPT", f"{rel(wf)} job {job_id} runs {rel(c.resolve())}, "
+                                                    "which is not under policy guarded_paths")
         if wf.name == "ci.yml":
             if "secrets." in text:
                 fail("CI_SECRETS_IN_PR_CI", "ci.yml references secrets.* -- PR CI must not receive secrets")
@@ -298,14 +307,17 @@ def relaxations(base: dict, head: dict) -> list[str]:
     return out
 
 
+def is_guarded(path: str, policy: dict) -> bool:
+    return any(path == g or (g.endswith("/") and path.startswith(g)) for g in policy["guarded_paths"])
+
+
 def guarded_changes(ref: str, head_policy: dict) -> list[str]:
     """Files under the policy's guarded paths that differ from the base: gates,
     their data and the configs that decide what is measured (coverage omit/
     exclude, page-health allowlist, analyzer config, gitleaks, ACK files)."""
     changed = subprocess.run(["git", "diff", "--name-only", f"{ref}...HEAD"], cwd=ROOT, check=True,
                              capture_output=True, text=True, encoding="utf-8").stdout.split()
-    guards = head_policy["guarded_paths"]
-    return [f for f in changed if any(f == g or (g.endswith("/") and f.startswith(g)) for g in guards)]
+    return [f for f in changed if is_guarded(f, head_policy)]
 
 
 def check_relaxation(ref: str, head_policy: dict) -> None:
@@ -355,6 +367,10 @@ def check_codeowners(policy: dict) -> None:
             parts = line.split()
             if len(parts) >= 2 and not line.startswith("#"):
                 owned.add(parts[0].lstrip("/"))
+    for suite, modules in policy["protected_tests"].items():
+        for module in modules:
+            if not is_guarded(f"backend/tests/{module}.py", policy):
+                fail("CI_UNGUARDED_TEST", f"protected test module backend/tests/{module}.py is not under guarded_paths")
     for g in policy["guarded_paths"] + ["supabase/migrations/"]:
         if g not in owned:
             fail("CI_CODEOWNERS_MISSING", f".github/CODEOWNERS has no owner for guarded path {g}")

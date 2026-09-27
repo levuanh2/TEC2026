@@ -500,6 +500,16 @@ page-health `ALLOWED` list in `tests/e2e/fixtures.ts`, `app/analysis_options.yam
   protection on `main` with "Require a pull request", "Require review from Code
   Owners" and required status check `ci-gate`. Without it, CI is advisory.
 
+Everything a workflow executes is guarded: `CI_UNGUARDED_SCRIPT` fails when a
+`run:` step calls a script outside `guarded_paths` (the security probes in
+`backend/scripts/` print the very `50/50` lines the gate trusts), and
+`CI_UNGUARDED_TEST` requires every `protected_tests` module to be guarded.
+
+Residual risk, by design: an assertion weakened inside a test that is neither
+protected nor guarded (most feature tests, the mock Playwright specs) keeps
+counts and coverage green. That is ordinary code review; strict-ci mutation
+testing is the automated signal for it.
+
 Residual risk, by design: PR CI runs the PR's own workflow and helper code, so a
 PR that edits a gate can make that gate lie. No in-repo check can prevent that
 without `pull_request_target` (excluded: it would run with repository secrets
