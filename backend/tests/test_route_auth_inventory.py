@@ -12,17 +12,71 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from fastapi.routing import APIRoute  # noqa: E402
+from starlette.routing import Route  # noqa: E402
+
 from main import app  # noqa: E402
 from tests.route_auth_manifest import EXCEPTION, POSITIVE, PUBLIC, ROUTES  # noqa: E402
 
 METHODS = {"get", "post", "put", "patch", "delete"}
-# The only anonymous /v1 operation (EXC-API-01). Growing this set is a policy change.
-DOCUMENTED_PUBLIC = {("GET", "/v1/carbon/scenarios")}
+# The only anonymous operations: EXC-API-01 and the liveness probe. Growing this
+# set is a policy change.
+DOCUMENTED_PUBLIC = {("GET", "/v1/carbon/scenarios"), ("GET", "/health")}
+# FastAPI's own documentation routes: the only served routes outside the schema.
+DOCS_ROUTES = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+# Middleware sees every request; a new one could answer requests no route owns.
+MIDDLEWARE = ["CORSMiddleware", "RequestIdMiddleware"]
 
 
 def openapi_operations() -> set[tuple[str, str]]:
-    return {(m.upper(), p) for p, item in app.openapi()["paths"].items() if p.startswith("/v1")
-            for m in item if m in METHODS}
+    return {(m.upper(), p) for p, item in app.openapi()["paths"].items() for m in item if m in METHODS}
+
+
+def served_operations() -> set[tuple[str, str]]:
+    """Every operation the app would actually route, from its routing table (not
+    from the schema): a route added with app.mount(), hidden with
+    include_in_schema=False (even via setattr) or of an unknown kind fails."""
+    ops: set[tuple[str, str]] = set()
+
+    def walk(routes, prefix: str = "") -> None:
+        for route in routes:
+            if hasattr(route, "original_router"):  # FastAPI >= 0.141: an included router
+                context = route.include_context
+                assert context.include_in_schema, "UNINVENTORIED_ROUTE: a router is included with include_in_schema=False"
+                walk(route.original_router.routes, prefix + context.prefix)
+            elif isinstance(route, APIRoute):
+                assert route.include_in_schema, f"UNINVENTORIED_ROUTE: {route.path} is hidden from the schema"
+                ops.update((m, prefix + route.path) for m in route.methods - {"HEAD", "OPTIONS"})
+            elif type(route) is Route and route.path in DOCS_ROUTES:
+                continue
+            else:
+                raise AssertionError(f"UNINVENTORIED_ROUTE: {type(route).__name__} {getattr(route, 'path', '?')} "
+                                     "is served outside the OpenAPI schema (mount / websocket / raw route)")
+
+    walk(app.routes)
+    return ops
+
+
+def test_every_served_route_is_in_the_schema():
+    assert served_operations() == openapi_operations()
+
+
+def test_routes_registered_at_startup_are_inventoried_too():
+    # uvicorn's lifespan protocol enters exactly this context; a custom lifespan
+    # could register routes, so walk the table again inside it.
+    import asyncio
+
+    async def inside_lifespan() -> set[tuple[str, str]]:
+        async with app.router.lifespan_context(app):
+            return served_operations()
+
+    assert asyncio.run(inside_lifespan()) == served_operations() == openapi_operations()
+    # Deprecated on_event hooks are not reviewed here at all: forbid them.
+    assert app.router.on_startup == [] and app.router.on_shutdown == [], "use no on_event startup/shutdown hooks"
+
+
+def test_middleware_is_exactly_the_reviewed_set():
+    assert [m.cls.__name__ for m in app.user_middleware] == MIDDLEWARE
 
 
 def test_every_protected_operation_has_positive_auth_coverage():

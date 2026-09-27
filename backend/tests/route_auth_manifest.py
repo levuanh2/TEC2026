@@ -1,4 +1,4 @@
-"""Auth coverage manifest: every /v1 operation in the app's OpenAPI, classified.
+"""Auth coverage manifest: every operation the app serves (its OpenAPI), classified.
 
     PUBLIC    no token needed (documented exception, answered 200 anonymously)
     POSITIVE  a real authenticated persona gets the documented SUCCESS status on a
@@ -45,6 +45,7 @@ M, F, X = "manager", "farmer", "outsider"
 ROUTES: dict[tuple[str, str], Route] = {
     # -- public ------------------------------------------------------------
     ("GET", "/v1/carbon/scenarios"): Route(PUBLIC, reason="EXC-API-01: static scenario names, no tenant data"),
+    ("GET", "/health"): Route(PUBLIC, reason="liveness probe for Render; reads the factor YAML, no tenant data"),
 
     # -- identity / organizations (manager) ----------------------------------
     ("GET", "/v1/me"): ok(M, 200),

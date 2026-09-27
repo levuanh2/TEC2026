@@ -90,11 +90,11 @@ PORT="$PORT" "$PY" - <<'PY'
 import json, os, re, sys, urllib.error, urllib.request
 base = f"http://127.0.0.1:{os.environ['PORT']}"
 spec = json.load(urllib.request.urlopen(f"{base}/openapi.json", timeout=10))
-public = {("GET", "/v1/carbon/scenarios")}  # EXC-API-01
+public = {("GET", "/v1/carbon/scenarios"), ("GET", "/health")}  # EXC-API-01 + liveness
 # EXC-API-02: the Carbon routes keep `missing_authorization`; all others `unauthenticated`.
 carbon = {("POST", "/v1/carbon/calculate"), ("GET", "/v1/crop-seasons/{crop_season_id}/carbon"),
           ("GET", "/v1/crop-seasons/{crop_season_id}/carbon/readiness")}
-ops = [(m.upper(), p) for p, item in spec["paths"].items() if p.startswith("/v1")
+ops = [(m.upper(), p) for p, item in spec["paths"].items()
        for m in item if m in {"get", "post", "put", "patch", "delete"}]
 bad = []
 for method, path in public:  # the documented public routes must stay public
@@ -125,6 +125,6 @@ for method, path in ops:
 if len(ops) < 50 or bad:
     print(f"::error title=Backend startup::live 401 sweep: {len(ops)} operations, failures: {bad[:10]}")
     sys.exit(1)
-print(f"live production process: {len(ops) - len(public & set(ops))} protected /v1 operations answer 401 + envelope")
+print(f"live production process: {len(ops) - len(public & set(ops))} protected operations answer 401 + envelope")
 PY
 echo "backend clean startup: PASS"

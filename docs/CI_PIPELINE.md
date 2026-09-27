@@ -449,8 +449,8 @@ lower its own bar.
 
 `strict-ci.yml` (nightly + manual): backend suite in random order (seed =
 run number, printed), critical DB suites twice in fresh processes, property
-tests (`backend/tests_strict`), mutation testing (report; baseline
-`carbon/engine.py` 67/133 mutants survive), resolved-dependency drift (fails),
+tests (`backend/tests_strict`), mutation testing (report; triaged baseline in
+`docs/MUTATION_BASELINE.md`), resolved-dependency drift (fails),
 license inventory (report).
 
 **Resolved-dependency baseline.** `backend/requirements.txt` uses floating
@@ -511,9 +511,14 @@ diff summary.
 
 **Positive auth coverage for every protected route.** A "no token -> 401" sweep
 also passes a route that rejects *every* caller. `backend/tests/route_auth_manifest.py`
-classifies each `/v1` operation of the app's OpenAPI as `PUBLIC` (only
-`GET /v1/carbon/scenarios`), `POSITIVE` or `EXCEPTION` (documented `EXC-AUTH-*`
-id; none today). `test_route_auth_inventory.py` (no database, both backend jobs)
+classifies every operation of the app's OpenAPI (not only `/v1`) as `PUBLIC`
+(only `GET /v1/carbon/scenarios` and `GET /health`), `POSITIVE` or `EXCEPTION`
+(documented `EXC-AUTH-*` id; none today). The inventory also walks the app's
+real routing table, before and inside its lifespan: served operations must
+equal the OpenAPI ones, and a mount, a websocket/raw route, any
+`include_in_schema=False` (even set at runtime), an `on_event` hook or an
+unreviewed middleware fails (`UNINVENTORIED_ROUTE`) -- so nothing the app
+serves can sit outside the manifest. `test_route_auth_inventory.py` (no database, both backend jobs)
 fails with `PROTECTED_ROUTE_POSITIVE_COVERAGE_MISSING` for an operation missing
 from the manifest, rejects stale entries, a non-2xx `POSITIVE` expectation and
 any write that is not `POSITIVE`. `test_route_positive_auth.py` (DB job) then
@@ -527,7 +532,7 @@ where the manifest says `deny`, an active manager of another cooperative gets
 `PROTECTED_ROUTE_POSITIVE_CASE_MISSING`. CV inference runs with an untrained
 model of the production architecture (CI has no checkpoint); upload, scope,
 Storage and rows are real. The tenant is deleted afterwards. The manifest and
-both tests are guarded with protected minimums (54 and 5 passed).
+both tests are guarded with protected minimums (54 and 8 passed).
 
 **Why `backend/main.py` is not a CODEOWNERS path.** It is application wiring,
 not CI policy, and every product PR would otherwise need the CI trailer. What it

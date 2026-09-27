@@ -75,8 +75,8 @@ jobs:
         working-directory: backend
         run: python -m pytest -q -p no:cacheprovider -p no:randomly tests_strict
 
-  # Selective mutation testing of critical pure logic. Reported, not gated yet:
-  # baseline carbon/engine.py 67/133 survived (2026-09-27).
+  # Selective mutation testing of critical pure logic. Reported, not gated yet;
+  # survivors triaged in docs/MUTATION_BASELINE.md (ratchet in a later PR).
   mutation:
     name: Mutation testing (critical modules, report)
     runs-on: ubuntu-24.04
@@ -119,6 +119,8 @@ jobs:
           name="$(echo "$MODULE" | tr '/.' '__')"
           cp "$RUNNER_TEMP/mutmut.txt" "mutation-report/$name.results.txt"
           mutmut show all > "mutation-report/$name.survivors.diff"
+          mutmut junitxml > "mutation-report/$name.junit.xml"
+          python -c "import sys, xml.etree.ElementTree as E; c = list(E.parse(sys.argv[1]).iter('testcase')); s = sum(1 for t in c if t.find('failure') is not None); print(f'mutation score: {len(c) - s}/{len(c)} killed, {s} survived')" "mutation-report/$name.junit.xml" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
