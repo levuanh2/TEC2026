@@ -337,7 +337,9 @@ def run_checks(s: dict, client: TestClient) -> None:
     r = direct_insert("viewer")
     check("b3_viewer_direct_insert_denied", r.status_code in (401, 403) and "42501" in r.text, f"{r.status_code} {r.text[:160]}")
     r = httpx.patch(f"{URL}/rest/v1/activities?id=eq.{viewer_row['id']}", headers=rest_headers(tokens["viewer"]), json={"note": "changed"}, timeout=30)
-    check("b3_viewer_direct_update_no_rows", r.status_code in (200, 204) and (r.status_code == 204 or r.json() == []), f"{r.status_code} {r.text[:120]}")
+    # Since 20260926100000_activity_update_denies_loudly a non-writer's UPDATE
+    # raises 42501 instead of silently matching 0 rows.
+    check("b3_viewer_direct_update_denied", r.status_code in (401, 403) and "42501" in r.text, f"{r.status_code} {r.text[:160]}")
     r = httpx.post(f"{URL}/rest/v1/rpc/soft_delete_activity", headers=rest_headers(tokens["viewer"]), json={"p_activity_id": viewer_row["id"]}, timeout=30)
     check("b3_viewer_direct_soft_delete_denied", r.status_code in (401, 403) and "42501" in r.text, f"{r.status_code} {r.text[:160]}")
     after = admin.table("activities").select("note,deleted_at").eq("id", viewer_row["id"]).execute().data[0]

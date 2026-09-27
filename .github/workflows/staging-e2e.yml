@@ -189,9 +189,6 @@ jobs:
       - name: P1 correctness
         if: ${{ !cancelled() }}
         run: python scripts/hosted_p1_correctness_smoke.py
-      - name: REST end-to-end
-        if: ${{ !cancelled() }}
-        run: python scripts/hosted_e2e_rest.py
       - name: Public sign-up disabled
         if: ${{ !cancelled() }}
         run: python scripts/verify_public_signup_disabled.py

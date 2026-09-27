@@ -219,8 +219,12 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
-# Off for the same reason; email/password SIGN-IN stays enabled.
-enable_signup = false
+# Must stay TRUE: the CLI maps this flag to GOTRUE_EXTERNAL_EMAIL_ENABLED, so
+# false turns off email/password SIGN-IN too ("email_provider_disabled").
+# Public sign-up is already refused by `[auth] enable_signup = false` above
+# (GOTRUE_DISABLE_SIGNUP) -- the hosted project's setting, which
+# backend/scripts/verify_public_signup_disabled.py checks.
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
