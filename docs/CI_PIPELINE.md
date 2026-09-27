@@ -509,7 +509,7 @@ pub: pub.dev; pip: no URL, path or index option). A dependency bump therefore
 carries the trailer and gets CODEOWNERS review, next to the dependency-audit
 diff summary.
 
-Everything a workflow executes is guarded: `CI_UNGUARDED_SCRIPT` fails when a
+Every gate script a workflow executes is guarded (the application code under test -- `backend/main.py` and the modules it imports, `web-dashboard/src`, `app/lib` -- is not: it is what production runs, it is reviewed like any product change, and the protected suites exercise it): `CI_UNGUARDED_SCRIPT` fails when a
 `run:` step calls a script outside `guarded_paths` (the security probes in
 `backend/scripts/` print the very `50/50` lines the gate trusts), and
 `CI_UNGUARDED_TEST` requires every `protected_tests` module to be guarded.
