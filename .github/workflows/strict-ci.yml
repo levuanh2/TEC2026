@@ -4,11 +4,6 @@
 name: Strict CI (nightly)
 
 on:
-  # TEMPORARY bootstrap: workflow_dispatch only works once this file is on main.
-  # Removed before merge (the final PR commit has no branch trigger).
-  push:
-    branches:
-      - ci/agricarbon-hardening-v2
   workflow_dispatch:
   schedule:
     - cron: "0 19 * * *"   # 02:00 Asia/Ho_Chi_Minh

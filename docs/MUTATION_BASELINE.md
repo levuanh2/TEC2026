@@ -7,17 +7,18 @@ PARTIAL): there is no score threshold yet. A future PR introduces a ratchet once
 the `missing test` items below are closed, so the bar is set on triaged data,
 not an invented number.
 
-Baseline: GitHub run 36330193098 (commit a71c47a, 2026-09-27). Every survivor
-below was read from its diff and classified exactly once.
+Baseline: GitHub run 36330193098 (commit a71c47a, 2026-09-27); totals confirmed
+unchanged by strict run 36332895849 (commit 1c3a0fa). Every survivor below was
+read from its diff and classified exactly once.
 
 | Module | Survivors | Equivalent / likely equivalent | Missing meaningful test | Low-value text | Needs investigation |
 |---|---|---|---|---|---|
 | `carbon/engine.py` | 67 of 133 | 10 | 12 | 45 | 0 |
-| `recommendation/rules.py` | 52 | 10 | 26 | 16 | 0 |
-| `infrastructure/memberships.py` | 3 | 1 | 2 | 0 | 0 |
+| `recommendation/rules.py` | 52 of 97 | 10 | 26 | 16 | 0 |
+| `infrastructure/memberships.py` | 3 of 13 | 1 | 2 | 0 | 0 |
 
-(mutmut `--no-progress` hides totals for the last two; from the next strict run
-the job summary prints `killed/total` from `mutmut junitxml`.)
+Mutation scores (killed/total, `mutmut junitxml`, printed in the strict job
+summary): engine 66/133, rules 45/97, memberships 10/13.
 
 ## Categories
 
