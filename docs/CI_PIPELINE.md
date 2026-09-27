@@ -171,9 +171,11 @@ staging uses; no production credential is stored.
 Environment secrets, required reviewers and branch protection for private
 repos need GitHub Pro/Team (the branch-protection API answers 403). The
 secrets are therefore **repository** secrets. Repository secrets are readable
-by any workflow on a pushed branch of this repo, so the rule is enforced by
-review: `ci.yml` must never reference `secrets.*` (it references none), and
-only `staging-e2e.yml` may. After upgrading, move the three into a `staging`
+by any workflow that **anyone with write access** pushes on any branch of this
+repo (today: the owner and one other collaborator with `write`). No workflow
+condition can prevent that; only environment secrets with required reviewers
+can. Until then the rule is enforced by review: `ci.yml` must never reference
+`secrets.*` (it references none), and only `staging-e2e.yml` may. After upgrading, move the three into a `staging`
 environment with a required reviewer and add `environment: staging` to the
 secret-bearing jobs. Recommended later: a `production` environment (required
 reviewers, `main` only, no automatic trigger). There is no production CD here.
@@ -183,8 +185,22 @@ reviewers, `main` only, no automatic trigger). There is no production CD here.
 `workflow_dispatch` only works once the workflow file is on the default
 branch. The first validation therefore used a **temporary** `push` trigger for
 exactly `ci/agricarbon-production-grade` (the branch of PR #1), plus a
-matching `push` leg in every job's `if:`. Both are removed before merge; the
-merged file only has `workflow_dispatch`.
+matching `push` leg in every secret-bearing job's `if:` that also requires the
+pusher and triggering actor to be the repository owner. Both are removed
+before merge; the merged file only has `workflow_dispatch`.
+
+**Cleanup hardening (from the read-only review).** In `staging_render_flow.py`
+and `hosted_lifecycle_rls_probe.py`, every cleanup call, the discovery
+`select`s included, is retried and recorded instead of raised, so one failed
+lookup cannot skip the remaining deletes. The probe now also fails
+(`--enforce`) when a cleanup step failed or an Auth user of the run survived.
+Before this, a failed Auth user deletion left row counts "restored" (the
+profile row was still deleted) and passed silently. Verified by fault
+injection: transient failure → retried, clean, exit 0; permanent failure →
+exit 1 with the tag and ids; surviving users → exit 1. `hosted_p0_security_smoke.py`
+keeps its older cleanup: it only runs in `ci.yml` against the runner's
+throw-away stack (it needs a direct Postgres URL, which CI never has for
+hosted), so an interrupted cleanup there cannot orphan hosted data.
 
 ## 4. Secrets and configuration
 

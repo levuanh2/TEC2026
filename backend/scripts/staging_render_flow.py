@@ -150,36 +150,63 @@ def flow() -> None:
     check("anonymous_read_401", r.status_code == 401, f"{r.status_code}")
 
 
-def cleanup() -> list[str]:
-    problems: list[str] = []
-
-    def attempt(label, fn):
+def attempt(problems: list[str], label: str, fn, tries: int = 3):
+    """Run one cleanup step, retrying transient errors; record, never raise."""
+    for i in range(tries):
         try:
-            fn()
+            return fn()
         except Exception as exc:  # noqa: BLE001 -- every step must be tried
-            problems.append(f"{label}: {type(exc).__name__}")
+            last = exc
+            time.sleep(2 * (i + 1))
+    problems.append(f"{label}: {type(last).__name__}")
+    return None
 
+
+def cleanup() -> list[str]:
+    """Delete everything under the run tag. Discovery queries are protected the
+    same way as deletes, so one failed lookup cannot skip the rest."""
+    problems: list[str] = []
     t = admin.table
-    for org in t("organizations").select("id").eq("organization_code", TAG).execute().data:
-        for farm in t("farms").select("id").eq("cooperative_id", org["id"]).execute().data:
-            for plot in t("plots").select("id").eq("farm_id", farm["id"]).execute().data:
-                for s in t("crop_seasons").select("id").eq("plot_id", plot["id"]).execute().data:
-                    for b in t("production_batches").select("id").eq("crop_season_id", s["id"]).execute().data:
-                        for a in t("activities").select("id").eq("production_batch_id", b["id"]).execute().data:
-                            attempt("irrigation_events", lambda x=a["id"]: t("irrigation_events").delete().eq("activity_id", x).execute())
-                            attempt("activities", lambda x=a["id"]: t("activities").delete().eq("id", x).execute())
-                        attempt("production_batches", lambda x=b["id"]: t("production_batches").delete().eq("id", x).execute())
-                    attempt("crop_seasons", lambda x=s["id"]: t("crop_seasons").delete().eq("id", x).execute())
-                attempt("plots", lambda x=plot["id"]: t("plots").delete().eq("id", x).execute())
-            attempt("farm_members", lambda x=farm["id"]: t("farm_members").delete().eq("farm_id", x).execute())
-            attempt("farms", lambda x=farm["id"]: t("farms").delete().eq("id", x).execute())
-        attempt("organization_memberships", lambda x=org["id"]: t("organization_memberships").delete().eq("organization_id", x).execute())
-        attempt("organizations", lambda x=org["id"]: t("organizations").delete().eq("id", x).execute())
-    for u in admin.auth.admin.list_users(page=1, per_page=1000):
+
+    def rows(label, query):
+        return attempt(problems, f"list {label}", lambda: query.execute().data) or []
+
+    def delete(label, query):
+        attempt(problems, f"delete {label}", query.execute)
+
+    for org in rows("organizations", t("organizations").select("id").eq("organization_code", TAG)):
+        for farm in rows("farms", t("farms").select("id").eq("cooperative_id", org["id"])):
+            for plot in rows("plots", t("plots").select("id").eq("farm_id", farm["id"])):
+                for s in rows("crop_seasons", t("crop_seasons").select("id").eq("plot_id", plot["id"])):
+                    for b in rows("production_batches", t("production_batches").select("id").eq("crop_season_id", s["id"])):
+                        for a in rows("activities", t("activities").select("id").eq("production_batch_id", b["id"])):
+                            delete("irrigation_events", t("irrigation_events").delete().eq("activity_id", a["id"]))
+                            delete("activities", t("activities").delete().eq("id", a["id"]))
+                        delete("production_batches", t("production_batches").delete().eq("id", b["id"]))
+                    delete("crop_seasons", t("crop_seasons").delete().eq("id", s["id"]))
+                delete("plots", t("plots").delete().eq("id", plot["id"]))
+            delete("farm_members", t("farm_members").delete().eq("farm_id", farm["id"]))
+            delete("farms", t("farms").delete().eq("id", farm["id"]))
+        delete("organization_memberships", t("organization_memberships").delete().eq("organization_id", org["id"]))
+        delete("organizations", t("organizations").delete().eq("id", org["id"]))
+    users = attempt(problems, "list auth users", lambda: admin.auth.admin.list_users(page=1, per_page=1000)) or []
+    for u in users:
         if (u.email or "").startswith(EMAIL_PREFIX):
-            attempt("auth user", lambda x=u.id: admin.auth.admin.delete_user(x))
-            attempt("profiles", lambda x=u.id: t("profiles").delete().eq("id", x).execute())
+            attempt(problems, "delete auth user", lambda x=u.id: admin.auth.admin.delete_user(x))
+            delete("profiles", t("profiles").delete().eq("id", u.id))
     return problems
+
+
+def verify(before: dict[str, int]) -> tuple[dict, list[str], list[str]]:
+    """Row counts back to baseline, and no Auth user of this run left
+    (auth.users is not among the counted public tables)."""
+    problems: list[str] = []
+    after = attempt(problems, "count rows after cleanup", snapshot) or {}
+    diff = {k: (before[k], after.get(k)) for k in before if before[k] != after.get(k)}
+    users = attempt(problems, "list auth users after cleanup",
+                    lambda: admin.auth.admin.list_users(page=1, per_page=1000))
+    orphans = [u.id for u in (users or []) if (u.email or "").startswith(EMAIL_PREFIX)]
+    return diff, orphans, problems
 
 
 def main() -> int:
@@ -194,16 +221,14 @@ def main() -> int:
     finally:
         problems = cleanup()
         time.sleep(1)
-        after = snapshot()
-    diff = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
-    # auth.users is not among the counted public tables: check it by prefix.
-    orphans = [u.id for u in admin.auth.admin.list_users(page=1, per_page=1000) if (u.email or "").startswith(EMAIL_PREFIX)]
+        diff, orphans, verify_problems = verify(before)
     check("cleanup_steps_succeeded", not problems, "; ".join(problems))
+    check("cleanup_verified", not verify_problems, "; ".join(verify_problems))
     check("cleanup_row_counts_restored", not diff, str(diff))
     check("cleanup_no_auth_users_left", not orphans, f"auth user ids: {orphans}")
     failed = [name for name, ok, _ in results if not ok]
     print(f"=== {len(results) - len(failed)}/{len(results)} checks passed ===")
-    if problems or diff or orphans:
+    if problems or verify_problems or diff or orphans:
         # ids only -- never tokens or passwords
         print(f"LEFTOVER CHECK NEEDED for tag {TAG}: {created}")
     return 1 if failed else 0

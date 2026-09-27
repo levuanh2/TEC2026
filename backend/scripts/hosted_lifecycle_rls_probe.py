@@ -168,33 +168,58 @@ def probe(ctx: dict) -> list[tuple[str, str, str]]:
     return out
 
 
-def cleanup() -> None:
-    def attempt(fn):
-        try:
-            fn()
-        except Exception as exc:  # noqa: BLE001
-            print(f"  cleanup warning: {type(exc).__name__}")
+def cleanup() -> list[str]:
+    """Delete everything under the run tag; returns the steps that failed.
 
-    for org in admin.table("organizations").select("id").ilike("organization_code", f"{TAG}-%").execute().data:
-        for farm in admin.table("farms").select("id").eq("cooperative_id", org["id"]).execute().data:
-            for plot in admin.table("plots").select("id").eq("farm_id", farm["id"]).execute().data:
-                for s in admin.table("crop_seasons").select("id").eq("plot_id", plot["id"]).execute().data:
-                    for b in admin.table("production_batches").select("id").eq("crop_season_id", s["id"]).execute().data:
-                        for a in admin.table("activities").select("id").eq("production_batch_id", b["id"]).execute().data:
-                            attempt(lambda x=a["id"]: admin.table("irrigation_events").delete().eq("activity_id", x).execute())
-                            attempt(lambda x=a["id"]: admin.table("activities").delete().eq("id", x).execute())
-                        attempt(lambda x=b["id"]: admin.table("production_batches").delete().eq("id", x).execute())
-                    attempt(lambda x=s["id"]: admin.table("crop_seasons").delete().eq("id", x).execute())
-                attempt(lambda x=plot["id"]: admin.table("plots").delete().eq("id", x).execute())
-            attempt(lambda x=farm["id"]: admin.table("farm_members").delete().eq("farm_id", x).execute())
-            attempt(lambda x=farm["id"]: admin.table("farms").delete().eq("id", x).execute())
-        attempt(lambda x=org["id"]: admin.table("organization_memberships").delete().eq("organization_id", x).execute())
-        attempt(lambda x=org["id"]: admin.table("organizations").delete().eq("id", x).execute())
-    for u in admin.auth.admin.list_users(page=1, per_page=1000):
+    Discovery queries are protected like the deletes (retried, recorded, never
+    raised), so one failed lookup cannot skip the rest of the cleanup."""
+    problems: list[str] = []
+
+    def attempt(label, fn, tries=3):
+        for i in range(tries):
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                time.sleep(2 * (i + 1))
+        problems.append(f"{label}: {type(last).__name__}")
+        print(f"  cleanup FAILED: {label}: {type(last).__name__}")
+        return None
+
+    def rows(label, query):
+        return attempt(f"list {label}", lambda: query.execute().data) or []
+
+    t = admin.table
+    for org in rows("organizations", t("organizations").select("id").ilike("organization_code", f"{TAG}-%")):
+        for farm in rows("farms", t("farms").select("id").eq("cooperative_id", org["id"])):
+            for plot in rows("plots", t("plots").select("id").eq("farm_id", farm["id"])):
+                for s in rows("crop_seasons", t("crop_seasons").select("id").eq("plot_id", plot["id"])):
+                    for b in rows("production_batches", t("production_batches").select("id").eq("crop_season_id", s["id"])):
+                        for a in rows("activities", t("activities").select("id").eq("production_batch_id", b["id"])):
+                            attempt("delete irrigation_events", t("irrigation_events").delete().eq("activity_id", a["id"]).execute)
+                            attempt("delete activities", t("activities").delete().eq("id", a["id"]).execute)
+                        attempt("delete production_batches", t("production_batches").delete().eq("id", b["id"]).execute)
+                    attempt("delete crop_seasons", t("crop_seasons").delete().eq("id", s["id"]).execute)
+                attempt("delete plots", t("plots").delete().eq("id", plot["id"]).execute)
+            attempt("delete farm_members", t("farm_members").delete().eq("farm_id", farm["id"]).execute)
+            attempt("delete farms", t("farms").delete().eq("id", farm["id"]).execute)
+        attempt("delete organization_memberships", t("organization_memberships").delete().eq("organization_id", org["id"]).execute)
+        attempt("delete organizations", t("organizations").delete().eq("id", org["id"]).execute)
+    for u in attempt("list auth users", lambda: admin.auth.admin.list_users(page=1, per_page=1000)) or []:
         if (u.email or "").startswith(f"{PREFIX.lower()}-{RUN}-"):
-            attempt(lambda x=u.id: admin.table("devices").delete().eq("user_id", x).execute())
-            attempt(lambda x=u.id: admin.auth.admin.delete_user(x))
-            attempt(lambda x=u.id: admin.table("profiles").delete().eq("id", x).execute())
+            attempt("delete devices", t("devices").delete().eq("user_id", u.id).execute)
+            attempt("delete auth user", lambda x=u.id: admin.auth.admin.delete_user(x))
+            attempt("delete profiles", t("profiles").delete().eq("id", u.id).execute)
+    return problems
+
+
+def orphan_users() -> list[str] | None:
+    """Auth users of this run still present (auth.users is not a counted table)."""
+    try:
+        users = admin.auth.admin.list_users(page=1, per_page=1000)
+    except Exception:  # noqa: BLE001 -- unknown is reported as a failure
+        return None
+    return [u.id for u in users if (u.email or "").startswith(f"{PREFIX.lower()}-{RUN}-")]
 
 
 def main() -> int:
@@ -207,10 +232,14 @@ def main() -> int:
     try:
         rows = probe(seed())
     finally:
-        cleanup()
+        problems = cleanup()
         time.sleep(1)
-        after = snapshot()
-        diff = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
+        try:
+            after = snapshot()
+            diff = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
+        except Exception as exc:  # noqa: BLE001
+            diff = {"row counts": f"could not be re-read ({type(exc).__name__})"}
+        orphans = orphan_users()
     mismatches = 0
     print(f"\n{'operation':44} {'expected':9} actual")
     for name, exp, got in rows:
@@ -218,8 +247,13 @@ def main() -> int:
         mismatches += 0 if good else 1
         print(f"{name:44} {exp:9} {got}{'' if good else '   <-- GAP'}")
     print(f"\ncleanup row counts restored: {not diff} {diff if diff else ''}")
+    print(f"cleanup steps failed: {problems or 'none'}")
+    print(f"auth users of this run left: {'unknown (list failed)' if orphans is None else (orphans or 'none')}")
+    cleanup_ok = not diff and not problems and orphans == []
+    if not cleanup_ok:
+        print(f"LEFTOVER CHECK NEEDED for run tag {TAG}")
     print(f"{len(rows) - mismatches}/{len(rows)} match the lifecycle contract")
-    return 1 if (args.enforce and (mismatches or diff)) else 0
+    return 1 if (args.enforce and (mismatches or not cleanup_ok)) else 0
 
 
 if __name__ == "__main__":

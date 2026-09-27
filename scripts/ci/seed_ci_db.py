@@ -2,8 +2,9 @@
 
     python scripts/ci/seed_ci_db.py      # after scripts/ci/supabase_stack.sh
 
-Refuses to run unless SUPABASE_URL points at a local stack (127.0.0.1/localhost):
-it creates users and data, and must never be aimed at a hosted project.
+Refuses to run unless BOTH SUPABASE_URL and SUPABASE_DB_URL point at a local
+stack (127.0.0.1/localhost): it creates users and data through both, and must
+never be aimed at a hosted project.
 
 Some real-database tests look up the demo tenant instead of building their own
 rows, so the empty CI database is provisioned the way the hosted one was, with
@@ -41,6 +42,8 @@ from supabase import create_client  # noqa: E402
 from infrastructure.config import load_settings  # noqa: E402
 from infrastructure.cv_repo import PostgresCvRepository  # noqa: E402
 
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+
 BUCKETS = {
     "plant-images": {"public": False, "allowed_mime_types": ["image/jpeg", "image/png"], "file_size_limit": 10 * 1024 * 1024},
     "mrv-evidence": {"public": False, "file_size_limit": 50 * 1024 * 1024},
@@ -61,8 +64,14 @@ def run(script: str, env: dict[str, str] | None = None, args: tuple[str, ...] = 
 def main() -> int:
     settings = load_settings()
     url, service_key = settings.require_supabase()
-    if urlparse(url).hostname not in {"127.0.0.1", "localhost"}:
-        sys.exit(f"refusing to seed {urlparse(url).hostname}: this script only provisions a local CI stack")
+    # BOTH connections must be local: the API URL (supabase-py, Auth admin,
+    # Storage) and the direct Postgres URL (factor import, CV repository).
+    # A missing DB URL is refused too -- never "probably fine".
+    targets = {"SUPABASE_URL": url, "SUPABASE_DB_URL": settings.supabase_db_url or ""}
+    for name, value in targets.items():
+        host = urlparse(value).hostname
+        if host not in LOCAL_HOSTS:
+            sys.exit(f"refusing to seed: {name} host {host!r} is not local; this script only provisions a local CI stack")
 
     run("import_factor_set.py", args=("--apply", "--publish"))
     run("import_factor_set.py", args=("--verify",))

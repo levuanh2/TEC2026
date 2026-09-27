@@ -33,8 +33,9 @@ on:
         default: false
   # BOOTSTRAP -- TEMPORARY, REMOVE BEFORE MERGE: workflow_dispatch only works
   # once this file is on the default branch, so the first validation runs on
-  # a push to the trusted CI branch. Delete this trigger AND the matching
-  # `push` leg of every `if:` below in the same commit.
+  # a push to the trusted CI branch BY THE REPOSITORY OWNER (other writers'
+  # pushes are skipped). Delete this trigger AND the matching `push` leg of
+  # every `if:` below in the same commit.
   push:
     branches: [ci/agricarbon-production-grade]
 
@@ -62,7 +63,8 @@ jobs:
     if: >-
       github.repository == 'levuanh2/TEC2026' && (
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade'))
+      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade' &&
+       github.actor == github.repository_owner && github.triggering_actor == github.repository_owner))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -131,7 +133,8 @@ jobs:
     if: >-
       github.repository == 'levuanh2/TEC2026' && (
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade'))
+      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade' &&
+       github.actor == github.repository_owner && github.triggering_actor == github.repository_owner))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -163,7 +166,8 @@ jobs:
     if: >-
       github.repository == 'levuanh2/TEC2026' && (
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.db_probes) ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade'))
+      (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade' &&
+       github.actor == github.repository_owner && github.triggering_actor == github.repository_owner))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
