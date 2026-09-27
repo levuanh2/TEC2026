@@ -57,3 +57,6 @@
 /web-dashboard/package-lock.json @levuanh2
 /app/pubspec.yaml @levuanh2
 /app/pubspec.lock @levuanh2
+/backend/tests/route_auth_manifest.py @levuanh2
+/backend/tests/test_route_positive_auth.py @levuanh2
+/backend/tests/test_route_auth_inventory.py @levuanh2

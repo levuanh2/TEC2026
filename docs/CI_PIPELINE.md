@@ -509,6 +509,36 @@ pub: pub.dev; pip: no URL, path or index option). A dependency bump therefore
 carries the trailer and gets CODEOWNERS review, next to the dependency-audit
 diff summary.
 
+**Positive auth coverage for every protected route.** A "no token -> 401" sweep
+also passes a route that rejects *every* caller. `backend/tests/route_auth_manifest.py`
+classifies each `/v1` operation of the app's OpenAPI as `PUBLIC` (only
+`GET /v1/carbon/scenarios`), `POSITIVE` or `EXCEPTION` (documented `EXC-AUTH-*`
+id; none today). `test_route_auth_inventory.py` (no database, both backend jobs)
+fails with `PROTECTED_ROUTE_POSITIVE_COVERAGE_MISSING` for an operation missing
+from the manifest, rejects stale entries, a non-2xx `POSITIVE` expectation and
+any write that is not `POSITIVE`. `test_route_positive_auth.py` (DB job) then
+builds a disposable tenant on the local stack -- Auth Admin users, password
+grant, real GoTrue JWTs -- and drives all 53 protected operations over HTTP
+through `main.app`: the persona gets the SUCCESS status (season + batch,
+activities, Carbon result, recommendation, CV inference, MRV export/render/
+download, provisioning ...), the same request without a token gets 401, and
+where the manifest says `deny`, an active manager of another cooperative gets
+403/404 first. A manifest entry whose request never ran fails with
+`PROTECTED_ROUTE_POSITIVE_CASE_MISSING`. CV inference runs with an untrained
+model of the production architecture (CI has no checkpoint); upload, scope,
+Storage and rows are real. The tenant is deleted afterwards. The manifest and
+both tests are guarded with protected minimums (54 and 5 passed).
+
+**Why `backend/main.py` is not a CODEOWNERS path.** It is application wiring,
+not CI policy, and every product PR would otherwise need the CI trailer. What it
+wires is checked from the outside: the route inventory is generated from its
+OpenAPI, the public/protected classification is exact, every protected
+operation has a positive and a negative auth case against the live stack, the
+live 401 sweep runs on `uvicorn main:app` without pytest, `HIDDEN_ROUTE` and
+`TEST_ENV_DETECTION` block the known ways to hide from that, and the OpenAPI
+contract gate detects route wiring changes. It moves to CODEOWNERS only if a
+concrete bypass of all of these is shown.
+
 Every gate script a workflow executes is guarded (the application code under test -- `backend/main.py` and the modules it imports, `web-dashboard/src`, `app/lib` -- is not: it is what production runs, it is reviewed like any product change, and the protected suites exercise it): `CI_UNGUARDED_SCRIPT` fails when a
 `run:` step calls a script outside `guarded_paths` (the security probes in
 `backend/scripts/` print the very `50/50` lines the gate trusts), and

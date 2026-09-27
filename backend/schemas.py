@@ -466,7 +466,9 @@ class EmissionFactorResponse(BaseModel):
     factor_set_id: str
     factor_code: str
     category: str
-    gas: str
+    # NULL for parameters that are not a gas's emission factor (scaling factors,
+    # exponents, default values): `emission_factors.gas` is nullable.
+    gas: str | None = None
     activity_unit: str
     result_unit: str
     factor_value: float

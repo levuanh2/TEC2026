@@ -4,6 +4,11 @@
 name: Strict CI (nightly)
 
 on:
+  # TEMPORARY bootstrap: workflow_dispatch only works once this file is on main.
+  # Removed before merge (the final PR commit has no branch trigger).
+  push:
+    branches:
+      - ci/agricarbon-hardening-v2
   workflow_dispatch:
   schedule:
     - cron: "0 19 * * *"   # 02:00 Asia/Ho_Chi_Minh
@@ -109,6 +114,18 @@ jobs:
           if [ "$status" -ge 16 ]; then echo "::error::mutmut failed ($status)"; exit 1; fi
           mutmut results | tee "$RUNNER_TEMP/mutmut.txt"
           { echo "### Mutation: $MODULE"; echo '```'; tail -20 "$RUNNER_TEMP/mutmut.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # Every surviving mutant's diff, for triage against docs/MUTATION_BASELINE.md.
+          mkdir -p mutation-report
+          name="$(echo "$MODULE" | tr '/.' '__')"
+          cp "$RUNNER_TEMP/mutmut.txt" "mutation-report/$name.results.txt"
+          mutmut show all > "mutation-report/$name.survivors.diff"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: mutation-${{ strategy.job-index }}
+          path: backend/mutation-report/
+          if-no-files-found: error
+          retention-days: 30
 
   # Resolved dependency drift is an error here (a warning on PRs), plus a
   # license inventory of the production dependency set (report).

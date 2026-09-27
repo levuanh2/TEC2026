@@ -4416,7 +4416,14 @@
             "title": "Category"
           },
           "gas": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Gas"
           },
           "activity_unit": {
@@ -4453,7 +4460,6 @@
           "factor_set_id",
           "factor_code",
           "category",
-          "gas",
           "activity_unit",
           "result_unit",
           "factor_value",
