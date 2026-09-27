@@ -45,12 +45,14 @@ Standard library + PyYAML (installed by the job).
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import py_compile
 import re
 import subprocess
 import sys
+import tokenize
 from collections import Counter
 from pathlib import Path
 
@@ -333,12 +335,29 @@ def check_npm(wf: str, job_id: str, run: str, policy: dict) -> None:
 
 
 ENV_DETECTION = {
-    "py": re.compile(r"^\s*(?:import|from)\s+(?:pytest|_pytest|hypothesis)\b|\.modules\b|[\"'](?:_?pytest|hypothesis|unittest)[\"']|PYTEST_|GITHUB_ACTIONS"
-                     r"|environ(?:\.get)?\s*[\(\[]\s*[\"']CI[\"']|getenv\(\s*[\"']CI[\"']"),
-    "ts": re.compile(r"\bVITEST\b|import\.meta\.vitest|navigator\.webdriver|GITHUB_ACTIONS|process\.env\.CI\b"
-                     r"|__playwright|PLAYWRIGHT"),
-    "dart": re.compile(r"FLUTTER_TEST|Platform\.environment|GITHUB_ACTIONS"),
+    # Any string literal naming a CI/test variable counts, whatever the access
+    # idiom (`"CI" in os.environ`, `environ["CI"]`, `getenv("CI")`, a dict of names).
+    "py": re.compile(r"^\s*(?:import|from)\s+(?:pytest|_pytest|hypothesis)\b|\.modules\b"
+                     r"|[\"'](?:_?pytest|hypothesis|unittest|CI|GITHUB_ACTIONS|PYTEST_CURRENT_TEST)[\"']"
+                     r"|PYTEST_|GITHUB_ACTIONS"),
+    "ts": re.compile(r"\bVITEST\b|import\.meta\.vitest|navigator\.webdriver|GITHUB_ACTIONS|process\.env"
+                     r"|[\"'`](?:CI|VITEST|PLAYWRIGHT)[\"'`]|__playwright|PLAYWRIGHT"),
+    "dart": re.compile(r"FLUTTER_TEST|Platform\.environment|GITHUB_ACTIONS|[\"'](?:CI)[\"']"),
 }
+
+
+def py_code_lines(text: str) -> list[str]:
+    """Source lines with comments removed by the tokenizer (a `#` inside a string
+    literal is code, not a comment). Untokenizable source is scanned as is."""
+    lines = text.splitlines()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                row, col = tok.start
+                lines[row - 1] = lines[row - 1][:col]
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+    return lines
 
 
 def check_env_detection(policy: dict) -> None:
@@ -353,10 +372,12 @@ def check_env_detection(policy: dict) -> None:
             r = rel(f)
             if kind == "py" and (set(f.relative_to(base).parts) & {"tests", "tests_strict", "scripts", ".venv"}):
                 continue
-            if kind == "ts" and (".test." in f.name or "/mocks/" in r):
-                continue
-            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-                code = line.split("#", 1)[0] if kind == "py" else line.split("//", 1)[0]
+            # Nothing under web-dashboard/src or app/lib is exempt by name: a
+            # `.test.`/mocks module can be imported by production code.
+            text = f.read_text(encoding="utf-8")
+            raw = text.splitlines()
+            code_lines = py_code_lines(text) if kind == "py" else raw
+            for n, (line, code) in enumerate(zip(raw, code_lines), 1):
                 if ENV_DETECTION[kind].search(code) and f"{r}: {line.strip()}" not in allow:
                     fail("TEST_ENV_DETECTION", f"{r}:{n}: production code detects the test runner/CI: `{line.strip()}`")
 
