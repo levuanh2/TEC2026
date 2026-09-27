@@ -310,6 +310,12 @@ def relaxations(base: dict, head: dict) -> list[str]:
         grown = [e for e in hx.get(key, []) if e not in bx.get(key, [])]
         if grown and key in bx:
             out.append(f"db_exceptions {key} grew: {grown}")
+    grown = set(head.get("route_mutation_exempt_files", [])) - set(base.get("route_mutation_exempt_files", []))
+    if grown and "route_mutation_exempt_files" in base:
+        out.append(f"route_mutation_exempt_files grew: {sorted(grown)}")
+    grown = set(head.get("route_mutation_allow", [])) - set(base.get("route_mutation_allow", []))
+    if grown and "route_mutation_allow" in base:
+        out.append(f"route_mutation_allow grew: {sorted(grown)}")
     dropped = set(base.get("guarded_paths", [])) - set(head.get("guarded_paths", []))
     if dropped:
         out.append(f"guarded_paths shrank: {sorted(dropped)}")
@@ -373,7 +379,9 @@ def py_code_lines(text: str) -> list[str]:
 
 ROUTE_MUTATION = re.compile(
     r"\.routes\s*(?:\.(?:append|insert|extend|remove|pop|clear)\b|\[|[-+*|]?=(?!=))|lifespan_context|\blifespan\s*="
-    r"|\badd_(?:api_)?(?:websocket_)?route\s*\(|\.mount\s*\(|\bsetattr\s*\(|\binclude_router\s*\(")
+    r"|\badd_(?:api_)?(?:websocket_)?route\s*\(|\.mount\s*\(|\bsetattr\s*\(|\binclude_router\s*\("
+    # undoing infrastructure/route_freeze.py
+    r"|__class__\s*=(?!=)|\bobject\s*\.\s*__setattr__|__frozen_routing__|\bfrozen_class\b|_frozen_classes")
 # A router/app route method is only allowed as a decorator: called as a plain
 # function (e.g. from a timer) it registers a route after the inventory looked.
 ROUTE_METHOD_CALL = re.compile(
@@ -387,11 +395,14 @@ def check_route_mutation(policy: dict) -> None:
     inventory looked) could serve an operation the auth inventory never sees.
     Exact `file: line` exceptions only (policy.json route_mutation_allow)."""
     allow = set(policy.get("route_mutation_allow", []))
+    exempt = set(policy.get("route_mutation_exempt_files", []))  # the freezer itself (guarded)
     for base in (ROOT / "backend", ROOT / "ml"):
         for f in base.rglob("*.py"):
             if set(f.relative_to(base).parts) & {"tests", "tests_strict", "scripts", ".venv", "runs", "datasets"}:
                 continue
             r = rel(f)
+            if r in exempt:
+                continue
             text = f.read_text(encoding="utf-8")
             for n, (line, code) in enumerate(zip(text.splitlines(), py_code_lines(text)), 1):
                 hit = ROUTE_MUTATION.search(code) or (

@@ -16,6 +16,7 @@ import fastapi.routing  # noqa: E402
 from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from starlette.routing import Route  # noqa: E402
 
+from infrastructure.route_freeze import frozen_class  # noqa: E402
 from main import app  # noqa: E402
 from tests.route_auth_manifest import EXCEPTION, POSITIVE, PUBLIC, ROUTES  # noqa: E402
 
@@ -52,7 +53,8 @@ def served_operations() -> set[tuple[str, str]]:
         for route in routes:
             if type(route) is included:
                 context = route.include_context
-                assert type(route.original_router) is APIRouter, "UNINVENTORIED_ROUTE: included router is not a plain APIRouter"
+                assert type(route.original_router) is frozen_class(APIRouter), \
+                    "UNINVENTORIED_ROUTE: included router is not the frozen plain APIRouter"
                 assert context.include_in_schema, "UNINVENTORIED_ROUTE: a router is included with include_in_schema=False"
                 walk(route.original_router.routes, prefix + context.prefix)
             elif type(route) is APIRoute:
@@ -88,6 +90,30 @@ def test_routes_registered_at_startup_are_inventoried_too():
     assert asyncio.run(inside_lifespan()) == served_operations() == openapi_operations()
     # Deprecated on_event hooks are not reviewed here at all: forbid them.
     assert app.router.on_startup == [] and app.router.on_shutdown == [], "use no on_event startup/shutdown hooks"
+
+
+def test_routing_is_frozen_after_import():
+    # main.py ends with freeze_routing(app): nothing can register a route later
+    # (timer, lifespan task, aliased decorator), so this inventory is final.
+    from fastapi import FastAPI
+
+    assert type(app) is frozen_class(FastAPI) and type(app.router) is frozen_class(APIRouter)
+    assert isinstance(app.router.routes, tuple)
+    attempts = {
+        "aliased decorator": lambda: app.get("/v1/late")(lambda: None),
+        "include_router": lambda: app.include_router(APIRouter()),
+        "add_api_route": lambda: app.router.add_api_route("/v1/late", lambda: None),
+        "mount": lambda: app.mount("/v1/late", FastAPI()),
+        "routes rebinding": lambda: setattr(app.router, "routes", []),
+        "router rebinding": lambda: setattr(app, "router", APIRouter()),
+    }
+    for label, attempt in attempts.items():
+        try:
+            attempt()
+        except (RuntimeError, AttributeError, TypeError):
+            continue
+        raise AssertionError(f"UNINVENTORIED_ROUTE: routing is not frozen ({label} succeeded)")
+    assert served_operations() == openapi_operations()
 
 
 def test_every_module_that_declares_routes_is_loaded_at_startup():

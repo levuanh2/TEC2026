@@ -552,6 +552,18 @@ routes to be loaded once `main` is imported (no late `importlib` routes).
 Exact exception: the reviewed `FastAPI(..., lifespan=lifespan)` line (the
 lifespan only releases pools on shutdown).
 
+**The routing table is frozen at runtime.** Static rules cannot see every
+alias (`route = app.get` inside a function a timer calls later), so `main.py`
+ends with `freeze_routing(app)` (`backend/infrastructure/route_freeze.py`,
+guarded): every router's route list becomes a tuple and every registration
+method -- `add_api_route`, `include_router`, `mount`, the `get`/`post`/...
+decorators, `on_event` -- raises, as does rebinding `routes`, `router` or
+`lifespan_context`. A late registration now fails loudly in production instead
+of serving an uninventoried operation. `test_routing_is_frozen_after_import`
+asserts the frozen state and tries each path. Undoing the freeze
+(`__class__ =`, `object.__setattr__`, `frozen_class`) is a `ROUTE_MUTATION`
+outside the freezer file itself.
+
 Residual, by design (like obfuscated environment detection): code written to
 defeat the scanners -- attribute names assembled at runtime, `getattr` tricks,
 eval -- that mutates routing later. No static or dynamic test can rule out
