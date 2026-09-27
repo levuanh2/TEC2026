@@ -194,8 +194,11 @@ reviewers, `main` only, no automatic trigger). There is no production CD here.
 branch. The first validation therefore used a **temporary** `push` trigger for
 exactly `ci/agricarbon-production-grade` (the branch of PR #1), plus a
 matching `push` leg in every secret-bearing job's `if:` that also requires the
-pusher and triggering actor to be the repository owner. Both are removed
-before merge; the merged file only has `workflow_dispatch`.
+pusher and triggering actor to be the repository owner. That run passed on
+GitHub Actions on 2026-09-27 (commit `df0be1b`, run 36306809693: Render flow
+17/17, hosted lifecycle probe 36/36 with cleanup verified, sign-up disabled 5/5),
+and the trigger and its `if:` legs were then removed. The merged file only has
+`workflow_dispatch`.
 
 **Cleanup hardening (from the read-only review).** In `staging_render_flow.py`
 and `hosted_lifecycle_rls_probe.py`, every cleanup call, the discovery
