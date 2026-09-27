@@ -28,8 +28,13 @@ DOCS_ROUTES = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 MIDDLEWARE = ["CORSMiddleware", "RequestIdMiddleware"]
 
 
+OPENAPI_METHODS = METHODS | {"head", "options", "trace"}
+
+
 def openapi_operations() -> set[tuple[str, str]]:
-    return {(m.upper(), p) for p, item in app.openapi()["paths"].items() for m in item if m in METHODS}
+    # Every HTTP method the schema lists, so an explicit HEAD/OPTIONS operation
+    # cannot slip past the manifest (the manifest and the suites use METHODS only).
+    return {(m.upper(), p) for p, item in app.openapi()["paths"].items() for m in item if m in OPENAPI_METHODS}
 
 
 def served_operations() -> set[tuple[str, str]]:
@@ -46,7 +51,11 @@ def served_operations() -> set[tuple[str, str]]:
                 walk(route.original_router.routes, prefix + context.prefix)
             elif isinstance(route, APIRoute):
                 assert route.include_in_schema, f"UNINVENTORIED_ROUTE: {route.path} is hidden from the schema"
-                ops.update((m, prefix + route.path) for m in route.methods - {"HEAD", "OPTIONS"})
+                # Every method counts (FastAPI adds no implicit HEAD to an APIRoute):
+                # an explicit HEAD/OPTIONS/TRACE route is not something the suites send.
+                extra = {m for m in route.methods if m.lower() not in METHODS}
+                assert not extra, f"UNINVENTORIED_ROUTE: {sorted(extra)} {route.path} -- only {sorted(METHODS)} are inventoried"
+                ops.update((m, prefix + route.path) for m in route.methods)
             elif type(route) is Route and route.path in DOCS_ROUTES:
                 continue
             else:
