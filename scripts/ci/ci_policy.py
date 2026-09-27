@@ -372,7 +372,11 @@ def py_code_lines(text: str) -> list[str]:
 
 ROUTE_MUTATION = re.compile(
     r"\.routes\s*(?:\.(?:append|insert|extend|remove|pop|clear)\b|\[|=(?!=))|lifespan_context|\blifespan\s*="
-    r"|\badd_(?:api_)?(?:websocket_)?route\s*\(|\.mount\s*\(|\bsetattr\s*\(")
+    r"|\badd_(?:api_)?(?:websocket_)?route\s*\(|\.mount\s*\(|\bsetattr\s*\(|\binclude_router\s*\(")
+# A router/app route method is only allowed as a decorator: called as a plain
+# function (e.g. from a timer) it registers a route after the inventory looked.
+ROUTE_METHOD_CALL = re.compile(
+    r"\b(?:app|\w*router)\s*\.\s*(?:get|post|put|patch|delete|head|options|trace|api_route|websocket|route)\s*\(")
 
 
 def check_route_mutation(policy: dict) -> None:
@@ -389,7 +393,9 @@ def check_route_mutation(policy: dict) -> None:
             r = rel(f)
             text = f.read_text(encoding="utf-8")
             for n, (line, code) in enumerate(zip(text.splitlines(), py_code_lines(text)), 1):
-                if ROUTE_MUTATION.search(code) and f"{r}: {line.strip()}" not in allow:
+                hit = ROUTE_MUTATION.search(code) or (
+                    ROUTE_METHOD_CALL.search(code) and not code.lstrip().startswith("@"))
+                if hit and f"{r}: {line.strip()}" not in allow:
                     fail("ROUTE_MUTATION", f"{r}:{n}: routing table / lifespan changed outside router decorators: `{line.strip()}`")
 
 
