@@ -1,0 +1,237 @@
+# Hosted staging checks: Render (API + static web) and the hosted Supabase
+# project. NOT a pull-request check and never required by branch protection.
+#
+# * Manual only (workflow_dispatch) from main: it holds the service role key,
+#   so it must never run code from an unreviewed branch or a fork. There is no
+#   pull_request / pull_request_target trigger, and every secret-bearing job
+#   re-checks repository + event + ref in its own `if:`.
+# * Never deploys, never applies migrations (hosted migrations stay a manual,
+#   approved, one-batch-at-a-time operation -- docs/MIGRATION_HISTORY.md,
+#   "Hosted migration runbook").
+# * Mutations happen only in DISPOSABLE tenants that each script creates under
+#   a unique run tag and deletes in `finally`; the run fails if any row count
+#   differs afterwards or an Auth user of the run survives, and prints the tag
+#   and ids to clean. No shared QA identity is needed.
+#
+# Secrets (repository secrets; see docs/CI_PIPELINE.md, "Staging E2E"):
+#   STAGING_SUPABASE_URL, STAGING_SUPABASE_PUBLISHABLE_KEY,
+#   STAGING_SUPABASE_SERVICE_ROLE_KEY
+# Optional, only for the opt-in browser job: STAGING_MANAGER_EMAIL/_PASSWORD,
+#   STAGING_FARMER_EMAIL/_PASSWORD.
+name: Staging E2E (hosted, manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      db_probes:
+        description: "Disposable-tenant PostgREST probes against hosted Supabase (create -> verify -> delete)"
+        type: boolean
+        default: true
+      browser_readonly:
+        description: "Read-only browser specs on the Render web app (needs the STAGING_* QA identity secrets)"
+        type: boolean
+        default: false
+
+# Never cancel a run: an interrupted script could skip its cleanup.
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11.9"
+  NODE_VERSION: "22.18.0"
+  API_URL: ${{ vars.STAGING_API_URL || 'https://agricarbon-api-staging.onrender.com' }}
+  WEB_URL: ${{ vars.STAGING_WEB_URL || 'https://agricarbon-web-staging.onrender.com' }}
+  # Render Free sleeps when idle; the first request waits for a cold start
+  # (measured 34 s on 2026-09-27). Waking within this budget is a pass, and the
+  # wake time is reported separately from warm latency.
+  COLD_START_BUDGET_SECONDS: "180"
+
+jobs:
+  preflight:
+    name: Preflight (trusted repo/ref, secrets present)
+    if: >-
+      github.repository == 'levuanh2/TEC2026' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Required secrets are configured
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          missing=""
+          for name in STAGING_SUPABASE_URL STAGING_SUPABASE_PUBLISHABLE_KEY STAGING_SUPABASE_SERVICE_ROLE_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Staging E2E BLOCKED::missing secrets:$missing (docs/CI_PIPELINE.md, Staging E2E)"
+            exit 1
+          fi
+          case "$STAGING_SUPABASE_URL" in
+            https://*.supabase.co) echo "hosted Supabase URL shape ok" ;;
+            *) echo "::error title=Staging E2E::STAGING_SUPABASE_URL is not a hosted https://*.supabase.co URL"; exit 1 ;;
+          esac
+
+  render:
+    name: Render health + cold start
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Wake API, then /health and /docs
+        run: |
+          start=$(date +%s)
+          code=000
+          while [ $(( $(date +%s) - start )) -lt "$COLD_START_BUDGET_SECONDS" ]; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$API_URL/health")" || code=000
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          wake=$(( $(date +%s) - start ))
+          if [ "$code" != "200" ]; then
+            echo "::error title=Render::$API_URL/health not 200 within ${COLD_START_BUDGET_SECONDS}s (last $code)"
+            exit 1
+          fi
+          warm="$(curl -s -o /dev/null -w '%{time_total}' "$API_URL/health")"
+          docs="$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/docs")"
+          web="$(curl -s -o /dev/null -w '%{http_code}' "$WEB_URL/")"
+          deep="$(curl -s -o /dev/null -w '%{http_code}' "$WEB_URL/farmer")"
+          {
+            echo "### Render staging"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| API wake (cold start incl.) | ${wake}s |"
+            echo "| API /health warm | ${warm}s |"
+            echo "| API /docs | $docs |"
+            echo "| Web / | $web |"
+            echo "| Web SPA deep link /farmer | $deep |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for pair in "docs:$docs" "web:$web" "deep-link:$deep"; do
+            [ "${pair#*:}" = "200" ] || { echo "::error title=Render::${pair%%:*} returned ${pair#*:}"; exit 1; }
+          done
+
+  # Provisioning -> season -> activity -> Carbon readiness -> MRV read ->
+  # closed-season refusal, all through the deployed Render API.
+  render-flow:
+    name: Render API flow (disposable tenant)
+    needs: render
+    if: >-
+      github.repository == 'levuanh2/TEC2026' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+      STAGING_API_URL: ${{ vars.STAGING_API_URL || 'https://agricarbon-api-staging.onrender.com' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Provision, season, activity, readiness, MRV, lifecycle, cleanup
+        run: python scripts/staging_render_flow.py
+
+  # The deployed database's own rules, straight through PostgREST (the Flutter
+  # path) -- catches a hosted project that drifted from supabase/migrations.
+  # Runs AFTER render-flow (even when it failed): both scripts compare global
+  # table row counts before/after, so running them in parallel makes each see
+  # the other's disposable tenant as a leftover (observed on the first run).
+  db-probes:
+    name: Hosted PostgREST probes (disposable tenant)
+    needs: [preflight, render-flow]
+    if: >-
+      !cancelled() && needs.preflight.result == 'success' &&
+      github.repository == 'levuanh2/TEC2026' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.db_probes))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      # Tag, delete in `finally`, row counts compared; exits 1 on any gap.
+      - name: Lifecycle + membership via PostgREST (36 cases)
+        if: ${{ !cancelled() }}
+        run: python scripts/hosted_lifecycle_rls_probe.py --enforce
+      - name: Public sign-up disabled
+        if: ${{ !cancelled() }}
+        run: python scripts/verify_public_signup_disabled.py
+
+  # Opt-in only: uses the shared QA identities,
+  # read-only, against the deployed web app.
+  browser-readonly:
+    name: Browser read-only (Render web, shared QA identities)
+    needs: render
+    if: >-
+      github.repository == 'levuanh2/TEC2026' &&
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.browser_readonly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web-dashboard
+    env:
+      REAL_E2E: "true"
+      FARMER_REAL_E2E: "true"
+      REAL_E2E_BASE_URL: ${{ vars.STAGING_WEB_URL || 'https://agricarbon-web-staging.onrender.com' }}
+      REAL_E2E_EMAIL: ${{ secrets.STAGING_MANAGER_EMAIL }}
+      REAL_E2E_PASSWORD: ${{ secrets.STAGING_MANAGER_PASSWORD }}
+      FARMER_REAL_E2E_EMAIL: ${{ secrets.STAGING_FARMER_EMAIL }}
+      FARMER_REAL_E2E_PASSWORD: ${{ secrets.STAGING_FARMER_PASSWORD }}
+      # Read-only: the MRV export spec writes, so it stays off.
+      REAL_MRV_EXPORT_E2E: "false"
+    steps:
+      - name: QA identity secrets are configured
+        run: |
+          for name in REAL_E2E_EMAIL REAL_E2E_PASSWORD FARMER_REAL_E2E_EMAIL FARMER_REAL_E2E_PASSWORD; do
+            [ -n "${!name}" ] || { echo "::error title=Browser read-only BLOCKED::STAGING_* QA identity secrets are not set"; exit 1; }
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web-dashboard/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      # playwright.real.config.ts keeps traces OFF (they would record the typed
+      # password); failure screenshots show only the masked field.
+      - name: Management + Farmer real-data read specs
+        run: npx playwright test --config playwright.real.config.ts web-real-data farmer-real-data
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: staging-browser-failure-screenshots
+          path: web-dashboard/test-results/
+          retention-days: 3

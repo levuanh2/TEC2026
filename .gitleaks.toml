@@ -1,0 +1,28 @@
+# Secret scanning for CI (`secret-scan` job) and local runs:
+#   gitleaks dir . --config .gitleaks.toml
+#
+# The full default ruleset stays on. The allowlist below only covers value
+# SHAPES that the entropy-based `generic-api-key` rule mistakes for secrets in
+# this codebase -- never whole files or directories, so a real key pasted into
+# any of these files is still caught.
+
+title = "AgriCarbon gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Identifiers and fixtures that look random but are not credentials"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = [
+  # snake_case identifiers: activity field keys (`key: 'water_volume_m3'`),
+  # methodology factor keys (`cfoa_key="straw_incorporated_lt_30d"`).
+  '''key\s*[:=]\s*["'][a-z][a-z0-9_]*["']''',
+  # Idempotency keys are client-generated request UUIDs, not credentials.
+  '''idempotency_key"\s*:\s*"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"''',
+  # The character set the provisioning service draws temporary passwords from.
+  '''_PASSWORD_ALPHABET\s*=\s*"[A-Za-z0-9]+"''',
+  # Fixed temporary-password fixture in the provisioning UI tests.
+  "temporaryPassword:\\s*'Ab3d-Ef4h-Jk5m'",
+]

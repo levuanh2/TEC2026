@@ -33,7 +33,9 @@ export default defineConfig({
   },
   // Do not start a normal dashboard server for a skipped test.  When enabled,
   // compile an explicit real-data build; VITE_USE_MOCK_DATA remains false.
-  webServer: process.env.REAL_E2E === 'true'
+  // A REAL_E2E_BASE_URL (e.g. the Render staging site, staging-e2e.yml) is an
+  // already-deployed app: nothing local to start.
+  webServer: process.env.REAL_E2E === 'true' && !process.env.REAL_E2E_BASE_URL
     ? {
         command: 'npm run dev -- --host 127.0.0.1 --port 5173',
         url: baseURL,

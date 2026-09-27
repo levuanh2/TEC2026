@@ -1,0 +1,10 @@
+# Coverage for CI's backend DB-integration job (docs/CI_PIPELINE.md, "Coverage").
+# Measures application code only: tests and the hosted QA scripts are excluded.
+[run]
+source = .
+omit =
+    tests/*
+    scripts/*
+
+[report]
+skip_empty = true

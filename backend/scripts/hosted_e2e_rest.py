@@ -1,5 +1,11 @@
 """Hosted Supabase E2E cho REST API đọc — SMOKE-TEST-REST.
 
+LEGACY / NOT PART OF CURRENT CI. Last matched the schema on 2026-09-08: its
+seeded PDF export row now violates `mrv_export_snapshot_lineage_chk`
+(20260913150000) and the MRV export read path changed since. It runs in
+neither ci.yml nor staging-e2e.yml; the replacement coverage is listed in
+docs/CI_PIPELINE.md ("Legacy scripts").
+
 Chạy: python backend/scripts/hosted_e2e_rest.py
 Cần backend/.env đầy đủ (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY).
 
