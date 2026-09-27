@@ -594,7 +594,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           bad="$(echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')"
           if [ -n "$bad" ]; then
-            echo "::error title=ci-gate::required jobs did not succeed: $(echo $bad)"
+            echo "::error title=ci-gate::required jobs did not succeed: ${bad//$'\n'/ }"
             exit 1
           fi
           echo "all $(echo "$NEEDS" | jq 'length') required jobs succeeded"

@@ -160,10 +160,14 @@ jobs:
 
   # The deployed database's own rules, straight through PostgREST (the Flutter
   # path) -- catches a hosted project that drifted from supabase/migrations.
+  # Runs AFTER render-flow (even when it failed): both scripts compare global
+  # table row counts before/after, so running them in parallel makes each see
+  # the other's disposable tenant as a leftover (observed on the first run).
   db-probes:
     name: Hosted PostgREST probes (disposable tenant)
-    needs: preflight
+    needs: [preflight, render-flow]
     if: >-
+      !cancelled() && needs.preflight.result == 'success' &&
       github.repository == 'levuanh2/TEC2026' && (
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.db_probes) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/ci/agricarbon-production-grade' &&

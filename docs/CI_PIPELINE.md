@@ -138,6 +138,14 @@ interrupted script could skip its cleanup. No shared QA identity is needed.
 | `db-probes` | **disposable tenant only** | hosted PostgREST lifecycle probe (36 cases, the Flutter sync calls) + public sign-up disabled; catches a hosted project that drifted from `supabase/migrations` |
 | `browser-readonly` | no | **opt-in** (`browser_readonly`, default off, never on push): `web-real-data` + `farmer-real-data` on the Render web app; needs the optional QA identity secrets |
 
+**Hosted jobs run one after another.** `render-flow` and `db-probes` both compare global
+table row counts before and after, so `db-probes` waits for `render-flow` (and still runs if it
+failed). On the first GitHub run they overlapped and each reported the other's in-flight tenant as
+a row-count difference, although every functional check passed and a direct lookup on hosted found
+0 leftover rows and 0 leftover Auth users for both run tags. Real users writing to the staging
+project during a run can still cause such a difference; the run then fails and a direct lookup by
+run tag decides.
+
 **Cleanup guarantee.** Each script tags everything with a unique run id,
 deletes it in `finally` (rows, the farmer that the API provisioned, the
 manager, profiles), then fails the run if any counted table's row count
