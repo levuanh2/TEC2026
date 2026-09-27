@@ -10,6 +10,9 @@ Fails (stable codes) when the built dist contains:
                         role is service_role, or a Postgres URL with a password
   DIST_TEST_ARTIFACT    source maps, test/spec/coverage files, QA identity domains
   BUNDLE_GROWTH         entry JS / CSS / total dist grew more than bundle.max_growth_pct
+  BUNDLE_SHRANK         entry JS / CSS / total dist is below bundle.min_size_pct of the
+                        baseline, or index.html loads no entry script: a stub or partial
+                        build must not pass the dist scans vacuously
                         over the recorded baseline (policy.json) -- reported always
 
 Library internals are not findings: supabase-js contains the bare "sb_secret_"
@@ -84,7 +87,9 @@ def main() -> int:
     js = [p for p in files if p.suffix == ".js"]
     css = [p for p in files if p.suffix == ".css"]
     index = text.get(args.dist / "index.html", "")
-    entry = [p for p in js if p.name in index] or js
+    entry = [p for p in js if p.name in index]
+    if not entry:
+        problems.append("BUNDLE_SHRANK: index.html references no built JS entry")
     sizes = {"entry_js_bytes": sum(p.stat().st_size for p in entry), "css_bytes": sum(p.stat().st_size for p in css),
              "total_dist_bytes": sum(p.stat().st_size for p in files)}
     rows = ["### Web dist", "", "| Size | Current | Baseline | Change |", "|---|---|---|---|"]
@@ -92,6 +97,8 @@ def main() -> int:
         base = b[key]
         growth = 100.0 * (now - base) / base
         rows.append(f"| {key} | {now:,} | {base:,} | {growth:+.1f}% |")
+        if now < base * b["min_size_pct"] / 100:
+            problems.append(f"BUNDLE_SHRANK: {key} is {now:,} B, below {b['min_size_pct']}% of the baseline {base:,} B")
         if growth > b["max_growth_pct"]:
             problems.append(f"BUNDLE_GROWTH: {key} grew {growth:.1f}% (limit {b['max_growth_pct']}%): {base:,} -> {now:,}")
     big = sorted(files, key=lambda p: p.stat().st_size, reverse=True)[:5]

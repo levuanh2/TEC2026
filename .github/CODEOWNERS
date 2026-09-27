@@ -51,3 +51,4 @@
 /backend/tests/test_straw_quickfix_persistence.py @levuanh2
 /backend/tests/test_write_response_atomicity.py @levuanh2
 /scripts/validate_supabase_schema.py @levuanh2
+/web-dashboard/package.json @levuanh2

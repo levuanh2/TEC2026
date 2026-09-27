@@ -125,6 +125,8 @@ def check_workflows(policy: dict) -> None:
                 for pat, label in BYPASS:
                     if pat.search(line) and (rel(wf), line.strip()) not in allow:
                         fail("CI_BYPASS", f"{rel(wf)} job {job_id}: `{line.strip()}` ({label})")
+            if re.search(r"\b(?:npm|npx)\b", run):
+                check_npm(rel(wf), job_id, run, policy)
             for path in re.findall(r"(?<![\w/.-])((?:\.\./)*(?:scripts|backend/scripts)/[\w./-]+\.(?:py|sh))", run):
                 cands = [ROOT / path.lstrip("./"), ROOT / "backend" / path, ROOT / path.replace("../", "")]
                 found = [c for c in cands if c.is_file()]
@@ -305,6 +307,27 @@ def relaxations(base: dict, head: dict) -> list[str]:
     if dropped:
         out.append(f"guarded_paths shrank: {sorted(dropped)}")
     return out
+
+
+def check_npm(wf: str, job_id: str, run: str, policy: dict) -> None:
+    """npm/npx resolve through web-dashboard/package.json (scripts, and the
+    devDependencies whose bins npx runs): it must be guarded, and any local file
+    an `npm run <script>` body executes must be guarded too."""
+    pkg_rel = "web-dashboard/package.json"
+    if not is_guarded(pkg_rel, policy):
+        fail("CI_UNGUARDED_SCRIPT", f"{wf} job {job_id} runs npm/npx, but {pkg_rel} is not under guarded_paths")
+    scripts = json.loads((ROOT / pkg_rel).read_text(encoding="utf-8")).get("scripts", {})
+    for name in re.findall(r"\bnpm (?:run(?:-script)?\s+([\w:-]+)|(test)\b)", run):
+        name = name[0] or name[1]
+        body = scripts.get(name)
+        if body is None:
+            fail("CI_MISSING_SCRIPT", f"{wf} job {job_id} runs npm script {name!r}, which package.json lacks")
+            continue
+        for ref in re.findall(r"(?<![\w@/-])((?:\./)?[\w./-]+\.(?:[cm]?js|ts|py|sh))\b", body):
+            target = f"web-dashboard/{ref.removeprefix('./')}"
+            if (ROOT / target).is_file() and not is_guarded(target, policy):
+                fail("CI_UNGUARDED_SCRIPT", f"{wf} job {job_id}: npm script {name!r} runs {target}, "
+                                            "which is not under guarded_paths")
 
 
 def is_guarded(path: str, policy: dict) -> bool:
