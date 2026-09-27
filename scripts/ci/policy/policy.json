@@ -54,7 +54,7 @@
       "test_straw_quickfix_persistence": 5,
       "test_write_response_atomicity": 8,
       "test_route_positive_auth": 54,
-      "test_route_auth_inventory": 8
+      "test_route_auth_inventory": 9
     }
   },
   "coverage": {

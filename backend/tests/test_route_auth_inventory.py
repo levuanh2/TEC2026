@@ -90,6 +90,30 @@ def test_routes_registered_at_startup_are_inventoried_too():
     assert app.router.on_startup == [] and app.router.on_shutdown == [], "use no on_event startup/shutdown hooks"
 
 
+def test_every_module_that_declares_routes_is_loaded_at_startup():
+    # A route decorator runs when its module is imported. A module first imported
+    # LATE (importlib / a timer) would register routes after this inventory ran,
+    # so every module declaring routes must already be loaded once `main` is.
+    import ast
+    import re
+
+    route_decorator = re.compile(r"^(?:app|\w*router)\.(?:get|post|put|patch|delete|head|options|trace|api_route|websocket|route)$")
+    backend = Path(__file__).resolve().parent.parent
+    late = []
+    for path in backend.rglob("*.py"):
+        parts = path.relative_to(backend).parts
+        if {"tests", "tests_strict", "scripts", ".venv"} & set(parts):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        declares = any(isinstance(d, ast.Call) and route_decorator.match(ast.unparse(d.func))
+                       for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                       for d in node.decorator_list)
+        module = ".".join(path.relative_to(backend).with_suffix("").parts).removesuffix(".__init__")
+        if declares and module not in sys.modules:
+            late.append(module)
+    assert not late, f"UNINVENTORIED_ROUTE: modules declare routes but are not imported at startup: {late}"
+
+
 def test_middleware_is_exactly_the_reviewed_set():
     assert [m.cls.__name__ for m in app.user_middleware] == MIDDLEWARE
 

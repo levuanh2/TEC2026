@@ -532,7 +532,7 @@ where the manifest says `deny`, an active manager of another cooperative gets
 `PROTECTED_ROUTE_POSITIVE_CASE_MISSING`. CV inference runs with an untrained
 model of the production architecture (CI has no checkpoint); upload, scope,
 Storage and rows are real. The tenant is deleted afterwards. The manifest and
-both tests are guarded with protected minimums (54 and 8 passed).
+both tests are guarded with protected minimums (54 and 9 passed).
 
 **`backend/main.py` is a CODEOWNERS path (since 2026-09-27).** The rule was:
 application wiring stays outside CI policy unless a concrete bypass of every
@@ -543,7 +543,12 @@ lifespan) is guarded, and `ROUTE_MUTATION` (workflow-policy) fails when any
 backend/ml production module edits the routing table directly
 (`.routes.append/insert/...`, `routes[...] =`), calls `add_route` /
 `add_api_route` / `mount`, uses `setattr`, or touches `lifespan` /
-`lifespan_context` -- routes come only from `@router.<method>` decorators.
+`lifespan_context`, calls `include_router` (outside the reviewed line in
+`main.py`), or calls a route method as a plain function -- routes come only
+from `@router.<method>` decorators on MODULE-LEVEL functions (the AST rejects
+a route decorator inside a function or class: it would register when called,
+e.g. from a timer), and the inventory requires every module that declares
+routes to be loaded once `main` is imported (no late `importlib` routes).
 Exact exception: the reviewed `FastAPI(..., lifespan=lifespan)` line (the
 lifespan only releases pools on shutdown).
 

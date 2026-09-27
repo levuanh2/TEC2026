@@ -47,6 +47,7 @@ Standard library + PyYAML (installed by the job).
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import json
 import os
@@ -371,7 +372,7 @@ def py_code_lines(text: str) -> list[str]:
 
 
 ROUTE_MUTATION = re.compile(
-    r"\.routes\s*(?:\.(?:append|insert|extend|remove|pop|clear)\b|\[|=(?!=))|lifespan_context|\blifespan\s*="
+    r"\.routes\s*(?:\.(?:append|insert|extend|remove|pop|clear)\b|\[|[-+*|]?=(?!=))|lifespan_context|\blifespan\s*="
     r"|\badd_(?:api_)?(?:websocket_)?route\s*\(|\.mount\s*\(|\bsetattr\s*\(|\binclude_router\s*\(")
 # A router/app route method is only allowed as a decorator: called as a plain
 # function (e.g. from a timer) it registers a route after the inventory looked.
@@ -397,6 +398,22 @@ def check_route_mutation(policy: dict) -> None:
                     ROUTE_METHOD_CALL.search(code) and not code.lstrip().startswith("@"))
                 if hit and f"{r}: {line.strip()}" not in allow:
                     fail("ROUTE_MUTATION", f"{r}:{n}: routing table / lifespan changed outside router decorators: `{line.strip()}`")
+            # A route decorator registers when its `def` executes: only a
+            # module-level def runs at import, before the inventory walks the
+            # table. Inside a function (called later, e.g. from a timer) it is a
+            # late registration. AST, so formatting cannot hide it.
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                fail("ROUTE_MUTATION", f"{r}: does not parse")
+                continue
+            top_level = {id(node) for node in tree.body}
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and id(node) not in top_level:
+                    for dec in node.decorator_list:
+                        if ROUTE_METHOD_CALL.search(ast.unparse(dec) + "("):
+                            fail("ROUTE_MUTATION", f"{r}:{node.lineno}: route decorator on a nested `{node.name}` "
+                                                   "registers a route when called, after the inventory ran")
 
 
 def check_env_detection(policy: dict) -> None:
