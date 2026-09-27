@@ -1,8 +1,10 @@
 """API contract hardening: error envelope + status semantics on EVERY route,
 finite quantities, schema boundaries, malformed input, log safety.
 
-Route sweeps enumerate `main.app.routes`, so a new endpoint is covered the day it
-is added -- no hand-maintained list to forget.
+Route sweeps enumerate the app's generated OpenAPI paths, so a new endpoint is
+covered the day it is added -- no hand-maintained list to forget. (Not
+`app.routes`: FastAPI >= 0.141 nests included routers in private wrappers, which a
+flat walk silently misses. No /v1 route uses include_in_schema=False.)
 """
 from __future__ import annotations
 
@@ -13,7 +15,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -35,10 +36,11 @@ UNCONFIGURED_503_BEFORE_AUTH = {("POST", "/v1/carbon/calculate"), ("GET", "/v1/c
 
 
 def v1_operations():
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path.startswith("/v1"):
-            for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
-                yield method, route.path
+    for path, item in app.openapi()["paths"].items():
+        if path.startswith("/v1"):
+            for method in item:
+                if method in {"get", "post", "put", "patch", "delete"}:
+                    yield method.upper(), path
 
 
 def concrete(path: str) -> str:
@@ -57,7 +59,7 @@ OPERATIONS = sorted(set(v1_operations()))
 
 
 def test_the_route_sweep_sees_the_whole_api():
-    # A broken app.routes walk must not make every sweep below vacuously pass.
+    # A broken route enumeration must not make every sweep below vacuously pass.
     assert len(OPERATIONS) >= 50
 
 

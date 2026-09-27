@@ -81,7 +81,7 @@ def production_modules() -> list[str]:
     mods = []
     for p in sorted(BACKEND.rglob("*.py")):
         rel = p.relative_to(BACKEND)
-        if rel.parts[0] in {"tests", "scripts"} or "__pycache__" in rel.parts:
+        if rel.parts[0] in {"tests", "tests_strict", "scripts"} or "__pycache__" in rel.parts:
             continue
         mods.append(".".join(rel.with_suffix("").parts).removesuffix(".__init__"))
     return mods
@@ -103,7 +103,7 @@ def check_declared() -> None:
     dist_of = md.packages_distributions()
     decl = declared()
     reachable = closure(decl)
-    files = [p for p in BACKEND.rglob("*.py") if "tests" not in p.relative_to(BACKEND).parts and "__pycache__" not in p.parts]
+    files = [p for p in BACKEND.rglob("*.py") if not {"tests", "tests_strict"} & set(p.relative_to(BACKEND).parts) and "__pycache__" not in p.parts]
     seen: dict[str, str] = {}
     for f in files:
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):

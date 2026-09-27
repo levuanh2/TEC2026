@@ -453,6 +453,16 @@ tests (`backend/tests_strict`), mutation testing (report; baseline
 `carbon/engine.py` 67/133 mutants survive), resolved-dependency drift (fails),
 license inventory (report).
 
+**Resolved-dependency baseline.** `backend/requirements.txt` uses floating
+`>=` ranges. `scripts/ci/policy/backend-resolved.txt` is the `pip freeze` of the
+clean venv on the Linux runner (taken from the `backend-startup` artifact, not a
+developer machine). PR CI prints every resolved change as a warning; strict-ci
+fails on it. Refresh it deliberately, together with `docs/openapi.json`: a
+FastAPI upgrade alone changes the generated spec (0.141 renders uploads as
+`contentMediaType` and adds `input`/`ctx` to `ValidationError`) and nests
+included routers so a flat `app.routes` walk sees no `/v1` routes -- the route
+sweep therefore enumerates `app.openapi()["paths"]`.
+
 ### CI exceptions
 
 | ID | Rule | Reason | Scope | Owner | Added | Review/expiry |
