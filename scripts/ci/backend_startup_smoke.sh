@@ -35,8 +35,16 @@ if sys.prefix == sys.base_prefix or norm(sys.prefix) != norm(sys.argv[1]):
 GUARD
 "$PY" -m pip install --quiet --upgrade pip
 "$PY" -m pip install --quiet -r "$ROOT/backend/requirements.txt"
+# What requirements.txt resolved to today (dependency drift check, dep_audit.py --drift).
+"$PY" -m pip freeze --exclude pip > "${FREEZE_OUT:-$ROOT/backend-resolved.txt}"
 
-cd "$ROOT/backend"
+cd "$ROOT/backend"  # Render's rootDir: the production working directory
+
+# Interpreter/pip isolation, every production module importable from
+# requirements.txt alone, no undeclared third-party imports.
+env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_PUBLISHABLE_KEY -u SUPABASE_DB_URL \
+  "$PY" "$ROOT/scripts/ci/python_deps_check.py"
+
 env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_PUBLISHABLE_KEY -u SUPABASE_DB_URL \
   "$PY" - <<'PY'
 import importlib.util, sys
@@ -51,7 +59,10 @@ PY
 env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_PUBLISHABLE_KEY -u SUPABASE_DB_URL \
   "$PY" -m uvicorn main:app --host 127.0.0.1 --port "$PORT" >"$LOG" 2>&1 &
 PID=$!
-trap 'kill "$PID" 2>/dev/null || true' EXIT
+# Always stop the server, however this script exits (no leaked process).
+# `wait` returns 143 for the SIGTERM we send; inside `if !` that expected status
+# neither trips set -e nor replaces the script's own exit code.
+trap 'if kill -0 "$PID" 2>/dev/null; then kill "$PID"; if ! wait "$PID" 2>/dev/null; then echo "uvicorn stopped"; fi; fi' EXIT
 
 up=""
 for _ in $(seq 1 60); do

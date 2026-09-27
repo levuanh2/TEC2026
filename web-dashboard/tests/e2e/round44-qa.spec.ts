@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 
 /* Round 4.4 mock gate — the pieces that do not need a real tenant: no
  * Fraunces download, one sans face on headings and body, no developer

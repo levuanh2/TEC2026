@@ -1,0 +1,1603 @@
+{
+ "functions": {
+  "private.activity_batch_open(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.assert_calculation_batch_matches_season()": {
+   "config": [
+    "search_path=public, pg_temp"
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.crop_season_transition_allowed(crop_status,crop_status)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.enforce_activity_detail_season_open()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.enforce_activity_ownership_immutable()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.enforce_activity_season_open()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.enforce_activity_type()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.enforce_batch_season_open()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.enforce_crop_season_lifecycle()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.handle_new_user()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.pm_check_assignment_total()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.pm_validate_dependency()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.pm_validate_task_assignee()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.pm_validate_task_module()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.populate_mrv_steps()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.prevent_finalized_benchmark_member_delete()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.set_updated_at()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.touch_activity_row()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.try_uuid(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.user_can_delete_activity(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_manage_farm_members(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_manage_mrv_case(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_read_batch(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_read_crop(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_read_farm(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_read_mrv_case(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_read_organization(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_read_profile(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_write_activity_batch(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_write_batch(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_write_crop(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_can_write_farm(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_is_org_manager(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.user_is_org_member(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "private.validate_benchmark_finalization()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_benchmark_member()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_carbon_breakdown()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_farm_cooperative()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_farm_member()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_mrv_case_batch()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_mrv_evidence_batch()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_mrv_export_calculation()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_mrv_file_path()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_plant_image_path()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_recommendation_lineage()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "private.validate_resource_snapshot()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": false
+  },
+  "soft_delete_activity(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "anon",
+    "authenticated"
+   ],
+   "security_definer": true
+  }
+ },
+ "policies": {
+  "activities.activities_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(private.user_can_write_activity_batch(production_batch_id) AND ((recorded_by IS NULL) OR (recorded_by = ( SELECT auth.uid() AS uid))))"
+  },
+  "activities.activities_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((deleted_at IS NULL) AND private.user_can_read_batch(production_batch_id))",
+   "with_check": null
+  },
+  "activities.activities_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_batch(production_batch_id)",
+   "with_check": "(private.user_can_write_activity_batch(production_batch_id) AND ((recorded_by IS NULL) OR (recorded_by = ( SELECT auth.uid() AS uid))))"
+  },
+  "benchmark_snapshot_members.benchmark_members_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM benchmark_snapshots bs\n  WHERE ((bs.id = benchmark_snapshot_members.benchmark_snapshot_id) AND (bs.status <> 'draft'::benchmark_status) AND private.user_can_read_organization(bs.organization_id))))",
+   "with_check": null
+  },
+  "benchmark_snapshots.benchmark_snapshots_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((status <> 'draft'::benchmark_status) AND private.user_can_read_organization(organization_id))",
+   "with_check": null
+  },
+  "carbon_breakdowns.carbon_breakdowns_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM carbon_calculations c\n  WHERE ((c.id = carbon_breakdowns.calculation_id) AND private.user_can_read_batch(c.production_batch_id))))",
+   "with_check": null
+  },
+  "carbon_breakdowns.carbon_breakdowns_select_crop_season": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM carbon_calculations c\n  WHERE ((c.id = carbon_breakdowns.calculation_id) AND private.user_can_read_crop(c.crop_season_id))))",
+   "with_check": null
+  },
+  "carbon_calculations.carbon_calculations_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_batch(production_batch_id)",
+   "with_check": null
+  },
+  "carbon_calculations.carbon_calculations_select_crop_season": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_crop(crop_season_id)",
+   "with_check": null
+  },
+  "crop_seasons.crop_seasons_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM plots p\n  WHERE ((p.id = crop_seasons.plot_id) AND private.user_can_write_farm(p.farm_id))))"
+  },
+  "crop_seasons.crop_seasons_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((deleted_at IS NULL) AND (EXISTS ( SELECT 1\n   FROM plots p\n  WHERE ((p.id = crop_seasons.plot_id) AND private.user_can_read_farm(p.farm_id)))))",
+   "with_check": null
+  },
+  "crop_seasons.crop_seasons_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_write_crop(id)",
+   "with_check": "private.user_can_write_crop(id)"
+  },
+  "cv_inferences.cv_inferences_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM plant_images i\n  WHERE ((i.id = cv_inferences.image_id) AND private.user_can_read_crop(i.crop_season_id))))",
+   "with_check": null
+  },
+  "cv_model_versions.cv_model_versions_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(status = ANY (ARRAY['active'::model_status, 'retired'::model_status]))",
+   "with_check": null
+  },
+  "devices.devices_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(user_id = ( SELECT auth.uid() AS uid))"
+  },
+  "devices.devices_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(user_id = ( SELECT auth.uid() AS uid))",
+   "with_check": null
+  },
+  "devices.devices_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(user_id = ( SELECT auth.uid() AS uid))",
+   "with_check": "(user_id = ( SELECT auth.uid() AS uid))"
+  },
+  "emission_factor_sets.ef_sets_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(status = 'published'::ef_status)",
+   "with_check": null
+  },
+  "emission_factors.ef_factors_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM emission_factor_sets s\n  WHERE ((s.id = emission_factors.factor_set_id) AND (s.status = 'published'::ef_status))))",
+   "with_check": null
+  },
+  "farm_members.farm_members_delete": {
+   "cmd": "DELETE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_manage_farm_members(farm_id)",
+   "with_check": null
+  },
+  "farm_members.farm_members_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "private.user_can_manage_farm_members(farm_id)"
+  },
+  "farm_members.farm_members_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_farm(farm_id)",
+   "with_check": null
+  },
+  "farm_members.farm_members_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_manage_farm_members(farm_id)",
+   "with_check": "private.user_can_manage_farm_members(farm_id)"
+  },
+  "farms.farms_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM organization_memberships om\n  WHERE ((om.organization_id = farms.cooperative_id) AND (om.user_id = ( SELECT auth.uid() AS uid)) AND (om.role = ANY (ARRAY['farmer'::organization_role, 'cooperative_manager'::organization_role])) AND ((om.ended_at IS NULL) OR (om.ended_at > now())))))"
+  },
+  "farms.farms_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((deleted_at IS NULL) AND private.user_can_read_farm(id))",
+   "with_check": null
+  },
+  "farms.farms_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_write_farm(id)",
+   "with_check": "private.user_can_write_farm(id)"
+  },
+  "fertilizer_applications.fertilizer_applications_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fertilizer_applications.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "fertilizer_applications.fertilizer_applications_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fertilizer_applications.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "fertilizer_applications.fertilizer_applications_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fertilizer_applications.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fertilizer_applications.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "fuel_usages.fuel_usages_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fuel_usages.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "fuel_usages.fuel_usages_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fuel_usages.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "fuel_usages.fuel_usages_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fuel_usages.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fuel_usages.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "harvest_events.harvest_events_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = harvest_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "harvest_events.harvest_events_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = harvest_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "harvest_events.harvest_events_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = harvest_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = harvest_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "irrigation_events.irrigation_events_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "irrigation_events.irrigation_events_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "irrigation_events.irrigation_events_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "mrv_case_batches.mrv_case_batches_delete": {
+   "cmd": "DELETE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_manage_mrv_case(mrv_case_id)",
+   "with_check": null
+  },
+  "mrv_case_batches.mrv_case_batches_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "private.user_can_manage_mrv_case(mrv_case_id)"
+  },
+  "mrv_case_batches.mrv_case_batches_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_mrv_case(mrv_case_id)",
+   "with_check": null
+  },
+  "mrv_case_steps.mrv_case_steps_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "private.user_can_manage_mrv_case(mrv_case_id)"
+  },
+  "mrv_case_steps.mrv_case_steps_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_mrv_case(mrv_case_id)",
+   "with_check": null
+  },
+  "mrv_case_steps.mrv_case_steps_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_manage_mrv_case(mrv_case_id)",
+   "with_check": "private.user_can_manage_mrv_case(mrv_case_id)"
+  },
+  "mrv_cases.mrv_cases_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(private.user_is_org_manager(organization_id) AND (created_by = ( SELECT auth.uid() AS uid)))"
+  },
+  "mrv_cases.mrv_cases_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_organization(organization_id)",
+   "with_check": null
+  },
+  "mrv_cases.mrv_cases_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_is_org_manager(organization_id)",
+   "with_check": "private.user_is_org_manager(organization_id)"
+  },
+  "mrv_evidence.mrv_evidence_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(private.user_can_manage_mrv_case(mrv_case_id) AND (uploaded_by = ( SELECT auth.uid() AS uid)))"
+  },
+  "mrv_evidence.mrv_evidence_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_mrv_case(mrv_case_id)",
+   "with_check": null
+  },
+  "mrv_evidence.mrv_evidence_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_manage_mrv_case(mrv_case_id)",
+   "with_check": "private.user_can_manage_mrv_case(mrv_case_id)"
+  },
+  "mrv_export_calculations.mrv_export_calcs_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM mrv_exports e\n  WHERE ((e.id = mrv_export_calculations.mrv_export_id) AND private.user_can_manage_mrv_case(e.mrv_case_id))))",
+   "with_check": null
+  },
+  "mrv_exports.mrv_exports_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_manage_mrv_case(mrv_case_id)",
+   "with_check": null
+  },
+  "mrv_step_catalog.mrv_step_catalog_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "true",
+   "with_check": null
+  },
+  "organization_data_grants.organization_grants_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(private.user_is_org_member(grantee_organization_id) OR private.user_is_org_manager(source_organization_id))",
+   "with_check": null
+  },
+  "organization_memberships.memberships_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((user_id = ( SELECT auth.uid() AS uid)) OR private.user_is_org_member(organization_id))",
+   "with_check": null
+  },
+  "organizations.organizations_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_organization(id)",
+   "with_check": null
+  },
+  "pesticide_applications.pesticide_applications_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = pesticide_applications.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "pesticide_applications.pesticide_applications_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = pesticide_applications.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "pesticide_applications.pesticide_applications_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = pesticide_applications.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = pesticide_applications.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "plant_images.plant_images_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(private.user_can_write_crop(crop_season_id) AND (uploaded_by = ( SELECT auth.uid() AS uid)))"
+  },
+  "plant_images.plant_images_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((deleted_at IS NULL) AND private.user_can_read_crop(crop_season_id))",
+   "with_check": null
+  },
+  "plant_images.plant_images_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_write_crop(crop_season_id)",
+   "with_check": "private.user_can_write_crop(crop_season_id)"
+  },
+  "plots.plots_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "private.user_can_write_farm(farm_id)"
+  },
+  "plots.plots_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((deleted_at IS NULL) AND private.user_can_read_farm(farm_id))",
+   "with_check": null
+  },
+  "plots.plots_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_write_farm(farm_id)",
+   "with_check": "private.user_can_write_farm(farm_id)"
+  },
+  "production_batches.production_batches_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "private.user_can_write_crop(crop_season_id)"
+  },
+  "production_batches.production_batches_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((deleted_at IS NULL) AND private.user_can_read_crop(crop_season_id))",
+   "with_check": null
+  },
+  "production_batches.production_batches_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_write_batch(id)",
+   "with_check": "private.user_can_write_batch(id)"
+  },
+  "profiles.profiles_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((( SELECT auth.uid() AS uid) IS NOT NULL) AND private.user_can_read_profile(id))",
+   "with_check": null
+  },
+  "profiles.profiles_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(id = ( SELECT auth.uid() AS uid))",
+   "with_check": "(id = ( SELECT auth.uid() AS uid))"
+  },
+  "recommendation_rules.recommendation_rules_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "is_active",
+   "with_check": null
+  },
+  "recommendations.recommendations_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_batch(production_batch_id)",
+   "with_check": null
+  },
+  "resource_metric_snapshots.resource_snapshots_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_batch(production_batch_id)",
+   "with_check": null
+  },
+  "season_recommendations.season_recommendations_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "private.user_can_read_crop(crop_season_id)",
+   "with_check": null
+  },
+  "seeding_events.seeding_events_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = seeding_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "seeding_events.seeding_events_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = seeding_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "seeding_events.seeding_events_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = seeding_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = seeding_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "straw_management_events.straw_management_events_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = straw_management_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "straw_management_events.straw_management_events_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = straw_management_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": null
+  },
+  "straw_management_events.straw_management_events_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = straw_management_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = straw_management_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
+  },
+  "sync_batches.sync_batches_insert": {
+   "cmd": "INSERT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "with_check": "(EXISTS ( SELECT 1\n   FROM devices d\n  WHERE ((d.id = sync_batches.device_id) AND (d.user_id = ( SELECT auth.uid() AS uid)))))"
+  },
+  "sync_batches.sync_batches_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM devices d\n  WHERE ((d.id = sync_batches.device_id) AND (d.user_id = ( SELECT auth.uid() AS uid)))))",
+   "with_check": null
+  },
+  "sync_batches.sync_batches_update": {
+   "cmd": "UPDATE",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM devices d\n  WHERE ((d.id = sync_batches.device_id) AND (d.user_id = ( SELECT auth.uid() AS uid)))))",
+   "with_check": "(EXISTS ( SELECT 1\n   FROM devices d\n  WHERE ((d.id = sync_batches.device_id) AND (d.user_id = ( SELECT auth.uid() AS uid)))))"
+  }
+ },
+ "rls": {
+  "activities": {
+   "enabled": true,
+   "forced": false
+  },
+  "benchmark_snapshot_members": {
+   "enabled": true,
+   "forced": false
+  },
+  "benchmark_snapshots": {
+   "enabled": true,
+   "forced": false
+  },
+  "carbon_breakdowns": {
+   "enabled": true,
+   "forced": false
+  },
+  "carbon_calculations": {
+   "enabled": true,
+   "forced": false
+  },
+  "crop_seasons": {
+   "enabled": true,
+   "forced": false
+  },
+  "cv_inferences": {
+   "enabled": true,
+   "forced": false
+  },
+  "cv_model_versions": {
+   "enabled": true,
+   "forced": false
+  },
+  "data_quality_flags": {
+   "enabled": true,
+   "forced": false
+  },
+  "devices": {
+   "enabled": true,
+   "forced": false
+  },
+  "emission_factor_sets": {
+   "enabled": true,
+   "forced": false
+  },
+  "emission_factors": {
+   "enabled": true,
+   "forced": false
+  },
+  "farm_members": {
+   "enabled": true,
+   "forced": false
+  },
+  "farms": {
+   "enabled": true,
+   "forced": false
+  },
+  "fertilizer_applications": {
+   "enabled": true,
+   "forced": false
+  },
+  "fuel_usages": {
+   "enabled": true,
+   "forced": false
+  },
+  "harvest_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "ingestion_batches": {
+   "enabled": true,
+   "forced": false
+  },
+  "irrigation_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_case_batches": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_case_steps": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_cases": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_evidence": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_export_calculations": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_exports": {
+   "enabled": true,
+   "forced": false
+  },
+  "mrv_step_catalog": {
+   "enabled": true,
+   "forced": false
+  },
+  "organization_data_grants": {
+   "enabled": true,
+   "forced": false
+  },
+  "organization_memberships": {
+   "enabled": true,
+   "forced": false
+  },
+  "organizations": {
+   "enabled": true,
+   "forced": false
+  },
+  "pesticide_applications": {
+   "enabled": true,
+   "forced": false
+  },
+  "plant_images": {
+   "enabled": true,
+   "forced": false
+  },
+  "plots": {
+   "enabled": true,
+   "forced": false
+  },
+  "production_batches": {
+   "enabled": true,
+   "forced": false
+  },
+  "profiles": {
+   "enabled": true,
+   "forced": false
+  },
+  "recommendation_rules": {
+   "enabled": true,
+   "forced": false
+  },
+  "recommendations": {
+   "enabled": true,
+   "forced": false
+  },
+  "resource_metric_snapshots": {
+   "enabled": true,
+   "forced": false
+  },
+  "season_recommendations": {
+   "enabled": true,
+   "forced": false
+  },
+  "seeding_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "straw_management_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "sync_batches": {
+   "enabled": true,
+   "forced": false
+  }
+ },
+ "table_grants": {
+  "PUBLIC": {},
+  "anon": {
+   "season_recommendations": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_batch_resource_efficiency_live": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_benchmark_summary": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_carbon_results": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_carbon_results_detailed": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_farm_plot_crop_tree": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_mrv_export_manifest": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "authenticated": {
+   "activities": "INSERT,SELECT,UPDATE",
+   "benchmark_snapshot_members": "SELECT",
+   "benchmark_snapshots": "SELECT",
+   "carbon_breakdowns": "SELECT",
+   "carbon_calculations": "SELECT",
+   "crop_seasons": "INSERT,SELECT,UPDATE",
+   "cv_inferences": "SELECT",
+   "cv_model_versions": "SELECT",
+   "devices": "INSERT,SELECT,UPDATE",
+   "emission_factor_sets": "SELECT",
+   "emission_factors": "SELECT",
+   "farm_members": "DELETE,INSERT,SELECT,UPDATE",
+   "farms": "INSERT,SELECT,UPDATE",
+   "fertilizer_applications": "INSERT,SELECT,UPDATE",
+   "fuel_usages": "INSERT,SELECT,UPDATE",
+   "harvest_events": "INSERT,SELECT,UPDATE",
+   "irrigation_events": "INSERT,SELECT,UPDATE",
+   "mrv_case_batches": "DELETE,INSERT,SELECT",
+   "mrv_case_steps": "INSERT,SELECT,UPDATE",
+   "mrv_cases": "INSERT,SELECT,UPDATE",
+   "mrv_evidence": "INSERT,SELECT,UPDATE",
+   "mrv_export_calculations": "SELECT",
+   "mrv_exports": "SELECT",
+   "mrv_step_catalog": "SELECT",
+   "organization_data_grants": "SELECT",
+   "organization_memberships": "SELECT",
+   "organizations": "SELECT",
+   "pesticide_applications": "INSERT,SELECT,UPDATE",
+   "plant_images": "INSERT,SELECT,UPDATE",
+   "plots": "INSERT,SELECT,UPDATE",
+   "production_batches": "INSERT,SELECT,UPDATE",
+   "profiles": "SELECT,UPDATE",
+   "recommendation_rules": "SELECT",
+   "recommendations": "SELECT",
+   "resource_metric_snapshots": "SELECT",
+   "season_recommendations": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "seeding_events": "INSERT,SELECT,UPDATE",
+   "straw_management_events": "INSERT,SELECT,UPDATE",
+   "sync_batches": "INSERT,SELECT,UPDATE",
+   "v_batch_resource_efficiency_live": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_benchmark_summary": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_carbon_results": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_carbon_results_detailed": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_farm_plot_crop_tree": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+   "v_mrv_export_manifest": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  }
+ },
+ "triggers": {
+  "activities.audit_change_trg": "audit.capture_change()",
+  "activities.enforce_activity_ownership_immutable_trg": "private.enforce_activity_ownership_immutable()",
+  "activities.enforce_activity_season_open_trg": "private.enforce_activity_season_open()",
+  "activities.touch_activity_row_trg": "private.touch_activity_row()",
+  "benchmark_snapshot_members.audit_change_trg": "audit.capture_change()",
+  "benchmark_snapshot_members.prevent_finalized_benchmark_member_delete_trg": "private.prevent_finalized_benchmark_member_delete()",
+  "benchmark_snapshot_members.validate_benchmark_member_trg": "private.validate_benchmark_member()",
+  "benchmark_snapshots.audit_change_trg": "audit.capture_change()",
+  "benchmark_snapshots.set_updated_at_trg": "private.set_updated_at()",
+  "benchmark_snapshots.validate_benchmark_finalization_trg": "private.validate_benchmark_finalization()",
+  "carbon_breakdowns.audit_change_trg": "audit.capture_change()",
+  "carbon_breakdowns.validate_carbon_breakdown_trg": "private.validate_carbon_breakdown()",
+  "carbon_calculations.audit_change_trg": "audit.capture_change()",
+  "carbon_calculations.carbon_calculations_batch_scope_guard": "private.assert_calculation_batch_matches_season()",
+  "crop_seasons.audit_change_trg": "audit.capture_change()",
+  "crop_seasons.enforce_crop_season_lifecycle_trg": "private.enforce_crop_season_lifecycle()",
+  "crop_seasons.set_updated_at_trg": "private.set_updated_at()",
+  "cv_inferences.audit_change_trg": "audit.capture_change()",
+  "cv_model_versions.audit_change_trg": "audit.capture_change()",
+  "cv_model_versions.set_updated_at_trg": "private.set_updated_at()",
+  "data_quality_flags.set_updated_at_trg": "private.set_updated_at()",
+  "devices.set_updated_at_trg": "private.set_updated_at()",
+  "emission_factor_sets.audit_change_trg": "audit.capture_change()",
+  "emission_factor_sets.set_updated_at_trg": "private.set_updated_at()",
+  "emission_factors.audit_change_trg": "audit.capture_change()",
+  "emission_factors.set_updated_at_trg": "private.set_updated_at()",
+  "farm_members.audit_change_trg": "audit.capture_change()",
+  "farm_members.set_updated_at_trg": "private.set_updated_at()",
+  "farm_members.validate_farm_member_trg": "private.validate_farm_member()",
+  "farms.audit_change_trg": "audit.capture_change()",
+  "farms.set_updated_at_trg": "private.set_updated_at()",
+  "farms.validate_farm_cooperative_trg": "private.validate_farm_cooperative()",
+  "fertilizer_applications.audit_change_trg": "audit.capture_change()",
+  "fertilizer_applications.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "fertilizer_applications.fertilizer_type_trg": "private.enforce_activity_type()",
+  "fertilizer_applications.set_updated_at_trg": "private.set_updated_at()",
+  "fuel_usages.audit_change_trg": "audit.capture_change()",
+  "fuel_usages.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "fuel_usages.fuel_type_trg": "private.enforce_activity_type()",
+  "fuel_usages.set_updated_at_trg": "private.set_updated_at()",
+  "harvest_events.audit_change_trg": "audit.capture_change()",
+  "harvest_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "harvest_events.harvest_type_trg": "private.enforce_activity_type()",
+  "harvest_events.set_updated_at_trg": "private.set_updated_at()",
+  "ingestion_batches.set_updated_at_trg": "private.set_updated_at()",
+  "irrigation_events.audit_change_trg": "audit.capture_change()",
+  "irrigation_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "irrigation_events.irrigation_type_trg": "private.enforce_activity_type()",
+  "irrigation_events.set_updated_at_trg": "private.set_updated_at()",
+  "mrv_case_batches.audit_change_trg": "audit.capture_change()",
+  "mrv_case_batches.validate_mrv_case_batch_trg": "private.validate_mrv_case_batch()",
+  "mrv_case_steps.audit_change_trg": "audit.capture_change()",
+  "mrv_case_steps.set_updated_at_trg": "private.set_updated_at()",
+  "mrv_cases.audit_change_trg": "audit.capture_change()",
+  "mrv_cases.populate_mrv_steps_trg": "private.populate_mrv_steps()",
+  "mrv_cases.set_updated_at_trg": "private.set_updated_at()",
+  "mrv_evidence.audit_change_trg": "audit.capture_change()",
+  "mrv_evidence.set_updated_at_trg": "private.set_updated_at()",
+  "mrv_evidence.validate_mrv_evidence_batch_trg": "private.validate_mrv_evidence_batch()",
+  "mrv_evidence.validate_mrv_evidence_path_trg": "private.validate_mrv_file_path()",
+  "mrv_export_calculations.audit_change_trg": "audit.capture_change()",
+  "mrv_export_calculations.validate_mrv_export_calculation_trg": "private.validate_mrv_export_calculation()",
+  "mrv_exports.audit_change_trg": "audit.capture_change()",
+  "mrv_exports.validate_mrv_export_path_trg": "private.validate_mrv_file_path()",
+  "organization_data_grants.audit_change_trg": "audit.capture_change()",
+  "organization_data_grants.set_updated_at_trg": "private.set_updated_at()",
+  "organization_memberships.audit_change_trg": "audit.capture_change()",
+  "organization_memberships.set_updated_at_trg": "private.set_updated_at()",
+  "organizations.audit_change_trg": "audit.capture_change()",
+  "organizations.set_updated_at_trg": "private.set_updated_at()",
+  "pesticide_applications.audit_change_trg": "audit.capture_change()",
+  "pesticide_applications.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "pesticide_applications.pesticide_type_trg": "private.enforce_activity_type()",
+  "pesticide_applications.set_updated_at_trg": "private.set_updated_at()",
+  "plant_images.audit_change_trg": "audit.capture_change()",
+  "plant_images.set_updated_at_trg": "private.set_updated_at()",
+  "plant_images.validate_plant_image_path_trg": "private.validate_plant_image_path()",
+  "plots.audit_change_trg": "audit.capture_change()",
+  "plots.set_updated_at_trg": "private.set_updated_at()",
+  "production_batches.audit_change_trg": "audit.capture_change()",
+  "production_batches.enforce_batch_season_open_trg": "private.enforce_batch_season_open()",
+  "production_batches.set_updated_at_trg": "private.set_updated_at()",
+  "profiles.set_updated_at_trg": "private.set_updated_at()",
+  "recommendation_rules.audit_change_trg": "audit.capture_change()",
+  "recommendation_rules.set_updated_at_trg": "private.set_updated_at()",
+  "recommendations.audit_change_trg": "audit.capture_change()",
+  "recommendations.set_updated_at_trg": "private.set_updated_at()",
+  "recommendations.validate_recommendation_lineage_trg": "private.validate_recommendation_lineage()",
+  "resource_metric_snapshots.audit_change_trg": "audit.capture_change()",
+  "resource_metric_snapshots.validate_resource_snapshot_trg": "private.validate_resource_snapshot()",
+  "seeding_events.audit_change_trg": "audit.capture_change()",
+  "seeding_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "seeding_events.seeding_type_trg": "private.enforce_activity_type()",
+  "seeding_events.set_updated_at_trg": "private.set_updated_at()",
+  "straw_management_events.audit_change_trg": "audit.capture_change()",
+  "straw_management_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "straw_management_events.set_updated_at_trg": "private.set_updated_at()",
+  "straw_management_events.straw_type_trg": "private.enforce_activity_type()",
+  "sync_batches.set_updated_at_trg": "private.set_updated_at()"
+ },
+ "unique_indexes": {
+  "activities_device_event_uidx": "CREATE UNIQUE INDEX activities_device_event_uidx ON public.activities USING btree (device_id, client_event_id) WHERE ((device_id IS NOT NULL) AND (client_event_id IS NOT NULL))",
+  "activities_ingestion_source_record_uidx": "CREATE UNIQUE INDEX activities_ingestion_source_record_uidx ON public.activities USING btree (ingestion_batch_id, source_record_key) WHERE ((ingestion_batch_id IS NOT NULL) AND (source_record_key IS NOT NULL))",
+  "activities_pkey": "CREATE UNIQUE INDEX activities_pkey ON public.activities USING btree (id)",
+  "activities_web_idempotency_uidx": "CREATE UNIQUE INDEX activities_web_idempotency_uidx ON public.activities USING btree (recorded_by, web_idempotency_key) WHERE ((recorded_by IS NOT NULL) AND (web_idempotency_key IS NOT NULL))",
+  "benchmark_snapshot_members_pkey": "CREATE UNIQUE INDEX benchmark_snapshot_members_pkey ON public.benchmark_snapshot_members USING btree (benchmark_snapshot_id, production_batch_id)",
+  "benchmark_snapshots_pkey": "CREATE UNIQUE INDEX benchmark_snapshots_pkey ON public.benchmark_snapshots USING btree (id)",
+  "carbon_breakdowns_pkey": "CREATE UNIQUE INDEX carbon_breakdowns_pkey ON public.carbon_breakdowns USING btree (id)",
+  "carbon_calculations_pkey": "CREATE UNIQUE INDEX carbon_calculations_pkey ON public.carbon_calculations USING btree (id)",
+  "carbon_calculations_production_batch_id_scenario_factor_set_key": "CREATE UNIQUE INDEX carbon_calculations_production_batch_id_scenario_factor_set_key ON public.carbon_calculations USING btree (production_batch_id, scenario, factor_set_id, input_hash)",
+  "carbon_calculations_season_input_uniq": "CREATE UNIQUE INDEX carbon_calculations_season_input_uniq ON public.carbon_calculations USING btree (crop_season_id, scenario, factor_set_id, input_hash) WHERE (production_batch_id IS NULL)",
+  "crop_seasons_pkey": "CREATE UNIQUE INDEX crop_seasons_pkey ON public.crop_seasons USING btree (id)",
+  "crop_seasons_plot_id_season_code_key": "CREATE UNIQUE INDEX crop_seasons_plot_id_season_code_key ON public.crop_seasons USING btree (plot_id, season_code)",
+  "cv_inferences_image_id_model_version_id_key": "CREATE UNIQUE INDEX cv_inferences_image_id_model_version_id_key ON public.cv_inferences USING btree (image_id, model_version_id)",
+  "cv_inferences_pkey": "CREATE UNIQUE INDEX cv_inferences_pkey ON public.cv_inferences USING btree (id)",
+  "cv_model_versions_pkey": "CREATE UNIQUE INDEX cv_model_versions_pkey ON public.cv_model_versions USING btree (id)",
+  "cv_model_versions_version_code_key": "CREATE UNIQUE INDEX cv_model_versions_version_code_key ON public.cv_model_versions USING btree (version_code)",
+  "data_quality_flags_pkey": "CREATE UNIQUE INDEX data_quality_flags_pkey ON public.data_quality_flags USING btree (id)",
+  "devices_installation_id_key": "CREATE UNIQUE INDEX devices_installation_id_key ON public.devices USING btree (installation_id)",
+  "devices_pkey": "CREATE UNIQUE INDEX devices_pkey ON public.devices USING btree (id)",
+  "emission_factor_sets_pkey": "CREATE UNIQUE INDEX emission_factor_sets_pkey ON public.emission_factor_sets USING btree (id)",
+  "emission_factor_sets_version_code_key": "CREATE UNIQUE INDEX emission_factor_sets_version_code_key ON public.emission_factor_sets USING btree (version_code)",
+  "emission_factors_factor_set_id_factor_code_key": "CREATE UNIQUE INDEX emission_factors_factor_set_id_factor_code_key ON public.emission_factors USING btree (factor_set_id, factor_code)",
+  "emission_factors_pkey": "CREATE UNIQUE INDEX emission_factors_pkey ON public.emission_factors USING btree (id)",
+  "farm_members_pkey": "CREATE UNIQUE INDEX farm_members_pkey ON public.farm_members USING btree (farm_id, user_id)",
+  "farms_cooperative_id_farm_code_key": "CREATE UNIQUE INDEX farms_cooperative_id_farm_code_key ON public.farms USING btree (cooperative_id, farm_code)",
+  "farms_pkey": "CREATE UNIQUE INDEX farms_pkey ON public.farms USING btree (id)",
+  "fertilizer_applications_pkey": "CREATE UNIQUE INDEX fertilizer_applications_pkey ON public.fertilizer_applications USING btree (activity_id)",
+  "fuel_usages_pkey": "CREATE UNIQUE INDEX fuel_usages_pkey ON public.fuel_usages USING btree (activity_id)",
+  "harvest_events_pkey": "CREATE UNIQUE INDEX harvest_events_pkey ON public.harvest_events USING btree (activity_id)",
+  "ingestion_batches_pkey": "CREATE UNIQUE INDEX ingestion_batches_pkey ON public.ingestion_batches USING btree (id)",
+  "ingestion_source_sha256_uidx": "CREATE UNIQUE INDEX ingestion_source_sha256_uidx ON public.ingestion_batches USING btree (source_sha256) WHERE (source_sha256 IS NOT NULL)",
+  "irrigation_events_pkey": "CREATE UNIQUE INDEX irrigation_events_pkey ON public.irrigation_events USING btree (activity_id)",
+  "mrv_case_batches_pkey": "CREATE UNIQUE INDEX mrv_case_batches_pkey ON public.mrv_case_batches USING btree (mrv_case_id, production_batch_id)",
+  "mrv_case_steps_pkey": "CREATE UNIQUE INDEX mrv_case_steps_pkey ON public.mrv_case_steps USING btree (mrv_case_id, step_no)",
+  "mrv_cases_organization_id_case_code_key": "CREATE UNIQUE INDEX mrv_cases_organization_id_case_code_key ON public.mrv_cases USING btree (organization_id, case_code)",
+  "mrv_cases_pkey": "CREATE UNIQUE INDEX mrv_cases_pkey ON public.mrv_cases USING btree (id)",
+  "mrv_evidence_pkey": "CREATE UNIQUE INDEX mrv_evidence_pkey ON public.mrv_evidence USING btree (id)",
+  "mrv_evidence_storage_object_path_key": "CREATE UNIQUE INDEX mrv_evidence_storage_object_path_key ON public.mrv_evidence USING btree (storage_object_path)",
+  "mrv_export_calculations_pkey": "CREATE UNIQUE INDEX mrv_export_calculations_pkey ON public.mrv_export_calculations USING btree (mrv_export_id, carbon_calculation_id)",
+  "mrv_exports_pkey": "CREATE UNIQUE INDEX mrv_exports_pkey ON public.mrv_exports USING btree (id)",
+  "mrv_exports_storage_object_path_key": "CREATE UNIQUE INDEX mrv_exports_storage_object_path_key ON public.mrv_exports USING btree (storage_object_path)",
+  "mrv_step_catalog_name_key": "CREATE UNIQUE INDEX mrv_step_catalog_name_key ON public.mrv_step_catalog USING btree (name)",
+  "mrv_step_catalog_pkey": "CREATE UNIQUE INDEX mrv_step_catalog_pkey ON public.mrv_step_catalog USING btree (step_no)",
+  "organization_data_grants_grantee_organization_id_source_org_key": "CREATE UNIQUE INDEX organization_data_grants_grantee_organization_id_source_org_key ON public.organization_data_grants USING btree (grantee_organization_id, source_organization_id)",
+  "organization_data_grants_pkey": "CREATE UNIQUE INDEX organization_data_grants_pkey ON public.organization_data_grants USING btree (id)",
+  "organization_memberships_organization_id_user_id_key": "CREATE UNIQUE INDEX organization_memberships_organization_id_user_id_key ON public.organization_memberships USING btree (organization_id, user_id)",
+  "organization_memberships_pkey": "CREATE UNIQUE INDEX organization_memberships_pkey ON public.organization_memberships USING btree (id)",
+  "organizations_organization_code_key": "CREATE UNIQUE INDEX organizations_organization_code_key ON public.organizations USING btree (organization_code)",
+  "organizations_pkey": "CREATE UNIQUE INDEX organizations_pkey ON public.organizations USING btree (id)",
+  "pesticide_applications_pkey": "CREATE UNIQUE INDEX pesticide_applications_pkey ON public.pesticide_applications USING btree (activity_id)",
+  "plant_images_pkey": "CREATE UNIQUE INDEX plant_images_pkey ON public.plant_images USING btree (id)",
+  "plant_images_sha_uidx": "CREATE UNIQUE INDEX plant_images_sha_uidx ON public.plant_images USING btree (sha256) WHERE ((sha256 IS NOT NULL) AND (deleted_at IS NULL))",
+  "plant_images_storage_object_path_key": "CREATE UNIQUE INDEX plant_images_storage_object_path_key ON public.plant_images USING btree (storage_object_path)",
+  "plots_farm_id_plot_code_key": "CREATE UNIQUE INDEX plots_farm_id_plot_code_key ON public.plots USING btree (farm_id, plot_code)",
+  "plots_pkey": "CREATE UNIQUE INDEX plots_pkey ON public.plots USING btree (id)",
+  "production_batches_crop_season_id_batch_code_key": "CREATE UNIQUE INDEX production_batches_crop_season_id_batch_code_key ON public.production_batches USING btree (crop_season_id, batch_code)",
+  "production_batches_pkey": "CREATE UNIQUE INDEX production_batches_pkey ON public.production_batches USING btree (id)",
+  "profiles_pkey": "CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)",
+  "recommendation_rules_pkey": "CREATE UNIQUE INDEX recommendation_rules_pkey ON public.recommendation_rules USING btree (id)",
+  "recommendation_rules_rule_code_version_code_key": "CREATE UNIQUE INDEX recommendation_rules_rule_code_version_code_key ON public.recommendation_rules USING btree (rule_code, version_code)",
+  "recommendations_pkey": "CREATE UNIQUE INDEX recommendations_pkey ON public.recommendations USING btree (id)",
+  "resource_metric_snapshots_pkey": "CREATE UNIQUE INDEX resource_metric_snapshots_pkey ON public.resource_metric_snapshots USING btree (id)",
+  "resource_metric_snapshots_production_batch_id_input_hash_key": "CREATE UNIQUE INDEX resource_metric_snapshots_production_batch_id_input_hash_key ON public.resource_metric_snapshots USING btree (production_batch_id, input_hash)",
+  "season_recommendations_crop_season_id_rule_code_key": "CREATE UNIQUE INDEX season_recommendations_crop_season_id_rule_code_key ON public.season_recommendations USING btree (crop_season_id, rule_code)",
+  "season_recommendations_pkey": "CREATE UNIQUE INDEX season_recommendations_pkey ON public.season_recommendations USING btree (id)",
+  "seeding_events_pkey": "CREATE UNIQUE INDEX seeding_events_pkey ON public.seeding_events USING btree (activity_id)",
+  "straw_management_events_pkey": "CREATE UNIQUE INDEX straw_management_events_pkey ON public.straw_management_events USING btree (activity_id)",
+  "sync_batches_device_id_client_batch_id_key": "CREATE UNIQUE INDEX sync_batches_device_id_client_batch_id_key ON public.sync_batches USING btree (device_id, client_batch_id)",
+  "sync_batches_pkey": "CREATE UNIQUE INDEX sync_batches_pkey ON public.sync_batches USING btree (id)"
+ }
+}

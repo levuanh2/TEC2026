@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 
 // Runs against the mock tenant (playwright.config.ts sets VITE_USE_MOCK_DATA=true),
 // so this is the PUBLIC/MOCK browser smoke. A real authenticated run needs a

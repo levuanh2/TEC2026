@@ -1,10 +1,11 @@
 # AgriCarbon monorepo CI -- the required check for main is the `ci-gate` job.
-# Design, local equivalents and failure triage: docs/CI_PIPELINE.md
+# Design, policy, exceptions, local equivalents: docs/CI_PIPELINE.md
 #
 # Uses NO repository secrets: everything runs against mock data or an isolated
 # Supabase stack started inside the runner. Never deploys, never touches the
 # hosted Supabase project, never applies migrations anywhere but that
-# throw-away local stack.
+# throw-away local stack. Every gate fails closed; the policy lives in
+# scripts/ci/policy/ and relaxing it needs a `CI-Policy-Change:` commit trailer.
 name: CI
 
 on:
@@ -23,22 +24,148 @@ concurrency:
 permissions:
   contents: read
 
+# `shell: bash` makes every run step `bash -eo pipefail`: a failing command in
+# `cmd | tee log` fails the step instead of being masked by tee.
+defaults:
+  run:
+    shell: bash
+
 env:
   PYTHON_VERSION: "3.11.9"     # render.yaml PYTHON_VERSION
   NODE_VERSION: "22.18.0"      # developer toolchain; render.yaml pins none
   FLUTTER_VERSION: "3.47.4"    # stable, Dart 3.13.3
   JAVA_VERSION: "17"           # app/android compileOptions / jvmTarget
   SUPABASE_CLI_VERSION: "2.118.0"
-  # Test-discovery floors: roughly 10% under the counts at the time CI was
-  # introduced (backend 840, Vitest 472, Playwright mock 90, Flutter 401).
-  # They catch a broken glob/import that silently drops tests; they are not
-  # targets. Raise them as suites grow; lower one only with the reason in the PR.
-  MIN_BACKEND_TESTS: "750"
-  MIN_VITEST_TESTS: "425"
-  MIN_PLAYWRIGHT_TESTS: "80"
-  MIN_FLUTTER_TESTS: "360"
+  # Bump to invalidate every dependency cache at once (docs/CI_PIPELINE.md, "Caches").
+  CACHE_EPOCH: "1"
 
 jobs:
+  # --------------------------------------------------------------- context
+  # The trusted comparison base for history/coverage/contract checks: the PR's
+  # target branch, or the previous main commit on push. Never PR-provided data.
+  context:
+    name: Context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      base: ${{ steps.base.outputs.base }}
+    steps:
+      - id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="origin/$BASE_REF"
+          elif [ "$EVENT" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            base="$BEFORE"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "comparison base: ${base:-none (manual run or new branch)}"
+
+  # ------------------------------------------------------- self-integrity
+  workflow-policy:
+    name: Workflow + CI policy
+    needs: context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # actionlint also runs the runner's shellcheck over every `run:` block.
+      - name: actionlint 1.7.12 (checksum-verified)
+        run: |
+          curl -fsSLo al.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  al.tgz" | sha256sum -c -
+          tar -xzf al.tgz -C "$RUNNER_TEMP" actionlint
+          rm al.tgz
+          "$RUNNER_TEMP/actionlint" -color
+      - name: CI policy (pins, timeouts, permissions, bypasses, gate, inventories, relaxation)
+        env:
+          BASE: ${{ needs.context.outputs.base }}
+        run: |
+          python -m pip install --quiet "pyyaml==6.0.3"
+          if [ -n "$BASE" ]; then
+            python scripts/ci/ci_policy.py --base-ref "$BASE"
+          else
+            python scripts/ci/ci_policy.py
+          fi
+      - name: PowerShell helper syntax (.herdr)
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem .herdr -Filter *.ps1) {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs.Count) { Write-Output "::error title=CI_SYNTAX::$($f.Name): $($errs[0].Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0   # full history: a secret added then removed in a PR still counts
+      - name: Install gitleaks 8.30.1 (checksum-verified)
+        run: |
+          curl -fsSLo gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
+          rm gitleaks.tgz
+      - name: Scan working tree (source, docs, workflows, render.yaml)
+        run: '"$RUNNER_TEMP/gitleaks" dir . --config .gitleaks.toml --redact --no-banner'
+      - name: Scan git history
+        run: '"$RUNNER_TEMP/gitleaks" git . --config .gitleaks.toml --redact --no-banner'
+      - name: No credential or data files are tracked
+        run: |
+          if git ls-files | grep -E '(^|/)(key\.properties|[^/]*\.(jks|keystore|p12|pem|sqlite|db)|\.env(\.[^/]*)?|\.supabase\.env|\.mcp\.json)$' | grep -vE '\.env\.example$'; then
+            echo "::error title=Secret scan::keystore, key.properties, .env, .mcp.json or database file is tracked"
+            exit 1
+          fi
+
+  dependency-audit:
+    name: Dependency audit
+    needs: context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install audit tools (pinned, checksum-verified)
+        run: |
+          python -m pip install --quiet "pip-audit==2.10.1"
+          curl -fsSLo "$RUNNER_TEMP/osv-scanner" https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64
+          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      # npm high/critical fail; PyPI + pub: any advisory fails; exceptions only
+      # with id/reason/owner/expiry in policy.json (expired ones fail).
+      - name: Audit PyPI + npm + pub
+        run: python scripts/ci/dep_audit.py --osv-scanner "$RUNNER_TEMP/osv-scanner"
+      - name: Dependency changes in this PR
+        if: ${{ needs.context.outputs.base != '' }}
+        env:
+          BASE: ${{ needs.context.outputs.base }}
+        run: python scripts/ci/dep_audit.py --diff "$BASE"
+
   # ------------------------------------------------------------ backend
   backend-unit:
     name: Backend static + unit
@@ -66,18 +193,26 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.12" "torchvision>=0.29"
           python -m pip install -r ../ml/requirements.txt
-      # No formatter/linter/type checker is configured for the backend yet
-      # (docs/CI_PIPELINE.md, "Gaps"); a byte-compile catches syntax errors in
-      # modules no test imports, e.g. the hosted QA scripts.
       - name: Byte-compile every module
         run: python -m compileall -q -x '(^|/)\.venv/' .
-      # No Supabase settings: tests that need a database or the configured app
-      # skip here and run in `backend-db-integration`, which forbids skips.
+      # No Supabase settings: DB/config-gated tests skip here under their exact
+      # allowlisted reasons and RUN in backend-db-integration (no skips there).
       - name: pytest (no database)
         run: python -m pytest tests -q -p no:cacheprovider --junitxml=reports/backend-unit.xml
-      - name: Report
+      - name: Discovery floor + skip budget
         if: ${{ !cancelled() }}
-        run: python ../scripts/ci/ci_report.py --label "Backend unit (no DB)" --junit reports/backend-unit.xml --min-total "$MIN_BACKEND_TESTS"
+        run: python ../scripts/ci/ci_report.py --label "Backend unit (no DB)" --junit reports/backend-unit.xml --floor backend --skips backend-unit
+      # Timestamp/validation behaviour must not depend on the machine: rerun the
+      # date- and parsing-sensitive modules in Vietnam time with a C locale.
+      - name: Timezone + locale independence (Asia/Ho_Chi_Minh, C.UTF-8)
+        env:
+          TZ: Asia/Ho_Chi_Minh
+          LC_ALL: C.UTF-8
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          tests/test_api_contract_hardening.py tests/test_activity_writes.py tests/test_activity_writes_expansion.py
+          tests/test_season_create.py tests/test_metric_completeness_order.py tests/test_carbon_engine.py
+          tests/test_straw_quickfix_persistence.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -86,7 +221,7 @@ jobs:
           retention-days: 14
 
   backend-startup:
-    name: Backend clean startup
+    name: Backend clean startup + import boundary
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -100,18 +235,24 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - name: Fresh venv, Render start command, /health + /docs
+      - name: Fresh venv, isolation + import boundary + declared deps, Render start, /health + /docs
         run: bash scripts/ci/backend_startup_smoke.sh
+      - name: Resolved dependency drift (warning on PRs; strict-ci fails)
+        run: python scripts/ci/dep_audit.py --drift backend-resolved.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: ${{ !cancelled() }}
         with:
-          name: backend-startup-log
-          path: backend-startup.log
+          name: backend-startup
+          path: |
+            backend-startup.log
+            backend-resolved.txt
+          if-no-files-found: ignore
           retention-days: 7
 
   # --------------------------------------------------------- migrations
   migration-static:
-    name: Migrations static checks
+    name: Migrations static + checksums
+    needs: context
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -119,36 +260,29 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Naming, versions, and history against the base
+      - name: Naming, versions, checksum manifest, history against the base
         env:
-          EVENT: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
+          BASE: ${{ needs.context.outputs.base }}
         run: |
-          base=""
-          if [ "$EVENT" = "pull_request" ]; then
-            base="origin/$BASE_REF"
-          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            base="$BEFORE"
-          fi
-          if [ -n "$base" ]; then
-            python scripts/ci/check_migrations.py --base-ref "$base"
+          if [ -n "$BASE" ]; then
+            python scripts/ci/check_migrations.py --base-ref "$BASE"
           else
             python scripts/ci/check_migrations.py
           fi
 
   # Isolated Supabase (Postgres + Auth + PostgREST + Storage) in the runner:
-  # every migration applied from an empty database, then the whole backend
-  # suite with the database and the configured app available.
+  # every migration applied from an empty database, the catalog audited, then
+  # the whole backend suite with the database and the configured app.
   backend-db-integration:
-    name: Backend DB integration (local Supabase)
-    needs: [backend-unit, migration-static]
+    name: Backend DB integration + schema audit + coverage
+    needs: [context, backend-unit, migration-static]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -168,24 +302,32 @@ jobs:
           python -m pip install -r ml/requirements.txt
       - name: Schema validator
         run: python scripts/validate_supabase_schema.py
-      # Factor set, demo tenant, QA farmer, private buckets, one outsider user,
-      # one CV model version -- what hosted has and some real-DB tests read.
+      # Invariants, RLS on every table, no permissive/anon policies, no
+      # privilege broadening, SECURITY DEFINER hygiene, and the committed
+      # catalog snapshot (policies, grants, triggers, unique indexes).
+      - name: Schema invariants + RLS policy + privilege + SECURITY DEFINER audit
+        run: python scripts/ci/db_audit.py
       - name: Seed the CI database like hosted
         run: python scripts/ci/seed_ci_db.py
-      # Every DB/config-gated test must RUN here. The only allowed skips are
-      # the CV real-model smoke tests, which need an ml/runs/ checkpoint that
-      # is never committed.
       - name: pytest (real database, configured app) + coverage
         working-directory: backend
         run: >-
           python -m pytest tests -q -p no:cacheprovider -rs
           --junitxml=reports/backend-db.xml
           --cov --cov-config=.coveragerc --cov-report=xml:reports/backend-coverage.xml
-      - name: Report
+      - name: Discovery floor + skip budget (only the 2 CV real-model tests may skip)
         if: ${{ !cancelled() }}
-        run: >-
-          python scripts/ci/ci_report.py --label "Backend + DB integration" --junit backend/reports/backend-db.xml
-          --min-total "$MIN_BACKEND_TESTS" --max-skipped 2 --coverage backend/reports/backend-coverage.xml
+        run: python scripts/ci/ci_report.py --label "Backend + DB integration" --junit backend/reports/backend-db.xml --floor backend --skips backend-db --coverage backend/reports/backend-coverage.xml
+      - name: Coverage no-regression + critical modules + changed lines
+        if: ${{ !cancelled() }}
+        env:
+          BASE: ${{ needs.context.outputs.base }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python scripts/ci/coverage_gate.py --layer backend --report backend/reports/backend-coverage.xml --base-ref "$BASE"
+          else
+            python scripts/ci/coverage_gate.py --layer backend --report backend/reports/backend-coverage.xml
+          fi
       - name: Supabase container logs
         if: ${{ failure() }}
         run: |
@@ -201,11 +343,37 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # An EXISTING seeded database at the base revision -> this change's
+  # migrations (or N-1 -> N when the change adds none).
+  migration-upgrade:
+    name: Migration upgrade (seeded base -> head)
+    needs: [context, migration-static]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - run: python -m pip install -r backend/requirements.txt
+      - name: Upgrade from the base revision
+        env:
+          BASE: ${{ needs.context.outputs.base || 'HEAD~1' }}
+        run: bash scripts/ci/migration_upgrade.sh "$BASE"
+
   # The same database rules exercised through the real HTTP surfaces: GoTrue
-  # users with real JWTs against PostgREST (exactly the Flutter sync calls),
-  # and main.app in-process for FastAPI authorization. Each probe builds a
-  # disposable tenant, cleans it up in `finally` and fails if row counts do
-  # not return to the baseline.
+  # users with real JWTs against PostgREST (the Flutter sync calls) and
+  # main.app in-process for FastAPI authorization. Each probe builds a
+  # disposable tenant, cleans it up and verifies the cleanup; each must report
+  # at least its policy minimum of checks, all passing.
   rls-security:
     name: RLS / PostgREST security (local Supabase)
     needs: [backend-unit, migration-static]
@@ -227,7 +395,6 @@ jobs:
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
       - name: Start stack
-        id: stack
         working-directory: .
         run: bash scripts/ci/supabase_stack.sh
       - run: python -m pip install -r requirements.txt
@@ -238,19 +405,29 @@ jobs:
       # broken rule; any failure still fails the job (no continue-on-error).
       - name: Lifecycle + membership via PostgREST (Flutter sync calls)
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
-        run: python scripts/hosted_lifecycle_rls_probe.py --enforce
+        run: |
+          python scripts/hosted_lifecycle_rls_probe.py --enforce | tee "$RUNNER_TEMP/lifecycle.log"
+          python ../scripts/ci/ci_report.py --label "Lifecycle probe" --probe-log "$RUNNER_TEMP/lifecycle.log" --probe lifecycle
       - name: P0 security (tenant isolation, roles, MRV exports)
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
-        run: python scripts/hosted_p0_security_smoke.py
+        run: |
+          python scripts/hosted_p0_security_smoke.py | tee "$RUNNER_TEMP/p0.log"
+          python ../scripts/ci/ci_report.py --label "P0 security" --probe-log "$RUNNER_TEMP/p0.log" --probe p0_security
       - name: P1 correctness (season/batch, carbon persistence, lifecycle)
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
-        run: python scripts/hosted_p1_correctness_smoke.py
+        run: |
+          python scripts/hosted_p1_correctness_smoke.py | tee "$RUNNER_TEMP/p1.log"
+          python ../scripts/ci/ci_report.py --label "P1 correctness" --probe-log "$RUNNER_TEMP/p1.log" --probe p1_correctness
       - name: Write reliability (atomic writes, dead pool recovery)
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
-        run: python scripts/hosted_write_reliability_smoke.py
+        run: |
+          python scripts/hosted_write_reliability_smoke.py | tee "$RUNNER_TEMP/wr.log"
+          python ../scripts/ci/ci_report.py --label "Write reliability" --probe-log "$RUNNER_TEMP/wr.log" --probe write_reliability
       - name: Public sign-up stays disabled
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
-        run: python scripts/verify_public_signup_disabled.py
+        run: |
+          python scripts/verify_public_signup_disabled.py | tee "$RUNNER_TEMP/signup.log"
+          python ../scripts/ci/ci_report.py --label "Sign-up disabled" --probe-log "$RUNNER_TEMP/signup.log" --probe signup_disabled
       - name: Supabase container logs
         if: ${{ failure() }}
         working-directory: .
@@ -264,9 +441,37 @@ jobs:
           path: supabase-logs/
           retention-days: 7
 
+  # ------------------------------------------------------- API contract
+  openapi-contract:
+    name: OpenAPI contract
+    needs: context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r backend/requirements.txt
+      - name: docs/openapi.json == generated; no unacknowledged breaking change
+        env:
+          BASE: ${{ needs.context.outputs.base }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python scripts/ci/openapi_check.py --base-ref "$BASE"
+          else
+            python scripts/ci/openapi_check.py
+          fi
+
   # ---------------------------------------------------------------- web
   web-unit:
-    name: Web typecheck + Vitest
+    name: Web typecheck + Vitest + coverage
+    needs: context
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -276,13 +481,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: web-dashboard/package-lock.json
       - run: npm ci
-      # No ESLint/Prettier config exists yet (docs/CI_PIPELINE.md, "Gaps").
+      # No ESLint/Prettier config exists yet (docs/CI_PIPELINE.md, "Gaps");
+      # @ts-ignore/@ts-nocheck additions fail workflow-policy.
       - name: TypeScript
         run: npx tsc -b
       - name: Vitest + coverage
@@ -290,11 +497,19 @@ jobs:
           npx vitest run --maxWorkers=2
           --reporter=default --reporter=junit --outputFile.junit=reports/vitest.xml
           --coverage.enabled
-      - name: Report
+      - name: Discovery floor + skip budget
         if: ${{ !cancelled() }}
-        run: >-
-          python3 ../scripts/ci/ci_report.py --label "Web Vitest" --junit reports/vitest.xml
-          --min-total "$MIN_VITEST_TESTS" --max-skipped 0 --coverage coverage/coverage-summary.json
+        run: python3 ../scripts/ci/ci_report.py --label "Web Vitest" --junit reports/vitest.xml --floor vitest --skips vitest --coverage coverage/coverage-summary.json
+      - name: Coverage no-regression + changed lines
+        if: ${{ !cancelled() }}
+        env:
+          BASE: ${{ needs.context.outputs.base }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python3 ../scripts/ci/coverage_gate.py --layer web --report coverage/lcov.info --base-ref "$BASE"
+          else
+            python3 ../scripts/ci/coverage_gate.py --layer web --report coverage/lcov.info
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -307,7 +522,7 @@ jobs:
           retention-days: 14
 
   web-build:
-    name: Web clean build
+    name: Web clean build + artifact checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
@@ -322,6 +537,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: web-dashboard/package-lock.json
+      # A clean checkout has no .env / dist / node_modules: nothing developer-made.
+      - name: Clean checkout has no local state
+        run: |
+          for p in .env dist node_modules ../.mcp.json ../backend/.env; do
+            if [ -e "$p" ]; then echo "::error title=Web build::$p exists in a clean checkout"; exit 1; fi
+          done
       - run: npm ci
       # Same command as render.yaml. VITE_* are build-time and public; the
       # values here are placeholders, so this dist is a build check, not a
@@ -333,23 +554,20 @@ jobs:
           VITE_SUPABASE_URL: https://supabase.ci.invalid
           VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-not-a-key
         run: npm run build
-      # With VITE_USE_MOCK_DATA=false the mock fixtures are tree-shaken out;
-      # finding one means mock mode leaked into a production-style bundle.
-      - name: Bundle carries no mock data
-        run: |
-          if grep -rlE 'farm-demo-01|crop-demo-01' dist; then
-            echo "::error title=Web build::mock fixtures found in dist -- VITE_USE_MOCK_DATA leaked into the build"
-            exit 1
-          fi
-          grep -rq 'api.ci.invalid' dist || { echo "::error title=Web build::VITE_API_BASE_URL was not compiled in"; exit 1; }
-          echo "dist is a real-data build ($(du -sh dist | cut -f1))"
+      - name: No mock data, dev endpoints, server secrets or test artifacts; bundle size
+        run: python3 ../scripts/ci/web_dist_check.py --dist dist --api-base https://api.ci.invalid
+      - name: Artifact manifest (commit, SHA-256, build mode)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: python3 ../scripts/ci/artifact_manifest.py --mode web-placeholder-endpoints-not-deployable --out dist --tree
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ github.event_name != 'pull_request' }}
         with:
-          name: web-dist-ci-placeholder-endpoints
+          name: web-dist-${{ github.sha }}-placeholder-endpoints
           path: web-dashboard/dist/
           retention-days: 7
 
+  # Console errors, page errors, failed requests and HTTP errors fail every
+  # test (tests/e2e/fixtures.ts); ci-quality.spec.ts adds axe + overflow gates.
   playwright-mock:
     name: Playwright mock (Farmer + Management)
     needs: [web-unit]
@@ -376,11 +594,11 @@ jobs:
       # The config uses channel "chrome" (Google Chrome, as developers run it).
       - name: Install Chrome + system deps
         run: npx playwright install --with-deps chrome
-      - name: Playwright (mock data, CI config)
+      - name: Playwright (mock data, CI config, 0 retries)
         run: npx playwright test
-      - name: Report
+      - name: Discovery floor + skip budget
         if: ${{ !cancelled() }}
-        run: python3 ../scripts/ci/ci_report.py --label "Playwright mock" --junit reports/playwright-junit.xml --min-total "$MIN_PLAYWRIGHT_TESTS" --max-skipped 0
+        run: python3 ../scripts/ci/ci_report.py --label "Playwright mock" --junit reports/playwright-junit.xml --floor playwright_mock --skips playwright_mock
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -398,7 +616,8 @@ jobs:
 
   # ------------------------------------------------------------ flutter
   flutter-unit:
-    name: Flutter analyze + test
+    name: Flutter analyze + test + coverage
+    needs: context
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -408,6 +627,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -415,7 +635,8 @@ jobs:
           cache: true   # SDK + pub cache, keyed on version and pubspec.lock
       - run: flutter --version
       - run: flutter pub get --enforce-lockfile
-      # Exits non-zero on any error, warning or lint (the tree is clean today).
+      # Exits non-zero on any error, warning or lint (the tree is clean today);
+      # relaxing analysis_options or adding // ignore fails workflow-policy.
       - run: flutter analyze
       # test/ only: integration_test/ needs a device and the hosted project.
       - name: flutter test + coverage
@@ -423,9 +644,19 @@ jobs:
           mkdir -p reports &&
           flutter test --coverage --concurrency=2 --reporter failures-only
           --file-reporter json:reports/flutter.json
-      - name: Report
+      - name: Discovery floor + skip budget
         if: ${{ !cancelled() }}
-        run: python3 ../scripts/ci/ci_report.py --label "Flutter" --flutter-json reports/flutter.json --min-total "$MIN_FLUTTER_TESTS" --coverage coverage/lcov.info
+        run: python3 ../scripts/ci/ci_report.py --label "Flutter" --flutter-json reports/flutter.json --floor flutter --skips flutter --coverage coverage/lcov.info
+      - name: Coverage no-regression + changed lines
+        if: ${{ !cancelled() }}
+        env:
+          BASE: ${{ needs.context.outputs.base }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python3 ../scripts/ci/coverage_gate.py --layer flutter --report coverage/lcov.info --base-ref "$BASE"
+          else
+            python3 ../scripts/ci/coverage_gate.py --layer flutter --report coverage/lcov.info
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -437,7 +668,7 @@ jobs:
           retention-days: 14
 
   flutter-android:
-    name: Flutter Android build (debug)
+    name: Flutter Android build (debug) + APK checks
     needs: [flutter-unit]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -468,117 +699,48 @@ jobs:
           echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
       # DEBUG build only. Release signing is not configured in CI (no keystore
       # or passwords exist here, by design), and a release build must never be
-      # signed with the debug key -- a signed release belongs to a future,
-      # separately approved release workflow (docs/CI_PIPELINE.md).
+      # signed with the debug key (android_check.py, EXC-ANDROID-01).
       - name: flutter build apk --debug (compile proof, arm64)
         run: flutter build apk --debug --target-platform android-arm64
+      - name: Android config + APK identity, mode, exported components, permissions, secrets
+        run: python3 ../scripts/ci/android_check.py --apk build/app/outputs/flutter-apk/app-debug.apk --mode debug
+      - name: Artifact manifest (commit, SHA-256, build mode)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: python3 ../scripts/ci/artifact_manifest.py --mode debug-not-distributable --out build/app/outputs/flutter-apk app-debug.apk
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ github.event_name != 'pull_request' }}
         with:
-          name: android-debug-apk-NOT-FOR-DISTRIBUTION
-          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          name: android-debug-apk-${{ github.sha }}-NOT-FOR-DISTRIBUTION
+          path: |
+            app/build/app/outputs/flutter-apk/app-debug.apk
+            app/build/app/outputs/flutter-apk/ARTIFACT-MANIFEST.json
           retention-days: 7
-
-  # ----------------------------------------------------------- security
-  secret-scan:
-    name: Secret scan
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0   # full history: a secret added then removed in a PR still counts
-      - name: Install gitleaks 8.30.1 (checksum-verified)
-        run: |
-          curl -fsSLo gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
-          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
-          tar -xzf gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
-          rm gitleaks.tgz
-      - name: Scan working tree (source, docs, workflows, render.yaml)
-        run: '"$RUNNER_TEMP/gitleaks" dir . --config .gitleaks.toml --redact --no-banner'
-      - name: Scan git history
-        run: '"$RUNNER_TEMP/gitleaks" git . --config .gitleaks.toml --redact --no-banner'
-      - name: No credential or data files are tracked
-        run: |
-          if git ls-files | grep -E '(^|/)(key\.properties|[^/]*\.(jks|keystore|p12|pem|sqlite|db)|\.env(\.[^/]*)?|\.supabase\.env)$' | grep -vE '\.env\.example$'; then
-            echo "::error title=Secret scan::keystore, key.properties, .env or database file is tracked"
-            exit 1
-          fi
-
-  workflow-lint:
-    name: Workflow lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # actionlint also runs the runner's shellcheck over every `run:` block.
-      - name: actionlint 1.7.12 (checksum-verified)
-        run: |
-          curl -fsSLo al.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  al.tgz" | sha256sum -c -
-          tar -xzf al.tgz -C "$RUNNER_TEMP" actionlint
-          rm al.tgz
-          "$RUNNER_TEMP/actionlint" -color
-
-  dependency-audit:
-    name: Dependency audit
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      # Policy (docs/CI_PIPELINE.md, "Dependency security"): npm fails on
-      # high/critical; PyPI and pub advisories carry no reliable severity in
-      # these tools, so any known vulnerability fails until it is fixed or
-      # explicitly accepted with --ignore-vuln / osv-scanner.toml + reason.
-      - name: Python (pip-audit, resolved backend/requirements.txt)
-        if: ${{ !cancelled() }}
-        run: |
-          python -m pip install --quiet "pip-audit==2.10.1"
-          pip-audit -r backend/requirements.txt --progress-spinner off --desc
-      - name: npm (audit, high and critical fail)
-        if: ${{ !cancelled() }}
-        working-directory: web-dashboard
-        run: npm audit --audit-level=high
-      - name: Dart/pub (osv-scanner on app/pubspec.lock)
-        if: ${{ !cancelled() }}
-        run: |
-          curl -fsSLo "$RUNNER_TEMP/osv-scanner" https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64
-          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/osv-scanner"
-          "$RUNNER_TEMP/osv-scanner" scan source --lockfile app/pubspec.lock
 
   # --------------------------------------------------------------- gate
   # The ONE check branch protection should require. It fails unless every
   # upstream job succeeded -- failed, cancelled and skipped all count as not
-  # passing, because every job above is unconditional.
+  # passing, because every job above is unconditional. workflow-policy fails
+  # if a job is ever added without being listed here.
   ci-gate:
     name: ci-gate
     if: ${{ always() }}
     needs:
+      - context
+      - workflow-policy
+      - secret-scan
+      - dependency-audit
       - backend-unit
       - backend-startup
       - migration-static
       - backend-db-integration
+      - migration-upgrade
       - rls-security
+      - openapi-contract
       - web-unit
       - web-build
       - playwright-mock
       - flutter-unit
       - flutter-android
-      - secret-scan
-      - workflow-lint
-      - dependency-audit
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -588,9 +750,9 @@ jobs:
         run: |
           {
             echo "### CI gate"
-            echo "| Job | Result |"
-            echo "|---|---|"
-            echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+            echo "| Layer | Job | Result |"
+            echo "|---|---|---|"
+            echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key | if test("backend|migration|rls") then "backend/DB" elif test("web|playwright|openapi") then "web/API" elif test("flutter") then "flutter" else "integrity/security" end) | \(.key) | \(if .value.result == "success" then "PASS" else "**" + (.value.result | ascii_upcase) + "**" end) |"'
           } >> "$GITHUB_STEP_SUMMARY"
           bad="$(echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')"
           if [ -n "$bad" ]; then

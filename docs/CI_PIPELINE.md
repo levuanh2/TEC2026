@@ -419,3 +419,70 @@ export read path has changed since. Its MRV coverage is replaced by:
 
 Its non-MRV reads (hierarchy, tenant isolation 404s) are covered by
 `test_read_repository.py`, the P0 smoke and the lifecycle probe.
+
+## 15. Hardening v2: strict quality gates
+
+Every gate fails closed with a stable error code. Policy data lives in
+`scripts/ci/policy/` (`policy.json`, `migrations.sha256`, `schema-audit.json`).
+Relaxing it (lower floor/baseline/minimum, larger tolerance or allowlist) fails
+`workflow-policy` unless a PR commit carries `CI-Policy-Change: <reason>`.
+Coverage baselines are always read from the **base branch**, so a PR cannot
+lower its own bar.
+
+| Gate | Job | Codes |
+|---|---|---|
+| actionlint + shellcheck, SHA pins, timeouts, permissions, bypass patterns (`\|\| true`, `set +e`, `continue-on-error`, `except: pass`), ci-gate completeness, missing scripts, syntax, `pull_request_target` | workflow-policy | `CI_*` |
+| skip/xfail/fixme/todo and `@ts-ignore`/Dart ignore inventories (increase fails), `.only`, analyzer relaxation, auth sign-up config, gitleaks allowlist shape | workflow-policy | `DISABLED_TEST_ADDED`, `FOCUSED_TEST`, `TS_SUPPRESSION_ADDED`, `DART_IGNORE_ADDED`, `ANALYZER_RELAXED`, `AUTH_SIGNUP_POLICY`, `GITLEAKS_BROAD_ALLOWLIST` |
+| discovery floors, exact skip budget, security probe minimums | every test job | `TEST_DISCOVERY_REGRESSION`, `UNEXPECTED_SKIP`, `PROBE_REGRESSION` |
+| coverage: global (-0.5 pp), 16 critical backend modules, changed lines >= 80% | backend-db-integration, web-unit, flutter-unit | `COVERAGE_REGRESSION`, `CRITICAL_COVERAGE_REGRESSION`, `CHANGED_CODE_COVERAGE` |
+| migration checksum manifest | migration-static | `MIGRATION_MODIFIED/DELETED/UNREGISTERED`, `MANIFEST_REWRITTEN` |
+| migration upgrade: seeded base -> head (N-1 -> N when none added), row counts kept, catalog == fresh, lifecycle 36/36 | migration-upgrade | - |
+| schema invariants, RLS on all tables, no anon/`true` policies, no privilege broadening, SECURITY DEFINER search_path/dynamic SQL, catalog snapshot | backend-db-integration (`db_audit.py`) | `SCHEMA_INVARIANT`, `RLS_*`, `PRIVILEGE_BROADENED`, `SECURITY_DEFINER`, `SCHEMA_AUDIT_DRIFT` |
+| OpenAPI == generated; breaking changes need `ACK` in `docs/API_BREAKING_CHANGES.md` | openapi-contract | `OPENAPI_DRIFT`, `OPENAPI_BREAKING` |
+| error envelope on every route, 401 semantics, validation 422, finite numbers, boundaries, malformed input, log safety | backend tests (`test_api_contract_hardening.py`) | - |
+| fresh-venv isolation, all production modules import, undeclared deps, resolved drift (warn) | backend-startup (`python_deps_check.py`) | `ENV_NOT_ISOLATED`, `IMPORT_BOUNDARY`, `UNDECLARED_DEPENDENCY` |
+| web dist: mock ids, dev API, server secrets (value shapes), test artifacts, bundle growth > 20% | web-build | `DIST_*`, `BUNDLE_GROWTH` |
+| console/page errors, failed requests, HTTP errors in every mock test; axe serious/critical = 0 and no overflow at 390/768/1024/1440 on 6 key screens | playwright-mock | - |
+| release debug-signing guard, cleartext, debuggable, exported components, permissions, APK identity/mode, APK secrets | flutter-android (`android_check.py`) | `RELEASE_DEBUG_SIGNING`, `APK_*`, `MANIFEST_*` |
+| advisories with id/reason/owner/expiry exceptions, dependency diff summary | dependency-audit | `DEP_*` |
+| artifacts carry commit + SHA-256 + build mode | web-build, flutter-android | - |
+
+`strict-ci.yml` (nightly + manual): backend suite in random order (seed =
+run number, printed), critical DB suites twice in fresh processes, property
+tests (`backend/tests_strict`), mutation testing (report; baseline
+`carbon/engine.py` 67/133 mutants survive), resolved-dependency drift (fails),
+license inventory (report).
+
+### CI exceptions
+
+| ID | Rule | Reason | Scope | Owner | Added | Review/expiry |
+|---|---|---|---|---|---|---|
+| EXC-SKIP-CV | skip budget | real-model CV smoke needs an uncommitted `ml/runs/` checkpoint | 2 exact test ids, backend-db | backend | 2026-09-27 | when a CI model artifact exists |
+| EXC-DB-01 | PRIVILEGE_BROADENED | legacy default grant: anon has write grants on `season_recommendations`; RLS on, no anon policy | 1 table | backend | 2026-09-27 | 2026-12-31 (revoke via migration) |
+| EXC-DB-02 | function EXECUTE | `soft_delete_activity` (SECURITY DEFINER) executable by anon/authenticated; checks `user_can_delete_activity` first, raises 42501 (verified as anon) | 1 RPC | backend | 2026-09-27 | 2026-12-31 |
+| EXC-API-01 | 401 sweep | `GET /v1/carbon/scenarios` is public: static scenario names, no tenant data | 1 route | backend | 2026-09-27 | 2026-12-31 |
+| EXC-WEB-01 | page-health | `api/carbon.ts`, `api/engine.ts`, `api/organizations.ts` are not mock-gated; in mock mode they hit a port Chrome refuses (127.0.0.1:9) | 6 exact requests + 1 console text | web | 2026-09-27 | 2026-12-31 (mock-gate the modules) |
+| EXC-ANDROID-01 | RELEASE_DEBUG_SIGNING | `main` still signs release with the debug key; fail-closed signing is on the unmerged release branch | `app/android/app/build.gradle.kts` | app | 2026-09-27 | **2026-10-31, enforced in code** |
+
+Dependency advisory exceptions go in `policy.json` `dependency_exceptions`
+(id, package, reason, owner, added, expires); expired ones fail CI. There are
+none today.
+
+### High-impact changes (review carefully)
+
+`.github/workflows/`, `scripts/ci/`, `scripts/ci/policy/`, `supabase/migrations/`,
+`.gitleaks.toml`, `tests/e2e/fixtures.ts` (page-health allowlist),
+`docs/API_BREAKING_CHANGES.md`. A PR touching them changes what "green" means:
+reviewers check that no gate got weaker, and relaxations carry the trailer.
+
+### Findings from building these gates (product follow-ups, not fixed here unless noted)
+
+- Fixed: activity quantities accepted `Infinity` (NaN failed range checks); now finite-only.
+- Fixed: `index.html` declared no favicon: every page logged a 404.
+- `docs/openapi.json` was 11 operations stale; regenerated, 5 historical breaks acknowledged.
+- Mock mode leaks carbon/readiness/health/organizations calls to the network (EXC-WEB-01); locally they reached `.env`'s backend.
+- Resource Metrics use plain float `sum()`: record order changes the last digit (property test); `math.fsum` would make MRV-hashed values order-exact (F-METRICS-FSUM).
+- Production code imports `PIL`, `postgrest`, `starlette`, `supabase_auth` that are only transitive dependencies; declare them.
+- `infrastructure/auth_admin.py` coverage 42.9%; mutation score of `carbon/engine.py` ~50% despite 96.8% line coverage.
+- Android `allowBackup` is unset (backups on, incl. the Supabase session in SharedPreferences): needs a product decision.
+- Licenses: psycopg family is LGPL-3.0 (review).

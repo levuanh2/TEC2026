@@ -1,0 +1,110 @@
+{
+  "_doc": "CI policy. Lowering a floor/minimum/baseline, raising a tolerance, or growing an allowlist is a relaxation: the workflow-policy job fails unless a commit in the PR carries a `CI-Policy-Change: <reason>` trailer. Exceptions are documented in docs/CI_PIPELINE.md, section 'CI exceptions'.",
+  "test_floors": {
+    "backend": 960,
+    "vitest": 460,
+    "playwright_mock": 97,
+    "flutter": 390
+  },
+  "skip_allowlist": {
+    "backend-unit": [
+      "reason:SUPABASE_DB_URL is not configured.",
+      "reason:SUPABASE_DB_URL is not configured; the RLS contract needs a real database.",
+      "reason:SUPABASE_DB_URL is not configured; the security contract needs a real database.",
+      "reason:SUPABASE_DB_URL is not configured; the atomicity invariant needs a real database.",
+      "reason:SUPABASE_DB_URL is not configured; persistence needs a real database.",
+      "reason:SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY are not configured; needs the configured main.app.",
+      "reason:no database configured",
+      "reason:No ml/runs/ checkpoint available in this environment."
+    ],
+    "backend-db": [
+      "test:tests.test_cv_real_model_smoke::test_real_baseline_checkpoint_infers_a_held_out_test_image",
+      "test:tests.test_cv_real_model_smoke::test_real_baseline_resolves_expected_threshold_and_temperature"
+    ],
+    "vitest": [],
+    "playwright_mock": [],
+    "flutter": []
+  },
+  "probe_minimums": {
+    "lifecycle": 36,
+    "p0_security": 50,
+    "p1_correctness": 30,
+    "write_reliability": 19,
+    "signup_disabled": 5
+  },
+  "coverage": {
+    "tolerance_pp": 0.5,
+    "changed_lines_min": 80,
+    "baseline": {
+      "backend": 89.35,
+      "web": 63.79,
+      "flutter": 66.06
+    },
+    "critical_backend": {
+      "infrastructure/auth.py": 88.0,
+      "infrastructure/auth_admin.py": 42.9,
+      "infrastructure/memberships.py": 100.0,
+      "infrastructure/persist_access.py": 86.8,
+      "infrastructure/read_repo.py": 80.7,
+      "infrastructure/write_repo.py": 86.6,
+      "infrastructure/season_repo.py": 97.4,
+      "infrastructure/provisioning_repo.py": 97.8,
+      "infrastructure/supabase_repo.py": 55.2,
+      "infrastructure/mrv_export_repo.py": 51.5,
+      "carbon/engine.py": 96.8,
+      "carbon/methodology.py": 96.1,
+      "carbon/readiness.py": 97.0,
+      "carbon/factor_register.py": 96.6,
+      "mrv/manifest.py": 96.1,
+      "recommendation/rules.py": 100.0
+    }
+  },
+  "bundle": {
+    "entry_js_bytes": 731850,
+    "css_bytes": 135629,
+    "total_dist_bytes": 869004,
+    "max_growth_pct": 20
+  },
+  "gate_optional_jobs": [],
+  "dart_analyzer_exclude": [
+    "build/**",
+    "android/**",
+    "ios/**"
+  ],
+  "bypass_allowlist": [],
+  "disabled_tests": {
+    "backend/tests/test_activity_rls_policies.py": 1,
+    "backend/tests/test_carbon_repo_read_retry.py": 1,
+    "backend/tests/test_cv_real_model_smoke.py": 1,
+    "backend/tests/test_db_lifecycle_rls.py": 1,
+    "backend/tests/test_farmer_provisioning.py": 2,
+    "backend/tests/test_p0_security_policies.py": 2,
+    "backend/tests/test_p1_correctness_policies.py": 2,
+    "backend/tests/test_pg_pool.py": 1,
+    "backend/tests/test_pg_pool_health.py": 3,
+    "backend/tests/test_season_create.py": 2,
+    "backend/tests/test_straw_quickfix_persistence.py": 1,
+    "backend/tests/test_write_response_atomicity.py": 1,
+    "web-dashboard/tests/e2e/farmer-real-carbon-quickfix.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-cv.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-data.spec.ts": 2,
+    "web-dashboard/tests/e2e/farmer-real-recommendations.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-straw-quickfix.spec.ts": 1,
+    "web-dashboard/tests/e2e/farmer-real-write.spec.ts": 1,
+    "web-dashboard/tests/e2e/redesign-qa.spec.ts": 1,
+    "web-dashboard/tests/e2e/round4-real.spec.ts": 2,
+    "web-dashboard/tests/e2e/round41-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/round43-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/round44-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/season-provisioning-real.spec.ts": 3,
+    "web-dashboard/tests/e2e/sidebar-parity-real.spec.ts": 1,
+    "web-dashboard/tests/e2e/web-real-data.spec.ts": 2
+  },
+  "ts_suppressions": {},
+  "dart_ignores": {
+    "app/integration_test/hosted_carbon_parity_test.dart": 1,
+    "app/integration_test/hosted_runtime_smoke_test.dart": 1,
+    "app/integration_test/hosted_season_lifecycle_test.dart": 1
+  },
+  "dependency_exceptions": []
+}
