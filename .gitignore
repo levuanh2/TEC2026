@@ -24,6 +24,16 @@ playwright/.cache/
 .vite-dev.log
 .qa-screenshots/
 
+# Test reports / coverage (CI and local equivalents, docs/CI_PIPELINE.md)
+/reports/
+/backend/reports/
+/web-dashboard/reports/
+/app/reports/
+coverage/
+.coverage
+coverage.xml
+backend-startup.log
+
 # Flutter (app/)
 .dart_tool/
 build/

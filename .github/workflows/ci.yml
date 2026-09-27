@@ -1,0 +1,581 @@
+# AgriCarbon monorepo CI -- the required check for main is the `ci-gate` job.
+# Design, local equivalents and failure triage: docs/CI_PIPELINE.md
+#
+# Uses NO repository secrets: everything runs against mock data or an isolated
+# Supabase stack started inside the runner. Never deploys, never touches the
+# hosted Supabase project, never applies migrations anywhere but that
+# throw-away local stack.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same PR supersedes the running check. Pushes to main are
+# never cancelled: every commit that lands there gets a complete result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11.9"     # render.yaml PYTHON_VERSION
+  NODE_VERSION: "22.18.0"      # developer toolchain; render.yaml pins none
+  FLUTTER_VERSION: "3.47.4"    # stable, Dart 3.13.3
+  JAVA_VERSION: "17"           # app/android compileOptions / jvmTarget
+  SUPABASE_CLI_VERSION: "2.118.0"
+  # Test-discovery floors: roughly 10% under the counts at the time CI was
+  # introduced (backend 840, Vitest 472, Playwright mock 90, Flutter 401).
+  # They catch a broken glob/import that silently drops tests; they are not
+  # targets. Raise them as suites grow; lower one only with the reason in the PR.
+  MIN_BACKEND_TESTS: "750"
+  MIN_VITEST_TESTS: "425"
+  MIN_PLAYWRIGHT_TESTS: "80"
+  MIN_FLUTTER_TESTS: "360"
+
+jobs:
+  # ------------------------------------------------------------ backend
+  backend-unit:
+    name: Backend static + unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      # No formatter/linter/type checker is configured for the backend yet
+      # (docs/CI_PIPELINE.md, "Gaps"); a byte-compile catches syntax errors in
+      # modules no test imports, e.g. the hosted QA scripts.
+      - name: Byte-compile every module
+        run: python -m compileall -q -x '(^|/)\.venv/' .
+      # No Supabase settings: tests that need a database or the configured app
+      # skip here and run in `backend-db-integration`, which forbids skips.
+      - name: pytest (no database)
+        run: python -m pytest tests -q -p no:cacheprovider --junitxml=reports/backend-unit.xml
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: python ../scripts/ci/ci_report.py --label "Backend unit (no DB)" --junit reports/backend-unit.xml --min-total "$MIN_BACKEND_TESTS"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: reports-backend-unit
+          path: backend/reports/
+          retention-days: 14
+
+  backend-startup:
+    name: Backend clean startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The pip download cache only saves bandwidth: the script still installs
+      # into a brand-new venv from backend/requirements.txt alone.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Fresh venv, Render start command, /health + /docs
+        run: bash scripts/ci/backend_startup_smoke.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: backend-startup-log
+          path: backend-startup.log
+          retention-days: 7
+
+  # --------------------------------------------------------- migrations
+  migration-static:
+    name: Migrations static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Naming, versions, and history against the base
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="origin/$BASE_REF"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          fi
+          if [ -n "$base" ]; then
+            python scripts/ci/check_migrations.py --base-ref "$base"
+          else
+            python scripts/ci/check_migrations.py
+          fi
+
+  # Isolated Supabase (Postgres + Auth + PostgREST + Storage) in the runner:
+  # every migration applied from an empty database, then the whole backend
+  # suite with the database and the configured app available.
+  backend-db-integration:
+    name: Backend DB integration (local Supabase)
+    needs: [backend-unit, migration-static]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start stack (clean apply of all migrations, fail-fast)
+        run: bash scripts/ci/supabase_stack.sh
+      - run: python -m pip install -r backend/requirements.txt "pytest-cov==7.1.0"
+      - name: Schema validator
+        run: python scripts/validate_supabase_schema.py
+      # Every DB/config-gated test must RUN here. The only allowed skips are
+      # the CV real-model smoke tests, which need an ml/runs/ checkpoint that
+      # is never committed.
+      - name: pytest (real database, configured app) + coverage
+        working-directory: backend
+        run: >-
+          python -m pytest tests -q -p no:cacheprovider -rs
+          --junitxml=reports/backend-db.xml
+          --cov --cov-config=.coveragerc --cov-report=xml:reports/backend-coverage.xml
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: >-
+          python scripts/ci/ci_report.py --label "Backend + DB integration" --junit backend/reports/backend-db.xml
+          --min-total "$MIN_BACKEND_TESTS" --max-skipped 2 --coverage backend/reports/backend-coverage.xml
+      - name: Supabase container logs
+        if: ${{ failure() }}
+        run: |
+          mkdir -p supabase-logs
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^supabase_'); do docker logs --tail 400 "$c" >"supabase-logs/$c.log" 2>&1; done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: reports-backend-db
+          path: |
+            backend/reports/
+            supabase-logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The same database rules exercised through the real HTTP surfaces: GoTrue
+  # users with real JWTs against PostgREST (exactly the Flutter sync calls),
+  # and main.app in-process for FastAPI authorization. Each probe builds a
+  # disposable tenant, cleans it up in `finally` and fails if row counts do
+  # not return to the baseline.
+  rls-security:
+    name: RLS / PostgREST security (local Supabase)
+    needs: [backend-unit, migration-static]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start stack
+        id: stack
+        working-directory: .
+        run: bash scripts/ci/supabase_stack.sh
+      - run: python -m pip install -r requirements.txt
+      # Each probe runs even if an earlier one failed, so one report shows every
+      # broken rule; any failure still fails the job (no continue-on-error).
+      - name: Lifecycle + membership via PostgREST (Flutter sync calls)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: python scripts/hosted_lifecycle_rls_probe.py --enforce
+      - name: P0 security (tenant isolation, roles, MRV exports)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: python scripts/hosted_p0_security_smoke.py
+      - name: P1 correctness (season/batch, carbon persistence, lifecycle)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: python scripts/hosted_p1_correctness_smoke.py
+      - name: Write reliability (atomic writes, dead pool recovery)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: python scripts/hosted_write_reliability_smoke.py
+      - name: REST end-to-end (hierarchy, activities, MRV, cleanup)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: python scripts/hosted_e2e_rest.py
+      - name: Public sign-up stays disabled
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: python scripts/verify_public_signup_disabled.py
+      - name: Supabase container logs
+        if: ${{ failure() }}
+        working-directory: .
+        run: |
+          mkdir -p supabase-logs
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^supabase_'); do docker logs --tail 400 "$c" >"supabase-logs/$c.log" 2>&1; done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: supabase-logs-rls
+          path: supabase-logs/
+          retention-days: 7
+
+  # ---------------------------------------------------------------- web
+  web-unit:
+    name: Web typecheck + Vitest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web-dashboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web-dashboard/package-lock.json
+      - run: npm ci
+      # No ESLint/Prettier config exists yet (docs/CI_PIPELINE.md, "Gaps").
+      - name: TypeScript
+        run: npx tsc -b
+      - name: Vitest + coverage
+        run: >-
+          npx vitest run --maxWorkers=2
+          --reporter=default --reporter=junit --outputFile.junit=reports/vitest.xml
+          --coverage.enabled
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 ../scripts/ci/ci_report.py --label "Web Vitest" --junit reports/vitest.xml
+          --min-total "$MIN_VITEST_TESTS" --max-skipped 0 --coverage coverage/coverage-summary.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: reports-web-unit
+          path: |
+            web-dashboard/reports/
+            web-dashboard/coverage/lcov.info
+            web-dashboard/coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  web-build:
+    name: Web clean build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web-dashboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web-dashboard/package-lock.json
+      - run: npm ci
+      # Same command as render.yaml. VITE_* are build-time and public; the
+      # values here are placeholders, so this dist is a build check, not a
+      # deployable staging bundle.
+      - name: npm run build (real-data mode, placeholder endpoints)
+        env:
+          VITE_USE_MOCK_DATA: "false"
+          VITE_API_BASE_URL: https://api.ci.invalid
+          VITE_SUPABASE_URL: https://supabase.ci.invalid
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-not-a-key
+        run: npm run build
+      # With VITE_USE_MOCK_DATA=false the mock fixtures are tree-shaken out;
+      # finding one means mock mode leaked into a production-style bundle.
+      - name: Bundle carries no mock data
+        run: |
+          if grep -rlE 'farm-demo-01|crop-demo-01' dist; then
+            echo "::error title=Web build::mock fixtures found in dist -- VITE_USE_MOCK_DATA leaked into the build"
+            exit 1
+          fi
+          grep -rq 'api.ci.invalid' dist || { echo "::error title=Web build::VITE_API_BASE_URL was not compiled in"; exit 1; }
+          echo "dist is a real-data build ($(du -sh dist | cut -f1))"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          name: web-dist-ci-placeholder-endpoints
+          path: web-dashboard/dist/
+          retention-days: 7
+
+  playwright-mock:
+    name: Playwright mock (Farmer + Management)
+    needs: [web-unit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web-dashboard
+    env:
+      # Hosted specs are excluded by playwright.config.ts; make sure none of
+      # their opt-in switches can be inherited here.
+      REAL_E2E: "false"
+      REDESIGN_QA: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web-dashboard/package-lock.json
+      - run: npm ci
+      # The config uses channel "chrome" (Google Chrome, as developers run it).
+      - name: Install Chrome + system deps
+        run: npx playwright install --with-deps chrome
+      - name: Playwright (mock data, CI config)
+        run: npx playwright test
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: python3 ../scripts/ci/ci_report.py --label "Playwright mock" --junit reports/playwright-junit.xml --min-total "$MIN_PLAYWRIGHT_TESTS" --max-skipped 0
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: reports-playwright
+          path: web-dashboard/reports/
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: playwright-failure-traces
+          path: |
+            web-dashboard/playwright-report/
+            web-dashboard/test-results/
+          retention-days: 7
+
+  # ------------------------------------------------------------ flutter
+  flutter-unit:
+    name: Flutter analyze + test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true   # SDK + pub cache, keyed on version and pubspec.lock
+      - run: flutter --version
+      - run: flutter pub get --enforce-lockfile
+      # Exits non-zero on any error, warning or lint (the tree is clean today).
+      - run: flutter analyze
+      # test/ only: integration_test/ needs a device and the hosted project.
+      - name: flutter test + coverage
+        run: >-
+          mkdir -p reports &&
+          flutter test --coverage --concurrency=2 --reporter failures-only
+          --file-reporter json:reports/flutter.json
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: python3 ../scripts/ci/ci_report.py --label "Flutter" --flutter-json reports/flutter.json --min-total "$MIN_FLUTTER_TESTS" --coverage coverage/lcov.info
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: reports-flutter
+          path: |
+            app/reports/
+            app/coverage/lcov.info
+          if-no-files-found: ignore
+          retention-days: 14
+
+  flutter-android:
+    name: Flutter Android build (debug)
+    needs: [flutter-unit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle   # ~/.gradle caches + wrapper, keyed on *.gradle* files
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      # app/android/gradle.properties asks for an 8 GB heap (Flutter template);
+      # the user-level file overrides it so Gradle + Kotlin daemons fit the
+      # 16 GB runner with headroom.
+      - name: Bound Gradle memory
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
+      # DEBUG build only. Release signing is not configured in CI (no keystore
+      # or passwords exist here, by design), and a release build must never be
+      # signed with the debug key -- a signed release belongs to a future,
+      # separately approved release workflow (docs/CI_PIPELINE.md).
+      - name: flutter build apk --debug (compile proof, arm64)
+        run: flutter build apk --debug --target-platform android-arm64
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          name: android-debug-apk-NOT-FOR-DISTRIBUTION
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
+
+  # ----------------------------------------------------------- security
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0   # full history: a secret added then removed in a PR still counts
+      - name: Install gitleaks 8.30.1 (checksum-verified)
+        run: |
+          curl -fsSLo gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
+          rm gitleaks.tgz
+      - name: Scan working tree (source, docs, workflows, render.yaml)
+        run: '"$RUNNER_TEMP/gitleaks" dir . --config .gitleaks.toml --redact --no-banner'
+      - name: Scan git history
+        run: '"$RUNNER_TEMP/gitleaks" git . --config .gitleaks.toml --redact --no-banner'
+      - name: No credential or data files are tracked
+        run: |
+          if git ls-files | grep -E '(^|/)(key\.properties|[^/]*\.(jks|keystore|p12|pem|sqlite|db)|\.env(\.[^/]*)?|\.supabase\.env)$' | grep -vE '\.env\.example$'; then
+            echo "::error title=Secret scan::keystore, key.properties, .env or database file is tracked"
+            exit 1
+          fi
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actionlint also runs the runner's shellcheck over every `run:` block.
+      - name: actionlint 1.7.12 (checksum-verified)
+        run: |
+          curl -fsSLo al.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  al.tgz" | sha256sum -c -
+          tar -xzf al.tgz -C "$RUNNER_TEMP" actionlint
+          rm al.tgz
+          "$RUNNER_TEMP/actionlint" -color
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Policy (docs/CI_PIPELINE.md, "Dependency security"): npm fails on
+      # high/critical; PyPI and pub advisories carry no reliable severity in
+      # these tools, so any known vulnerability fails until it is fixed or
+      # explicitly accepted with --ignore-vuln / osv-scanner.toml + reason.
+      - name: Python (pip-audit, resolved backend/requirements.txt)
+        if: ${{ !cancelled() }}
+        run: |
+          python -m pip install --quiet "pip-audit==2.10.1"
+          pip-audit -r backend/requirements.txt --progress-spinner off --desc
+      - name: npm (audit, high and critical fail)
+        if: ${{ !cancelled() }}
+        working-directory: web-dashboard
+        run: npm audit --audit-level=high
+      - name: Dart/pub (osv-scanner on app/pubspec.lock)
+        if: ${{ !cancelled() }}
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/osv-scanner" https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64
+          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          "$RUNNER_TEMP/osv-scanner" scan source --lockfile app/pubspec.lock
+
+  # --------------------------------------------------------------- gate
+  # The ONE check branch protection should require. It fails unless every
+  # upstream job succeeded -- failed, cancelled and skipped all count as not
+  # passing, because every job above is unconditional.
+  ci-gate:
+    name: ci-gate
+    if: ${{ always() }}
+    needs:
+      - backend-unit
+      - backend-startup
+      - migration-static
+      - backend-db-integration
+      - rls-security
+      - web-unit
+      - web-build
+      - playwright-mock
+      - flutter-unit
+      - flutter-android
+      - secret-scan
+      - workflow-lint
+      - dependency-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every required job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          {
+            echo "### CI gate"
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+          bad="$(echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')"
+          if [ -n "$bad" ]; then
+            echo "::error title=ci-gate::required jobs did not succeed: $(echo $bad)"
+            exit 1
+          fi
+          echo "all $(echo "$NEEDS" | jq 'length') required jobs succeeded"

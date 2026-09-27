@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from infrastructure.config import Settings  # noqa: E402
+from infrastructure.config import Settings, load_settings  # noqa: E402
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository  # noqa: E402
 
 DUMMY_SETTINGS = Settings(
@@ -464,6 +464,17 @@ def test_organization_summary_sums_farms_not_averages(repo_a):
 # hình dạng {"detail": {"error": {"code","message"}}} như lỗi tự tay raise.
 # ---------------------------------------------------------------------------
 
+# These drive the CONFIGURED `main.app`: without Supabase settings every read
+# route answers 503 `backend_not_configured` before validation or auth, and the
+# malformed-bearer cases need a live Supabase Auth/PostgREST to reject the JWT.
+# CI runs them against its local Supabase stack (and fails on unexpected skips).
+requires_supabase_config = pytest.mark.skipif(
+    not load_settings().auth_configured,
+    reason="SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY are not configured; needs the configured main.app.",
+)
+
+
+@requires_supabase_config
 def test_query_param_type_error_uses_unified_error_contract():
     from fastapi.testclient import TestClient
     from main import app
@@ -486,6 +497,7 @@ def test_missing_authorization_uses_unified_401_error_contract():
     assert response.json()["detail"]["error"]["code"] == "unauthenticated"
 
 
+@requires_supabase_config
 @pytest.mark.parametrize("token", ["garbage", "malformed.jwt.token", "a.b.c"])
 @pytest.mark.parametrize("path", ["/v1/me", "/v1/farmer/scope", "/v1/farms"])
 def test_malformed_bearer_returns_401_not_500(path, token, monkeypatch):
@@ -504,6 +516,7 @@ def test_malformed_bearer_returns_401_not_500(path, token, monkeypatch):
     assert response.json()["detail"]["error"]["code"] == "unauthenticated"
 
 
+@requires_supabase_config
 def test_me_malformed_bearer_returns_401():
     from fastapi.testclient import TestClient
     from main import app
@@ -513,6 +526,7 @@ def test_me_malformed_bearer_returns_401():
     assert response.json()["detail"]["error"]["code"] == "unauthenticated"
 
 
+@requires_supabase_config
 def test_farmer_scope_malformed_bearer_returns_401():
     from fastapi.testclient import TestClient
     from main import app

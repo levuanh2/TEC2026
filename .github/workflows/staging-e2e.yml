@@ -1,0 +1,243 @@
+# Hosted staging checks: Render (API + static web) and the hosted Supabase
+# project. NOT a pull-request check and never required by branch protection.
+#
+# * Manual only (workflow_dispatch), and only for main: it holds the service
+#   role key, so it must never run code from an unreviewed branch or a fork.
+#   No pull_request / pull_request_target trigger exists here on purpose.
+# * Never deploys, never applies migrations (hosted migrations stay a manual,
+#   approved, one-batch-at-a-time operation -- docs/MIGRATION_HISTORY.md,
+#   "Hosted migration runbook").
+# * Mutations happen only in DISPOSABLE tenants that each probe creates under a
+#   unique run tag and deletes in `finally`, then proves the row counts are
+#   back to the baseline. The shared QA identities are used read-only.
+#
+# Setup (secrets, variables, environment): docs/CI_PIPELINE.md, "Staging E2E".
+name: Staging E2E (hosted, manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      db_probes:
+        description: "Disposable-tenant DB/API probes against hosted Supabase (create -> verify -> delete)"
+        type: boolean
+        default: true
+      browser_readonly:
+        description: "Read-only Farmer + Management browser checks on the Render web app (shared QA identities)"
+        type: boolean
+        default: true
+
+# Never cancel a run: an interrupted probe could skip its cleanup.
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11.9"
+  NODE_VERSION: "22.18.0"
+  API_URL: ${{ vars.STAGING_API_URL || 'https://agricarbon-api-staging.onrender.com' }}
+  WEB_URL: ${{ vars.STAGING_WEB_URL || 'https://agricarbon-web-staging.onrender.com' }}
+  # Render Free sleeps when idle; the first request waits for a cold start
+  # (measured 34 s on 2026-09-27). Waking within this budget is a pass, and the
+  # wake time is reported separately from warm latency.
+  COLD_START_BUDGET_SECONDS: "180"
+
+jobs:
+  preflight:
+    name: Preflight (trusted ref, secrets present)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Only main may run with staging secrets
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error title=Staging E2E::run this workflow from main (got $GITHUB_REF)"
+            exit 1
+          fi
+      - name: Required secrets are configured
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          STAGING_MANAGER_EMAIL: ${{ secrets.STAGING_MANAGER_EMAIL }}
+          STAGING_MANAGER_PASSWORD: ${{ secrets.STAGING_MANAGER_PASSWORD }}
+          STAGING_FARMER_EMAIL: ${{ secrets.STAGING_FARMER_EMAIL }}
+          STAGING_FARMER_PASSWORD: ${{ secrets.STAGING_FARMER_PASSWORD }}
+        run: |
+          missing=""
+          for name in STAGING_SUPABASE_URL STAGING_SUPABASE_PUBLISHABLE_KEY STAGING_SUPABASE_SERVICE_ROLE_KEY \
+                      STAGING_MANAGER_EMAIL STAGING_MANAGER_PASSWORD STAGING_FARMER_EMAIL STAGING_FARMER_PASSWORD; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Staging E2E BLOCKED::missing secrets:$missing (docs/CI_PIPELINE.md, Staging E2E)"
+            exit 1
+          fi
+          echo "all required staging secrets are set"
+
+  render:
+    name: Render health + cold start
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Wake API, then /health and /docs
+        run: |
+          start=$(date +%s)
+          code=000
+          while [ $(( $(date +%s) - start )) -lt "$COLD_START_BUDGET_SECONDS" ]; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$API_URL/health")" || code=000
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          wake=$(( $(date +%s) - start ))
+          if [ "$code" != "200" ]; then
+            echo "::error title=Render::$API_URL/health not 200 within ${COLD_START_BUDGET_SECONDS}s (last $code)"
+            exit 1
+          fi
+          warm="$(curl -s -o /dev/null -w '%{time_total}' "$API_URL/health")"
+          docs="$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/docs")"
+          web="$(curl -s -o /dev/null -w '%{http_code}' "$WEB_URL/")"
+          deep="$(curl -s -o /dev/null -w '%{http_code}' "$WEB_URL/farmer")"
+          {
+            echo "### Render staging"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| API wake (cold start incl.) | ${wake}s |"
+            echo "| API /health warm | ${warm}s |"
+            echo "| API /docs | $docs |"
+            echo "| Web / | $web |"
+            echo "| Web SPA deep link /farmer | $deep |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for pair in "docs:$docs" "web:$web" "deep-link:$deep"; do
+            [ "${pair#*:}" = "200" ] || { echo "::error title=Render::${pair%%:*} returned ${pair#*:}"; exit 1; }
+          done
+
+  authenticated-read:
+    name: Authenticated safe reads (Render API)
+    needs: render
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    env:
+      SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      PUBLISHABLE: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - name: Farmer and Manager GET /v1/me, farmer scope, organizations
+        env:
+          FARMER_EMAIL: ${{ secrets.STAGING_FARMER_EMAIL }}
+          FARMER_PASSWORD: ${{ secrets.STAGING_FARMER_PASSWORD }}
+          MANAGER_EMAIL: ${{ secrets.STAGING_MANAGER_EMAIL }}
+          MANAGER_PASSWORD: ${{ secrets.STAGING_MANAGER_PASSWORD }}
+        run: |
+          token() {
+            local t
+            t="$(jq -n --arg e "$1" --arg p "$2" '{email:$e,password:$p}' \
+              | curl -fsS "$SUPABASE_URL/auth/v1/token?grant_type=password" -H "apikey: $PUBLISHABLE" \
+                  -H 'content-type: application/json' --data @- | jq -r .access_token)"
+            echo "::add-mask::$t"
+            printf '%s' "$t"
+          }
+          get() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" "$API_URL$2"; }
+          farmer="$(token "$FARMER_EMAIL" "$FARMER_PASSWORD")"
+          manager="$(token "$MANAGER_EMAIL" "$MANAGER_PASSWORD")"
+          fail=0
+          check() { echo "$1 -> $2 (want $3)"; [ "$2" = "$3" ] || fail=1; }
+          check "farmer  GET /v1/me"            "$(get "$farmer" /v1/me)" 200
+          check "farmer  GET /v1/farmer/scope"  "$(get "$farmer" /v1/farmer/scope)" 200
+          check "manager GET /v1/me"            "$(get "$manager" /v1/me)" 200
+          check "manager GET /v1/organizations" "$(get "$manager" /v1/organizations)" 200
+          check "anon    GET /v1/farms"         "$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/v1/farms")" 401
+          exit $fail
+
+  db-probes:
+    name: Disposable-tenant DB/API probes (hosted Supabase)
+    needs: preflight
+    if: ${{ inputs.db_probes }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      # Each script tags its tenant with a unique run id, deletes it in
+      # `finally` (Auth users included) and exits 1 if any table's row count
+      # differs from before the run -- the log then names the tag to clean.
+      - name: Lifecycle + membership via PostgREST
+        if: ${{ !cancelled() }}
+        run: python scripts/hosted_lifecycle_rls_probe.py --enforce
+      - name: P0 security
+        if: ${{ !cancelled() }}
+        run: python scripts/hosted_p0_security_smoke.py
+      - name: P1 correctness
+        if: ${{ !cancelled() }}
+        run: python scripts/hosted_p1_correctness_smoke.py
+      - name: REST end-to-end
+        if: ${{ !cancelled() }}
+        run: python scripts/hosted_e2e_rest.py
+      - name: Public sign-up disabled
+        if: ${{ !cancelled() }}
+        run: python scripts/verify_public_signup_disabled.py
+      - name: Cleanup failed -- identify leftovers
+        if: ${{ failure() }}
+        run: |
+          echo "::warning title=Staging E2E::a probe failed; if it reported 'cleanup ... False' or a row-count diff, the run tag printed above identifies the leftover tenant, users and storage objects"
+
+  browser-readonly:
+    name: Browser read-only (Render web, shared QA identities)
+    needs: render
+    if: ${{ inputs.browser_readonly }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    defaults:
+      run:
+        working-directory: web-dashboard
+    env:
+      REAL_E2E: "true"
+      FARMER_REAL_E2E: "true"
+      REAL_E2E_BASE_URL: ${{ vars.STAGING_WEB_URL || 'https://agricarbon-web-staging.onrender.com' }}
+      REAL_E2E_EMAIL: ${{ secrets.STAGING_MANAGER_EMAIL }}
+      REAL_E2E_PASSWORD: ${{ secrets.STAGING_MANAGER_PASSWORD }}
+      FARMER_REAL_E2E_EMAIL: ${{ secrets.STAGING_FARMER_EMAIL }}
+      FARMER_REAL_E2E_PASSWORD: ${{ secrets.STAGING_FARMER_PASSWORD }}
+      # Read-only: the MRV export spec writes, so it stays off.
+      REAL_MRV_EXPORT_E2E: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web-dashboard/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      # playwright.real.config.ts keeps traces OFF (they would record the typed
+      # password); failure screenshots show only the masked field.
+      - name: Management + Farmer real-data read specs
+        run: npx playwright test --config playwright.real.config.ts web-real-data farmer-real-data
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: staging-browser-failure-screenshots
+          path: web-dashboard/test-results/
+          retention-days: 3
