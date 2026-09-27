@@ -195,6 +195,11 @@
     "backend/tests/test_straw_quickfix_persistence.py",
     "backend/tests/test_write_response_atomicity.py",
     "scripts/validate_supabase_schema.py",
-    "web-dashboard/package.json"
+    "web-dashboard/package.json",
+    "backend/requirements.txt",
+    "ml/requirements.txt",
+    "web-dashboard/package-lock.json",
+    "app/pubspec.yaml",
+    "app/pubspec.lock"
   ]
 }

@@ -15,6 +15,7 @@ WORKFLOWS (.github/workflows/*.yml)
   CI_CODEOWNERS_MISSING     a guarded path (or supabase/migrations/) has no CODEOWNERS entry
   CI_UNGUARDED_SCRIPT       a workflow runs a script outside policy guarded_paths
   CI_UNGUARDED_TEST         a protected_tests module is outside policy guarded_paths
+  DEP_SOURCE                a lockfile/requirements entry installs from outside the public registry
   CI_GUARDED_CHANGE         a file under policy guarded_paths changed without the trailer
   CI_GATE_INCOMPLETE        ci-gate needs every other ci.yml job, and fails on non-success
   CI_MISSING_SCRIPT         every scripts/... path a workflow runs exists
@@ -330,6 +331,34 @@ def check_npm(wf: str, job_id: str, run: str, policy: dict) -> None:
                                             "which is not under guarded_paths")
 
 
+def check_dependency_sources() -> None:
+    """Test runners and tools come from the dependency manifests, so a manifest
+    that installs from an arbitrary tarball/URL/index could ship a fake pytest,
+    vitest or playwright that "passes". Only the public registries, pinned by
+    integrity where the ecosystem has it."""
+    lock = json.loads((ROOT / "web-dashboard" / "package-lock.json").read_text(encoding="utf-8"))
+    for name, pkg in lock.get("packages", {}).items():
+        if not name:
+            continue
+        resolved, integrity = pkg.get("resolved", ""), pkg.get("integrity", "")
+        if pkg.get("link") or not resolved.startswith("https://registry.npmjs.org/") or not integrity.startswith("sha512-"):
+            fail("DEP_SOURCE", f"web-dashboard/package-lock.json {name}: must resolve from registry.npmjs.org "
+                               f"with a sha512 integrity (resolved={resolved or pkg.get('link')!r})")
+    for req in ("backend/requirements.txt", "ml/requirements.txt"):
+        for n, line in enumerate((ROOT / req).read_text(encoding="utf-8").splitlines(), 1):
+            spec = line.split("#", 1)[0].strip()
+            if spec and (spec.startswith("-") or "://" in spec or " @ " in spec or spec.startswith(("git+", "."))):
+                fail("DEP_SOURCE", f"{req}:{n}: `{spec}` installs from outside PyPI (option, URL or path)")
+    pub = yaml.safe_load((ROOT / "app" / "pubspec.lock").read_text(encoding="utf-8"))
+    for name, pkg in (pub.get("packages") or {}).items():
+        url = (pkg.get("description") or {}).get("url") if isinstance(pkg.get("description"), dict) else None
+        if pkg.get("source") == "sdk":
+            continue
+        if pkg.get("source") != "hosted" or url != "https://pub.dev":
+            fail("DEP_SOURCE", f"app/pubspec.lock {name}: must be hosted on https://pub.dev "
+                               f"(source={pkg.get('source')!r}, url={url!r})")
+
+
 def is_guarded(path: str, policy: dict) -> bool:
     return any(path == g or (g.endswith("/") and path.startswith(g)) for g in policy["guarded_paths"])
 
@@ -413,6 +442,7 @@ def main() -> int:
     check_inventories(policy)
     check_config()
     check_codeowners(policy)
+    check_dependency_sources()
     if args.base_ref:
         check_relaxation(args.base_ref, policy)
     print(f"ci_policy: {'FAIL' if errors else 'PASS'} ({len(errors)} violation(s))")

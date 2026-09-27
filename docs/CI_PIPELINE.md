@@ -500,6 +500,15 @@ page-health `ALLOWED` list in `tests/e2e/fixtures.ts`, `app/analysis_options.yam
   protection on `main` with "Require a pull request", "Require review from Code
   Owners" and required status check `ci-gate`. Without it, CI is advisory.
 
+Dependency manifests are guarded too (`backend/requirements.txt`,
+`ml/requirements.txt`, `web-dashboard/package.json` + `package-lock.json`,
+`app/pubspec.yaml` + `pubspec.lock`): they decide which pytest / vitest /
+playwright binary runs the gates. `DEP_SOURCE` additionally requires every entry
+to come from the public registry (npm: registry.npmjs.org + sha512 integrity;
+pub: pub.dev; pip: no URL, path or index option). A dependency bump therefore
+carries the trailer and gets CODEOWNERS review, next to the dependency-audit
+diff summary.
+
 Everything a workflow executes is guarded: `CI_UNGUARDED_SCRIPT` fails when a
 `run:` step calls a script outside `guarded_paths` (the security probes in
 `backend/scripts/` print the very `50/50` lines the gate trusts), and
