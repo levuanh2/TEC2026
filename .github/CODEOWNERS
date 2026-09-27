@@ -1,0 +1,32 @@
+# CI-critical paths (docs/CI_PIPELINE.md, "CI change review").
+# GitHub reads this file from the BASE branch, so a PR cannot remove itself
+# from review. Effective only with branch protection on main:
+# "Require a pull request" + "Require review from Code Owners" + required
+# status check `ci-gate`. Must list every policy.json guarded_paths entry
+# (ci_policy.py CI_CODEOWNERS_MISSING) plus the migrations.
+
+/.github/workflows/ @levuanh2
+/.github/CODEOWNERS @levuanh2
+/scripts/ci/ @levuanh2
+/.gitleaks.toml @levuanh2
+/backend/.coveragerc @levuanh2
+/backend/pytest.ini @levuanh2
+/backend/tests/conftest.py @levuanh2
+/backend/tests/_markers.py @levuanh2
+/web-dashboard/vite.config.ts @levuanh2
+/web-dashboard/playwright.config.ts @levuanh2
+/web-dashboard/tests/e2e/fixtures.ts @levuanh2
+/web-dashboard/tsconfig.json @levuanh2
+/web-dashboard/tsconfig.app.json @levuanh2
+/web-dashboard/eslint.config.js @levuanh2
+/app/analysis_options.yaml @levuanh2
+/app/dart_test.yaml @levuanh2
+/docs/API_BREAKING_CHANGES.md @levuanh2
+/docs/MIGRATION_DATA_CHANGES.md @levuanh2
+/supabase/config.toml @levuanh2
+/backend/pyproject.toml @levuanh2
+/backend/setup.cfg @levuanh2
+/backend/tox.ini @levuanh2
+/web-dashboard/vitest.config.ts @levuanh2
+/supabase/migrations/ @levuanh2
+/scripts/ci/policy/ @levuanh2

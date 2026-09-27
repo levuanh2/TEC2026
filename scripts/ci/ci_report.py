@@ -16,6 +16,9 @@ Exit 1 (with a stable code) when:
                             allowlist -- entries are `reason:<exact skip reason>` or
                             `test:<exact test id>`; nothing fuzzy. Fewer skips than
                             allowed is fine (a gated test that became runnable).
+  PROTECTED_TEST_REGRESSION a security-critical test module (policy `protected_tests`) passed
+                            fewer tests than its minimum -- deleting security tests and padding
+                            the total elsewhere does not keep the floor green
   PROBE_REGRESSION          a security probe reported fewer checks than its minimum,
                             or not all of them passed, or printed no result line
 
@@ -99,6 +102,17 @@ def line_coverage(path: Path) -> str:
     return f"{hit / found * 100:.2f}%" if found else "n/a"
 
 
+def passed_per_module(path: Path) -> Counter:
+    """Passed test cases per module (`tests.test_x` classname -> `test_x`)."""
+    out: Counter = Counter()
+    for tc in ET.parse(path).getroot().iter("testcase"):
+        if any(tc.find(tag) is not None for tag in ("failure", "error", "skipped")):
+            continue
+        parts = (tc.get("classname") or "").split(".")
+        out[parts[1] if len(parts) > 1 and parts[0] == "tests" else parts[0]] += 1
+    return out
+
+
 def allowed(skip: Skip, allowlist: list[str]) -> bool:
     test_id, reason = skip
     return any((e.startswith("reason:") and reason == e[7:]) or (e.startswith("test:") and test_id == e[5:])
@@ -144,6 +158,7 @@ def main() -> int:
     ap.add_argument("--floor", help="key in policy test_floors")
     ap.add_argument("--skips", help="key in policy skip_allowlist")
     ap.add_argument("--probe", help="key in policy probe_minimums")
+    ap.add_argument("--protected", help="key in policy protected_tests (JUnit only)")
     ap.add_argument("--coverage", type=Path, help="Cobertura .xml, lcov .info or Vitest json-summary .json")
     args = ap.parse_args()
     if args.probe_log:
@@ -171,6 +186,11 @@ def main() -> int:
         problems.append(f"TESTS_FAILED: {counts['failed']} failed")
     if total < floor:
         problems.append(f"TEST_DISCOVERY_REGRESSION: {total} tests discovered, policy floor is {floor}")
+    if args.protected and args.junit and not any(p.startswith("REPORT_MISSING") for p in problems):
+        per_module = passed_per_module(path)
+        for module, minimum in sorted(POLICY["protected_tests"][args.protected].items()):
+            if per_module[module] < minimum:
+                problems.append(f"PROTECTED_TEST_REGRESSION: {module} passed {per_module[module]} tests, minimum is {minimum}")
     if unexpected:
         problems.append(f"UNEXPECTED_SKIP: {len(unexpected)} skip(s) not on the '{args.skips}' allowlist")
 

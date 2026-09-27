@@ -11,8 +11,10 @@
 #    stops at the first failure). If the change adds none, the newest base
 #    migration is held back and replayed instead (N-1 -> N), so the upgrade
 #    path is exercised on every run;
-# 3. require: every migration recorded, core row counts unchanged (no data
-#    lost), the upgraded catalog identical to the freshly-built one
+# 3. require: every migration recorded; EVERY public table that existed at the
+#    base keeps its row count and the content of its base columns (checksum),
+#    unless docs/MIGRATION_DATA_CHANGES.md has `ACK data-change <new migration
+#    file> <table>` for a reviewed backfill; the upgraded catalog identical to the freshly-built one
 #    (db_audit.py against the committed snapshot), and the PostgREST lifecycle
 #    probe still 36/36.
 # Local only; the stack and the worktree are removed on exit, whatever happens.
@@ -23,7 +25,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/migration-upgrade"
 BASE_TREE="$WORK/base"
 PY="${PYTHON:-python}"
-TABLES="organizations organization_memberships farms farm_members plots crop_seasons production_batches activities irrigation_events emission_factor_sets mrv_cases"
+ACKS="$ROOT/docs/MIGRATION_DATA_CHANGES.md"
 
 cleanup() {
   if [ -d "$BASE_TREE/supabase" ]; then
@@ -61,31 +63,63 @@ printf '  %s\n' $new
 eval "$(cd "$BASE_TREE" && env -u GITHUB_ENV bash scripts/ci/supabase_stack.sh | grep '^export ')"
 (cd "$BASE_TREE" && "$PY" scripts/ci/seed_ci_db.py >/dev/null)
 
-count_rows() {
+sql() { psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "$1"; }
+
+# Base tables and their base columns, captured before the upgrade.
+TABLES="$(sql "select tablename from pg_tables where schemaname = 'public' order by 1")"
+[ -n "$TABLES" ] || { echo "::error title=Migration upgrade::no public tables at the base"; exit 1; }
+declare -A COLS
+for t in $TABLES; do
+  COLS[$t]="$(sql "select string_agg(format('%I', column_name), ', ' order by ordinal_position) from information_schema.columns where table_schema = 'public' and table_name = '$t'")"
+done
+
+# One line per base table: <table> <rows>:<md5 of its base columns, order-independent>
+fingerprint() {
   for t in $TABLES; do
-    printf '%s=%s ' "$t" "$(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select count(*) from public.$t")"
+    printf '%s %s\n' "$t" "$(sql "select count(*) || ':' || coalesce(md5(string_agg(r, E'\n' order by r)), '-') from (select row(${COLS[$t]})::text as r from public.\"$t\") s")"
   done
 }
-before="$(count_rows)"
-echo "seeded rows before upgrade: $before"
+before="$(fingerprint)"
+echo "seeded base: $(printf '%s\n' "$before" | wc -l) public tables, $(printf '%s\n' "$before" | awk -F'[ :]' '{s += $2} END {print s}') rows, $(printf '%s\n' "$before" | awk -F'[ :]' '$2 == 0 {e++} END {print e + 0}') empty tables"
 
 for f in $new; do
   cp "$ROOT/supabase/migrations/$f" "$BASE_TREE/supabase/migrations/$f"
 done
 supabase migration up --local --workdir "$BASE_TREE"
 
-applied="$(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c 'select version from supabase_migrations.schema_migrations order by version')"
+applied="$(sql 'select version from supabase_migrations.schema_migrations order by version')"
 expected="$(printf '%s\n' "$head_files" | cut -d_ -f1)"
 if [ "$applied" != "$expected" ]; then
   echo "::error title=Migration upgrade::applied versions after upgrade differ from supabase/migrations"
   exit 1
 fi
-after="$(count_rows)"
-echo "rows after upgrade:          $after"
-if [ "$before" != "$after" ]; then
-  echo "::error title=Migration upgrade::row counts changed during the upgrade (data lost or duplicated)"
+
+after="$(fingerprint)"
+# diff exits 1 when the fingerprints differ; that case is handled below.
+if delta="$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"; then
+  delta=""
+fi
+changed="$(printf '%s\n' "$delta" | sed -n 's/^< \([^ ]*\) .*/\1/p')"
+unacked=""
+for t in $changed; do
+  acked=""
+  for f in $new; do
+    if [ -f "$ACKS" ] && grep -qxF "ACK data-change $f $t" "$ACKS"; then
+      acked=1
+    fi
+  done
+  if [ -n "$acked" ]; then
+    echo "::warning title=Migration upgrade::$t changed during the upgrade (acknowledged in docs/MIGRATION_DATA_CHANGES.md)"
+  else
+    unacked="$unacked $t"
+  fi
+done
+if [ -n "$unacked" ]; then
+  printf '%s\n' "$delta" | grep -E '^[<>]'
+  echo "::error title=Migration upgrade::MIGRATION_DATA_CHANGED: rows lost, duplicated or rewritten in:$unacked -- if intended, add 'ACK data-change <migration file> <table>' to docs/MIGRATION_DATA_CHANGES.md"
   exit 1
 fi
+echo "all $(printf '%s\n' "$before" | wc -l) base tables keep their rows and base-column content"
 
 # The upgraded catalog must equal the one built from scratch (same snapshot).
 "$PY" "$ROOT/scripts/ci/db_audit.py"

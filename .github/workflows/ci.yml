@@ -55,15 +55,23 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          base=""
-          if [ "$EVENT" = "pull_request" ]; then
-            base="origin/$BASE_REF"
-          elif [ "$EVENT" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
-            base="$BEFORE"
-          fi
+          # Every run compares against a trusted base; no run silently skips the
+          # base comparisons (policy relaxation, migrations, coverage, OpenAPI).
+          case "$EVENT" in
+            pull_request) base="origin/$BASE_REF" ;;
+            push)
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "::error title=ci context::push without a previous commit; no comparison base"
+                exit 1
+              fi
+              base="$BEFORE" ;;
+            workflow_dispatch) base="origin/$DEFAULT_BRANCH" ;;
+            *) echo "::error title=ci context::unsupported event $EVENT"; exit 1 ;;
+          esac
           echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "comparison base: ${base:-none (manual run or new branch)}"
+          echo "comparison base: $base"
 
   # ------------------------------------------------------- self-integrity
   workflow-policy:
@@ -92,11 +100,9 @@ jobs:
           BASE: ${{ needs.context.outputs.base }}
         run: |
           python -m pip install --quiet "pyyaml==6.0.3"
-          if [ -n "$BASE" ]; then
-            python scripts/ci/ci_policy.py --base-ref "$BASE"
-          else
-            python scripts/ci/ci_policy.py
-          fi
+          python scripts/ci/ci_policy.py --base-ref "$BASE"
+      - name: ci-gate logic on synthetic job results
+        run: bash scripts/ci/ci_gate_selftest.sh
       - name: PowerShell helper syntax (.herdr)
         shell: pwsh
         run: |
@@ -161,7 +167,6 @@ jobs:
       - name: Audit PyPI + npm + pub
         run: python scripts/ci/dep_audit.py --osv-scanner "$RUNNER_TEMP/osv-scanner"
       - name: Dependency changes in this PR
-        if: ${{ needs.context.outputs.base != '' }}
         env:
           BASE: ${{ needs.context.outputs.base }}
         run: python scripts/ci/dep_audit.py --diff "$BASE"
@@ -264,11 +269,7 @@ jobs:
         env:
           BASE: ${{ needs.context.outputs.base }}
         run: |
-          if [ -n "$BASE" ]; then
-            python scripts/ci/check_migrations.py --base-ref "$BASE"
-          else
-            python scripts/ci/check_migrations.py
-          fi
+          python scripts/ci/check_migrations.py --base-ref "$BASE"
 
   # Isolated Supabase (Postgres + Auth + PostgREST + Storage) in the runner:
   # every migration applied from an empty database, the catalog audited, then
@@ -317,17 +318,13 @@ jobs:
           --cov --cov-config=.coveragerc --cov-report=xml:reports/backend-coverage.xml
       - name: Discovery floor + skip budget (only the 2 CV real-model tests may skip)
         if: ${{ !cancelled() }}
-        run: python scripts/ci/ci_report.py --label "Backend + DB integration" --junit backend/reports/backend-db.xml --floor backend --skips backend-db --coverage backend/reports/backend-coverage.xml
+        run: python scripts/ci/ci_report.py --label "Backend + DB integration" --junit backend/reports/backend-db.xml --floor backend --skips backend-db --protected backend-db --coverage backend/reports/backend-coverage.xml
       - name: Coverage no-regression + critical modules + changed lines
         if: ${{ !cancelled() }}
         env:
           BASE: ${{ needs.context.outputs.base }}
         run: |
-          if [ -n "$BASE" ]; then
-            python scripts/ci/coverage_gate.py --layer backend --report backend/reports/backend-coverage.xml --base-ref "$BASE"
-          else
-            python scripts/ci/coverage_gate.py --layer backend --report backend/reports/backend-coverage.xml
-          fi
+          python scripts/ci/coverage_gate.py --layer backend --report backend/reports/backend-coverage.xml --base-ref "$BASE"
       - name: Supabase container logs
         if: ${{ failure() }}
         run: |
@@ -366,7 +363,7 @@ jobs:
       - run: python -m pip install -r backend/requirements.txt
       - name: Upgrade from the base revision
         env:
-          BASE: ${{ needs.context.outputs.base || 'HEAD~1' }}
+          BASE: ${{ needs.context.outputs.base }}
         run: bash scripts/ci/migration_upgrade.sh "$BASE"
 
   # The same database rules exercised through the real HTTP surfaces: GoTrue
@@ -462,11 +459,7 @@ jobs:
         env:
           BASE: ${{ needs.context.outputs.base }}
         run: |
-          if [ -n "$BASE" ]; then
-            python scripts/ci/openapi_check.py --base-ref "$BASE"
-          else
-            python scripts/ci/openapi_check.py
-          fi
+          python scripts/ci/openapi_check.py --base-ref "$BASE"
 
   # ---------------------------------------------------------------- web
   web-unit:
@@ -505,11 +498,7 @@ jobs:
         env:
           BASE: ${{ needs.context.outputs.base }}
         run: |
-          if [ -n "$BASE" ]; then
-            python3 ../scripts/ci/coverage_gate.py --layer web --report coverage/lcov.info --base-ref "$BASE"
-          else
-            python3 ../scripts/ci/coverage_gate.py --layer web --report coverage/lcov.info
-          fi
+          python3 ../scripts/ci/coverage_gate.py --layer web --report coverage/lcov.info --base-ref "$BASE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -652,11 +641,7 @@ jobs:
         env:
           BASE: ${{ needs.context.outputs.base }}
         run: |
-          if [ -n "$BASE" ]; then
-            python3 ../scripts/ci/coverage_gate.py --layer flutter --report coverage/lcov.info --base-ref "$BASE"
-          else
-            python3 ../scripts/ci/coverage_gate.py --layer flutter --report coverage/lcov.info
-          fi
+          python3 ../scripts/ci/coverage_gate.py --layer flutter --report coverage/lcov.info --base-ref "$BASE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -744,19 +729,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      # Logic + synthetic-status self-test: scripts/ci/ci_gate.sh, ci_gate_selftest.sh
       - name: Every required job succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          {
-            echo "### CI gate"
-            echo "| Layer | Job | Result |"
-            echo "|---|---|---|"
-            echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key | if test("backend|migration|rls") then "backend/DB" elif test("web|playwright|openapi") then "web/API" elif test("flutter") then "flutter" else "integrity/security" end) | \(.key) | \(if .value.result == "success" then "PASS" else "**" + (.value.result | ascii_upcase) + "**" end) |"'
-          } >> "$GITHUB_STEP_SUMMARY"
-          bad="$(echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')"
-          if [ -n "$bad" ]; then
-            echo "::error title=ci-gate::required jobs did not succeed: ${bad//$'\n'/ }"
-            exit 1
-          fi
-          echo "all $(echo "$NEEDS" | jq 'length') required jobs succeeded"
+        run: bash scripts/ci/ci_gate.sh

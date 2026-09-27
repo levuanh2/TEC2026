@@ -433,10 +433,10 @@ lower its own bar.
 |---|---|---|
 | actionlint + shellcheck, SHA pins, timeouts, permissions, bypass patterns (`\|\| true`, `set +e`, `continue-on-error`, `except: pass`), ci-gate completeness, missing scripts, syntax, `pull_request_target` | workflow-policy | `CI_*` |
 | skip/xfail/fixme/todo and `@ts-ignore`/Dart ignore inventories (increase fails), `.only`, analyzer relaxation, auth sign-up config, gitleaks allowlist shape | workflow-policy | `DISABLED_TEST_ADDED`, `FOCUSED_TEST`, `TS_SUPPRESSION_ADDED`, `DART_IGNORE_ADDED`, `ANALYZER_RELAXED`, `AUTH_SIGNUP_POLICY`, `GITLEAKS_BROAD_ALLOWLIST` |
-| discovery floors, exact skip budget, security probe minimums | every test job | `TEST_DISCOVERY_REGRESSION`, `UNEXPECTED_SKIP`, `PROBE_REGRESSION` |
+| discovery floors, exact skip budget, security probe minimums, per-module minimums for security-critical test files (`protected_tests`: deleting them and padding elsewhere fails) | every test job | `TEST_DISCOVERY_REGRESSION`, `UNEXPECTED_SKIP`, `PROBE_REGRESSION`, `PROTECTED_TEST_REGRESSION` |
 | coverage: global (-0.5 pp), 16 critical backend modules, changed lines >= 80% | backend-db-integration, web-unit, flutter-unit | `COVERAGE_REGRESSION`, `CRITICAL_COVERAGE_REGRESSION`, `CHANGED_CODE_COVERAGE` |
 | migration checksum manifest | migration-static | `MIGRATION_MODIFIED/DELETED/UNREGISTERED`, `MANIFEST_REWRITTEN` |
-| migration upgrade: seeded base -> head (N-1 -> N when none added), row counts kept, catalog == fresh, lifecycle 36/36 | migration-upgrade | - |
+| migration upgrade: seeded base -> head (N-1 -> N when none added); every base table keeps its row count and base-column checksum unless `docs/MIGRATION_DATA_CHANGES.md` ACKs it; catalog == fresh; lifecycle 36/36 | migration-upgrade | `MIGRATION_DATA_CHANGED` |
 | schema invariants, RLS on all tables, no anon/`true` policies, no privilege broadening, SECURITY DEFINER search_path/dynamic SQL, catalog snapshot | backend-db-integration (`db_audit.py`) | `SCHEMA_INVARIANT`, `RLS_*`, `PRIVILEGE_BROADENED`, `SECURITY_DEFINER`, `SCHEMA_AUDIT_DRIFT` |
 | OpenAPI == generated; breaking changes need `ACK` in `docs/API_BREAKING_CHANGES.md` | openapi-contract | `OPENAPI_DRIFT`, `OPENAPI_BREAKING` |
 | error envelope on every route, 401 semantics, validation 422, finite numbers, boundaries, malformed input, log safety | backend tests (`test_api_contract_hardening.py`) | - |
@@ -471,8 +471,41 @@ sweep therefore enumerates `app.openapi()["paths"]`.
 | EXC-DB-01 | PRIVILEGE_BROADENED | legacy default grant: anon has write grants on `season_recommendations`; RLS on, no anon policy | 1 table | backend | 2026-09-27 | 2026-12-31 (revoke via migration) |
 | EXC-DB-02 | function EXECUTE | `soft_delete_activity` (SECURITY DEFINER) executable by anon/authenticated; checks `user_can_delete_activity` first, raises 42501 (verified as anon) | 1 RPC | backend | 2026-09-27 | 2026-12-31 |
 | EXC-API-01 | 401 sweep | `GET /v1/carbon/scenarios` is public: static scenario names, no tenant data | 1 route | backend | 2026-09-27 | 2026-12-31 |
+| EXC-API-02 | 401 sweep | the 3 Carbon routes answer 401 `missing_authorization` (Flutter `carbon_api_service` maps it); every other route `unauthenticated`. All answer 401 before 422/503 | 3 routes | backend | 2026-09-27 | 2026-12-31 |
+| EXC-DB-03 | RLS_PERMISSIVE | `mrv_step_catalog_select` is `USING (true)` for authenticated: static MRV step catalog, no tenant data | 1 policy | backend | 2026-09-27 | 2026-12-31 |
 | EXC-WEB-01 | page-health | `api/carbon.ts`, `api/engine.ts`, `api/organizations.ts` are not mock-gated; in mock mode they hit a port Chrome refuses (127.0.0.1:9) | 6 exact requests + 1 console text | web | 2026-09-27 | 2026-12-31 (mock-gate the modules) |
 | EXC-ANDROID-01 | RELEASE_DEBUG_SIGNING | `main` still signs release with the debug key; fail-closed signing is on the unmerged release branch | `app/android/app/build.gradle.kts` | app | 2026-09-27 | **2026-10-31, enforced in code** |
+
+DB exceptions (EXC-DB-01..03) are data in `policy.json` `db_exceptions`, read by
+`db_audit.py`; growing them is a policy relaxation.
+
+### CI change review
+
+These are high-impact: `.github/workflows/`, `scripts/ci/` (gates and
+`policy/`), `supabase/migrations/`, and every file in `policy.json`
+`guarded_paths` -- including the configs that decide what is measured
+(`backend/.coveragerc`, `web-dashboard/vite.config.ts` coverage excludes, the
+page-health `ALLOWED` list in `tests/e2e/fixtures.ts`, `app/analysis_options.yaml`,
+`.gitleaks.toml`, pytest config/conftest/markers, `docs/API_BREAKING_CHANGES.md`,
+`docs/MIGRATION_DATA_CHANGES.md`).
+
+- `workflow-policy` fails (`CI_GUARDED_CHANGE` / `CI_POLICY_RELAXED`) unless a
+  commit in the PR carries `CI-Policy-Change: <reason>`; the changed files and
+  relaxations are listed in the job summary.
+- The trailer is self-declared. It makes the change explicit; it is not an
+  approval. Approval is **CODEOWNERS**: `.github/CODEOWNERS` owns every guarded
+  path (`CI_CODEOWNERS_MISSING` keeps it in sync), and GitHub reads it from the
+  base branch, so a PR cannot drop itself out of review.
+- **Required repository setting** (not something a workflow can enforce): branch
+  protection on `main` with "Require a pull request", "Require review from Code
+  Owners" and required status check `ci-gate`. Without it, CI is advisory.
+
+Residual risk, by design: PR CI runs the PR's own workflow and helper code, so a
+PR that edits a gate can make that gate lie. No in-repo check can prevent that
+without `pull_request_target` (excluded: it would run with repository secrets
+in reach). The defence is the review rule above. Secret scans match value
+shapes; a secret deliberately split or encoded to evade them is out of scope
+(the scans target accidental leaks).
 
 Dependency advisory exceptions go in `policy.json` `dependency_exceptions`
 (id, package, reason, owner, added, expires); expired ones fail CI. There are

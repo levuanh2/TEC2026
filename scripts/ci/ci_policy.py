@@ -12,6 +12,8 @@ WORKFLOWS (.github/workflows/*.yml)
   CI_PERMISSIONS            top-level permissions is exactly {contents: read}; no job widens it
   CI_FORBIDDEN_TRIGGER      no pull_request_target anywhere
   CI_SECRETS_IN_PR_CI       ci.yml never references secrets.*
+  CI_CODEOWNERS_MISSING     a guarded path (or supabase/migrations/) has no CODEOWNERS entry
+  CI_GUARDED_CHANGE         a file under policy guarded_paths changed without the trailer
   CI_GATE_INCOMPLETE        ci-gate needs every other ci.yml job, and fails on non-success
   CI_MISSING_SCRIPT         every scripts/... path a workflow runs exists
 BYPASS PATTERNS (workflow run blocks + scripts/ci/*)
@@ -40,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import py_compile
 import re
 import subprocess
@@ -62,7 +65,7 @@ BYPASS = [
     (re.compile(r"except(?:\s+(?:Exception|BaseException))?\s*:\s*pass\b"), "except: pass"),
 ]
 DISABLED_PATTERNS = {
-    "py": re.compile(r"pytest\.mark\.(?:skip|xfail)\b|pytest\.(?:skip|xfail)\(|pytest\.importorskip\("),
+    "py": re.compile(r"pytest\.mark\.(?:skip|skipif|xfail)\b|pytest\.(?:skip|xfail)\(|pytest\.importorskip\("),
     "ts": re.compile(r"\b(?:test|it|describe)\.(?:skip|fixme|todo)\b|\b(?:xit|xdescribe)\("),
     "dart": re.compile(r"\bskip\s*:"),
 }
@@ -139,8 +142,13 @@ def check_workflows(policy: dict) -> None:
                 if gate.get("if") != "${{ always() }}":
                     fail("CI_GATE_INCOMPLETE", "ci-gate must run with if: ${{ always() }}")
                 body = "".join(s.get("run", "") for s in gate.get("steps") or [])
-                if 'select(.value.result != "success")' not in body:
-                    fail("CI_GATE_INCOMPLETE", "ci-gate must fail on every non-success upstream result")
+                gate_sh = ROOT / "scripts" / "ci" / "ci_gate.sh"
+                gate_logic = gate_sh.read_text(encoding="utf-8") if gate_sh.is_file() else ""
+                if "bash scripts/ci/ci_gate.sh" not in body or 'select(.value.result != "success")' not in gate_logic:
+                    fail("CI_GATE_INCOMPLETE", "ci-gate must run scripts/ci/ci_gate.sh, which fails on every non-success upstream result")
+                policy_runs = "".join(s.get("run", "") for s in (jobs.get("workflow-policy") or {}).get("steps") or [])
+                if "bash scripts/ci/ci_gate_selftest.sh" not in policy_runs:
+                    fail("CI_GATE_INCOMPLETE", "workflow-policy must run scripts/ci/ci_gate_selftest.sh")
 
 
 def check_helpers(policy: dict) -> None:
@@ -165,13 +173,15 @@ def check_helpers(policy: dict) -> None:
 
 # ------------------------------------------------------------ inventories
 def test_files():
-    yield from ((p, "py") for p in (ROOT / "backend" / "tests").rglob("test_*.py"))
-    yield from ((p, "py") for p in (ROOT / "ml" / "tests").rglob("test_*.py"))
+    # Every file under the test trees, not only test_*.py: a skip marker defined in
+    # a helper (_markers.py, conftest.py) disables every test that uses it.
+    for tree in ("backend/tests", "backend/tests_strict", "ml/tests"):
+        yield from ((p, "py") for p in (ROOT / tree).rglob("*.py"))
     web = ROOT / "web-dashboard"
     for pat in ("src/**/*.test.ts", "src/**/*.test.tsx", "tests/e2e/**/*.ts"):
         yield from ((p, "ts") for p in web.glob(pat))
     for sub in ("test", "integration_test"):
-        yield from ((p, "dart") for p in (ROOT / "app" / sub).rglob("*_test.dart"))
+        yield from ((p, "dart") for p in (ROOT / "app" / sub).rglob("*.dart"))
 
 
 def inventories() -> dict:
@@ -250,6 +260,10 @@ def relaxations(base: dict, head: dict) -> list[str]:
     for probe, n in base["probe_minimums"].items():
         if head["probe_minimums"].get(probe, 0) < n:
             out.append(f"probe minimum {probe} {n} -> {head['probe_minimums'].get(probe)}")
+    for suite, mins in base.get("protected_tests", {}).items():
+        for module, n in mins.items():
+            if head.get("protected_tests", {}).get(suite, {}).get(module, 0) < n:
+                out.append(f"protected tests {suite}/{module} {n} -> {head.get('protected_tests', {}).get(suite, {}).get(module)}")
     bc, hc = base["coverage"], head["coverage"]
     if hc["tolerance_pp"] > bc["tolerance_pp"]:
         out.append(f"coverage tolerance {bc['tolerance_pp']} -> {hc['tolerance_pp']}")
@@ -273,30 +287,77 @@ def relaxations(base: dict, head: dict) -> list[str]:
         out.append("ci-gate optional jobs grew")
     if head["bundle"]["max_growth_pct"] > base["bundle"]["max_growth_pct"]:
         out.append("bundle growth tolerance raised")
+    bx, hx = base.get("db_exceptions", {}), head.get("db_exceptions", {})
+    for key in ("anon_table_write", "function_execute", "open_read_policies"):
+        grown = [e for e in hx.get(key, []) if e not in bx.get(key, [])]
+        if grown and key in bx:
+            out.append(f"db_exceptions {key} grew: {grown}")
+    dropped = set(base.get("guarded_paths", [])) - set(head.get("guarded_paths", []))
+    if dropped:
+        out.append(f"guarded_paths shrank: {sorted(dropped)}")
     return out
 
 
+def guarded_changes(ref: str, head_policy: dict) -> list[str]:
+    """Files under the policy's guarded paths that differ from the base: gates,
+    their data and the configs that decide what is measured (coverage omit/
+    exclude, page-health allowlist, analyzer config, gitleaks, ACK files)."""
+    changed = subprocess.run(["git", "diff", "--name-only", f"{ref}...HEAD"], cwd=ROOT, check=True,
+                             capture_output=True, text=True, encoding="utf-8").stdout.split()
+    guards = head_policy["guarded_paths"]
+    return [f for f in changed if any(f == g or (g.endswith("/") and f.startswith(g)) for g in guards)]
+
+
 def check_relaxation(ref: str, head_policy: dict) -> None:
+    """A relaxed policy, or any change under guarded_paths, needs a
+    `CI-Policy-Change: <reason>` trailer in the PR's commits. The trailer is
+    self-declared -- it makes the change explicit and searchable; approval is
+    CODEOWNERS review on the same paths (docs/CI_PIPELINE.md, "CI change review")."""
     try:
         base_text = subprocess.run(["git", "show", f"{ref}:scripts/ci/policy/policy.json"], cwd=ROOT,
                                    check=True, capture_output=True, text=True, encoding="utf-8").stdout
+        found = relaxations(json.loads(base_text), head_policy)
     except subprocess.CalledProcessError:
-        print(f"no policy.json on {ref}: relaxation check not applicable (first introduction)")
-        return
-    found = relaxations(json.loads(base_text), head_policy)
-    if not found:
-        print("policy not relaxed")
+        print(f"no policy.json on {ref}: policy introduced by this change")
+        found = []
+    guarded = guarded_changes(ref, head_policy)
+    for item in found:
+        print(f"POLICY RELAXED: {item}")
+    for f in guarded:
+        print(f"GUARDED PATH CHANGED: {f}")
+    if not found and not guarded:
+        print("policy not relaxed; no guarded path changed")
         return
     log = subprocess.run(["git", "log", "--format=%B", f"{ref}..HEAD"], cwd=ROOT, check=True,
                          capture_output=True, text=True, encoding="utf-8").stdout
     trailer = re.search(r"^CI-Policy-Change:\s*\S.*$", log, re.M)
-    for item in found:
-        print(f"POLICY RELAXED: {item}")
+    what = "; ".join(found + [f"changed {f}" for f in guarded])
     if not trailer:
-        fail("CI_POLICY_RELAXED", "policy relaxed without a `CI-Policy-Change: <reason>` commit trailer: "
-                                  + "; ".join(found))
+        if found:
+            fail("CI_POLICY_RELAXED", "policy relaxed without a `CI-Policy-Change: <reason>` commit trailer: "
+                                      + "; ".join(found))
+        if guarded:
+            fail("CI_GUARDED_CHANGE", f"{len(guarded)} guarded CI file(s) changed without a "
+                                      "`CI-Policy-Change: <reason>` commit trailer: " + ", ".join(guarded))
     else:
-        print(f"::warning title=CI policy relaxed::{trailer.group(0)} -- reviewers must approve: " + "; ".join(found))
+        print(f"::warning title=CI policy change::{trailer.group(0)} -- CODEOWNERS must review: {what}")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        with open(summary_path, "a", encoding="utf-8") as fh:
+            fh.write("### CI policy changes in this PR\n" + "".join(f"- {x}\n" for x in found + guarded))
+
+
+def check_codeowners(policy: dict) -> None:
+    path = ROOT / ".github" / "CODEOWNERS"
+    owned = set()
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and not line.startswith("#"):
+                owned.add(parts[0].lstrip("/"))
+    for g in policy["guarded_paths"] + ["supabase/migrations/"]:
+        if g not in owned:
+            fail("CI_CODEOWNERS_MISSING", f".github/CODEOWNERS has no owner for guarded path {g}")
 
 
 def main() -> int:
@@ -312,6 +373,7 @@ def main() -> int:
     check_helpers(policy)
     check_inventories(policy)
     check_config()
+    check_codeowners(policy)
     if args.base_ref:
         check_relaxation(args.base_ref, policy)
     print(f"ci_policy: {'FAIL' if errors else 'PASS'} ({len(errors)} violation(s))")

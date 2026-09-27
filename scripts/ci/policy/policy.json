@@ -32,6 +32,29 @@
     "write_reliability": 19,
     "signup_disabled": 5
   },
+  "protected_tests": {
+    "backend-db": {
+      "test_activity_rls_policies": 19,
+      "test_activity_write_permissions": 19,
+      "test_activity_writes": 40,
+      "test_activity_writes_expansion": 24,
+      "test_api_contract_hardening": 139,
+      "test_carbon_engine": 57,
+      "test_carbon_idempotent_save": 3,
+      "test_carbon_persist_authorization": 11,
+      "test_db_lifecycle_rls": 50,
+      "test_farmer_provisioning": 39,
+      "test_me_active_memberships": 12,
+      "test_memberships": 7,
+      "test_mrv_canonical_carbon": 6,
+      "test_mrv_export": 59,
+      "test_mrv_factor_provenance": 3,
+      "test_p0_security_policies": 13,
+      "test_season_create": 47,
+      "test_straw_quickfix_persistence": 5,
+      "test_write_response_atomicity": 8
+    }
+  },
   "coverage": {
     "tolerance_pp": 0.5,
     "changed_lines_min": 80,
@@ -73,18 +96,19 @@
   ],
   "bypass_allowlist": [],
   "disabled_tests": {
-    "backend/tests/test_activity_rls_policies.py": 1,
+    "backend/tests/_markers.py": 1,
+    "backend/tests/test_activity_rls_policies.py": 2,
     "backend/tests/test_carbon_repo_read_retry.py": 1,
-    "backend/tests/test_cv_real_model_smoke.py": 1,
-    "backend/tests/test_db_lifecycle_rls.py": 1,
-    "backend/tests/test_farmer_provisioning.py": 2,
-    "backend/tests/test_p0_security_policies.py": 2,
-    "backend/tests/test_p1_correctness_policies.py": 2,
+    "backend/tests/test_cv_real_model_smoke.py": 3,
+    "backend/tests/test_db_lifecycle_rls.py": 2,
+    "backend/tests/test_farmer_provisioning.py": 3,
+    "backend/tests/test_p0_security_policies.py": 3,
+    "backend/tests/test_p1_correctness_policies.py": 3,
     "backend/tests/test_pg_pool.py": 1,
-    "backend/tests/test_pg_pool_health.py": 3,
-    "backend/tests/test_season_create.py": 2,
-    "backend/tests/test_straw_quickfix_persistence.py": 1,
-    "backend/tests/test_write_response_atomicity.py": 1,
+    "backend/tests/test_pg_pool_health.py": 4,
+    "backend/tests/test_season_create.py": 3,
+    "backend/tests/test_straw_quickfix_persistence.py": 2,
+    "backend/tests/test_write_response_atomicity.py": 2,
     "web-dashboard/tests/e2e/farmer-real-carbon-quickfix.spec.ts": 1,
     "web-dashboard/tests/e2e/farmer-real-cv.spec.ts": 1,
     "web-dashboard/tests/e2e/farmer-real-data.spec.ts": 2,
@@ -106,5 +130,48 @@
     "app/integration_test/hosted_runtime_smoke_test.dart": 1,
     "app/integration_test/hosted_season_lifecycle_test.dart": 1
   },
-  "dependency_exceptions": []
+  "dependency_exceptions": [],
+  "db_exceptions": {
+    "anon_table_write": [
+      "season_recommendations"
+    ],
+    "function_execute": [
+      {
+        "function": "public.soft_delete_activity(p_activity_id uuid)",
+        "role": "anon"
+      },
+      {
+        "function": "public.soft_delete_activity(p_activity_id uuid)",
+        "role": "authenticated"
+      }
+    ],
+    "open_read_policies": [
+      "mrv_step_catalog.mrv_step_catalog_select"
+    ]
+  },
+  "guarded_paths": [
+    ".github/workflows/",
+    ".github/CODEOWNERS",
+    "scripts/ci/",
+    ".gitleaks.toml",
+    "backend/.coveragerc",
+    "backend/pytest.ini",
+    "backend/tests/conftest.py",
+    "backend/tests/_markers.py",
+    "web-dashboard/vite.config.ts",
+    "web-dashboard/playwright.config.ts",
+    "web-dashboard/tests/e2e/fixtures.ts",
+    "web-dashboard/tsconfig.json",
+    "web-dashboard/tsconfig.app.json",
+    "web-dashboard/eslint.config.js",
+    "app/analysis_options.yaml",
+    "app/dart_test.yaml",
+    "docs/API_BREAKING_CHANGES.md",
+    "docs/MIGRATION_DATA_CHANGES.md",
+    "supabase/config.toml",
+    "backend/pyproject.toml",
+    "backend/setup.cfg",
+    "backend/tox.ini",
+    "web-dashboard/vitest.config.ts"
+  ]
 }

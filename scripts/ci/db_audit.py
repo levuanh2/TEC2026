@@ -9,8 +9,10 @@ HARD RULES (fail regardless of the snapshot)
   SCHEMA_INVARIANT     hierarchy NOT NULLs, foreign keys, soft-delete columns,
                        idempotency/uniqueness indexes, lifecycle triggers
   RLS_DISABLED         a public table without row level security
-  RLS_PERMISSIVE       a policy granted to anon/public, or a write policy whose
-                       USING/WITH CHECK is literally `true`
+  RLS_PERMISSIVE       a policy granted to anon/public, a write policy whose
+                       USING/WITH CHECK is literally `true`, or a read policy with
+                       USING `true` (every signed-in user of every tenant) outside
+                       the exact open-read allowlist
   PRIVILEGE_BROADENED  anon holds INSERT/UPDATE/DELETE/TRUNCATE on a public TABLE,
                        or anon/authenticated/PUBLIC can EXECUTE a function, beyond
                        the documented exceptions below
@@ -46,17 +48,12 @@ ROLES = ("anon", "authenticated", "PUBLIC")
 DETAIL_TABLES = ("seeding_events", "fertilizer_applications", "irrigation_events", "pesticide_applications",
                  "straw_management_events", "harvest_events")
 
-# Documented exceptions (docs/CI_PIPELINE.md, "CI exceptions").
-ANON_TABLE_WRITE_EXCEPTIONS = {
-    # EXC-DB-01: legacy default grant; RLS is enabled and has no anon policy.
-    "season_recommendations",
-}
-FUNCTION_EXECUTE_EXCEPTIONS = {
-    # EXC-DB-02: the RPC the Flutter app calls; checks user_can_delete_activity
-    # before anything else and raises 42501 (verified as role anon in CI).
-    ("public.soft_delete_activity(p_activity_id uuid)", "anon"),
-    ("public.soft_delete_activity(p_activity_id uuid)", "authenticated"),
-}
+# Documented exceptions (docs/CI_PIPELINE.md, "CI exceptions") live in policy.json
+# `db_exceptions`, so growing them is a policy relaxation (ci_policy.py).
+_EXC = json.loads((ROOT / "scripts" / "ci" / "policy" / "policy.json").read_text(encoding="utf-8"))["db_exceptions"]
+ANON_TABLE_WRITE_EXCEPTIONS = set(_EXC["anon_table_write"])                              # EXC-DB-01
+FUNCTION_EXECUTE_EXCEPTIONS = {(e["function"], e["role"]) for e in _EXC["function_execute"]}  # EXC-DB-02
+OPEN_READ_POLICIES = set(_EXC["open_read_policies"])                                      # EXC-DB-03
 
 NOT_NULL = [("activities", "production_batch_id"), ("activities", "activity_type"), ("activities", "occurred_at"),
             ("production_batches", "crop_season_id"), ("crop_seasons", "plot_id"), ("plots", "farm_id"),
@@ -156,6 +153,8 @@ def hard_rules(cur, snap: dict) -> None:
             fail("RLS_PERMISSIVE", f"policy {name} applies to {p['roles']}")
         if p["cmd"] in ("INSERT", "UPDATE", "DELETE", "ALL") and "true" in (p["using"], p["with_check"]):
             fail("RLS_PERMISSIVE", f"write policy {name} is unconditional (true)")
+        elif p["cmd"] == "SELECT" and p["using"] == "true" and name not in OPEN_READ_POLICIES:
+            fail("RLS_PERMISSIVE", f"read policy {name} is USING (true): every tenant's users can read it")
     for table, privs in snap["table_grants"]["anon"].items():
         writes = set(privs.split(",")) & {"INSERT", "UPDATE", "DELETE", "TRUNCATE"}
         is_table = table in snap["rls"]

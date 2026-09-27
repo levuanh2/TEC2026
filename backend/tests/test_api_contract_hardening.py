@@ -20,19 +20,21 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from infrastructure.config import load_settings  # noqa: E402
 from main import app  # noqa: E402
 from schemas import ActivityCreateRequest, CropSeasonCreateRequest, validate_activity_data  # noqa: E402
 from tests._markers import requires_supabase_config  # noqa: E402
 
 UUID = "00000000-0000-4000-8000-000000000001"
-CONFIGURED = load_settings().auth_configured
 # Intentionally public: the static list of Carbon scenario names, no tenant data.
 PUBLIC_ROUTES = {("GET", "/v1/carbon/scenarios")}
-# Unconfigured app only: these Carbon routes resolve the repository (503) before
-# the caller's token. With configuration (CI DB job) they must answer 401 too.
-UNCONFIGURED_503_BEFORE_AUTH = {("POST", "/v1/carbon/calculate"), ("GET", "/v1/crop-seasons/{crop_season_id}/carbon"),
+# EXC-API-02: the Carbon routes answer 401 with code `missing_authorization`
+# (Flutter's carbon_api_service maps it); every other route uses `unauthenticated`.
+CARBON_MISSING_AUTHORIZATION = {("POST", "/v1/carbon/calculate"), ("GET", "/v1/crop-seasons/{crop_season_id}/carbon"),
                                 ("GET", "/v1/crop-seasons/{crop_season_id}/carbon/readiness")}
+
+
+def expected_401_code(method: str, path: str) -> str:
+    return "missing_authorization" if (method, path) in CARBON_MISSING_AUTHORIZATION else "unauthenticated"
 
 
 def v1_operations():
@@ -71,8 +73,9 @@ def test_unauthenticated_request_gets_the_standard_error_envelope(method, path):
     response = TestClient(app, raise_server_exceptions=False).request(method, concrete(path), json={})
     assert response.status_code != 500, f"{method} {path} crashed without a token: {response.text[:200]}"
     assert is_envelope(response), f"{method} {path} -> {response.status_code} without the error envelope: {response.text[:200]}"
-    allowed = {401, 503} if (method, path) in UNCONFIGURED_503_BEFORE_AUTH and not CONFIGURED else {401}
-    assert response.status_code in allowed, f"{method} {path} -> {response.status_code}, expected {sorted(allowed)}"
+    # 401 before anything else: no 503 (unconfigured service) and no 422 (body).
+    assert response.status_code == 401, f"{method} {path} -> {response.status_code}, expected 401"
+    assert response.json()["detail"]["error"]["code"] == expected_401_code(method, path)
 
 
 @requires_supabase_config
@@ -82,7 +85,7 @@ def test_configured_app_answers_401_for_every_protected_route(method, path):
         return
     response = TestClient(app, raise_server_exceptions=False).request(method, concrete(path), json={})
     assert response.status_code == 401 and is_envelope(response), f"{method} {path} -> {response.status_code} {response.text[:200]}"
-    assert response.json()["detail"]["error"]["code"] == "unauthenticated"
+    assert response.json()["detail"]["error"]["code"] == expected_401_code(method, path)
 
 
 @requires_supabase_config
