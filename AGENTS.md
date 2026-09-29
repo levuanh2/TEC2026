@@ -522,3 +522,11 @@ Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trư�
 | `web-dashboard/**` (auth boundary, Carbon quick-fix contract, Farmer Home/Journal, Management `/seasons` `/data-gaps` `/carbon`, overlay drawer, visual tokens, tests), `docs/WEB_UX_REDESIGN_ROUND4.md` (new) | **Claude** (đang giữ) | Round 4: P0 logout/session-expired dead end, P0 quick-fix required/optional contradiction, Farmer Home task-first, ba route Management khác nhiệm vụ, drawer overlay, copy Carbon theo state. **Không** đổi backend, công thức/hệ số/logic Carbon. Branch `fix/agricarbon-redesign-round4`, commit local, chưa merge/push/deploy. | Xem `docs/WEB_UX_REDESIGN_ROUND4.md`. |
 
 Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trước qua Herdr.
+
+## AgriCarbon Round 5 — logic integrity (2026-09-29)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/api.py` (GET carbon, activity write errors), `backend/service.py` (`CarbonService.stored/readiness`, harvest-area bound), `backend/schemas.py` (readiness fingerprint), `backend/infrastructure/{mapping,repository,supabase_repo}.py`, `backend/tests/test_round5_*.py`, `web-dashboard/**`, `docs/WEB_LOGIC_UAT_ROUND5.md` (new) | **Claude** (đang giữ) | Round 5: tách kết quả actual khỏi kịch bản mô phỏng, provenance/nhãn nguồn, fingerprint staleness, harvest-area bound, ngày vụ, MRV association, recommendation basis, precision. **Không** đổi công thức/hệ số/GWP/methodology. Branch `fix/agricarbon-round5-logic-integrity`, commit local, chưa push/merge/deploy. | đang làm |
+
+Codex: đừng sửa các file trên trong round này trừ khi nhắn trước qua Herdr.

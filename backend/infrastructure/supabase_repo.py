@@ -152,6 +152,23 @@ class SupabaseCarbonRepository:
             ).data or []
         return {r["factor_code"]: r["id"] for r in rows}
 
+    def factor_set_version(self, factor_set_id: str) -> str | None:
+        """version_code của một bộ hệ số, để bản tính đã lưu nói được nó dùng bộ nào.
+
+        Bộ hệ số là bất biến sau khi publish, nên cache theo id trong tiến trình.
+        """
+        cache = self.__dict__.setdefault("_factor_set_versions", {})
+        if factor_set_id not in cache:
+            with profiling.observe("carbon select emission_factor_sets"):
+                rows = self._read(
+                    lambda c: c.table("emission_factor_sets").select("version_code")
+                    .eq("id", factor_set_id).limit(1).execute()
+                ).data or []
+            if not rows:
+                return None
+            cache[factor_set_id] = rows[0].get("version_code")
+        return cache[factor_set_id]
+
     # -- ghi ---------------------------------------------------------------
 
     def save_calculation(

@@ -38,6 +38,7 @@ from infrastructure.persist_access import CropPersistChecker
 from infrastructure.pagination import paginate
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
+from infrastructure.mapping import CALCULATION_KIND
 from service import (
     ActivityWriteAccessError,
     ActivityWriteService,
@@ -216,6 +217,7 @@ def _payload(result, calculation_id: str | None) -> dict[str, Any]:
     body["water_regime_scenario"] = body["scenario"]  # tên cũ trong SRS §4.2
     body["co2e_total_kg"] = body["total_co2e_kg"]
     body["calculation_id"] = calculation_id
+    body["calculation_kind"] = CALCULATION_KIND.get(body["scenario"], "scenario")
     return body
 
 
@@ -297,17 +299,23 @@ def calculate_carbon_endpoint(
 @router.get("/crop-seasons/{crop_season_id}/carbon", tags=['Carbon'], dependencies=[Depends(_require_bearer)])
 def get_crop_carbon(
     crop_season_id: str,
-    scenario: Scenario | None = None,
+    scenario: Scenario = "as_recorded",
     authorization: str | None = Header(default=None),
     service: CarbonService = Depends(_service),
     access_checker: CropAccessChecker = Depends(_access_checker),
 ) -> dict[str, Any]:
-    """Bản tính THÀNH CÔNG gần nhất của vụ. Không trả bản tính thất bại."""
+    """Bản tính THÀNH CÔNG gần nhất của vụ CHO ĐÚNG KỊCH BẢN. Không trả bản tính thất bại.
+
+    Mặc định `as_recorded` = kết quả vận hành chính thức của vụ. AWD và ngập liên
+    tục là kịch bản mô phỏng, chỉ trả khi hỏi đích danh (`?scenario=awd`) — tính
+    một kịch bản sau không bao giờ thay kết quả vận hành trong câu trả lời mặc định.
+    `calculation_kind` cho biết "actual" hay "scenario".
+    """
     request_id = str(uuid.uuid4())
     _require_caller(authorization, access_checker, crop_season_id)
 
     try:
-        row = service.latest(crop_season_id, scenario)
+        row = service.stored(crop_season_id, scenario)
     except Exception as exc:  # noqa: BLE001
         _raise_http(exc, request_id)
         raise
@@ -318,7 +326,7 @@ def get_crop_carbon(
             detail=error_detail(
                 "no_calculation",
                 f"Vụ '{crop_season_id}' chưa có bản tính thành công nào"
-                + (f" cho kịch bản '{scenario}'" if scenario else "")
+                + f" cho kịch bản '{scenario}'"
                 + ". Gọi POST /v1/carbon/calculate trước.",
             ),
         )

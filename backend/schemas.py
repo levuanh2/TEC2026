@@ -544,6 +544,12 @@ class CarbonReadinessResponse(BaseModel):
     can_calculate: bool
     blocking_count: int
     missing_inputs: list[CarbonMissingInput]
+    #: `input_hash` the engine would store for an `as_recorded` calculation of the
+    #: season's current Activity Data. A stored actual result whose `input_hash`
+    #: differs is stale. None when the data cannot even be mapped.
+    input_hash: str | None = None
+    #: Factor-set version the running engine uses.
+    ef_config_version: str | None = None
 
 
 # -- MRV --------------------------------------------------------------------

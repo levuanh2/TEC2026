@@ -69,6 +69,9 @@ class RecordingCarbon:
     def latest(self, crop_season_id, scenario=None):
         return {"id": "calc-1", "crop_season_id": crop_season_id, "status": "succeeded"}
 
+    def stored(self, crop_season_id, scenario="as_recorded"):
+        return self.latest(crop_season_id, scenario)
+
 
 def client_for(*, readable: set[str], writable: set[str], carbon=None, auth=True):
     carbon = carbon or RecordingCarbon()

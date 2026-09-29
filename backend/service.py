@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from carbon import CarbonResult, ParameterSet, calculate_carbon
+from carbon import CarbonResult, ParameterSet, calculate_carbon, compute_input_hash
 from carbon.errors import CarbonEngineError
 from carbon.readiness import mapping_refused, readiness as carbon_readiness
 from infrastructure import memberships
@@ -25,6 +25,7 @@ from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
     map_crop_activity_data,
+    stored_calculation_view,
     record_refs,
 )
 from infrastructure.repository import CarbonRepository
@@ -141,6 +142,24 @@ class CarbonService:
     def latest(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
         return self._repo.latest_calculation(crop_season_id, scenario)
 
+    def stored(self, crop_season_id: str, scenario: str = "as_recorded") -> dict[str, Any] | None:
+        """Bản tính đã lưu gần nhất CỦA ĐÚNG KỊCH BẢN, theo từ vựng API.
+
+        Không bao giờ "bản mới nhất bất kỳ": một kịch bản mô phỏng tính sau không
+        được thay kết quả vận hành (`as_recorded`) của vụ.
+        """
+        row = self._repo.latest_calculation(crop_season_id, scenario)
+        if row is None:
+            return None
+        factor_set_id = row.get("factor_set_id")
+        version = self._repo.factor_set_version(str(factor_set_id)) if factor_set_id else None
+        view = stored_calculation_view(row, ef_config_version=version)
+        # Phương pháp chỉ gắn khi bản tính dùng ĐÚNG bộ tham số engine đang chạy —
+        # không gán mô tả của bộ khác cho một kết quả cũ.
+        if version and version == self._params.version:
+            view["methodology"] = self._params.methodology.to_dict()
+        return view
+
     def readiness(self, crop_season_id: str) -> dict[str, Any]:
         """Which Carbon inputs the season still lacks, derived server-side.
 
@@ -156,7 +175,14 @@ class CarbonService:
             # different fix, so name the one that actually applies.
             return mapping_refused(area_missing=bundle.plot.get("area_ha") is None, detail=str(exc))
         # Record identity rides alongside, so the client can open the exact record.
-        return carbon_readiness(data, record_refs(bundle))
+        body = carbon_readiness(data, record_refs(bundle))
+        # Fingerprint của kết quả vận hành nếu tính bây giờ: đúng `input_hash` mà
+        # engine sẽ ghi cho `as_recorded`. Chỉ Activity Data engine tiêu thụ đi vào
+        # hash (không có chi phí, ghi chú), nên client so khớp hash thay vì so thời
+        # điểm sửa bản ghi — sửa chi phí không còn làm kết quả "cần tính lại".
+        body["input_hash"] = compute_input_hash(data, "as_recorded", self._params)
+        body["ef_config_version"] = self._params.version
+        return body
 
 
 class ActivityWriteAccessError(Exception):

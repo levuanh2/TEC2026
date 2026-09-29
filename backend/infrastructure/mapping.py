@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from carbon import (
+    SCENARIO_FROM_DB,
     SCENARIO_TO_DB,
     CropActivityData,
     FertilizerApplication,
@@ -422,3 +423,61 @@ def _effective_factor(entry, primary_path: str | None) -> float:
     if primary_path is not None:
         return float(entry.factors_used[primary_path])
     return 0.0
+
+
+# --- Đọc lại bản tính đã lưu -> hình dạng API ------------------------------
+# `carbon_breakdowns` lưu `category` (enum DB), không lưu `source` của engine.
+# Đảo ngược đúng bảng SOURCE_TO_CATEGORY ở trên — không đặt tên nguồn mới.
+CATEGORY_TO_SOURCE = {category: source for (source, _gas), category in SOURCE_TO_CATEGORY.items()}
+
+#: `actual` (DB) / `as_recorded` (API) là kết quả vận hành chính thức của vụ;
+#: hai giá trị còn lại là kịch bản mô phỏng để so sánh (SRS §4.2, FR-1a-09).
+CALCULATION_KIND = {"as_recorded": "actual", "awd": "scenario", "continuous_flooding": "scenario"}
+
+
+def _stored_source(row: dict[str, Any]) -> str:
+    category = str(row.get("category") or "")
+    if category in CATEGORY_TO_SOURCE:
+        return CATEGORY_TO_SOURCE[category]
+    if category == "fuel":
+        code = str((row.get("formula_metadata") or {}).get("primary_factor_code") or "")
+        # primary_factor_code của nhiên liệu là "fuel.<loại>..." (PRIMARY_FACTOR_PREFIX).
+        parts = code.split(".")
+        return f"fuel_{parts[1]}" if len(parts) > 1 and parts[0] == "fuel" else "fuel"
+    return category or "other"
+
+
+def stored_calculation_view(row: dict[str, Any], *, ef_config_version: str | None) -> dict[str, Any]:
+    """Một hàng `carbon_calculations` đã lưu, theo cùng từ vựng với POST /carbon/calculate.
+
+    HÀM THUẦN, chỉ đổi tên/nhấc trường đã có — không tính lại, không thêm số.
+    Giữ nguyên mọi cột gốc (client cũ vẫn đọc được), bổ sung:
+      - `scenario`/`water_regime_scenario` theo từ vựng API (`as_recorded`, không phải `actual`)
+      - `calculation_kind`: "actual" (kết quả vận hành) | "scenario" (mô phỏng)
+      - `ef_config_version` giải từ `factor_set_id` (None nếu không giải được — không bịa)
+      - mỗi dòng breakdown: `source` của engine + `factors_used`/`provenance`/`parameter_status`
+        nhấc từ `formula_metadata`.
+    """
+    db_scenario = row.get("scenario")
+    scenario = SCENARIO_FROM_DB.get(db_scenario, db_scenario)
+    view = dict(row)
+    view["db_scenario"] = db_scenario
+    view["scenario"] = scenario
+    view["water_regime_scenario"] = scenario
+    view["calculation_kind"] = CALCULATION_KIND.get(scenario, "scenario")
+    view["co2e_total_kg"] = row.get("total_co2e_kg")
+    view["calculation_id"] = row.get("id")
+    view["ef_config_version"] = ef_config_version
+    breakdown = []
+    for item in row.get("breakdown") or []:
+        meta = item.get("formula_metadata") or {}
+        breakdown.append({
+            **item,
+            "source": _stored_source(item),
+            "formula": item.get("formula_expression") or item.get("formula_note"),
+            "factors_used": meta.get("factors_used") or {},
+            "provenance": meta.get("provenance") or {},
+            "parameter_status": meta.get("parameter_status") or {},
+        })
+    view["breakdown"] = breakdown
+    return view
