@@ -104,11 +104,12 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 
 /** An engine warning without the season id, file paths or config keys. */
 export function cleanWarning(w: string): string {
-  return w
+  const out = w
     .replace(/Vụ '[^']*':\s*/g, '')
     .replace(/\s*\((?:docs|backend)\/[^)]*\)/g, '')
     .replace(UUID, 'vụ này')
     .trim()
+  return out.charAt(0).toLocaleUpperCase('vi-VN') + out.slice(1)
 }
 
 /** The per-kg figure at one precision on every screen (docs: 3 significant decimals). */

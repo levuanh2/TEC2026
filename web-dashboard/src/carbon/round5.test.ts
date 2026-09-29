@@ -112,6 +112,6 @@ describe('engine warnings are readable', () => {
     const out = cleanWarning(w)
     expect(out).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/)
     expect(out).not.toMatch(/docs\//)
-    expect(out.startsWith('có ghi nhận thuốc BVTV')).toBe(true)
+    expect(out.startsWith('Có ghi nhận thuốc BVTV')).toBe(true)
   })
 })

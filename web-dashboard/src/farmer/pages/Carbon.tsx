@@ -5,7 +5,7 @@ import { isResultStale } from '../../carbon/readiness'
 import { SCENARIO_LABEL, carbonSourceLabel, cleanWarning, notCounted, resultKindLabel } from '../../carbon/presentation'
 import type { Activity, CropSeason } from '../../types'
 import { SeasonMethodologyPanel } from '../../features/seasonMethodology'
-import { dateTime, perKg } from '../../format'
+import { co2eKg, dateTime, perKg } from '../../format'
 import type { ActivityMutations, SeasonContext } from '../ActivityForms'
 import { fmtNumber } from '../activityView'
 import { CarbonRepairHub } from '../CarbonRepair'
@@ -150,7 +150,7 @@ function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolea
               <div key={index} className="fw-source">
                 <span>{carbonSourceLabel(item)}</span>
                 <span className="fw-source__bar" aria-hidden="true"><i style={{ width: `${(share ?? 0) * 100}%` }} /></span>
-                <b>{perKg(item.co2e_kg, 'kg CO₂e')}</b>
+                <b>{co2eKg(item.co2e_kg)}</b>
               </div>
             )
           })}

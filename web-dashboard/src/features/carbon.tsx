@@ -2,7 +2,7 @@ import { Ico } from '../icons'
 import { useState } from 'react'
 import { ApiError } from '../api/client'
 import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '../api/carbon'
-import { num, kg, perKg, dateTime } from '../format'
+import { num, perKg, dateTime, co2eKg } from '../format'
 import { Async, Badge, Link, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
 import { useCarbonView } from '../carbon/useCarbonView'
 import { carbonSourceLabel, cleanWarning, gasLabel, isSimulation, notCounted, resultKindLabel } from '../carbon/presentation'
@@ -210,7 +210,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
       <div className="carbon-hero">
         <div className="carbon-hero__cell">
           <div className="carbon-hero__label">CO₂e tổng</div>
-          <div className={`carbon-hero__value${total == null ? ' is-empty' : ''}`}>{total == null ? 'Chưa đủ dữ liệu' : num(total, { max: 1 })}</div>
+          <div className={`carbon-hero__value${total == null ? ' is-empty' : ''}`}>{total == null ? 'Chưa đủ dữ liệu' : num(total, { max: 2 })}</div>
           <div className="carbon-hero__unit">kg CO₂e · toàn vụ</div>
         </div>
         <div className="carbon-hero__cell is-primary">
@@ -249,7 +249,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
                   <span className="share__track">
                     <span className={`share__fill ${gasClass(b.gas)}`} style={{ width: `${max > 0 ? (Math.abs(v) / max) * 100 : 0}%` }} />
                   </span>
-                  <span className="share__val">{kg(v)}</span>
+                  <span className="share__val">{co2eKg(v)}</span>
                 </div>
               )
             })}
@@ -299,7 +299,7 @@ function ProvenanceItem({ entry }: { entry: any }) {
     <div className="prov-item">
       <button className="prov-item__head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>
-          {carbonSourceLabel(entry)} <span className="muted">· {kg(entry.co2e_kg)}</span>
+          {carbonSourceLabel(entry)} <span className="muted">· {co2eKg(entry.co2e_kg)}</span>
         </span>
         <span aria-hidden="true">{open ? '▲' : '▼'}</span>
       </button>
