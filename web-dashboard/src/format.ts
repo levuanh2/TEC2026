@@ -55,3 +55,7 @@ export function daysSince(value: string | null | undefined): number | null {
   const days = Math.floor((Date.now() - start.getTime()) / 86_400_000)
   return days >= 0 ? days : null
 }
+
+/** "Thửa <tên>" without doubling when the name already starts with "Thửa". */
+export const plotTitle = (name: string | null | undefined) =>
+  !name ? 'Thửa ruộng' : /^thửa\b/i.test(name.trim()) ? name.trim() : `Thửa ${name.trim()}`

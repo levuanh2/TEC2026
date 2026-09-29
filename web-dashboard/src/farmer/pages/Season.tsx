@@ -50,7 +50,7 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
 
   return (
     <>
-      {ctx ? <SeasonHeader ctx={ctx} canEnd={Boolean(writeCtx)} /> : <SeasonHeaderSkeleton />}
+      {ctx ? <SeasonHeader ctx={ctx} canEnd={Boolean(writeCtx)} activities={activities.data} /> : <SeasonHeaderSkeleton />}
       <Tabs items={tabs} />
       <Flash message={mutations.flash} />
       {writeCtx && justStarted && !activities.data?.length && mutations.version === 0 && (
@@ -92,10 +92,12 @@ export function SeasonWorkspace({ id, tab }: { id: string; tab: SeasonTab }) {
   )
 }
 
-function SeasonHeader({ ctx, canEnd }: { ctx: SeasonCtx; canEnd?: boolean }) {
+function SeasonHeader({ ctx, canEnd, activities }: { ctx: SeasonCtx; canEnd?: boolean; activities?: Activity[] | null }) {
   const { season, plot, farm } = ctx
   const active = isActiveStatus(season.status)
-  const days = !season.harvestDate ? daysSince(season.plantingDate) : null
+  const sown = sowingDate(season, activities)
+  const harvested = harvestDate(season, activities)
+  const days = !season.harvestDate && harvested.source !== 'journal' ? daysSince(sown.iso ?? undefined) : null
   return (
     <section className="fw-ws-head">
       <Crumbs items={[
@@ -117,8 +119,8 @@ function SeasonHeader({ ctx, canEnd }: { ctx: SeasonCtx; canEnd?: boolean }) {
         <Fact icon="plot" label="Thửa" value={plot ? `${plot.name}${plot.areaHa != null ? ` · ${ha(plot.areaHa)}` : ''}` : null} />
         <Fact icon="farm" label="Nông hộ" value={farm?.name} />
         <Fact icon="seeding" label="Giống" value={season.variety} />
-        <Fact icon="calendar" label="Gieo sạ" value={season.plantingDate ? date(season.plantingDate) : null} />
-        <Fact icon="harvest" label="Thu hoạch" value={season.harvestDate ? date(season.harvestDate) : null} />
+        <Fact icon="calendar" label="Gieo sạ" value={sown.value ? `${sown.value} (${sown.note})` : null} />
+        <Fact icon="harvest" label="Thu hoạch" value={harvested.value ? `${harvested.value} (${harvested.note})` : null} />
         {days != null && <Fact icon="clock" label="Đã canh tác" value={`${days} ngày`} />}
       </div>
     </section>

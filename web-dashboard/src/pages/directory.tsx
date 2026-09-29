@@ -8,7 +8,7 @@ import {
 } from '../api/organizations'
 import { listFarms, getFarm, getPlotsForFarm, getPlot, getFarmMetrics, getFarmCropSeasons } from '../api/farms'
 import { getCropSeasons } from '../api/crops'
-import { ha, kg, place, perKg, date } from '../format'
+import { ha, kg, place, perKg, date, plotTitle } from '../format'
 import { seasonStatus } from '../vocab'
 import {
   Async,
@@ -357,7 +357,7 @@ export function PlotPage({ id, role }: { id: string; role?: Role }) {
               )}
             </Section>
             {starting && (
-              <Sheet title="Bắt đầu vụ mới" subtitle={`Thửa ${plot.name} · Mã ${plot.code}`} onClose={() => setStarting(false)}>
+              <Sheet title="Bắt đầu vụ mới" subtitle={`${plotTitle(plot.name)} · Mã ${plot.code}`} onClose={() => setStarting(false)}>
                 <StartSeasonForm
                   variant="management"
                   plots={[plot]}
