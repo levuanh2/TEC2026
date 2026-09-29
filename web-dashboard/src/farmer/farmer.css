@@ -1287,3 +1287,8 @@
 .fw-scenario .fw-btn { justify-self: start; min-height: 40px; }
 @media (max-width: 768px) { .fw-scenarios { grid-template-columns: 1fr; } }
 .fw-ctxbar__src { color: var(--fw-muted); font-size: var(--fw-text-xs); font-weight: 500; }
+/* Round 5 gate: four season tabs overflowed 390px by 8px (the Carbon tab sat
+ * partly off-screen). */
+@media (max-width: 420px) {
+  .fw-tabs { gap: var(--fw-space-12); }
+}

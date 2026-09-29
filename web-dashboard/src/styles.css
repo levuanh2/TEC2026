@@ -743,8 +743,10 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 /* Phones: the table becomes ranked rows — every cell keeps its label, and no
  * column is dropped silently. */
 /* Tablet and phone: ranked rows, not a squeezed or sideways-scrolling table
- * (Round 4 found /seasons 99px wider than a 768px viewport). */
-@media (max-width: 900px) {
+ * (Round 4 found /seasons 99px wider than a 768px viewport). Round 5: at 1024
+ * (216px rail) /seasons needed 1041px in 758px and its row actions sat off
+ * screen, so the row layout starts at 1100px. */
+@media (max-width: 1100px) {
   .ops-table__wrap { border: 0; background: none; overflow: visible; }
   .ops-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .ops-table tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
@@ -895,7 +897,7 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
 .cell-note { color: var(--text-muted); font-size: var(--fs-caption); }
 .btn--sm { white-space: nowrap; }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .ops-table td.ops-act { display: flex; gap: 8px; width: auto; text-align: left; }
   .ops-table td.ops-act::before { content: none; }
   .ops-table td.ops-act .btn { margin: 0; }
@@ -1087,3 +1089,15 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
 .carbon-notcounted { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 14px; }
 .carbon-notcounted ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; }
 .carbon-warnings { margin: 0 0 12px; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+
+/* Round 5 gate: at 1280px the ops tables still scroll sideways inside their
+ * wrapper and the row actions sat outside the viewport. Where the table is a
+ * table (above the 1100px row layout), the action column is pinned to the
+ * scroller's right edge, so the CTA is always visible. Identity codes keep
+ * their no-wrap rule. */
+@media (min-width: 1101px) {
+  .ops-table th:last-child, .ops-table td.ops-act { position: sticky; right: 0; background: var(--ac-elevated); box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .12); }
+  .ops-table tbody tr:hover td.ops-act, .ops-table tbody tr:focus-within td.ops-act { background: var(--ac-subtle); }
+  .ops-table tbody tr[aria-selected="true"] td.ops-act { background: var(--ac-select); }
+}
+.segmented button { min-height: 40px; }
