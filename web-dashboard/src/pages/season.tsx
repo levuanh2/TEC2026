@@ -3,9 +3,10 @@ import { useCarbonView } from '../carbon/useCarbonView'
 import { label, seasonStatus } from '../vocab'
 import { getCropSeason, getActivities, getProductionBatches, endCropSeason, endSeasonErrorMessage } from '../api/crops'
 import { useState } from 'react'
-import { getPlot } from '../api/farms'
+import { getPlot, usingMockData } from '../api/farms'
+import { listMrvBatches, listMrvCases } from '../api/mrv'
 import { getResourceMetrics } from '../api/metrics'
-import { ha, kg, date, perKg } from '../format'
+import { ha, kg, date, perKg, vndPerKg } from '../format'
 import {
   Async,
   Badge,
@@ -158,7 +159,7 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
             )}
             {tab === 'mrv' && (
               <Async state={batches} skeleton="table">
-                {(rows) => <SeasonMrv batches={rows} />}
+                {(rows) => <SeasonMrv seasonId={id} batches={rows} />}
               </Async>
             )}
           </>
@@ -219,7 +220,7 @@ function Overview({
             <MiniMetric label="Nước/kg" value={m?.waterPerKg == null ? '—' : perKg(m.waterPerKg, 'm³')} />
             <MiniMetric label="Phân/kg" value={m?.fertilizerPerKg == null ? '—' : perKg(m.fertilizerPerKg, 'kg')} />
             <MiniMetric label="CO₂e/kg" value={m?.co2ePerKg == null ? '—' : perKg(m.co2ePerKg, 'kg')} />
-            <MiniMetric label="Chi phí/kg" value={m?.costPerKg == null ? '—' : perKg(m.costPerKg, '₫')} />
+            <MiniMetric label="Chi phí/kg" value={m?.costPerKg == null ? '—' : `${vndPerKg(m.costPerKg)} ₫`} />
           </div>
           <button className="btn btn--link" onClick={() => go(`${base}/performance`)}>
             Xem chi tiết hiệu suất <Ico name="arrow" size={14} />
@@ -270,7 +271,7 @@ function Performance({ metrics }: { metrics: Metrics }) {
         <MetricCard name="Nước / kg" value={metrics.waterPerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.waterPerKg, '')} unit="m³/kg" context="Tổng nước tưới chia sản lượng" status={tone(metrics.completeness.water)} />
         <MetricCard name="Phân bón / kg" value={metrics.fertilizerPerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.fertilizerPerKg, '')} unit="kg/kg" context="Tổng phân bón chia sản lượng" status={tone(metrics.completeness.fertilizer)} />
         <MetricCard name="Carbon / kg" value={metrics.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.co2ePerKg, '')} unit="kg CO₂e/kg" context={metrics.co2ePerKg == null ? 'Chưa có kết quả Carbon đã tính' : 'Theo kết quả Carbon đã lưu của vụ'} />
-        <MetricCard name="Chi phí / kg" value={metrics.costPerKg == null ? 'Chưa đủ dữ liệu' : perKg(metrics.costPerKg, '')} unit="₫/kg" context="Tổng chi phí đầu vào chia sản lượng" status={tone(metrics.completeness.cost)} />
+        <MetricCard name="Chi phí / kg" value={metrics.costPerKg == null ? 'Chưa đủ dữ liệu' : vndPerKg(metrics.costPerKg)} unit="₫/kg" context="Tổng chi phí đầu vào chia sản lượng" status={tone(metrics.completeness.cost)} />
       </div>
       {!metrics.completeness.cost && (
         <Notice kind="info">Chi phí đầu vào chưa nhập đủ — chỉ số chi phí/kg tạm thời chưa hiển thị.</Notice>
@@ -279,20 +280,53 @@ function Performance({ metrics }: { metrics: Metrics }) {
   )
 }
 
-function SeasonMrv({ batches }: { batches: Batches }) {
+/** A season belongs to an MRV case only through a real case↔batch relation.
+ *
+ * Every season has a production batch (the `default` one is created with the
+ * season), so "has a batch" says nothing about MRV. This reads the cases in
+ * scope and their linked batches, and claims membership only for a case that
+ * actually lists this season. */
+function SeasonMrv({ seasonId, batches }: { seasonId: string; batches: Batches }) {
+  const memberships = useAsync(async () => {
+    if (usingMockData) return []
+    const cases = await listMrvCases()
+    const linked = await Promise.all(cases.map(async (c) => ({
+      c, batches: (await listMrvBatches(c.caseId)).filter((b) => b.cropSeasonId === seasonId),
+    })))
+    return linked.filter((x) => x.batches.length > 0)
+  }, [seasonId])
+  const linked = memberships.data ?? []
+  const first = linked[0]
   return (
-    <Section title="MRV" description="Vụ này tham gia hồ sơ MRV của tổ chức thông qua các lô sản xuất bên dưới" cta={{ label: 'Mở hồ sơ MRV', to: '/mrv' }}>
+    <Section
+      title="MRV"
+      description={memberships.loading ? 'Đang kiểm tra liên kết hồ sơ MRV…'
+        : memberships.error ? 'Chưa kiểm tra được liên kết hồ sơ MRV.'
+          : first ? `Vụ này thuộc hồ sơ MRV ${linked.map((x) => x.c.caseCode).join(', ')} qua các lô sản xuất được liên kết.`
+            : 'Vụ này chưa thuộc hồ sơ MRV nào.'}
+      cta={first ? { label: 'Mở hồ sơ MRV của vụ', to: `/mrv?case=${encodeURIComponent(first.c.caseId)}` } : undefined}
+    >
+      <div data-testid="season-mrv-membership" data-linked={first ? 'true' : 'false'} hidden />
+      {!memberships.loading && !memberships.error && !first && (
+        <Notice kind="info">
+          Lô sản xuất bên dưới là đơn vị truy xuất của vụ; lô chưa được gắn vào hồ sơ MRV nên vụ chưa tham gia MRV.
+        </Notice>
+      )}
       {batches.length === 0 ? (
-        <EmptyState icon="task" title="Vụ chưa gắn lô sản xuất nào vào hồ sơ MRV" />
+        <EmptyState icon="task" title="Vụ chưa có lô sản xuất" />
       ) : (
         <DataTable
           rows={batches}
           rowKey={(b) => b.id}
           columns={[
-            { label: 'Mã lô', render: (b) => <span className="col-key">{b.batchCode}</span> },
+            { label: 'Lô sản xuất', render: (b) => <span className="col-key">{b.batchCode === 'default' ? 'Lô mặc định của vụ' : b.batchCode}</span> },
+            { label: 'Hồ sơ MRV', render: (b) => {
+              const hit = linked.find((x) => x.batches.some((mb) => mb.productionBatchId === b.id))
+              return hit ? hit.c.caseCode : 'Chưa gắn'
+            } },
             { label: 'Trạng thái', render: (b) => label('cropStatus', b.status) },
-            { label: 'Bắt đầu', render: (b) => date(b.startedOn) },
-            { label: 'Kết thúc', render: (b) => date(b.closedOn) },
+            { label: 'Bắt đầu', render: (b) => b.startedOn ? date(b.startedOn) : 'Chưa ghi nhận' },
+            { label: 'Kết thúc', render: (b) => b.closedOn ? date(b.closedOn) : 'Chưa kết thúc' },
           ]}
         />
       )}

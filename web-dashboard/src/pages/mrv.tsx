@@ -23,10 +23,14 @@ export function MrvPage({ role }: { role?: Role } = {}) {
   const state = useAsync<{ mrvCase: MrvCase | null; evidence: MrvEvidence[] }>(async () => {
     if (usingMockData) return { mrvCase: null, evidence: [] }
     const cases = await listMrvCases()
-    if (!cases[0]) return { mrvCase: null, evidence: [] }
+    // `/mrv?case=<id>` opens that case (a season links here only when it
+    // belongs to one); otherwise the first case in scope, as before.
+    const wanted = new URLSearchParams(window.location.search).get('case')
+    const pick = cases.find((c) => c.caseId === wanted) ?? cases[0]
+    if (!pick) return { mrvCase: null, evidence: [] }
     const [mrvCase, evidence] = await Promise.all([
-      getMrvCase(cases[0].caseId),
-      listMrvEvidence(cases[0].caseId).catch(() => [] as MrvEvidence[]),
+      getMrvCase(pick.caseId),
+      listMrvEvidence(pick.caseId).catch(() => [] as MrvEvidence[]),
     ])
     return { mrvCase, evidence }
   }, [])

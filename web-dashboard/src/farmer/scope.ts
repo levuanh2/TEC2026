@@ -3,7 +3,7 @@ import type { CropSeason, Farm, Plot } from '../types'
 import { ApiError } from '../api/client'
 import { getFarmerScope, usingMockData, type FarmerScope } from '../api/farms'
 import { getActivities } from '../api/crops'
-import { getResourceMetrics } from '../api/metrics'
+import { getResourceMetrics, type SeasonMetrics } from '../api/metrics'
 import { generateRecommendations, getRecommendations, type Recommendation } from '../api/recommendations'
 import { getCvInferences } from '../api/cv'
 import { getCarbon, getCarbonReadiness, type CarbonReadiness, type CarbonResult } from '../api/carbon'
@@ -79,12 +79,27 @@ const RECS_DEFER_MS = 1_200
  *  the season's records changed in this session, nothing is stored yet, or what
  *  is stored has aged past `RECS_STALE_AFTER_MS`. Anything else renders as-is —
  *  a page load must not pay for generation just because it happened. */
-export function recommendationsOutOfDate(seasonId: string, items: Recommendation[]): boolean {
+export function recommendationsOutOfDate(seasonId: string, items: Recommendation[], metrics?: SeasonMetrics | null): boolean {
   if (seasonDataChanged(seasonId)) return true
   if (!items.length) return true
+  // A data task whose data has since been supplied (from any device or
+  // session) is out of date now, not after the age limit.
+  if (metrics && items.some((r) => r.status === 'generated' && dataTaskResolved(r, metrics))) return true
   const newest = items.reduce((max, r) => (r.generatedAt > max ? r.generatedAt : max), '')
   const at = Date.parse(newest)
   return Number.isNaN(at) || Date.now() - at > RECS_STALE_AFTER_MS
+}
+
+/** The metric a `data.completeness.<key>` task asks for, or null for other rules. */
+export const dataTaskKey = (r: Pick<Recommendation, 'ruleCode' | 'type'>): string | null =>
+  r.type === 'data_task' && r.ruleCode.startsWith('data.completeness.') ? r.ruleCode.slice('data.completeness.'.length) : null
+
+/** True when the season's current metrics already contain what the task asked for. */
+export function dataTaskResolved(r: Pick<Recommendation, 'ruleCode' | 'type'>, m: SeasonMetrics): boolean {
+  const key = dataTaskKey(r)
+  if (key === 'yield') return m.yieldKg != null
+  if (key === 'water' || key === 'fertilizer' || key === 'cost') return Boolean(m.completeness[key])
+  return false
 }
 
 export interface RecommendationsState extends QueryState<Recommendation[]> {
@@ -102,6 +117,7 @@ export interface RecommendationsState extends QueryState<Recommendation[]> {
 
 export function useRecommendations(id: string | null): RecommendationsState {
   const list = useQuery(id ? keys.recs(id) : null, () => getRecommendations(id!))
+  const metrics = useMetrics(id)
 
   const run = async () => {
     const items = await generateRecommendations(id!)
@@ -112,7 +128,7 @@ export function useRecommendations(id: string | null): RecommendationsState {
 
   // Armed only after the section has rendered its stored data and the deferral
   // has elapsed, so generation can never be part of first load.
-  const due = Boolean(id) && list.data !== undefined && recommendationsOutOfDate(id!, list.data ?? [])
+  const due = Boolean(id) && list.data !== undefined && recommendationsOutOfDate(id!, list.data ?? [], metrics.data)
   const [armed, setArmed] = useState(false)
   useEffect(() => {
     if (!due) { setArmed(false); return }
@@ -123,6 +139,8 @@ export function useRecommendations(id: string | null): RecommendationsState {
   const gen = useQuery(id ? keys.recsGen(id) : null, run, STABLE_MS, armed)
   return {
     ...list,
+    // Never show a task for data that is already there while the refresh runs.
+    data: list.data && metrics.data ? list.data.filter((r) => !(r.status === 'generated' && dataTaskResolved(r, metrics.data!))) : list.data,
     generating: Boolean(id) && (gen.loading || gen.refreshing),
     generateError: gen.error,
     lastGeneratedCount: gen.data,

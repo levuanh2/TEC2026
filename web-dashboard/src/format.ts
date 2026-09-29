@@ -16,6 +16,12 @@ export const ha = (v: number | null | undefined, empty?: string) => num(v, { suf
 export const m3 = (v: number | null | undefined, empty?: string) => num(v, { suffix: ' m³', max: 2, empty })
 export const vnd = (v: number | null | undefined, empty?: string) =>
   v == null ? (empty ?? EMPTY) : `${nf(0).format(v)} ₫`
+/* Precision policy (Round 5, docs/WEB_LOGIC_UAT_ROUND5.md §precision):
+ *   CO₂e/kg, nước/kg, phân/kg → 3 decimals (0,997 never becomes "1")
+ *   ₫/kg and every ₫ amount → whole đồng (1.090 ₫, never 1.090,385 ₫)
+ *   totals (kg, kg CO₂e)    → up to 1 decimal where the screen shows one */
+export const vndPerKg = (v: number | null | undefined, empty?: string) =>
+  v == null ? (empty ?? EMPTY) : nf(0).format(v)
 export const perKg = (v: number | null | undefined, unit: string, empty?: string) =>
   v == null ? (empty ?? EMPTY) : `${nf(3).format(v)}${unit ? ` ${unit}` : ''}`
 
