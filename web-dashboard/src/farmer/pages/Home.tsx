@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../api/me'
+import type { Activity } from '../../types'
 import { Link } from '../../ui'
 import { greeting, localDay, longDay } from '../activityView'
 import { useActivityMutations } from '../ActivityForms'
@@ -65,7 +66,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
       <Flash message={mutations.flash} />
 
       <div className="fw-home-top">
-        <HomeHero scope={scope} primary={primary} />
+        <HomeHero scope={scope} primary={primary} activities={activities.data} />
         <PrimaryNextAction
           loading={scope.loading || (Boolean(sid) && (activities.loading || carbonReadiness.loading || metrics.loading))}
           action={action}
@@ -91,11 +92,11 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   )
 }
 
-function HomeHero({ scope, primary }: { scope: QueryState<{ farms: unknown[] }>; primary: SeasonCtx | null }) {
+function HomeHero({ scope, primary, activities }: { scope: QueryState<{ farms: unknown[] }>; primary: SeasonCtx | null; activities?: Activity[] | null }) {
   if (scope.loading) return <HeroSkeleton />
   if (scope.error) return <ErrorPanel error={scope.error} onRetry={scope.reload} />
   if (!primary) return <NoActiveSeason purpose="home" />
-  return <SeasonContextBar ctx={primary} />
+  return <SeasonContextBar ctx={primary} activities={activities} />
 }
 
 export function HeroSkeleton() {

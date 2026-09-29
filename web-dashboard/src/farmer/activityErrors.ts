@@ -21,6 +21,8 @@ export function mapActivityError(err: unknown): ActivityErrorPresentation {
       return { message: 'Vụ này hiện không thể ghi hoạt động (đã đóng hoặc chưa sẵn sàng).', retryable: false }
     case 'duplicate_event':
       return { message: 'Yêu cầu này đã được ghi nhận với dữ liệu khác. Vui lòng tải lại và thử lại.', retryable: false }
+    case 'harvested_area_exceeds_plot':
+      return { message: err.message || 'Diện tích thu hoạch không được lớn hơn diện tích thửa.', retryable: false }
     case 'validation_error':
       return { message: 'Dữ liệu chưa hợp lệ. Vui lòng kiểm tra lại các trường đã nhập.', retryable: false }
     case 'offline':

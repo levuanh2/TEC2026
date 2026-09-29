@@ -18,6 +18,7 @@ import { MetricCards } from './Performance'
 import { useCanEditSeason, useWritableSeason } from '../writeAccess'
 import { NEW_SEASON_PARAM } from '../StartSeason'
 import { EndSeasonButton } from '../EndSeason'
+import { harvestDate, sowingDate } from '../seasonDates'
 
 export type SeasonTab = 'overview' | 'journal' | 'performance' | 'carbon'
 const NOT_FOUND = 'Không tìm thấy dữ liệu hoặc dữ liệu không thuộc phạm vi truy cập.'
@@ -172,12 +173,17 @@ function SeasonStatus({ ctx, metrics, activities }: { ctx: SeasonCtx | null; met
   const rows = activities.data ?? []
   const latest = rows.reduce<string | null>((max, a) => (!max || a.occurredAt > max ? a.occurredAt : max), null)
   const types = [...new Set(rows.map((a) => a.type))]
-  const days = !ctx.season.harvestDate ? daysSince(ctx.season.plantingDate) : null
+  const sown = sowingDate(ctx.season, rows)
+  const harvested = harvestDate(ctx.season, rows)
+  const ended = Boolean(ctx.season.harvestDate) || harvested.source === 'journal'
+  const days = !ended ? daysSince(sown.iso ?? undefined) : null
   return (
     <div className="fw-card fw-card--pad">
       <dl className="fw-detail">
         <div><dt>Trạng thái</dt><dd>{seasonStatusLabel(ctx.season.status)}</dd></div>
-        <div><dt>Thời gian canh tác</dt><dd>{days != null ? `${days} ngày kể từ gieo sạ` : ctx.season.harvestDate ? `Thu hoạch ${date(ctx.season.harvestDate)}` : 'Chưa ghi nhận ngày gieo sạ'}</dd></div>
+        <div><dt>Gieo sạ</dt><dd data-testid="season-sowing-date">{sown.value ? `${sown.value} (${sown.note})` : 'Chưa ghi nhận'}</dd></div>
+        <div><dt>Thu hoạch</dt><dd data-testid="season-harvest-date">{harvested.value ? `${harvested.value} (${harvested.note})` : 'Chưa ghi nhận'}</dd></div>
+        {days != null && <div><dt>Thời gian canh tác</dt><dd>{`${days} ngày kể từ gieo sạ`}</dd></div>}
         <div><dt>Hoạt động đã ghi</dt><dd>{activities.error ? '—' : rows.length}</dd></div>
         <div><dt>Loại hoạt động</dt><dd>{types.length ? types.map((t) => ACTIVITY_TITLE[t] ?? t).join(', ') : 'Chưa có'}</dd></div>
         <div><dt>Lần ghi gần nhất</dt><dd>{latest ? dayLabel(latest.slice(0, 10)) : 'Chưa có'}</dd></div>

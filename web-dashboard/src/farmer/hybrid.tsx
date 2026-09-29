@@ -11,6 +11,7 @@ import { Ico, type IconName } from './icons'
 import { Sk } from './kit'
 import { homeSummary, journalLine, metricDetails, readable, type Reading, type SeasonFacts } from './metricsView'
 import { seasonStatusLabel, type SeasonCtx } from './scope'
+import { harvestDate, sowingDate, type SeasonDate } from './seasonDates'
 
 /* The hybrid Farmer surface: identity, ONE next action, and a compact read of
  * how the season is doing.
@@ -29,7 +30,7 @@ import { seasonStatusLabel, type SeasonCtx } from './scope'
  * status, day count and the two dates — and its only action is a quiet link,
  * so the page has exactly one primary button (the next action below it).
  */
-export function SeasonContextBar({ ctx, loading }: { ctx: SeasonCtx | null; loading?: boolean }) {
+export function SeasonContextBar({ ctx, loading, activities }: { ctx: SeasonCtx | null; loading?: boolean; activities?: Activity[] | null }) {
   if (loading) {
     return (
       <div className="fw-ctxbar" aria-busy="true">
@@ -39,7 +40,9 @@ export function SeasonContextBar({ ctx, loading }: { ctx: SeasonCtx | null; load
   }
   if (!ctx) return null
   const { season, plot, farm } = ctx
-  const days = season.harvestDate ? null : daysSince(season.plantingDate)
+  const sown = sowingDate(season, activities)
+  const harvested = harvestDate(season, activities)
+  const days = season.harvestDate || harvested.source === 'journal' ? null : daysSince(sown.iso ?? undefined)
   return (
     <section className="fw-ctxbar" aria-labelledby="fw-ctxbar-season">
       <p className="fw-ctxbar__place">
@@ -55,13 +58,22 @@ export function SeasonContextBar({ ctx, loading }: { ctx: SeasonCtx | null; load
         {days != null && <span className="fw-ctxbar__days"><Ico name="calendar" />{days} ngày kể từ gieo sạ</span>}
       </p>
       <p className="fw-ctxbar__dates">
-        <span><Ico name="calendar" />Gieo sạ: <b className={season.plantingDate ? undefined : 'is-empty'}>{season.plantingDate ? date(season.plantingDate) : 'Chưa ghi nhận'}</b></span>
-        <span><Ico name="harvest" />Thu hoạch: <b className={season.harvestDate ? undefined : 'is-empty'}>{season.harvestDate ? date(season.harvestDate) : 'Chưa ghi nhận'}</b></span>
+        <SeasonDateItem icon="calendar" label="Gieo sạ" d={sown} testId="season-sowing-date" />
+        <SeasonDateItem icon="harvest" label="Thu hoạch" d={harvested} testId="season-harvest-date" />
       </p>
       <p className="fw-ctxbar__go">
         <Link className="fw-link" to={`/farmer/crop-seasons/${season.id}`}>Xem chi tiết vụ<Ico name="arrow" /></Link>
       </p>
     </section>
+  )
+}
+
+function SeasonDateItem({ icon, label, d, testId }: { icon: IconName; label: string; d: SeasonDate; testId: string }) {
+  return (
+    <span data-testid={testId}>
+      <Ico name={icon} />{label}: <b className={d.value ? undefined : 'is-empty'}>{d.value ?? 'Chưa ghi nhận'}</b>
+      {d.note && <small className="fw-ctxbar__src"> ({d.note})</small>}
+    </span>
   )
 }
 
