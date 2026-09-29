@@ -115,3 +115,12 @@ describe('engine warnings are readable', () => {
     expect(out.startsWith('Có ghi nhận thuốc BVTV')).toBe(true)
   })
 })
+
+describe('a simulation computed on older data is flagged, never compared as current', () => {
+  it('older than the actual → outdated; same or newer → current', async () => {
+    const { simulationOutdated } = await import('./presentation')
+    expect(simulationOutdated({ calculated_at: '2026-09-29T07:31:00Z' }, { calculated_at: '2026-09-29T07:52:00Z' })).toBe(true)
+    expect(simulationOutdated({ calculated_at: '2026-09-29T07:53:00Z' }, { calculated_at: '2026-09-29T07:52:00Z' })).toBe(false)
+    expect(simulationOutdated({ calculated_at: undefined }, { calculated_at: '2026-09-29T07:52:00Z' })).toBe(false)
+  })
+})

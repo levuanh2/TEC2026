@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ApiError } from '../../api/client'
 import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '../../api/carbon'
 import { isResultStale } from '../../carbon/readiness'
-import { SCENARIO_LABEL, carbonSourceLabel, cleanWarning, notCounted, resultKindLabel } from '../../carbon/presentation'
+import { SCENARIO_LABEL, carbonSourceLabel, cleanWarning, notCounted, resultKindLabel, simulationOutdated } from '../../carbon/presentation'
 import type { Activity, CropSeason } from '../../types'
 import { SeasonMethodologyPanel } from '../../features/seasonMethodology'
 import { co2eKg, dateTime, perKg } from '../../format'
@@ -181,6 +181,7 @@ function CarbonSuccess({ result, stale }: { result: CarbonResult; stale?: boolea
 
 const SIMULATIONS: Scenario[] = ['awd', 'continuous_flooding']
 
+
 /** Simulated water regimes beside the actual result — never in its place.
  *
  * Each scenario is read by name. A missing one is "Chưa tính", not an error,
@@ -234,6 +235,14 @@ function ScenarioCompare({ seasonId, actual, canCalculate }: { seasonId: string;
                   <>
                     <b>{r.co2e_per_kg == null ? 'Chưa đủ dữ liệu' : perKg(r.co2e_per_kg, 'kg CO₂e/kg')}</b>
                     <span>{fmtNumber(r.total_co2e_kg)} kg CO₂e · tính lúc {r.calculated_at ? dateTime(r.calculated_at) : '—'}</span>
+                    {simulationOutdated(r, actual) && (
+                      <>
+                        <span className="fw-scenario__old" data-testid={`carbon-scenario-${s}-outdated`}>
+                          Tính trên dữ liệu cũ hơn kết quả vận hành — chưa so sánh được.
+                        </span>
+                        {canCalculate && <button type="button" className="fw-btn fw-btn--soft fw-btn--sm" disabled={busy != null} onClick={() => void run(s)}>{busy === s ? 'Đang tính…' : 'Tính lại kịch bản'}</button>}
+                      </>
+                    )}
                   </>
                 ) : (
                   <>

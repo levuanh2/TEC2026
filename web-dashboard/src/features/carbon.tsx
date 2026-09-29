@@ -5,7 +5,7 @@ import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '..
 import { num, perKg, dateTime, co2eKg } from '../format'
 import { Async, Badge, Link, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
 import { useCarbonView } from '../carbon/useCarbonView'
-import { carbonSourceLabel, cleanWarning, gasLabel, isSimulation, notCounted, resultKindLabel } from '../carbon/presentation'
+import { carbonSourceLabel, cleanWarning, gasLabel, isSimulation, notCounted, resultKindLabel, simulationOutdated } from '../carbon/presentation'
 
 /* The actual result is the season's; the other two are simulations of the same
  * data under an assumed water regime, and are labelled as such everywhere. */
@@ -53,11 +53,14 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
    * only fail is not drawn at all (it used to be drawn disabled, while the copy
    * below still told the officer to press it). */
   const hasStored = Boolean(state.data) && !state.error
+  // A simulation older than the actual result ran on older data (see simulationOutdated).
+  const simOutdated = scenario !== 'as_recorded' && hasStored && Boolean(readiness.result) && simulationOutdated(state.data!, readiness.result!)
   const action: string | null = !canRecalculate || readiness.loading || state.loading || blocked
     ? null
     : view?.calculationStatus === 'stale' && scenario === 'as_recorded' ? 'Tính lại'
       : !hasStored ? (scenario === 'as_recorded' ? 'Tính Carbon' : 'Tính kịch bản mô phỏng')
-        : null
+        : simOutdated ? 'Tính lại kịch bản'
+          : null
   const activityGaps = view?.userFixableGaps.filter((g) => g.flow === 'activity') ?? []
   const methodologyGaps = view?.userFixableGaps.filter((g) => g.flow === 'carbon_methodology') ?? []
 
@@ -131,6 +134,11 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
             <Notice kind="info">
               <Ico name="info" size={14} /> Kịch bản mô phỏng: tính lại cùng dữ liệu của vụ với chế độ nước giả định. Đây là ước tính
               theo kịch bản, không phải kết quả đã ghi nhận và không thay kết quả vận hành của vụ.
+            </Notice>
+          )}
+          {simOutdated && (
+            <Notice kind="warning">
+              <Ico name="warning" size={14} /> <span data-testid="carbon-simulation-outdated">Kịch bản này được tính trên dữ liệu cũ hơn kết quả vận hành, nên chưa so sánh được với kết quả hiện tại.</span>
             </Notice>
           )}
 

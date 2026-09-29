@@ -54,6 +54,17 @@ export function resultKindLabel(r: Pick<CarbonResult, 'scenario' | 'water_regime
   return `Kịch bản mô phỏng · ${s ? SCENARIO_LABEL[s] : 'không rõ chế độ nước'}`
 }
 
+/** A stored simulation older than the actual result was computed on older data.
+ *
+ * Recalculating the actual with unchanged inputs reuses its stored row (same
+ * `input_hash`), so an actual result NEWER than a simulation means the inputs
+ * moved on after that simulation ran: comparing the two would compare
+ * different data. */
+export function simulationOutdated(sim: Pick<CarbonResult, 'calculated_at'>, actual: Pick<CarbonResult, 'calculated_at'>): boolean {
+  const s = Date.parse(sim.calculated_at ?? ''), a = Date.parse(actual.calculated_at ?? '')
+  return !Number.isNaN(s) && !Number.isNaN(a) && s < a
+}
+
 /* ------------------------------------------------------ coverage & text */
 
 /** A category the result does NOT carry as a number, and the engine's reason. */

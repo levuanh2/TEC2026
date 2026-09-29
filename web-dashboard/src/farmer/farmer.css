@@ -1292,3 +1292,4 @@
 @media (max-width: 420px) {
   .fw-tabs { gap: var(--fw-space-12); }
 }
+.fw-scenario__old { color: var(--fw-ink); font-weight: 600; }
