@@ -193,6 +193,17 @@ class InvalidCropSeasonStateError(Exception):
     pass
 
 
+class HarvestAreaExceedsPlotError(Exception):
+    """A harvest claims more hectares than the season's plot has."""
+
+    def __init__(self, harvested_area_ha: float, plot_area_ha: float) -> None:
+        self.harvested_area_ha = harvested_area_ha
+        self.plot_area_ha = plot_area_ha
+        super().__init__(
+            f"Diện tích thu hoạch ({harvested_area_ha:g} ha) không được lớn hơn diện tích thửa ({plot_area_ha:g} ha)."
+        )
+
+
 class ActivityWriteService:
     """Domain service for Farmer Web online journal writes.
 
@@ -229,6 +240,30 @@ class ActivityWriteService:
         return str(batches[0]["id"])
 
     @staticmethod
+    def _assert_harvest_within_plot(
+        read_repository: SupabaseReadRepository, crop_season_id: str, activity_type: str, data: dict[str, Any],
+    ) -> None:
+        """`harvested_area_ha` may equal the plot area, never exceed it.
+
+        Enforced here, not only in the form: the API is the boundary every client
+        (Farmer Web, Flutter, scripts) goes through. A plot without a recorded
+        area applies no bound — nothing is guessed.
+        """
+        if activity_type != "harvest" or data.get("harvested_area_ha") is None:
+            return
+        try:
+            plot_id = read_repository.season(crop_season_id).get("plot_id")
+            plot = read_repository.plot(str(plot_id)) if plot_id else {}
+        except ReadNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
+        plot_area = plot.get("area_ha")
+        if plot_area is None:
+            return
+        harvested = float(data["harvested_area_ha"])
+        if harvested > float(plot_area) + 1e-9:
+            raise HarvestAreaExceedsPlotError(harvested, float(plot_area))
+
+    @staticmethod
     def _response(row: dict[str, Any], *, replay: bool = False) -> dict[str, Any]:
         return {
             "id": row["id"], "crop_season_id": row["crop_season_id"],
@@ -245,6 +280,7 @@ class ActivityWriteService:
         actor_id = self._actor_and_farmer_scope(read_repository)
         batch_id = self._write_batch(read_repository, crop_season_id)
         data = schemas.validate_activity_data(request.activity_type, request.data).model_dump()
+        self._assert_harvest_within_plot(read_repository, crop_season_id, request.activity_type, data)
         try:
             # The repository re-checks write permission (farm owner/editor or
             # cooperative manager) inside its transaction; a read-only farm
@@ -279,6 +315,9 @@ class ActivityWriteService:
             data = schemas.validate_activity_data(
                 existing["activity_type"], {**existing["data"], **request.data}
             ).model_dump()
+            self._assert_harvest_within_plot(
+                read_repository, str(existing["crop_season_id"]), existing["activity_type"], data,
+            )
         try:
             return self._write_repository.update(
                 activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,

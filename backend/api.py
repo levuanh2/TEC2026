@@ -45,6 +45,7 @@ from service import (
     CarbonService,
     CvAccessError,
     CvService,
+    HarvestAreaExceedsPlotError,
     InvalidCropSeasonStateError,
     InvalidImageError,
     MrvExportAccessError,
@@ -474,6 +475,10 @@ def _write_or_http(callback):
         raise HTTPException(status_code=422, detail=error_detail("invalid_crop_season_state", "Crop season is not open for journal writes.")) from exc
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=409, detail=error_detail("duplicate_event", "Idempotency key was already used with different activity data.")) from exc
+    except HarvestAreaExceedsPlotError as exc:
+        raise HTTPException(status_code=422, detail=error_detail(
+            "harvested_area_exceeds_plot", str(exc), field="harvested_area_ha", plot_area_ha=exc.plot_area_ha,
+        )) from exc
 
 
 @router.post("/crop-seasons/{crop_season_id}/activities", tags=['Activities'], status_code=201, response_model=schemas.ActivityWriteResponse)
