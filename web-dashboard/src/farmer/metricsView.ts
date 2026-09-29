@@ -4,6 +4,7 @@ import { perKg as perKgText } from '../format'
 import type { Activity } from '../types'
 import { fmtNumber, toNumber, type QuickType } from './activityView'
 import type { IconName } from './icons'
+import { carbonSourceLabel } from '../carbon/presentation'
 
 /* View model for the season's metrics (Round 4.3).
  *
@@ -218,14 +219,6 @@ export interface CarbonInputs {
   fixTo: string
 }
 
-export const SOURCE_LABEL: Record<string, string> = {
-  ch4_rice_cultivation: 'Khí mê-tan từ ruộng lúa',
-  ch4_straw_burning: 'Đốt rơm rạ (CH₄)',
-  n2o_straw_burning: 'Đốt rơm rạ (N₂O)',
-  n2o_fertilizer_direct: 'Phân đạm — phát thải trực tiếp',
-  n2o_fertilizer_indirect: 'Phân đạm — phát thải gián tiếp',
-  co2_fuel_combustion: 'Nhiên liệu máy móc',
-}
 
 const needYield = 'Thiếu sản lượng thóc: hãy ghi hoạt động Thu hoạch có số kg.'
 
@@ -358,7 +351,7 @@ function carbon(m: SeasonMetrics, c: CarbonInputs | null): MetricDetail {
     primary, secondary,
     meaning: 'Lượng khí nhà kính ước tính cho cả vụ, quy về CO₂ tương đương.',
     basis: primary
-      ? [top ? `Nguồn đóng góp nhiều nhất: ${SOURCE_LABEL[top.source] ?? 'Nguồn khác'}.` : null,
+      ? [top ? `Nguồn đóng góp nhiều nhất: ${carbonSourceLabel(top)}.` : null,
         r?.calculated_at ? `Tính lúc ${new Date(r.calculated_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.` : null]
         .filter(Boolean).join(' ') || null
       : null,

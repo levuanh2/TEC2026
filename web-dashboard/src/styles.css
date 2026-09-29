@@ -544,7 +544,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .carbon-hero__cell.is-primary .carbon-hero__value { color: var(--text-primary); }
 
 .share-row { display: grid; gap: 8px; }
-.share { display: grid; grid-template-columns: 160px minmax(0, 1fr) 96px; gap: 12px; align-items: center; font-size: var(--fs-sm); }
+.share { display: grid; grid-template-columns: minmax(160px, 300px) minmax(0, 1fr) 96px; gap: 12px; align-items: center; font-size: var(--fs-sm); }
 .share__track { height: 4px; border-radius: 0; background: var(--bg-subtle); overflow: hidden; }
 .share__fill { height: 100%; background: var(--accent); border-radius: 0; }
 .share__fill.gas-ch4 { background: var(--accent); }
@@ -632,7 +632,8 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .kpi-strip { border-bottom: 0; }
   .carbon-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .dl { grid-template-columns: minmax(0, 1fr); }
-  .share { grid-template-columns: 110px minmax(0, 1fr) 72px; }
+  .share { grid-template-columns: minmax(0, 1fr) auto; }
+  .share__track { grid-column: 1 / -1; grid-row: 2; }
   .page-head h1 { font-size: 22px; }
   .hero__stats { gap: 20px; }
 }
@@ -1079,3 +1080,10 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
 .acct-cred dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 .acct-cred code { font-size: 1.15em; letter-spacing: .04em; }
 @media (max-width: 560px) { .acct-cred div { grid-template-columns: minmax(0, 1fr); } }
+
+/* Round 5 — Carbon result kind, categories without a numeric line, warnings. */
+.carbon-kind { font-weight: 650; }
+.carbon-kind--sim { color: var(--text-muted, inherit); font-style: italic; }
+.carbon-notcounted { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 14px; }
+.carbon-notcounted ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.carbon-warnings { margin: 0 0 12px; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
