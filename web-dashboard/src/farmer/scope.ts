@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { CropSeason, Farm, Plot } from '../types'
 import { ApiError } from '../api/client'
+import { seasonStatus } from '../vocab'
 import { getFarmerScope, usingMockData, type FarmerScope } from '../api/farms'
 import { getActivities } from '../api/crops'
 import { getResourceMetrics, type SeasonMetrics } from '../api/metrics'
@@ -13,11 +14,15 @@ export type SeasonCtx = { season: CropSeason; plot?: Plot; farm?: Farm }
 
 export const isActiveStatus = (status: string | null | undefined) => /(^active$|đang|canh tác)/i.test(status ?? '')
 
+/** Same words as Management (`vocab.seasonStatus`): a harvested season was
+ * "Đã kết thúc" here and "Đã thu hoạch" there for the same row (Round 5). */
 export function seasonStatusLabel(status: string | null | undefined): string {
   const s = (status ?? '').toLowerCase()
   if (isActiveStatus(s)) return 'Đang canh tác'
-  if (/harvest|complete|closed|done/.test(s)) return 'Đã kết thúc'
-  if (/plan|draft/.test(s)) return 'Kế hoạch'
+  if (['planned', 'harvested', 'closed', 'cancelled'].includes(s)) return seasonStatus(s)
+  if (/harvest/.test(s)) return seasonStatus('harvested')
+  if (/complete|closed|done/.test(s)) return seasonStatus('closed')
+  if (/plan|draft/.test(s)) return seasonStatus('planned')
   return status || 'Chưa rõ trạng thái'
 }
 
