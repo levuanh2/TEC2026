@@ -1095,6 +1095,12 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
  * table (above the 1100px row layout), the action column is pinned to the
  * scroller's right edge, so the CTA is always visible. Identity codes keep
  * their no-wrap rule. */
+/* Names are words, not identifiers: a real farm/plot/season name such as
+ * "Hộ UAT R5 09290717" may wrap between words so the table fits (Round 5 real
+ * data pushed /seasons to 1041px in 990px at 1280). Codes (the <small> under
+ * each name) still never break mid-token. */
+.ops-table--seasons td:nth-child(1) b, .ops-table--seasons td:nth-child(2) b,
+.ops-table td:nth-child(-n+3) b { white-space: normal; overflow-wrap: normal; }
 @media (min-width: 1101px) {
   .ops-table th:last-child, .ops-table td.ops-act { position: sticky; right: 0; background: var(--ac-elevated); box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .12); }
   .ops-table tbody tr:hover td.ops-act, .ops-table tbody tr:focus-within td.ops-act { background: var(--ac-subtle); }
