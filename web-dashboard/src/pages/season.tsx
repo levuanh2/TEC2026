@@ -306,7 +306,7 @@ function SeasonMrv({ seasonId, batches }: { seasonId: string; batches: Batches }
             : 'Vụ này chưa thuộc hồ sơ MRV nào.'}
       cta={first ? { label: 'Mở hồ sơ MRV của vụ', to: `/mrv?case=${encodeURIComponent(first.c.caseId)}` } : undefined}
     >
-      <div data-testid="season-mrv-membership" data-linked={first ? 'true' : 'false'} hidden />
+      <div data-testid="season-mrv-membership" data-linked={memberships.loading ? 'loading' : memberships.error ? 'unknown' : first ? 'true' : 'false'} hidden />
       {!memberships.loading && !memberships.error && !first && (
         <Notice kind="info">
           Lô sản xuất bên dưới là đơn vị truy xuất của vụ; lô chưa được gắn vào hồ sơ MRV nên vụ chưa tham gia MRV.
