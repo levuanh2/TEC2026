@@ -23,6 +23,8 @@ import 'package:agricarbon_app/services/sync_service.dart';
 import 'package:agricarbon_app/shell/auth_controller.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http show StreamedResponse;
+import 'package:http/testing.dart' as http show MockClient;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
@@ -79,6 +81,13 @@ class _FakeAuth extends AuthService {
   }
 
   void emitError(Object e) => _signals.addError(e);
+  void emitSignal(AuthSignal signal) => _signals.add(signal);
+
+  bool endedByServer = false;
+  @override
+  Future<void> rememberSessionEndedByServer(bool ended) async => endedByServer = ended;
+  @override
+  Future<bool> sessionEndedByServer() async => endedByServer;
 }
 
 /// Máy chủ giả: đếm MỌI lời gọi mạng của lượt gửi.
@@ -302,6 +311,40 @@ void main() {
     conn.dispose();
   });
 
+  test('bị từ chối rồi mở lại app: màn đăng nhập vẫn báo hết phiên, đăng nhập lại thì thôi',
+      () async {
+    await openOffline();
+    auth.refreshError = AuthApiException('User is banned', statusCode: '400', code: 'user_banned');
+    conn.debugSet(online: true, wifi: true);
+    await co.runSync(manual: true);
+    await _until(() => controller.phase == AuthPhase.sessionExpired);
+    expect(auth.endedByServer, isTrue);
+    controller.dispose();
+    co.dispose();
+    conn.dispose();
+
+    // Next launch: no session on the phone any more.
+    final relaunched = AuthController(auth)..start();
+    await _until(() => relaunched.phase == AuthPhase.sessionExpired);
+    // Signing in again clears the reminder.
+    auth.hasSession = true;
+    auth.emitSignal(const AuthSignal(AuthSignalKind.signedIn, _user));
+    await _until(() => relaunched.phase == AuthPhase.authenticated);
+    await _until(() => !auth.endedByServer);
+    relaunched.dispose();
+  });
+
+  test('đăng xuất chủ động xoá lời nhắc hết phiên', () async {
+    auth.endedByServer = true;
+    await openOffline();
+    await controller.signOut();
+    await _until(() => controller.phase == AuthPhase.signedOut);
+    expect(auth.endedByServer, isFalse);
+    controller.dispose();
+    co.dispose();
+    conn.dispose();
+  });
+
   test('mất mạng giữa chừng lúc làm mới: không gửi, vẫn ở trong app', () async {
     await openOffline();
     await db.saveActivity(_act('e1'));
@@ -325,6 +368,35 @@ void main() {
     controller.dispose();
     co.dispose();
     conn.dispose();
+  });
+
+  test('offline: kéo danh mục bỏ qua máy chủ ngay, không chờ làm mới phiên',
+      () async {
+    final db =
+        LocalDatabase(factory: databaseFactoryFfi, directoryOverride: tmp.path);
+    await db.openForUser(_user);
+    var online = false;
+    final sync = SyncService(server, db, DeviceService.fixed('dev-1'),
+        isOnline: () => online);
+    final sw = Stopwatch()..start();
+    await expectLater(sync.pullFarmsPlotsSeasons(), throwsA(isA<OfflineSkipped>()));
+    expect(sw.elapsedMilliseconds, lessThan(500));
+    expect(server.calls, 0); // không một lời gọi mạng nào
+    online = true;
+    await sync.pullFarmsPlotsSeasons(); // có mạng: kéo như cũ
+    await db.close();
+  });
+
+  test('request treo không phản hồi: hết giờ thành lỗi mạng, không giữ hàng đợi mãi', () async {
+    final hung = http.MockClient.streaming((_, __) => Completer<http.StreamedResponse>().future);
+    final client = TimeoutHttpClient(hung, timeout: const Duration(milliseconds: 50));
+    await expectLater(client.get(Uri.parse('https://example.invalid/auth/v1/token')),
+        throwsA(isA<TimeoutException>()));
+    expect(
+        await checkSessionFreshness(
+            hasSession: true, isExpired: true,
+            refresh: () async => (await client.get(Uri.parse('https://x.invalid'))).statusCode == 200),
+        SessionFreshness.offline);
   });
 
   group('checkSessionFreshness', () {

@@ -79,6 +79,10 @@ class AuthController extends ChangeNotifier implements AuthActions {
       _enqueue(AuthSignal(AuthSignalKind.initialSessionPresent, restored));
     } else {
       _setPhase(AuthPhase.signedOut);
+      _queue = _queue.then((_) async {
+        final next = await _noSessionPhase();
+        if (_phase == AuthPhase.signedOut) _setPhase(next); // never overrides a newer phase
+      });
     }
   }
 
@@ -105,10 +109,13 @@ class AuthController extends ChangeNotifier implements AuthActions {
         // `initialSession`). Nếu đã kích hoạt đúng user này rồi thì bỏ qua —
         // tránh mở lại DB / tải lại Trang chủ lần hai.
         if (uid == _currentUserId && _phase == AuthPhase.authenticated) break;
-        if (await _switchTo(uid)) _setPhase(AuthPhase.authenticated);
+        if (await _switchTo(uid)) {
+          _setPhase(AuthPhase.authenticated);
+          unawaited(_auth.rememberSessionEndedByServer(false));
+        }
       case AuthSignalKind.initialSessionAbsent:
         await _tearDownCurrentUser();
-        _setPhase(AuthPhase.signedOut);
+        _setPhase(await _noSessionPhase());
       case AuthSignalKind.passwordRecovery:
         // Link đặt lại mật khẩu trong email vừa mở một phiên. Chạy đủ vòng đời
         // đổi tài khoản nếu là user khác, rồi bật cờ để [AuthGate] hiện màn đặt
@@ -146,12 +153,20 @@ class AuthController extends ChangeNotifier implements AuthActions {
         await _tearDownCurrentUser();
         if (_userRequestedSignOut) {
           _userRequestedSignOut = false;
+          unawaited(_auth.rememberSessionEndedByServer(false));
           _setPhase(AuthPhase.signedOut);
         } else {
+          if (hadUser) unawaited(_auth.rememberSessionEndedByServer(true));
           _setPhase(hadUser ? AuthPhase.sessionExpired : AuthPhase.signedOut);
         }
     }
   }
+
+  /// No session at start: `sessionExpired` when the server ended the last one
+  /// (revoked / banned) in an earlier run — so the login screen says why and
+  /// that unsent records are kept — otherwise `signedOut`.
+  Future<AuthPhase> _noSessionPhase() async =>
+      await _auth.sessionEndedByServer() ? AuthPhase.sessionExpired : AuthPhase.signedOut;
 
   /// Chuyển vùng hoạt động sang [newUserId]. Trả `true` nếu an toàn để vào shell.
   ///

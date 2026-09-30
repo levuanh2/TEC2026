@@ -106,6 +106,7 @@ class AppServices {
       db,
       devices,
       onSynced: homeController.markSynced,
+      isOnline: () => connectivity.isOnline,
     );
 
     final syncCoordinator = SyncCoordinator(

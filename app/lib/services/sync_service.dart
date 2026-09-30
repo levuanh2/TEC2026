@@ -30,12 +30,19 @@ const _kDetailTableFor = <String, String>{
 /// Mọi thao tác mạng đi qua [SyncGateway] — test bơm bản giả, không cần Supabase.
 class SyncService {
   SyncService(this._gateway, this._db, this._devices,
-      {Future<void> Function()? onSynced})
-      : _onSynced = onSynced;
+      {Future<void> Function()? onSynced, bool Function()? isOnline})
+      : _onSynced = onSynced,
+        _isOnline = isOnline;
   final SyncGateway _gateway;
   final LocalDatabase _db;
   final DeviceService _devices;
   final Future<void> Function()? _onSynced;
+
+  /// Trạng thái mạng của máy. Khi offline, việc kéo danh mục từ máy chủ bị bỏ
+  /// qua ngay: với phiên đã hết hạn, mỗi lời gọi Supabase sẽ thử làm mới phiên
+  /// (gotrue tự thử lại tới ~10 s) trước khi hỏng — màn "Hộ / Trang trại" từng
+  /// chờ ~51 s mới hiện dữ liệu trên máy (Round 5.1, điện thoại thật).
+  final bool Function()? _isOnline;
 
   final _batchCache =
       <String, String>{}; // cropSeason server id -> batch server id
@@ -300,6 +307,7 @@ class SyncService {
   /// hoặc bị thu hồi quyền phía server). Caller nên gọi
   /// `activeContext.revalidate()` sau đó để dọn lựa chọn đã mất.
   Future<void> pullFarmsPlotsSeasons() async {
+    if (_isOnline?.call() == false) throw const OfflineSkipped();
     final farms = await _gateway.fetchFarms();
     await _db.replaceFarms([for (final row in farms) Farm.fromServer(row)]);
 
@@ -319,6 +327,13 @@ class SyncService {
       {for (final row in seasons) row['id'] as String},
     );
   }
+}
+
+/// Không gọi máy chủ vì máy đang offline — người gọi hiện dữ liệu trên máy.
+class OfflineSkipped implements Exception {
+  const OfflineSkipped();
+  @override
+  String toString() => 'OfflineSkipped';
 }
 
 class SyncSummary {

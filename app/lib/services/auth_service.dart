@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io' show SocketException;
 
+import 'package:http/http.dart' as http show BaseClient, BaseRequest, Client, StreamedResponse;
 import 'package:http/http.dart' show ClientException;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
@@ -23,6 +25,26 @@ enum AuthSignalKind {
   /// Phiên trên máy vẫn còn, người dùng vẫn làm việc offline được — đây KHÔNG
   /// phải hết phiên, cũng không phải lỗi khiến phải đăng nhập lại.
   refreshDeferred,
+}
+
+/// Mọi request Supabase (Auth, PostgREST) có giới hạn thời gian chờ phản hồi.
+///
+/// Round 5.1, điện thoại thật: vừa bật lại mạng, request làm mới phiên gửi đi
+/// lúc mạng còn đang chuyển treo mãi không có phản hồi; gotrue gộp mọi lần làm
+/// mới cùng refresh token vào đúng request đó, nên cổng phiên trước khi đồng bộ
+/// chờ vô hạn — không gửi, nhưng cũng không bao giờ báo "đăng nhập lại". Có
+/// giới hạn, request treo thành lỗi mạng, gotrue bỏ nó và lần sau thử lại.
+class TimeoutHttpClient extends http.BaseClient {
+  TimeoutHttpClient(this._inner, {this.timeout = const Duration(seconds: 20)});
+  final http.Client _inner;
+  final Duration timeout;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) =>
+      _inner.send(request).timeout(timeout);
+
+  @override
+  void close() => _inner.close();
 }
 
 /// Kết quả kiểm tra phiên ngay trước khi gửi dữ liệu lên máy chủ.
@@ -91,6 +113,7 @@ class AuthService {
   static Future<void> init() => Supabase.initialize(
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.supabasePublishableKey,
+        httpClient: TimeoutHttpClient(http.Client()),
         authOptions: FlutterAuthClientOptions(
           localStorage: SecureSessionStorage(
             persistSessionKey:
@@ -123,8 +146,13 @@ class AuthService {
     return checkSessionFreshness(
       hasSession: session != null,
       isExpired: session?.isExpired ?? false,
-      refresh: () async =>
-          (await client.auth.refreshSession()).session != null,
+      // Giới hạn tổng: một lần làm mới (kể cả các lần gotrue tự thử lại) không
+      // bao giờ giữ hàng đợi quá lâu — hết giờ = chưa tới được máy chủ.
+      refresh: () async => (await client.auth
+                  .refreshSession()
+                  .timeout(const Duration(seconds: 30)))
+              .session !=
+          null,
     );
   }
 
@@ -194,4 +222,25 @@ class AuthService {
       client.auth.updateUser(UserAttributes(password: newPassword));
 
   Future<void> signOut() => client.auth.signOut();
+
+  static const _kEndedByServer = 'auth.session_ended_by_server';
+
+  /// Máy chủ đã kết thúc phiên (thu hồi / khoá tài khoản), không phải người
+  /// dùng bấm đăng xuất. Lưu một cờ (không nhạy cảm) để lần mở app sau vẫn nói
+  /// rõ "phiên đã hết hạn — dữ liệu chưa gửi vẫn giữ", chứ không chỉ hiện màn
+  /// đăng nhập trống. Lỗi lưu trữ bị bỏ qua: đây chỉ là lời nhắc.
+  Future<void> rememberSessionEndedByServer(bool ended) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      ended ? await prefs.setBool(_kEndedByServer, true) : await prefs.remove(_kEndedByServer);
+    } catch (_) {}
+  }
+
+  Future<bool> sessionEndedByServer() async {
+    try {
+      return (await SharedPreferences.getInstance()).getBool(_kEndedByServer) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }
