@@ -27,6 +27,7 @@ from carbon import ENGINE_VERSION, ParameterSet
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import SupabaseCropAccessChecker
 from infrastructure.persist_access import PostgresCropPersistChecker
+from infrastructure.pg_carbon_repo import PostgresCarbonRepository
 from carbon.factor_register import load_parameter_file, readiness as factor_readiness
 from infrastructure.config import load_settings
 from infrastructure import pg_pool, supabase_clients
@@ -127,9 +128,17 @@ app.openapi = _custom_openapi  # type: ignore[method-assign]
 
 
 def _build_service() -> CarbonService:
-    """Repository thật. Thiếu cấu hình -> ConfigError, KHÔNG âm thầm dùng bản in-memory."""
+    """Repository thật. Thiếu cấu hình -> ConfigError, KHÔNG âm thầm dùng bản in-memory.
+
+    With the backend DB URL the pooled-Postgres repository serves the same rows
+    in fewer round trips and writes a calculation atomically (Round 5.1); without
+    it the PostgREST repository still works, as before.
+    """
     parameters = ParameterSet.load(settings.ef_config_path)
-    return CarbonService(SupabaseCarbonRepository(settings), parameters)
+    repository = (
+        PostgresCarbonRepository(settings) if settings.supabase_db_url else SupabaseCarbonRepository(settings)
+    )
+    return CarbonService(repository, parameters)
 
 
 if settings.supabase_configured:

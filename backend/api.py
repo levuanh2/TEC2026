@@ -12,10 +12,13 @@ mọi request phải qua `CropAccessChecker` — replay JWT của người gọi
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import logging
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile
@@ -184,7 +187,7 @@ def _require_caller(
 
 
 def _require_persist_authority(
-    authorization: str | None, checker: CropPersistChecker, crop_season_id: str
+    authorization: str | None, checker: CropPersistChecker, crop_season_id: str, **resolved: Any,
 ) -> None:
     """B4: persisting needs write authority on the crop, not just read access.
 
@@ -193,11 +196,42 @@ def _require_persist_authority(
     """
     token = extract_bearer_token(authorization)
     try:
-        checker.assert_can_persist(token, crop_season_id)
+        checker.assert_can_persist(token, crop_season_id, **resolved)
     except CropAccessError as exc:
         raise HTTPException(
             status_code=404, detail=error_detail("crop_not_found", str(exc))
         ) from exc
+
+
+def _require_caller_and_persist_authority(
+    authorization: str | None, access_checker: CropAccessChecker,
+    persist_checker: CropPersistChecker, crop_season_id: str,
+) -> None:
+    """Read scope, then write authority — with the identity lookup overlapped.
+
+    The write check needs the Auth server's answer to "who is this JWT"; that
+    round trip does not depend on the RLS read check, so it runs while the read
+    check is in flight (Round 5.1: every sequential trip here cost 250–300 ms
+    of each calculation). The write rule itself is still evaluated only after
+    the read check passed, so an out-of-scope caller never reaches it, and a
+    caller failing both still gets the read check's error.
+    """
+    resolve = getattr(persist_checker, "verified_user_id", None)
+    try:
+        token = extract_bearer_token(authorization)
+    except MissingAuthError:
+        resolve = None  # `_require_caller` below turns this into the 401
+    if resolve is None:
+        _require_caller(authorization, access_checker, crop_season_id)
+        _require_persist_authority(authorization, persist_checker, crop_season_id)
+        return
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        identity = pool.submit(contextvars.copy_context().run, resolve, token)
+        try:
+            _require_caller(authorization, access_checker, crop_season_id)
+        finally:
+            identity.exception()  # always wait: nothing outlives the request
+    _require_persist_authority(authorization, persist_checker, crop_season_id, user_id=identity.result())
 
 
 def _json_ready(body: dict[str, Any]) -> dict[str, Any]:
@@ -267,25 +301,28 @@ def calculate_carbon_endpoint(
     """
     request_id = str(uuid.uuid4())
     started = time.monotonic()
-    _require_caller(authorization, access_checker, payload.crop_season_id)
-    _require_persist_authority(authorization, persist_checker, payload.crop_season_id)
+    # One database connection for the write check, the read and the save
+    # (Round 5.1); a service without a session behaves exactly as before.
+    session = getattr(service, "session", None)
+    with session() if session is not None else contextlib.nullcontext():
+        _require_caller_and_persist_authority(authorization, access_checker, persist_checker, payload.crop_season_id)
 
-    try:
-        # Serialized before `save_calculation` writes anything; only the new id
-        # is added afterwards, which cannot make valid JSON invalid.
-        outcome = service.calculate(
-            payload.crop_season_id, payload.water_regime_scenario,
-            prepare=lambda result: _json_ready(_payload(result, None)),
-        )
-    except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
-        logger.info(
-            "carbon_calculate_failed request_id=%s crop_season_id=%s scenario=%s "
-            "error=%s duration_ms=%d",
-            request_id, payload.crop_season_id, payload.water_regime_scenario,
-            type(exc).__name__, (time.monotonic() - started) * 1000,
-        )
-        _raise_http(exc, request_id)
-        raise
+        try:
+            # Serialized before `save_calculation` writes anything; only the new id
+            # is added afterwards, which cannot make valid JSON invalid.
+            outcome = service.calculate(
+                payload.crop_season_id, payload.water_regime_scenario,
+                prepare=lambda result: _json_ready(_payload(result, None)),
+            )
+        except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
+            logger.info(
+                "carbon_calculate_failed request_id=%s crop_season_id=%s scenario=%s "
+                "error=%s duration_ms=%d",
+                request_id, payload.crop_season_id, payload.water_regime_scenario,
+                type(exc).__name__, (time.monotonic() - started) * 1000,
+            )
+            _raise_http(exc, request_id)
+            raise
 
     logger.info(
         "carbon_calculate_ok request_id=%s crop_season_id=%s scenario=%s "

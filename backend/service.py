@@ -6,6 +6,7 @@ repository không biết Carbon Engine.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import logging
@@ -102,9 +103,24 @@ class CarbonService:
     def parameters(self) -> ParameterSet:
         return self._params
 
+    def session(self):
+        """The repository's one-connection block, when it has one (Round 5.1)."""
+        session = getattr(self._repo, "session", None)
+        return session() if session is not None else contextlib.nullcontext()
+
     def calculate(
         self, crop_season_id: str, scenario: str = "as_recorded", *, persist: bool = True,
         prepare: Callable[[CarbonResult], Any] | None = None,
+    ) -> CalculationOutcome:
+        # A repository that can keep one connection for the read-then-write
+        # does (Round 5.1); others behave exactly as before.
+        session = getattr(self._repo, "session", None)
+        with session() if session is not None else contextlib.nullcontext():
+            return self._calculate(crop_season_id, scenario, persist=persist, prepare=prepare)
+
+    def _calculate(
+        self, crop_season_id: str, scenario: str, *, persist: bool,
+        prepare: Callable[[CarbonResult], Any] | None,
     ) -> CalculationOutcome:
         bundle = self._repo.get_crop_bundle(crop_season_id)
         activity_data = map_crop_activity_data(bundle)
