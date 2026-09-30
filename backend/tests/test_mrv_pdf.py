@@ -85,7 +85,9 @@ def test_the_cover_identifies_the_report_and_the_snapshot():
     assert "Gói báo cáo MRV" in cover
     assert "MRV EVIDENCE REPORT" in cover
     assert "DEMO-MRV-2026" in cover and "Hồ sơ MRV demo" in cover
-    assert manifest["export_id"] in cover and PDF_ID in cover
+    # Short ids for people (Round 5.1); the full ids live in the JSON package.
+    assert manifest["export_id"][:8] in cover and PDF_ID[:8] in cover
+    assert manifest["export_id"] not in cover
     assert "1.0" in cover
     assert flat(rp.COVER_DISCLAIMER) in flat(cover)
     assert "Không phải chứng nhận" in cover
@@ -144,9 +146,9 @@ def test_step_statuses_are_preserved_and_not_started_is_not_failure():
     manifest["steps"].append({"step_no": 3, "name": "Thiết lập đường cơ sở", "status": "not_started",
                               "started_at": None, "completed_at": None, "notes": None, "evidence_count": 0})
     text = flat(text_of(render(manifest)))
-    assert flat("Chưa bắt đầu (not_started)") in text
-    assert flat("Đang thực hiện (in_progress)") in text
-    assert flat("Hoàn thành (completed)") in text
+    assert flat("Chưa bắt đầu") in text
+    assert flat("Đang thực hiện") in text
+    assert flat("Hoàn thành") in text
     assert "Khôngđạt(" not in text
 
 
@@ -218,17 +220,19 @@ def test_every_warning_is_rendered_with_its_severity():
     text = flat(text_of(render(manifest)))
     assert manifest["warnings"], "fixture must carry warnings"
     for warning in manifest["warnings"]:
-        assert flat(warning["code"]) in text, warning["code"]
-        assert flat(warning["message"]) in text, warning["message"]
-    assert flat("Cảnh báo (warning)") in text and flat("Thông tin (info)") in text
+        # Every warning is there, under its Vietnamese label, never its code.
+        assert flat(rp.WARNING_CODE.get(warning["code"], warning["code"])) in text, warning["code"]
+        assert warning["code"] not in rp.WARNING_CODE or flat(warning["code"]) not in text, warning["code"]
+    assert flat(f"Toàn bộ {len(manifest['warnings'])} cảnh báo") in text
+    assert flat("Cảnh báo") in text and flat("Thông tin") in text
 
 
 def test_integrity_section_carries_the_payload_digest_and_lineage():
     manifest, *_ = build_manifest()
     text = text_of(render(manifest))
     assert manifest["package_integrity"]["manifest_sha256"] in flat(text)
-    assert "source_snapshot_export_id" in text
-    assert "file_sha256" in text
+    assert "Mã snapshot nguồn" in text and manifest["export_id"][:8] in text
+    assert "SHA-256 của tệp PDF" in text
     assert "2026-09-13T09:00:00Z" in text  # rendered_at, UTC ISO
 
 

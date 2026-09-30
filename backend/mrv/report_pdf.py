@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import threading
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
@@ -118,6 +119,16 @@ ACTIVITY_TYPE = {
 SOURCE = {"mobile_offline": "Di động (ngoại tuyến)", "mobile": "Di động", "web": "Web"}
 SEVERITY = {"warning": "Cảnh báo", "info": "Thông tin"}
 COMPLETENESS = {"water": "Nước", "fertilizer": "Phân bón", "cost": "Chi phí", "carbon": "Carbon"}
+WARNING_CODE = {
+    "carbon_unavailable": "Chưa có kết quả Carbon", "factor_provenance_unavailable": "Chưa rõ nguồn gốc hệ số",
+    "factor_unverified": "Hệ số chưa đối chiếu nguồn", "evidence_none": "Chưa có bằng chứng",
+    "evidence_checksum_missing": "Bằng chứng thiếu mã băm", "evidence_missing_for_step": "Bước thiếu bằng chứng",
+    "mrv_step_incomplete": "Bước MRV chưa hoàn thành", "resource_metric_incomplete": "Chỉ số tài nguyên chưa đủ",
+    "harvest_missing": "Chưa có thu hoạch", "scope_empty": "Hồ sơ chưa có phạm vi",
+    "carbon_engine_warning": "Lưu ý của phép tính Carbon",
+}
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_QUOTED_UUID = re.compile(r"(['\"]?)(" + _UUID.pattern + r")")
 CARBON_REASON = {"no_succeeded_calculation": "chưa có bản tính CO₂e thành công"}
 CASE_STATUS = {
     "draft": "Nháp", "in_progress": "Đang thực hiện", "ready_for_verification": "Sẵn sàng thẩm định",
@@ -241,8 +252,10 @@ def _compact(value: Any) -> str | None:
 def _status(code: Any, labels: dict[str, str]) -> str:
     if not code:
         return NULL_REF
-    label = labels.get(str(code))
-    return f"{label} ({code})" if label else str(code)
+    # The report is read by people: the Vietnamese label only (Round 5.1). The
+    # code stays in the JSON snapshot and the XLSX data sheets. A code with no
+    # label is printed as-is rather than given an invented name.
+    return labels.get(str(code)) or str(code)
 
 
 # --------------------------------------------------------------------------
@@ -369,11 +382,11 @@ class _Report:
             ("Kỳ báo cáo", f"{fmt_date(case.get('period_start')) or NULL_REF} – {fmt_date(case.get('period_end')) or NULL_REF}"),
             ("Tổ chức", ((self.m.get("scope") or {}).get("organization") or {}).get("name")),
             ("Snapshot tạo lúc", f"{fmt_local(self.m.get('generated_at')) or NULL_REF} (giờ Việt Nam, UTC+7)"),
-            ("Người tạo snapshot", f"mã người dùng {by.get('user_id') or NULL_REF} · vai trò: "
+            ("Người tạo snapshot", f"mã người dùng {_short(by.get('user_id')) or NULL_REF} · vai trò: "
                                    f"{', '.join(_status(r, ROLE) for r in (by.get('roles') or [])) or NULL_REF}"),
             ("Phiên bản lược đồ", self.m.get("schema_version")),
-            ("Mã snapshot (export_id)", self.m.get("export_id")),
-            ("Mã bản PDF", self.export_id),
+            ("Mã snapshot", _short(self.m.get("export_id"))),
+            ("Mã bản PDF", _short(self.export_id)),
             ("Tình trạng tài liệu", "Không phải chứng nhận — tài liệu hỗ trợ tổng hợp dữ liệu"),
         ]))
         story.append(Spacer(1, 12))
@@ -555,6 +568,39 @@ class _Report:
             story.append(Paragraph(escape(f"Vụ canh tác {self.season_label(season_id)}"), self.s.h2))
             story.append(_grid(rows, [w * .46, w * .2, w * .14, w * .2]))
 
+    def human(self, text: Any) -> str | None:
+        """A snapshot message as a person reads it: seasons by code, other ids
+        shortened, status and metric codes as their Vietnamese labels. The JSON
+        keeps the message verbatim."""
+        if text is None:
+            return None
+        out = _QUOTED_UUID.sub(lambda m_: self.season_label(m_.group(2)) if self._is_season(m_.group(2))
+                               else f"mã {_short(m_.group(2))}", str(text))
+        for code, label in {**STEP_STATUS, **COMPLETENESS}.items():
+            out = re.sub(rf"(?<![A-Za-z_]){re.escape(code)}(?![A-Za-z_])", label.lower() if code in COMPLETENESS else label, out)
+        return out
+
+    def related(self, value: Any) -> str | None:
+        if not isinstance(value, dict) or not value:
+            return self.human(_compact(value))
+        parts = []
+        for key, v in sorted(value.items()):
+            if key == "crop_season_id":
+                parts.append(f"Vụ {self.season_label(v)}")
+            elif key == "step_no":
+                parts.append(f"Bước {v}")
+            elif key == "missing" and isinstance(v, (list, tuple)):
+                parts.append("Thiếu: " + ", ".join(COMPLETENESS.get(str(x), str(x)).lower() for x in v))
+            elif key == "factor_set_id":
+                parts.append(f"Bộ hệ số mã {_short(v)}")
+            else:
+                parts.append(self.human(_compact(v)) or "")
+        return "; ".join(p for p in parts if p)
+
+    def _is_season(self, value: str) -> bool:
+        return any(str((b.get("crop_season") or {}).get("crop_season_id")) == value
+                   for b in (self.m.get("scope") or {}).get("production_batches") or [])
+
     def season_label(self, season_id: Any) -> str:
         """`<season code> · <short id>` from the snapshot's own scope; the id alone
         only when the scope does not name the season."""
@@ -562,7 +608,7 @@ class _Report:
             season = b.get("crop_season") or {}
             if str(season.get("crop_season_id")) == str(season_id) and season.get("season_code"):
                 return f"{season['season_code']} · mã {_short(season_id)}"
-        return f"mã {season_id}"
+        return f"mã {_short(season_id)}"
 
     def carbon(self, story: list[Any]) -> None:
         self.section("Carbon", story)
@@ -588,7 +634,7 @@ class _Report:
                 ("Tổng CO₂e", f"{fmt_number(c.get('total_co2e_kg')) or NULL_VALUE} kgCO₂e"),
                 ("CO₂e trên mỗi kg", f"{fmt_number(c.get('co2e_per_kg'), sig=_RATIO_SIG_DIGITS) or NULL_VALUE} kgCO₂e/kg"),
                 ("Sản lượng dùng khi tính", f"{fmt_number(c.get('yield_kg')) or NULL_VALUE} kg"),
-                ("Mã bản tính", c.get("calculation_id")),
+                ("Mã bản tính", _short(c.get("calculation_id"))),
                 ("Thời điểm tính (giờ VN)", fmt_local(c.get("calculated_at"))),
                 ("Loại kết quả", _status(c.get("calculation_kind"), CALCULATION_KIND)),
                 ("Kịch bản", _status(c.get("scenario"), SCENARIO)),
@@ -644,7 +690,7 @@ class _Report:
             rows = [self.head("Mã hệ số", "Hạng mục · khí", "Giá trị", "Đơn vị", "Tham chiếu nguồn", "Đối chiếu")]
             for f in sorted(fs.get("factors") or [], key=lambda x: str(x.get("factor_code") or "")):
                 rows.append([
-                    self.cell(f.get("factor_code")), self.cell(f"{f.get('category') or NULL_REF} · {f.get('gas') or NULL_REF}"),
+                    self.cell(f.get("factor_code")), self.cell(f"{_status(f.get('category'), CATEGORY)} · {f.get('gas') or NULL_REF}"),
                     self.cell(fmt_number(f.get("factor_value")), null=NULL_VALUE),
                     self.cell(f"{f.get('activity_unit') or '?'} › {f.get('result_unit') or '?'}"),
                     self.cell(f.get("source_reference"), null="Không ghi nguồn"),
@@ -659,14 +705,15 @@ class _Report:
         self.section("Cảnh báo", story)
         items = self.m.get("warnings") or []
         story.append(_p(f"Toàn bộ {len(items)} cảnh báo trong snapshot, không lược bớt. Mức độ giữ nguyên; "
-                        "\"Thông tin\" (info) là dữ liệu chưa đầy đủ, không phải lỗi.", self.s.note))
+                        "\"Thông tin\" là dữ liệu chưa đầy đủ, không phải lỗi. Mã đầy đủ của từng cảnh báo "
+                        "có trong JSON/XLSX của cùng snapshot.", self.s.note))
         order = {"warning": 0, "info": 1}
         rows = [self.head("Mức độ", "Mã", "Nội dung", "Liên quan")]
         for w_ in sorted(items, key=lambda x: (order.get(str(x.get("severity")), 2), str(x.get("code") or ""),
                                                 json.dumps(x.get("related") or {}, sort_keys=True))):
             rows.append([
-                self.cell(_status(w_.get("severity"), SEVERITY)), self.cell(w_.get("code")),
-                self.cell(w_.get("message")), self.cell(_compact(w_.get("related")), null="—"),
+                self.cell(_status(w_.get("severity"), SEVERITY)), self.cell(_status(w_.get("code"), WARNING_CODE)),
+                self.cell(self.human(w_.get("message"))), self.cell(self.related(w_.get("related")), null="—"),
             ])
         if not items:
             rows.append([self.cell("Không có cảnh báo nào.", muted=True), "", "", ""])
@@ -678,16 +725,16 @@ class _Report:
         integ = self.m.get("package_integrity") or {}
         digest = integ.get("manifest_sha256")
         story.append(self.kv([
-            ("Phiên bản lược đồ (schema_version)", self.m.get("schema_version")),
-            ("Snapshot nguồn (source_snapshot_export_id)", self.m.get("export_id")),
-            ("Mã bản PDF (export_id)", self.export_id),
-            ("payload_sha256 (manifest_sha256)", _p(digest, self.s.mono) if digest else None),
+            ("Phiên bản lược đồ", self.m.get("schema_version")),
+            ("Mã snapshot nguồn", _short(self.m.get("export_id"))),
+            ("Mã bản PDF", _short(self.export_id)),
+            ("Mã băm SHA-256 của snapshot", _p(digest, self.s.mono) if digest else None),
             ("Thuật toán · phạm vi băm", f"{integ.get('algorithm') or NULL_REF} · {integ.get('canonical_over') or NULL_REF}"),
             ("Cách chuẩn hoá", integ.get("canonical_form")),
             ("Snapshot tạo lúc (UTC)", self.m.get("generated_at")),
             ("PDF kết xuất lúc (UTC)", mrv_manifest.iso_utc(self.rendered_at) if self.rendered_at else None),
-            ("SHA-256 của tệp PDF (artifact_sha256)",
-             "Ghi trong hồ sơ xuất (file_sha256) và được kiểm tra mỗi lần tải về. Một tệp không thể chứa mã băm của chính nó."),
+            ("SHA-256 của tệp PDF",
+             "Ghi trong hồ sơ xuất và được kiểm tra mỗi lần tải về. Một tệp không thể chứa mã băm của chính nó."),
         ], label_width=62 * mm))
         story.append(Spacer(1, 6))
         story.append(_p(

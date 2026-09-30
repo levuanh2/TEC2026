@@ -51,8 +51,10 @@ def test_pdf_labels_kind_scenario_version_and_status_instead_of_raw_values():
     manifest = _manifest()
     text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(report_pdf.render_pdf(manifest))).pages)
     flat = " ".join(text.split())
-    assert "Kết quả vận hành (actual)" in flat
-    assert "Theo dữ liệu đã ghi nhận (actual)" in flat
+    assert "Kết quả vận hành" in flat and "Theo dữ liệu đã ghi nhận" in flat
+    # People read labels; codes stay in the JSON/XLSX data (Round 5.1).
+    for raw in ("(actual)", "(cooperative_manager)", "(draft)", "irrigation_ch4", "fertilizer_n2o"):
+        assert raw not in flat
     assert FACTOR_SET_ROW[FACTOR_SET]["version_code"] in flat
     assert "undefined" not in flat.lower()
     # The factor set is named by its version in the Carbon block, not by UUID.
