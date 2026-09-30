@@ -1,6 +1,7 @@
 import '../db/local_database.dart';
 import '../models/activity.dart';
 import '../models/activity_field_spec.dart';
+import '../models/activity_validation.dart' show harvestAreaError;
 import '../models/farm.dart';
 import 'device_service.dart';
 import 'sync_errors.dart';
@@ -155,6 +156,24 @@ class SyncService {
       if (seasonServerId == null) {
         summary.deferred++;
         continue; // vụ cha chưa có id thật trên server
+      }
+
+      // Diện tích thu hoạch > diện tích thửa: máy chủ sẽ từ chối (trigger DB),
+      // và bản ghi hoạt động đã gửi trước bảng chi tiết sẽ nằm lại thiếu chi
+      // tiết. Chặn ngay tại đây, không gọi mạng; đánh dấu lỗi vĩnh viễn để
+      // hàng đợi không tự thử lại — nông dân sửa bản ghi rồi mới gửi.
+      if (activity.type == 'harvest' && season != null) {
+        final plot = await _db.getPlotByClientId(season.plotClientId);
+        if (harvestAreaError(activity.payload['harvested_area_ha'], plot?.areaHa) != null) {
+          const kind = SyncErrorKind.harvestAreaExceedsPlot;
+          await _db.updateActivitySyncState(
+            activity.clientEventId,
+            state: SyncState.failed,
+            error: kind.name,
+          );
+          summary.record('Hoạt động ${activity.type}', kind);
+          continue;
+        }
       }
       try {
         await _db.updateActivitySyncState(activity.clientEventId,

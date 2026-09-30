@@ -139,6 +139,28 @@ class AppRoutes {
     );
   }
 
+  /// Mở một hoạt động ĐÃ GHI trên máy (theo `client_event_id`) để sửa — lối
+  /// sửa của hàng đợi khi máy chủ/máy từ chối dữ liệu (vd. diện tích thu
+  /// hoạch vượt thửa). Lưu lại đưa bản ghi về "Chưa gửi".
+  static Future<void> openActivityEdit(
+    BuildContext context,
+    AppServices services, {
+    required String clientEventId,
+  }) async {
+    final activity = await services.db.getActivity(clientEventId);
+    if (activity == null || !context.mounted) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ActivityFormScreen(
+          services: services,
+          cropSeasonId: activity.cropSeasonId,
+          activityType: activity.type,
+          existing: activity,
+        ),
+      ),
+    );
+  }
+
   static Future<CropSeason?> openCropSeasonForm(
     BuildContext context,
     AppServices services, {

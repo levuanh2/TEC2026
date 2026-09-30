@@ -73,6 +73,7 @@ class _HomeShellState extends State<HomeShell>
             SyncTab(
               coordinator: _s.syncCoordinator,
               onOpenSettings: _openSyncSettings,
+              onFixActivity: _fixActivity,
             ),
             AccountTab(services: _s),
           ],
@@ -165,6 +166,11 @@ class _HomeShellState extends State<HomeShell>
 
   @override
   void switchToSyncTab() => _select(2);
+
+  Future<void> _fixActivity(String clientEventId) async {
+    await AppRoutes.openActivityEdit(context, _s, clientEventId: clientEventId);
+    if (mounted) await _s.syncCoordinator.refresh();
+  }
 
   void _openSyncSettings() {
     AppRoutes.openSyncSettings(context, _s).then((_) {

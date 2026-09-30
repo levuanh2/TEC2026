@@ -10,10 +10,19 @@ import '../../services/sync_errors.dart';
 /// SQLite), hiện trạng thái mạng + mốc gửi gần nhất + danh sách `pending/failed`,
 /// nút "Gửi dữ liệu ngay". Không bao giờ hiện exception kỹ thuật.
 class SyncTab extends StatelessWidget {
-  const SyncTab({super.key, required this.coordinator, this.onOpenSettings});
+  const SyncTab({
+    super.key,
+    required this.coordinator,
+    this.onOpenSettings,
+    this.onFixActivity,
+  });
 
   final SyncCoordinator coordinator;
   final VoidCallback? onOpenSettings;
+
+  /// Mở bản ghi hoạt động (theo `client_event_id`) để sửa — cho các lỗi chỉ
+  /// sửa dữ liệu mới gửi được (vd. diện tích thu hoạch vượt thửa).
+  final Future<void> Function(String clientEventId)? onFixActivity;
 
   SyncCoordinator get _co => coordinator;
 
@@ -92,7 +101,7 @@ class SyncTab extends StatelessWidget {
               children: [
                 _StatusCard(coordinator: _co),
                 const SizedBox(height: AppSpacing.lg),
-                _QueueSection(coordinator: _co),
+                _QueueSection(coordinator: _co, onFixActivity: onFixActivity),
                 const SizedBox(height: AppSpacing.lg),
                 const _TimestampsCard(),
               ],
@@ -199,8 +208,9 @@ class _StatusCard extends StatelessWidget {
 }
 
 class _QueueSection extends StatelessWidget {
-  const _QueueSection({required this.coordinator});
+  const _QueueSection({required this.coordinator, this.onFixActivity});
   final SyncCoordinator coordinator;
+  final Future<void> Function(String clientEventId)? onFixActivity;
 
   @override
   Widget build(BuildContext context) {
@@ -240,7 +250,7 @@ class _QueueSection extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.xs),
         for (final it in items) ...[
-          _QueueRow(item: it),
+          _QueueRow(item: it, onFixActivity: onFixActivity),
           const SizedBox(height: AppSpacing.sm),
         ],
       ],
@@ -249,8 +259,16 @@ class _QueueSection extends StatelessWidget {
 }
 
 class _QueueRow extends StatelessWidget {
-  const _QueueRow({required this.item});
+  const _QueueRow({required this.item, this.onFixActivity});
   final SyncQueueItem item;
+  final Future<void> Function(String clientEventId)? onFixActivity;
+
+  /// Lỗi chỉ hết khi SỬA bản ghi — gửi lại y nguyên luôn hỏng.
+  bool get _needsEdit =>
+      item.kind == SyncQueueKind.activity &&
+      !item.isTombstone &&
+      item.syncState == SyncState.failed &&
+      item.errorCode == SyncErrorKind.harvestAreaExceedsPlot.name;
 
   (String, StatusTone) _badge() {
     if (item.syncState == SyncState.failed) {
@@ -263,6 +281,9 @@ class _QueueRow extends StatelessWidget {
       }
       if (kind == SyncErrorKind.auth) {
         return ('Hết phiên', StatusTone.danger);
+      }
+      if (kind == SyncErrorKind.harvestAreaExceedsPlot) {
+        return ('Cần sửa', StatusTone.danger);
       }
       return ('Gửi lỗi', StatusTone.warning);
     }
@@ -302,6 +323,17 @@ class _QueueRow extends StatelessWidget {
             Text(
               _friendlyError(item.errorCode!),
               style: text.labelSmall?.copyWith(color: AppColors.warningText),
+            ),
+          ],
+          if (_needsEdit && onFixActivity != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => onFixActivity!(item.clientId),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Sửa bản ghi'),
+              ),
             ),
           ],
           if (item.retryCount > 0) ...[
