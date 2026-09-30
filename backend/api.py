@@ -776,6 +776,23 @@ def organization_plots_seasons(organization_id: str, repo: SupabaseReadRepositor
     })
 
 
+@router.get(
+    "/organizations/{organization_id}/mrv-batches", tags=['MRV'],
+    response_model=schemas.OrganizationMrvBatchesResponse,
+)
+def organization_mrv_batches(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Every MRV case of the organization with its batches, in one request.
+
+    Replaces `/mrv/cases` + `/mrv/cases/{id}/batches` PER CASE on the Management
+    screens (Round 5.1); the request count no longer grows with the number of
+    cases, and no case is lost past the first page. RLS decides scope.
+    """
+    return _read_or_404(lambda: {
+        "organization_id": organization_id,
+        "items": repo.organization_mrv_batches(organization_id),
+    })
+
+
 @router.get("/organizations/{organization_id}/farm-performance", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.FarmPerformanceResponse])
 def farm_performance(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: {"items": repo.farm_performance(organization_id)})

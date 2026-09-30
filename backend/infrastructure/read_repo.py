@@ -657,6 +657,44 @@ class SupabaseReadRepository:
             })
         return items
 
+    def organization_mrv_batches(self, organization_id: str) -> list[dict[str, Any]]:
+        """Every MRV case of the organization with its batches, by RLS.
+
+        Round 5.1: Management read `/mrv/cases` (paginated: only the first 20
+        cases) and then `/mrv/cases/{id}/batches` once PER CASE, and each of those
+        read 3 rows per batch. This is the same rows through the same caller-bound
+        client in a fixed number of round trips: organization, cases, links,
+        batches, seasons, plots. A batch whose season/plot the caller cannot read
+        is left out (never guessed). Raises `ReadNotFoundError` when the
+        organization is not visible.
+        """
+        _, cases = self._concurrent(
+            lambda: self._one("organizations", organization_id),
+            lambda: self._many("mrv_cases", organization_id=organization_id),
+        )
+        links = self._many_in("mrv_case_batches", "mrv_case_id", [str(c["id"]) for c in cases])
+        batches = {str(b["id"]): b for b in self._many_in(
+            "production_batches", "id", sorted({str(link["production_batch_id"]) for link in links}))}
+        seasons = {str(s["id"]): s for s in self._many_in(
+            "crop_seasons", "id", sorted({str(b["crop_season_id"]) for b in batches.values()}))}
+        plots = {str(p["id"]): p for p in self._many_in(
+            "plots", "id", sorted({str(s["plot_id"]) for s in seasons.values()}))}
+        by_case: dict[str, list[dict[str, Any]]] = {str(c["id"]): [] for c in cases}
+        for link in links:
+            batch = batches.get(str(link["production_batch_id"]))
+            season = seasons.get(str(batch["crop_season_id"])) if batch else None
+            plot = plots.get(str(season["plot_id"])) if season else None
+            if plot is None:
+                continue
+            by_case[str(link["mrv_case_id"])].append({
+                "production_batch_id": batch["id"], "batch_code": batch["batch_code"],
+                "crop_season_id": season["id"], "farm_id": plot["farm_id"], "plot_id": plot["id"],
+            })
+        return [
+            {"case_id": c["id"], "case_code": c["case_code"], "status": c["status"], "batches": by_case[str(c["id"])]}
+            for c in sorted(cases, key=lambda c: str(c.get("case_code") or ""))
+        ]
+
     def mrv_evidence(self, case_id: str) -> list[dict[str, Any]]:
         self._one("mrv_cases", case_id)
         return [

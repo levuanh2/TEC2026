@@ -187,6 +187,8 @@ def _run(journey: Journey, fx: dict) -> None:
     j("GET", "/v1/mrv/cases/{mrv_case_id}", mrv_case_id=case)
     for suffix in ("steps", "batches", "evidence"):
         j("GET", "/v1/mrv/cases/{mrv_case_id}/" + suffix, mrv_case_id=case)
+    grouped = j("GET", "/v1/organizations/{organization_id}/mrv-batches", organization_id=org).json()["items"]
+    assert batch in [b["production_batch_id"] for c in grouped if c["case_id"] == case for b in c["batches"]]
     export = j("POST", "/v1/mrv/cases/{mrv_case_id}/exports", mrv_case_id=case, json={"format": "json"}).json()
     export_id = export["export_id"]
     assert export_id in j("GET", "/v1/mrv/cases/{mrv_case_id}/exports", mrv_case_id=case).text

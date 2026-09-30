@@ -622,6 +622,19 @@ class MrvBatchResponse(BaseModel):
     plot_id: str
 
 
+class MrvCaseBatches(BaseModel):
+    """One MRV case and its batches — per batch exactly `/mrv/cases/{id}/batches`."""
+    case_id: str
+    case_code: str
+    status: str
+    batches: list[MrvBatchResponse]
+
+
+class OrganizationMrvBatchesResponse(BaseModel):
+    organization_id: str
+    items: list[MrvCaseBatches]
+
+
 class MrvEvidenceResponse(BaseModel):
     id: str
     step_no: int
