@@ -94,3 +94,32 @@ def test_unknown_season_is_not_found():
 ])
 def test_number_parsing_matches_the_web(value, expected):
     assert _as_number(value) == expected
+
+
+def test_a_jwt_issued_a_moment_in_the_future_is_retried_once_not_a_500(monkeypatch):
+    """Hosted PostgREST's clock can trail Auth's right after sign-in (PGRST303
+    "JWT issued at future"); the read waits a moment and succeeds instead of
+    escaping as a 500."""
+    import infrastructure.read_repo as rr
+
+    class Skewed(Exception):
+        code, message = "PGRST303", "JWT issued at future"
+
+    calls = []
+    monkeypatch.setattr(rr.time, "sleep", lambda s: calls.append(("sleep", s)))
+    repo = _repo(_tables())
+
+    def attempt():
+        calls.append("try")
+        if calls.count("try") == 1:
+            raise Skewed()
+        return "ok"
+
+    assert repo._retrying(attempt) == "ok"
+    assert calls == ["try", ("sleep", rr._CLOCK_SKEW_WAIT_SECONDS), "try"]
+
+    def always():
+        raise Skewed()
+
+    with pytest.raises(Skewed):  # retried once only, then surfaces
+        repo._retrying(always)

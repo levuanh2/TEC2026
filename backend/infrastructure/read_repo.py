@@ -66,6 +66,15 @@ except Exception:  # noqa: BLE001 - absence just disables the retry below
 # not enough to paper over Supabase actually being down.
 _READ_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 0.15
+# Round 5.1: right after sign-in, hosted PostgREST can reject a brand-new JWT
+# with PGRST303 "JWT issued at future" (its clock trails Auth's by < 1 s). The
+# token becomes valid a moment later, so this one rejection is retried once
+# after a short wait instead of surfacing as a 500 (without CORS headers).
+_CLOCK_SKEW_WAIT_SECONDS = 1.0
+
+
+def _is_clock_skew(exc: BaseException) -> bool:
+    return getattr(exc, "code", None) == "PGRST303" and "future" in str(getattr(exc, "message", exc)).lower()
 
 
 class ReadNotFoundError(Exception): pass
@@ -104,16 +113,21 @@ class SupabaseReadRepository:
         # every attempt, so it must leave this loop as `InvalidTokenError` (-> 401)
         # instead of escaping raw and becoming a 500.
         with auth.jwt_rejection_as_invalid_token():
-            for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
+            transport_retries, skew_retried = _READ_ATTEMPTS - 1, False
+            while True:
                 failed = self.client
                 try:
                     return attempt()
-                except _TRANSPORT_ERRORS:
-                    if not self._pooled or remaining == 0:
+                except Exception as exc:  # noqa: BLE001 - re-raised unless it is one of the two retryable cases
+                    if _is_clock_skew(exc) and not skew_retried:
+                        skew_retried = True
+                        time.sleep(_CLOCK_SKEW_WAIT_SECONDS)
+                        continue
+                    if not isinstance(exc, _TRANSPORT_ERRORS) or not self._pooled or transport_retries == 0:
                         raise
+                    transport_retries -= 1
                     time.sleep(_RETRY_BACKOFF_SECONDS)
                     self.client = supabase_clients.renew(self._settings, self.token, failed)
-        raise AssertionError("unreachable")  # pragma: no cover
 
     def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
         with profiling.observe(label):
