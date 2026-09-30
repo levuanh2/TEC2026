@@ -318,3 +318,63 @@ def test_bound_serves_every_connection_from_one_checkout_and_keeps_rollback():
             assert conn.execute("select to_regclass('pg_temp.round51_bound_probe') as t").fetchone()["t"] is None
         with pg_pool.bound(_DB_URL), pg_pool.connection(_DB_URL) as nested:
             assert nested is first
+
+
+def _rls_can_read(conn, user_id: str, season: str) -> bool:
+    """Ground truth for "may read": the real `crop_seasons_select` policy, as the
+    PostgREST read check evaluated it (role `authenticated`, the caller's claims)."""
+    with conn.transaction(force_rollback=True):
+        conn.execute("set local role authenticated")
+        conn.execute("select set_config('request.jwt.claims', %s, true)",
+                     [json.dumps({"sub": user_id, "role": "authenticated"})])
+        return conn.execute("select count(*) as n from public.crop_seasons where id = %s::uuid", [season]).fetchone()["n"] == 1
+
+
+def _can_write(conn, user_id: str, season: str) -> bool:
+    """Ground truth for "may write": exactly `assert_can_persist`'s rule."""
+    with conn.transaction(force_rollback=True):
+        conn.execute("select set_config('request.jwt.claims', %s, true)",
+                     [json.dumps({"sub": user_id, "role": "authenticated"})])
+        return bool(conn.execute("select private.user_can_write_crop(%s::uuid) as w", [season]).fetchone()["w"])
+
+
+def test_authorized_read_is_the_rls_read_and_write_rules_and_leaks_nothing(db, monkeypatch):
+    """Round 5.1: `get_crop_bundle_as` = old PostgREST read check + write check + read.
+
+    For every live season and every user with a membership (plus an unknown
+    id): allowed exactly when the real RLS read policy AND the write rule allow,
+    and then the bundle is identical to the unguarded read; refused otherwise,
+    with every bundle statement having returned NO row.
+    """
+    from infrastructure.auth import CropAccessError
+
+    repo = PostgresCarbonRepository(_SETTINGS, connect=_savepoints(db))
+    users = [r["id"] for r in db.execute(
+        "select distinct user_id::text as id from public.farm_members"
+        " union select distinct user_id::text from public.organization_memberships"
+    ).fetchall()] + [str(uuid.uuid4())]
+    captured: list = []
+    real_stage = PostgresCarbonRepository._stage
+
+    def spy(conn, label, statements, *, last=False):
+        results = real_stage(conn, label, statements, last=last)
+        captured.append(results)
+        return results
+
+    monkeypatch.setattr(PostgresCarbonRepository, "_stage", staticmethod(spy))
+    allowed = refused = 0
+    for season in _live_seasons(db):
+        plain = asdict(repo.get_crop_bundle(season))
+        for user in users:
+            expected = _rls_can_read(db, user, season) and _can_write(db, user, season)
+            captured.clear()
+            if expected:
+                assert asdict(repo.get_crop_bundle_as(season, user)) == plain
+                allowed += 1
+            else:
+                with pytest.raises(CropAccessError):
+                    repo.get_crop_bundle_as(season, user)
+                bundle_rows = captured[-1][2:-1]
+                assert all(rows == [] for rows in bundle_rows), "a refused caller received bundle rows"
+                refused += 1
+    assert allowed and refused  # both paths really ran on this data

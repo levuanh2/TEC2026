@@ -29,12 +29,15 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import json
 import uuid
 from typing import Any, Callable
 
 from carbon import SCENARIO_TO_DB
 
 from . import pg_pool, profiling
+from .auth import CropAccessError
+from .persist_access import _DENIED
 from .config import Settings
 from .mapping import RawCropBundle
 from .repository import CropNotFoundError, FactorSetNotFoundError
@@ -153,49 +156,59 @@ class PostgresCarbonRepository:
         if not ids:
             return out
 
-        detail_tables = list(DETAIL_TABLES.items())
-        per_season = 5 + len(detail_tables)
+        per_season = 5 + len(DETAIL_TABLES)
         statements: list[tuple[str, list[Any]]] = []
         for season in ids:
-            statements += [
-                ("select to_jsonb(t) as r from public.crop_seasons t where t.id = %s", [season]),
-                ("select to_jsonb(t) as r from public.plots t"
-                 " where t.id = (select c.plot_id from public.crop_seasons c where c.id = %s)", [season]),
-                ("select to_jsonb(t) as r from public.production_batches t where t.crop_season_id = %s", [season]),
-                ("select to_jsonb(t) as r from public.farms t where t.id = ("
-                 " select p.farm_id from public.plots p join public.crop_seasons c on c.plot_id = p.id"
-                 " where c.id = %s)", [season]),
-                ("select to_jsonb(a) as r from public.activities a join ("
-                 " select x.id, x.deleted_at, row_number() over () as pos"
-                 " from (select t.id, t.deleted_at from public.production_batches t where t.crop_season_id = %s) x"
-                 ") b on b.id = a.production_batch_id where b.deleted_at is null order by b.pos, a.ctid", [season]),
-                *[(f"select to_jsonb(d) as r from public.{table} d where d.activity_id in ("
-                   " select a.id from public.activities a join public.production_batches b"
-                   " on b.id = a.production_batch_id where b.crop_season_id = %s and b.deleted_at is null"
-                   " and a.deleted_at is null and a.activity_type = %s::public.activity_type)",
-                   [season, activity_type]) for activity_type, table in detail_tables],
-            ]
+            statements += _bundle_statements(season)
         with self._connection() as conn:
             results = self._stage(conn, "carbon pg season bundle", statements, last=True)
 
-        for n, season in enumerate(ids):
-            crops, plots, batches, farms, rows, *details = results[per_season * n: per_season * (n + 1)]
-            crop = crops[0] if crops else None
-            if crop is None or crop.get("deleted_at") is not None:
-                out[season] = CropNotFoundError(f"Không tìm thấy vụ canh tác '{season}'.")
-                continue
-            plot = plots[0] if plots else {}
-            farm = (farms[0] if farms else None) if plot.get("farm_id") else None
-            detail_by_activity = {row["activity_id"]: row for table_rows in details for row in table_rows}
-            activities = [a for a in rows if a.get("deleted_at") is None]
-            for activity in activities:
-                activity["detail"] = (
-                    detail_by_activity.get(activity["id"], {}) if DETAIL_TABLES.get(activity["activity_type"]) else {}
-                )
-            out[season] = RawCropBundle(
-                crop_season=crop, plot=plot, farm=farm, production_batches=batches, activities=activities,
-            )
-        return out
+        return {**out, **_bundles_from(ids, results, per_season)}
+
+    def get_crop_bundle_as(self, crop_season_id: str, user_id: str) -> RawCropBundle:
+        """The season's bundle, read only if `user_id` may read AND write it.
+
+        Round 5.1: the calculate route used to ask PostgREST (an HTTPS round
+        trip) whether the caller can read the season, then Postgres whether they
+        can write it, then read the bundle: three sequential trips. Here the
+        same RLS rules run inside Postgres with the caller's verified id as the
+        JWT claims, in ONE pipeline with the bundle reads:
+
+        * read = the `crop_seasons_select` policy: `deleted_at is null` and
+          `private.user_can_read_crop` (plot -> farm membership);
+        * write = `private.user_can_write_crop`, as `assert_can_persist`.
+
+        Every bundle statement carries the same predicate in its WHERE clause,
+        so a caller who fails it gets empty results from Postgres: no row of a
+        season they may not use ever reaches this process. Refusal is a
+        `CropAccessError` (the route's 404), whichever rule refused.
+        """
+        try:
+            uuid.UUID(str(crop_season_id))
+        except ValueError as exc:
+            raise CropAccessError(_DENIED.format(crop_season_id)) from exc
+        if not user_id:
+            raise CropAccessError(_DENIED.format(crop_season_id))
+        guard = (
+            " and exists (select 1 from public.crop_seasons g where g.id = %s::uuid and g.deleted_at is null)"
+            " and private.user_can_read_crop(%s::uuid) and private.user_can_write_crop(%s::uuid)"
+        )
+        guard_params = [crop_season_id] * 3
+        statements = [
+            ("select set_config('request.jwt.claims', %s, true) as r",
+             [json.dumps({"sub": str(user_id), "role": "authenticated"})]),
+            ("select jsonb_build_object('allowed', (true" + guard + ")) as r", guard_params),
+            *_bundle_statements(crop_season_id, guard, guard_params),
+            ("select set_config('request.jwt.claims', '', true) as r", []),
+        ]
+        with self._connection() as conn:
+            results = self._stage(conn, "carbon pg authorized season bundle", statements, last=True)
+        if not results[1] or not results[1][0].get("allowed"):
+            raise CropAccessError(_DENIED.format(crop_season_id))
+        outcome = _bundles_from([crop_season_id], results[2:-1], 5 + len(DETAIL_TABLES))[crop_season_id]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
     def latest_calculation(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
         return self.latest_calculations([crop_season_id], scenario).get(crop_season_id)
@@ -327,3 +340,54 @@ class PostgresCarbonRepository:
         if not outcome:
             raise RuntimeError("carbon calculation was neither inserted nor found")
         return outcome[0]["id"]
+
+
+def _bundle_statements(
+    season: str, guard: str = "", guard_params: list[Any] | None = None,
+) -> list[tuple[str, list[Any]]]:
+    """The reads of one season's bundle; `guard` (a SQL predicate starting with
+    ` and`) is added to every WHERE clause, with `guard_params` after the
+    statement's own parameters."""
+    g, gp = guard, list(guard_params or [])
+    return [
+        (f"select to_jsonb(t) as r from public.crop_seasons t where t.id = %s{g}", [season, *gp]),
+        (f"select to_jsonb(t) as r from public.plots t"
+         f" where t.id = (select c.plot_id from public.crop_seasons c where c.id = %s){g}", [season, *gp]),
+        (f"select to_jsonb(t) as r from public.production_batches t where t.crop_season_id = %s{g}", [season, *gp]),
+        (f"select to_jsonb(t) as r from public.farms t where t.id = ("
+         f" select p.farm_id from public.plots p join public.crop_seasons c on c.plot_id = p.id"
+         f" where c.id = %s){g}", [season, *gp]),
+        (f"select to_jsonb(a) as r from public.activities a join ("
+         f" select x.id, x.deleted_at, row_number() over () as pos"
+         f" from (select t.id, t.deleted_at from public.production_batches t where t.crop_season_id = %s) x"
+         f") b on b.id = a.production_batch_id where b.deleted_at is null{g} order by b.pos, a.ctid", [season, *gp]),
+        *[(f"select to_jsonb(d) as r from public.{table} d where d.activity_id in ("
+           f" select a.id from public.activities a join public.production_batches b"
+           f" on b.id = a.production_batch_id where b.crop_season_id = %s and b.deleted_at is null"
+           f" and a.deleted_at is null and a.activity_type = %s::public.activity_type){g}",
+           [season, activity_type, *gp]) for activity_type, table in DETAIL_TABLES.items()],
+    ]
+
+
+def _bundles_from(
+    ids: list[str], results: list[list[dict[str, Any]]], per_season: int,
+) -> dict[str, RawCropBundle | CropNotFoundError]:
+    out: dict[str, RawCropBundle | CropNotFoundError] = {}
+    for n, season in enumerate(ids):
+        crops, plots, batches, farms, rows, *details = results[per_season * n: per_season * (n + 1)]
+        crop = crops[0] if crops else None
+        if crop is None or crop.get("deleted_at") is not None:
+            out[season] = CropNotFoundError(f"Không tìm thấy vụ canh tác '{season}'.")
+            continue
+        plot = plots[0] if plots else {}
+        farm = (farms[0] if farms else None) if plot.get("farm_id") else None
+        detail_by_activity = {row["activity_id"]: row for table_rows in details for row in table_rows}
+        activities = [a for a in rows if a.get("deleted_at") is None]
+        for activity in activities:
+            activity["detail"] = (
+                detail_by_activity.get(activity["id"], {}) if DETAIL_TABLES.get(activity["activity_type"]) else {}
+            )
+        out[season] = RawCropBundle(
+            crop_season=crop, plot=plot, farm=farm, production_batches=batches, activities=activities,
+        )
+    return out

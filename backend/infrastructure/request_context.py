@@ -31,6 +31,8 @@ def _server_timing(profile: profiling.RequestProfile, duration_ms: float) -> str
     for label, count, total_ms in profile.top(14):
         metric = label.translate(_SAFE_LABEL).replace(" ", "-")
         parts.append(f'{metric};dur={total_ms:.1f};desc="x{count}"')
+    for label, total_ms in profile.phases.items():
+        parts.append(f'phase-{label.translate(_SAFE_LABEL).replace(" ", "-")};dur={total_ms:.1f}')
     return ", ".join(parts)
 
 

@@ -26,6 +26,9 @@ class RequestProfile:
     calls: int = 0
     db_ms: float = 0.0
     by_label: dict[str, list[float]] = field(default_factory=dict)
+    # Wall time of named request phases (auth, bundle read, engine, save...).
+    # Kept apart from `db_ms`: a phase may contain several round trips, or none.
+    phases: dict[str, float] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record(self, label: str, elapsed_ms: float) -> None:
@@ -33,6 +36,10 @@ class RequestProfile:
             self.calls += 1
             self.db_ms += elapsed_ms
             self.by_label.setdefault(label, []).append(elapsed_ms)
+
+    def record_phase(self, label: str, elapsed_ms: float) -> None:
+        with self._lock:
+            self.phases[label] = self.phases.get(label, 0.0) + elapsed_ms
 
     def top(self, limit: int = 6) -> list[tuple[str, int, float]]:
         """(label, call count, total ms) for the slowest labels."""
@@ -52,6 +59,20 @@ def start() -> RequestProfile:
 
 def current() -> RequestProfile | None:
     return _current.get()
+
+
+@contextmanager
+def phase(label: str):
+    """Time one named phase of the in-flight request (Round 5.1 Carbon profile)."""
+    profile = _current.get()
+    if profile is None:
+        yield
+        return
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        profile.record_phase(label, (time.monotonic() - started) * 1000)
 
 
 @contextmanager

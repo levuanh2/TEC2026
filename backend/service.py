@@ -21,7 +21,7 @@ from typing import Any, Callable
 from carbon import CarbonResult, ParameterSet, calculate_carbon, compute_input_hash
 from carbon.errors import CarbonEngineError
 from carbon.readiness import mapping_refused, readiness as carbon_readiness
-from infrastructure import memberships
+from infrastructure import memberships, profiling
 from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
@@ -110,47 +110,60 @@ class CarbonService:
 
     def calculate(
         self, crop_season_id: str, scenario: str = "as_recorded", *, persist: bool = True,
-        prepare: Callable[[CarbonResult], Any] | None = None,
+        prepare: Callable[[CarbonResult], Any] | None = None, caller: str | None = None,
     ) -> CalculationOutcome:
         # A repository that can keep one connection for the read-then-write
         # does (Round 5.1); others behave exactly as before.
         session = getattr(self._repo, "session", None)
         with session() if session is not None else contextlib.nullcontext():
-            return self._calculate(crop_season_id, scenario, persist=persist, prepare=prepare)
+            return self._calculate(crop_season_id, scenario, persist=persist, prepare=prepare, caller=caller)
+
+    def can_authorize_reads(self) -> bool:
+        """The repository can check the caller's read+write rules while it reads."""
+        return hasattr(self._repo, "get_crop_bundle_as")
 
     def _calculate(
         self, crop_season_id: str, scenario: str, *, persist: bool,
-        prepare: Callable[[CarbonResult], Any] | None,
+        prepare: Callable[[CarbonResult], Any] | None, caller: str | None = None,
     ) -> CalculationOutcome:
-        bundle = self._repo.get_crop_bundle(crop_season_id)
-        activity_data = map_crop_activity_data(bundle)
+        with profiling.phase("bundle read"):
+            # `caller` (a verified user id): the repository enforces the caller's
+            # read and write rules in the same round trip as the read, and
+            # raises CropAccessError when either refuses (Round 5.1).
+            bundle = (self._repo.get_crop_bundle_as(crop_season_id, caller) if caller is not None
+                      else self._repo.get_crop_bundle(crop_season_id))
+        with profiling.phase("engine"):
+            activity_data = map_crop_activity_data(bundle)
 
-        # Mọi lỗi phương pháp luận/thiếu hệ số nổ ra từ đây — fail closed, không nuốt.
-        result = calculate_carbon(activity_data, scenario, self._params)
+            # Mọi lỗi phương pháp luận/thiếu hệ số nổ ra từ đây — fail closed, không nuốt.
+            result = calculate_carbon(activity_data, scenario, self._params)
 
         # The success representation is built before the first write: a result
         # the API cannot serialize must fail here, with nothing saved, rather
         # than after `save_calculation` has stored it (an HTTP 500 for a saved
         # calculation, which a retry would then silently reuse).
-        prepared = prepare(result) if prepare is not None else None
+        with profiling.phase("serialize"):
+            prepared = prepare(result) if prepare is not None else None
 
         if not persist:
             return CalculationOutcome(result=result, calculation_id=None, persisted=False, prepared=prepared)
 
-        factor_set_id = self._repo.resolve_factor_set_id(result.ef_config_version)
-        factor_ids = self._repo.factor_ids_by_code(factor_set_id)
+        with profiling.phase("factor lookup"):
+            factor_set_id = self._repo.resolve_factor_set_id(result.ef_config_version)
+            factor_ids = self._repo.factor_ids_by_code(factor_set_id)
 
-        calculation_id = self._repo.save_calculation(
-            calculation_row(
-                result,
-                crop_season_id=crop_season_id,
-                factor_set_id=factor_set_id,
-                area_ha=activity_data.area_ha,
-                cultivation_days=activity_data.recorded_cultivation_days,
-                pre_season_water_regime=activity_data.pre_season_water_regime,
-            ),
-            breakdown_rows(result, factor_ids),
-        )
+        with profiling.phase("save result+breakdown"):
+            calculation_id = self._repo.save_calculation(
+                calculation_row(
+                    result,
+                    crop_season_id=crop_season_id,
+                    factor_set_id=factor_set_id,
+                    area_ha=activity_data.area_ha,
+                    cultivation_days=activity_data.recorded_cultivation_days,
+                    pre_season_water_regime=activity_data.pre_season_water_regime,
+                ),
+                breakdown_rows(result, factor_ids),
+            )
         return CalculationOutcome(
             result=result, calculation_id=calculation_id, persisted=True, prepared=prepared
         )

@@ -35,6 +35,7 @@ from carbon.errors import (
     MissingEmissionFactorError,
 )
 import schemas
+from infrastructure import profiling
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthError, extract_bearer_token
 from infrastructure.persist_access import CropPersistChecker
@@ -225,13 +226,21 @@ def _require_caller_and_persist_authority(
         _require_caller(authorization, access_checker, crop_season_id)
         _require_persist_authority(authorization, persist_checker, crop_season_id)
         return
+
+    def timed_resolve(value: str) -> Any:
+        with profiling.phase("auth identity"):
+            return resolve(value)
+
     with ThreadPoolExecutor(max_workers=1) as pool:
-        identity = pool.submit(contextvars.copy_context().run, resolve, token)
+        identity = pool.submit(contextvars.copy_context().run, timed_resolve, token)
         try:
-            _require_caller(authorization, access_checker, crop_season_id)
+            with profiling.phase("auth read check"):
+                _require_caller(authorization, access_checker, crop_season_id)
         finally:
-            identity.exception()  # always wait: nothing outlives the request
-    _require_persist_authority(authorization, persist_checker, crop_season_id, user_id=identity.result())
+            with profiling.phase("auth identity wait"):
+                identity.exception()  # always wait: nothing outlives the request
+    with profiling.phase("auth write check"):
+        _require_persist_authority(authorization, persist_checker, crop_season_id, user_id=identity.result())
 
 
 def _json_ready(body: dict[str, Any]) -> dict[str, Any]:
@@ -304,8 +313,41 @@ def calculate_carbon_endpoint(
     # One database connection for the write check, the read and the save
     # (Round 5.1); a service without a session behaves exactly as before.
     session = getattr(service, "session", None)
-    with session() if session is not None else contextlib.nullcontext():
-        _require_caller_and_persist_authority(authorization, access_checker, persist_checker, payload.crop_season_id)
+    resolve = getattr(persist_checker, "verified_user_id", None)
+    authorize_in_read = resolve is not None and getattr(service, "can_authorize_reads", lambda: False)()
+    token: str | None = None
+    if authorize_in_read:
+        try:
+            token = extract_bearer_token(authorization)
+        except MissingAuthError:
+            _require_caller(authorization, access_checker, payload.crop_season_id)  # the standard 401
+            raise
+    with contextlib.ExitStack() as stack:
+        identity = None
+        if authorize_in_read:
+            # Round 5.1: ask Auth who the caller is while the pooled connection
+            # is being checked out; the read and write rules then run inside
+            # Postgres in the same round trip as the bundle read (see
+            # `PostgresCarbonRepository.get_crop_bundle_as`), instead of a
+            # PostgREST read check, a write check and a read in sequence.
+            pool = stack.enter_context(ThreadPoolExecutor(max_workers=1))
+
+            def timed_resolve(value: str) -> Any:
+                with profiling.phase("auth identity"):
+                    return resolve(value)
+
+            identity = pool.submit(contextvars.copy_context().run, timed_resolve, token)
+        stack.enter_context(session() if session is not None else contextlib.nullcontext())
+        caller: str | None = None
+        if identity is not None:
+            with profiling.phase("auth identity wait"):
+                caller = identity.result()  # InvalidTokenError -> the standard 401
+            if not caller:
+                raise HTTPException(status_code=404, detail=error_detail(
+                    "crop_not_found", f"'{payload.crop_season_id}' không tồn tại hoặc không thuộc phạm vi "
+                                      "truy cập của người dùng hiện tại."))
+        else:
+            _require_caller_and_persist_authority(authorization, access_checker, persist_checker, payload.crop_season_id)
 
         try:
             # Serialized before `save_calculation` writes anything; only the new id
@@ -313,7 +355,12 @@ def calculate_carbon_endpoint(
             outcome = service.calculate(
                 payload.crop_season_id, payload.water_regime_scenario,
                 prepare=lambda result: _json_ready(_payload(result, None)),
+                **({"caller": caller} if caller is not None else {}),
             )
+        except CropAccessError as exc:
+            # Same 404 as the separate read/write checks gave: a caller never
+            # learns which rule refused, or whether the season exists.
+            raise HTTPException(status_code=404, detail=error_detail("crop_not_found", str(exc))) from exc
         except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
             logger.info(
                 "carbon_calculate_failed request_id=%s crop_season_id=%s scenario=%s "
