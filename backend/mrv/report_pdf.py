@@ -119,6 +119,25 @@ SOURCE = {"mobile_offline": "Di động (ngoại tuyến)", "mobile": "Di độn
 SEVERITY = {"warning": "Cảnh báo", "info": "Thông tin"}
 COMPLETENESS = {"water": "Nước", "fertilizer": "Phân bón", "cost": "Chi phí", "carbon": "Carbon"}
 CARBON_REASON = {"no_succeeded_calculation": "chưa có bản tính CO₂e thành công"}
+CASE_STATUS = {
+    "draft": "Nháp", "in_progress": "Đang thực hiện", "ready_for_verification": "Sẵn sàng thẩm định",
+    "verified": "Đã thẩm định", "closed": "Đã đóng",
+}
+SEASON_STATUS = {
+    "planned": "Dự kiến", "active": "Đang canh tác", "harvested": "Đã thu hoạch",
+    "closed": "Đã đóng", "cancelled": "Đã huỷ",
+}
+ROLE = {
+    "cooperative_manager": "Quản lý HTX", "farmer": "Nông hộ", "enterprise_viewer": "Doanh nghiệp (xem)",
+    "regulator": "Cơ quan quản lý", "owner": "Chủ nông hộ", "editor": "Người ghi", "viewer": "Người xem",
+}
+SCENARIO = {"actual": "Theo dữ liệu đã ghi nhận", "awd": "Mô phỏng AWD", "continuous_flooding": "Mô phỏng ngập liên tục"}
+CALCULATION_KIND = {"actual": "Kết quả vận hành", "scenario": "Kịch bản mô phỏng"}
+CATEGORY = {
+    "irrigation_ch4": "CH₄ ruộng lúa", "fertilizer_n2o": "N₂O phân đạm", "fuel": "Nhiên liệu",
+    "straw": "Rơm rạ", "straw_burning_ch4": "Đốt rơm CH₄", "straw_burning_n2o": "Đốt rơm N₂O",
+    "electricity": "Điện", "other": "Khác",
+}
 
 # (key, label, unit, completeness key, is_ratio)
 _METRIC_ROWS = [
@@ -346,11 +365,12 @@ class _Report:
         story.append(self.kv([
             ("Mã hồ sơ", case.get("case_code")),
             ("Tên hồ sơ", case.get("name")),
-            ("Trạng thái hồ sơ", case.get("status")),
+            ("Trạng thái hồ sơ", _status(case.get("status"), CASE_STATUS)),
             ("Kỳ báo cáo", f"{fmt_date(case.get('period_start')) or NULL_REF} – {fmt_date(case.get('period_end')) or NULL_REF}"),
             ("Tổ chức", ((self.m.get("scope") or {}).get("organization") or {}).get("name")),
             ("Snapshot tạo lúc", f"{fmt_local(self.m.get('generated_at')) or NULL_REF} (giờ Việt Nam, UTC+7)"),
-            ("Người tạo snapshot", f"{by.get('user_id') or NULL_REF} · vai trò: {', '.join(by.get('roles') or []) or NULL_REF}"),
+            ("Người tạo snapshot", f"mã người dùng {by.get('user_id') or NULL_REF} · vai trò: "
+                                   f"{', '.join(_status(r, ROLE) for r in (by.get('roles') or [])) or NULL_REF}"),
             ("Phiên bản lược đồ", self.m.get("schema_version")),
             ("Mã snapshot (export_id)", self.m.get("export_id")),
             ("Mã bản PDF", self.export_id),
@@ -384,7 +404,7 @@ class _Report:
         for season_id in sorted(per_season):
             flags = (per_season[season_id] or {}).get("data_completeness") or {}
             parts = [f"{COMPLETENESS.get(k, k)}: {'đủ' if v else 'chưa đủ'}" for k, v in sorted(flags.items())]
-            completeness.append(f"Vụ {_short(season_id)}: " + (" · ".join(parts) or NULL_REF))
+            completeness.append(f"Vụ {self.season_label(season_id)}: " + (" · ".join(parts) or NULL_REF))
         story.append(_p("Chỉ các con số có trong snapshot. Không có điểm số hay tỷ lệ \"sẵn sàng\" do hệ thống tự đặt ra.", self.s.note))
         story.append(self.kv([
             ("Số bước đã hoàn thành", f"{r.get('completed_steps', NULL_REF)} / {r.get('total_steps', NULL_REF)}"),
@@ -411,7 +431,7 @@ class _Report:
             rows.append([
                 self.cell(f"{farm.get('farm_code') or NULL_REF}\n{farm.get('name') or ''}".strip()),
                 self.cell(f"{plot.get('plot_code') or NULL_REF} · {area + ' ha' if area else NULL_VALUE}"),
-                self.cell(f"{season.get('season_code') or NULL_REF} · {season.get('status') or NULL_REF} · "
+                self.cell(f"{season.get('season_code') or NULL_REF} · {_status(season.get('status'), SEASON_STATUS)} · "
                           f"{fmt_date(season.get('started_on')) or NULL_REF} – {fmt_date(season.get('closed_on')) or 'chưa đóng'}"),
                 self.cell(b.get("batch_code")),
             ])
@@ -532,8 +552,17 @@ class _Report:
             # Appended flat, not wrapped in KeepTogether: ReportLab will not chain a
             # keepWithNext heading/note onto a KeepTogether, which stranded the
             # section heading at a page bottom. h2 keeps with its table instead.
-            story.append(Paragraph(f"Vụ canh tác {escape(str(season_id))}", self.s.h2))
+            story.append(Paragraph(escape(f"Vụ canh tác {self.season_label(season_id)}"), self.s.h2))
             story.append(_grid(rows, [w * .46, w * .2, w * .14, w * .2]))
+
+    def season_label(self, season_id: Any) -> str:
+        """`<season code> · <short id>` from the snapshot's own scope; the id alone
+        only when the scope does not name the season."""
+        for b in (self.m.get("scope") or {}).get("production_batches") or []:
+            season = b.get("crop_season") or {}
+            if str(season.get("crop_season_id")) == str(season_id) and season.get("season_code"):
+                return f"{season['season_code']} · mã {_short(season_id)}"
+        return f"mã {season_id}"
 
     def carbon(self, story: list[Any]) -> None:
         self.section("Carbon", story)
@@ -545,7 +574,7 @@ class _Report:
         w = self.CONTENT_WIDTH
         for season_id in sorted(per_season):
             c = per_season[season_id] or {}
-            story.append(Paragraph(f"Vụ canh tác {escape(str(season_id))}", self.s.h2))
+            story.append(Paragraph(escape(f"Vụ canh tác {self.season_label(season_id)}"), self.s.h2))
             if c.get("status") != "succeeded":
                 reason = CARBON_REASON.get(str(c.get("reason")), c.get("reason") or NULL_REF)
                 story.append(self.kv([
@@ -561,16 +590,17 @@ class _Report:
                 ("Sản lượng dùng khi tính", f"{fmt_number(c.get('yield_kg')) or NULL_VALUE} kg"),
                 ("Mã bản tính", c.get("calculation_id")),
                 ("Thời điểm tính (giờ VN)", fmt_local(c.get("calculated_at"))),
-                ("Kịch bản", c.get("scenario")),
+                ("Loại kết quả", _status(c.get("calculation_kind"), CALCULATION_KIND)),
+                ("Kịch bản", _status(c.get("scenario"), SCENARIO)),
                 ("Phiên bản engine · bậc phương pháp", f"{c.get('engine_version') or NULL_REF} · Tier {c.get('methodology_tier') or NULL_REF}"),
-                ("Bộ hệ số", c.get("factor_set_id")),
+                ("Phiên bản bộ hệ số", c.get("ef_config_version") or "Không đọc được phiên bản (xem mục Nguồn gốc hệ số)"),
             ]))
             breakdown = sorted(c.get("breakdown") or [], key=lambda b: (
                 str(b.get("category") or ""), str(b.get("gas") or ""), str(b.get("emission_factor_id") or "")))
             rows = [self.head("Hạng mục", "Khí", "Giá trị hoạt động", "Hệ số áp dụng", "Khí (kg)", "CO₂e (kg)", "Công thức")]
             for b in breakdown:
                 rows.append([
-                    self.cell(b.get("category")), self.cell(b.get("gas")),
+                    self.cell(_status(b.get("category"), CATEGORY)), self.cell(b.get("gas")),
                     self.cell(f"{fmt_number(b.get('activity_value')) or NULL_VALUE} {b.get('activity_unit') or ''}".strip()),
                     self.cell(fmt_number(b.get("factor_value_used")), null=NULL_VALUE),
                     self.cell(fmt_number(b.get("gas_kg")), null=NULL_VALUE),
@@ -608,7 +638,7 @@ class _Report:
                 ("Tên", fs.get("name")),
                 ("Phương pháp luận", f"{fs.get('methodology_name') or NULL_REF} · {fs.get('methodology_version') or NULL_REF}"),
                 ("Nguồn", f"{fs.get('source_name') or NULL_REF} · {fs.get('source_url') or NULL_REF}"),
-                ("Trạng thái bộ hệ số", fs.get("status")),
+                ("Trạng thái bộ hệ số", _status(fs.get("status"), {"published": "Đã công bố", "draft": "Nháp", "retired": "Ngừng dùng"})),
                 ("Hiệu lực", f"{fmt_date(fs.get('valid_from')) or NULL_REF} – {fmt_date(fs.get('valid_to')) or 'không giới hạn'}"),
             ]))
             rows = [self.head("Mã hệ số", "Hạng mục · khí", "Giá trị", "Đơn vị", "Tham chiếu nguồn", "Đối chiếu")]

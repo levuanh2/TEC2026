@@ -484,7 +484,8 @@ def _carbon(wb: Workbook, m: dict[str, Any]) -> None:
     )
     s.header(["Mã vụ", "Trạng thái", "Lý do", "Mã bản tính", "Thời điểm tính (UTC)",
               "Kịch bản", "Tổng CO2e (kg)", "CO2e/kg", "Sản lượng (kg)",
-              "Phiên bản engine", "Bậc phương pháp", "Bộ hệ số"])
+              "Phiên bản engine", "Bậc phương pháp", "Bộ hệ số",
+              "Loại kết quả", "Phiên bản bộ hệ số"])
     per_season = (m.get("carbon") or {}).get("per_crop_season") or {}
     if not per_season:
         s.row([EMPTY_NOTE])
@@ -497,6 +498,7 @@ def _carbon(wb: Workbook, m: dict[str, Any]) -> None:
             _num(c.get("co2e_per_kg")), _num(c.get("yield_kg")),
             _text(c.get("engine_version")), _num(c.get("methodology_tier")),
             _text(c.get("factor_set_id")),
+            _text(c.get("calculation_kind")), _text(c.get("ef_config_version")),
         ])
 
     s.blank_row()

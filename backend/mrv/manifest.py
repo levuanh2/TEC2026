@@ -509,8 +509,15 @@ def _resource_section(
 
 def _carbon_section(
     carbon_by_season: dict[str, dict[str, Any] | None],
+    factor_sets: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
     """The persisted calculation, verbatim. No CO2e is computed here.
+
+    Round 5.1: each result also names what KIND of result it is (the actual,
+    `as_recorded` calculation — the export never reads a scenario) and the
+    factor-set VERSION it was computed with, read from the factor-set row the
+    provenance section reads too. A set that cannot be read gives `null`, never
+    a guessed version.
 
     When no succeeded calculation exists the section is `status: unavailable`
     with a warning, and the package is still generated -- an MRV case is more
@@ -535,6 +542,8 @@ def _carbon_section(
                 "engine_version": None,
                 "methodology_tier": None,
                 "factor_set_id": None,
+                "calculation_kind": None,
+                "ef_config_version": None,
                 "breakdown": [],
             }
             warnings.append(
@@ -578,6 +587,8 @@ def _carbon_section(
             "engine_version": row.get("engine_version"),
             "methodology_tier": row.get("methodology_tier"),
             "factor_set_id": factor_set_id,
+            "calculation_kind": "actual" if row.get("scenario") == "actual" else "scenario",
+            "ef_config_version": ((factor_sets or {}).get(factor_set_id) or {}).get("version_code") if factor_set_id else None,
             "breakdown": breakdown,
         }
         for w in (row.get("warnings") or []):
@@ -720,7 +731,7 @@ def build_manifest(inputs: ManifestInputs) -> dict[str, Any]:
     warnings += w
     resource, w = _resource_section(inputs.metrics_by_season)
     warnings += w
-    carbon, w, factor_set_ids = _carbon_section(inputs.carbon_by_season)
+    carbon, w, factor_set_ids = _carbon_section(inputs.carbon_by_season, inputs.factor_sets)
     warnings += w
     provenance, w = _provenance_section(inputs, factor_set_ids)
     warnings += w
