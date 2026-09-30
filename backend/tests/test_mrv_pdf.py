@@ -498,3 +498,22 @@ def test_a_large_manifest_renders_with_readable_pagination():
     assert elapsed < 60, f"1000-activity PDF took {elapsed:.1f}s"
     assert len(data) < 8 * 1024 * 1024
     print(f"\n  large PDF: {elapsed:.2f}s, {len(data) / 1024:.0f} KiB, {len(reader.pages)} pages")
+
+
+def test_the_report_carries_no_uuid_and_no_raw_code():
+    """Round 5.1: the PDF is read by people. Ids and codes stay in the JSON
+    snapshot and the XLSX audit sheet; the PDF shows labels and short ids."""
+    import re
+    from mrv import labels as L
+
+    manifest = carbon_manifest()
+    text = text_of(render(manifest))
+    assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", text)
+    # Warning messages are the engine's prose (English in this fixture); the
+    # code scan is about fields, so it reads the report without that prose.
+    for w in manifest["warnings"]:
+        w["message"] = "…"
+    text = text_of(render(manifest))
+    codes = {c for _, t in L.DICTIONARY for c in t if c.lower() != t[c].lower()}
+    found = sorted(c for c in codes if re.search(rf"(?<![\w.-]){re.escape(c)}(?![\w.-])", text))
+    assert not found, found

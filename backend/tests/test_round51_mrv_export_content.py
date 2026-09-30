@@ -68,8 +68,8 @@ def test_workbook_carbon_sheet_carries_kind_and_version():
 
     wb = load_workbook(io.BytesIO(workbook.render_workbook(_manifest())))
     ws = wb["Carbon"]
-    header = next(r for r in ws.iter_rows(values_only=True) if r and r[0] == "Mã vụ")
-    row = next(r for r in ws.iter_rows(values_only=True) if r and r[0] == SEASON)
-    values = dict(zip(header, row))
-    assert values["Loại kết quả"] == "actual"
+    rows = list(ws.iter_rows(values_only=True))
+    at = next(i for i, r in enumerate(rows) if r and r[0] == "Vụ")
+    values = dict(zip(rows[at], rows[at + 1]))
+    assert values["Loại kết quả"] == "Kết quả vận hành"
     assert values["Phiên bản bộ hệ số"] == FACTOR_SET_ROW[FACTOR_SET]["version_code"]

@@ -107,48 +107,11 @@ def _register_fonts() -> None:
 # Vocabulary. Codes are always shown next to labels so nothing is reinterpreted.
 # --------------------------------------------------------------------------
 
-STEP_STATUS = {
-    "completed": "Hoàn thành", "in_progress": "Đang thực hiện", "not_started": "Chưa bắt đầu",
-    "blocked": "Bị chặn", "skipped": "Bỏ qua", "failed": "Không đạt",
-}
-ACTIVITY_TYPE = {
-    "seeding": "Gieo sạ", "fertilizer": "Bón phân", "irrigation": "Tưới nước",
-    "pesticide": "Phun thuốc BVTV", "straw_management": "Xử lý rơm rạ", "harvest": "Thu hoạch",
-    "fuel": "Nhiên liệu", "fuel_usage": "Nhiên liệu",
-}
-SOURCE = {"mobile_offline": "Di động (ngoại tuyến)", "mobile": "Di động", "web": "Web"}
-SEVERITY = {"warning": "Cảnh báo", "info": "Thông tin"}
-COMPLETENESS = {"water": "Nước", "fertilizer": "Phân bón", "cost": "Chi phí", "carbon": "Carbon"}
-WARNING_CODE = {
-    "carbon_unavailable": "Chưa có kết quả Carbon", "factor_provenance_unavailable": "Chưa rõ nguồn gốc hệ số",
-    "factor_unverified": "Hệ số chưa đối chiếu nguồn", "evidence_none": "Chưa có bằng chứng",
-    "evidence_checksum_missing": "Bằng chứng thiếu mã băm", "evidence_missing_for_step": "Bước thiếu bằng chứng",
-    "mrv_step_incomplete": "Bước MRV chưa hoàn thành", "resource_metric_incomplete": "Chỉ số tài nguyên chưa đủ",
-    "harvest_missing": "Chưa có thu hoạch", "scope_empty": "Hồ sơ chưa có phạm vi",
-    "carbon_engine_warning": "Lưu ý của phép tính Carbon",
-}
-_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-_QUOTED_UUID = re.compile(r"(['\"]?)(" + _UUID.pattern + r")")
-CARBON_REASON = {"no_succeeded_calculation": "chưa có bản tính CO₂e thành công"}
-CASE_STATUS = {
-    "draft": "Nháp", "in_progress": "Đang thực hiện", "ready_for_verification": "Sẵn sàng thẩm định",
-    "verified": "Đã thẩm định", "closed": "Đã đóng",
-}
-SEASON_STATUS = {
-    "planned": "Dự kiến", "active": "Đang canh tác", "harvested": "Đã thu hoạch",
-    "closed": "Đã đóng", "cancelled": "Đã huỷ",
-}
-ROLE = {
-    "cooperative_manager": "Quản lý HTX", "farmer": "Nông hộ", "enterprise_viewer": "Doanh nghiệp (xem)",
-    "regulator": "Cơ quan quản lý", "owner": "Chủ nông hộ", "editor": "Người ghi", "viewer": "Người xem",
-}
-SCENARIO = {"actual": "Theo dữ liệu đã ghi nhận", "awd": "Mô phỏng AWD", "continuous_flooding": "Mô phỏng ngập liên tục"}
-CALCULATION_KIND = {"actual": "Kết quả vận hành", "scenario": "Kịch bản mô phỏng"}
-CATEGORY = {
-    "irrigation_ch4": "CH₄ ruộng lúa", "fertilizer_n2o": "N₂O phân đạm", "fuel": "Nhiên liệu",
-    "straw": "Rơm rạ", "straw_burning_ch4": "Đốt rơm CH₄", "straw_burning_n2o": "Đốt rơm N₂O",
-    "electricity": "Điện", "other": "Khác",
-}
+from .labels import (  # noqa: E402 - one vocabulary for the PDF and the XLSX (Round 5.1)
+    ACTIVITY_TYPE, CALCULATION_KIND, CARBON_REASON, CASE_STATUS, CATEGORY, COMPLETENESS, DETAIL_VALUE,
+    CARBON_SCOPE, FACTOR_SET_STATUS, GAS, PARAMETER_KIND, ROLE, VERIFICATION, SCENARIO, SEASON_STATUS, SEVERITY, SOURCE, STEP_STATUS, UNIT, WARNING_CODE,
+)
+from . import labels as _labels  # noqa: E402
 
 # (key, label, unit, completeness key, is_ratio)
 _METRIC_ROWS = [
@@ -479,8 +442,8 @@ class _Report:
         for e in items:
             checksum = (e.get("checksum") or {}).get("value")
             rows.append([
-                self.cell(e.get("step_no")), self.cell(e.get("evidence_type")),
-                self.cell(f"{e.get('file_name') or NULL_REF} · {e.get('mime_type') or NULL_REF}"),
+                self.cell(e.get("step_no")), self.cell(_labels.label(e.get("evidence_type"), _labels.EVIDENCE_TYPE)),
+                self.cell(e.get("file_name") or NULL_REF),
                 self.cell(f"{fmt_local(e.get('uploaded_at')) or NULL_REF} · {_short(e.get('uploaded_by')) or NULL_REF}"),
                 _p(checksum, self.s.mono) if checksum else self.cell("Chưa có mã băm", muted=True),
                 self.cell(e.get("evidence_id")),
@@ -569,37 +532,11 @@ class _Report:
             story.append(_grid(rows, [w * .46, w * .2, w * .14, w * .2]))
 
     def human(self, text: Any) -> str | None:
-        """A snapshot message as a person reads it: seasons by code, other ids
-        shortened, status and metric codes as their Vietnamese labels. The JSON
-        keeps the message verbatim."""
-        if text is None:
-            return None
-        out = _QUOTED_UUID.sub(lambda m_: self.season_label(m_.group(2)) if self._is_season(m_.group(2))
-                               else f"mã {_short(m_.group(2))}", str(text))
-        for code, label in {**STEP_STATUS, **COMPLETENESS}.items():
-            out = re.sub(rf"(?<![A-Za-z_]){re.escape(code)}(?![A-Za-z_])", label.lower() if code in COMPLETENESS else label, out)
-        return out
+        """A snapshot message as a person reads it (see `labels.humanize`)."""
+        return _labels.humanize(self.m, text)
 
     def related(self, value: Any) -> str | None:
-        if not isinstance(value, dict) or not value:
-            return self.human(_compact(value))
-        parts = []
-        for key, v in sorted(value.items()):
-            if key == "crop_season_id":
-                parts.append(f"Vụ {self.season_label(v)}")
-            elif key == "step_no":
-                parts.append(f"Bước {v}")
-            elif key == "missing" and isinstance(v, (list, tuple)):
-                parts.append("Thiếu: " + ", ".join(COMPLETENESS.get(str(x), str(x)).lower() for x in v))
-            elif key == "factor_set_id":
-                parts.append(f"Bộ hệ số mã {_short(v)}")
-            else:
-                parts.append(self.human(_compact(v)) or "")
-        return "; ".join(p for p in parts if p)
-
-    def _is_season(self, value: str) -> bool:
-        return any(str((b.get("crop_season") or {}).get("crop_season_id")) == value
-                   for b in (self.m.get("scope") or {}).get("production_batches") or [])
+        return _labels.related(self.m, value)
 
     def season_label(self, season_id: Any) -> str:
         """`<season code> · <short id>` from the snapshot's own scope; the id alone
@@ -646,8 +583,8 @@ class _Report:
             rows = [self.head("Hạng mục", "Khí", "Giá trị hoạt động", "Hệ số áp dụng", "Khí (kg)", "CO₂e (kg)", "Công thức")]
             for b in breakdown:
                 rows.append([
-                    self.cell(_status(b.get("category"), CATEGORY)), self.cell(b.get("gas")),
-                    self.cell(f"{fmt_number(b.get('activity_value')) or NULL_VALUE} {b.get('activity_unit') or ''}".strip()),
+                    self.cell(_status(b.get("category"), CATEGORY)), self.cell(_status(b.get("gas"), GAS)),
+                    self.cell(f"{fmt_number(b.get('activity_value')) or NULL_VALUE} {_status(b.get('activity_unit'), UNIT) if b.get('activity_unit') else ''}".strip()),
                     self.cell(fmt_number(b.get("factor_value_used")), null=NULL_VALUE),
                     self.cell(fmt_number(b.get("gas_kg")), null=NULL_VALUE),
                     self.cell(fmt_number(b.get("co2e_kg")), null=NULL_VALUE),
@@ -663,10 +600,10 @@ class _Report:
         prov = self.m.get("provenance") or {}
         acts = prov.get("activities") or {}
         story.append(self.kv([
-            ("Phạm vi tính carbon", prov.get("carbon_scope")),
+            ("Phạm vi tính carbon", _status(prov.get("carbon_scope"), CARBON_SCOPE) if prov.get("carbon_scope") else None),
             ("Bao gồm hoạt động đã xoá", _compact(acts.get("includes_deleted"))),
             ("Kèm tệp bằng chứng gốc", _compact(prov.get("evidence_binaries_included"))),
-            ("Bảng nguồn hoạt động", _compact(acts.get("source_tables"))),
+            ("Nguồn dữ liệu hoạt động", ", ".join(_status(t, _labels.SOURCE_TABLE) for t in acts.get("source_tables") or []) or None),
         ]))
         sets = sorted(prov.get("emission_factor_sets") or [], key=lambda x: str(x.get("factor_set_id") or ""))
         if not sets:
@@ -684,17 +621,21 @@ class _Report:
                 ("Tên", fs.get("name")),
                 ("Phương pháp luận", f"{fs.get('methodology_name') or NULL_REF} · {fs.get('methodology_version') or NULL_REF}"),
                 ("Nguồn", f"{fs.get('source_name') or NULL_REF} · {fs.get('source_url') or NULL_REF}"),
-                ("Trạng thái bộ hệ số", _status(fs.get("status"), {"published": "Đã công bố", "draft": "Nháp", "retired": "Ngừng dùng"})),
+                ("Trạng thái bộ hệ số", _status(fs.get("status"), FACTOR_SET_STATUS)),
                 ("Hiệu lực", f"{fmt_date(fs.get('valid_from')) or NULL_REF} – {fmt_date(fs.get('valid_to')) or 'không giới hạn'}"),
             ]))
-            rows = [self.head("Mã hệ số", "Hạng mục · khí", "Giá trị", "Đơn vị", "Tham chiếu nguồn", "Đối chiếu")]
+            # People read the parameter's kind; its factor code is in the JSON
+            # snapshot and the XLSX audit sheet (Round 5.1).
+            rows = [self.head("Loại tham số", "Hạng mục · khí", "Giá trị", "Đơn vị", "Tham chiếu nguồn", "Đối chiếu")]
             for f in sorted(fs.get("factors") or [], key=lambda x: str(x.get("factor_code") or "")):
                 rows.append([
-                    self.cell(f.get("factor_code")), self.cell(f"{_status(f.get('category'), CATEGORY)} · {f.get('gas') or NULL_REF}"),
+                    self.cell(_status(f.get("parameter_kind"), PARAMETER_KIND)),
+                    self.cell(f"{_status(f.get('category'), CATEGORY)} · {_status(f.get('gas'), GAS)}"),
                     self.cell(fmt_number(f.get("factor_value")), null=NULL_VALUE),
-                    self.cell(f"{f.get('activity_unit') or '?'} › {f.get('result_unit') or '?'}"),
+                    self.cell(f"{_status(f.get('activity_unit'), UNIT) if f.get('activity_unit') else '?'} › {_status(f.get('result_unit'), UNIT) if f.get('result_unit') else '?'}"),
                     self.cell(f.get("source_reference"), null="Không ghi nguồn"),
-                    self.cell(f.get("verification_status"), null="Không rõ"),
+                    self.cell(_status(f.get("verification_status"), VERIFICATION) if f.get("verification_status") else None,
+                              null="Không rõ"),
                 ])
             if len(rows) == 1:
                 rows.append([self.cell("Bộ hệ số không kèm hệ số chi tiết trong snapshot.", muted=True), "", "", "", "", ""])
@@ -729,8 +670,9 @@ class _Report:
             ("Mã snapshot nguồn", _short(self.m.get("export_id"))),
             ("Mã bản PDF", _short(self.export_id)),
             ("Mã băm SHA-256 của snapshot", _p(digest, self.s.mono) if digest else None),
-            ("Thuật toán · phạm vi băm", f"{integ.get('algorithm') or NULL_REF} · {integ.get('canonical_over') or NULL_REF}"),
-            ("Cách chuẩn hoá", integ.get("canonical_form")),
+            ("Thuật toán · phạm vi băm", f"{(integ.get('algorithm') or NULL_REF).upper()} · "
+                                         f"{_status(integ.get('canonical_over'), _labels.HASH_SCOPE)}"),
+            ("Cách chuẩn hoá", _status(integ.get("canonical_form"), _labels.CANONICAL_FORM) if integ.get("canonical_form") else None),
             ("Snapshot tạo lúc (UTC)", self.m.get("generated_at")),
             ("PDF kết xuất lúc (UTC)", mrv_manifest.iso_utc(self.rendered_at) if self.rendered_at else None),
             ("SHA-256 của tệp PDF",
@@ -763,7 +705,8 @@ class _Report:
                 if key in _DETAIL_SKIP or detail.get(key) is None or detail.get(key) == "":
                     continue
                 raw = detail[key]
-                value = fmt_number(raw) if kinds.get(key) == "num" else _compact(raw)
+                value = (fmt_number(raw) if kinds.get(key) == "num"
+                         else _status(raw, DETAIL_VALUE[key]) if key in DETAIL_VALUE else _compact(raw))
                 values.append(f"{labels.get(key, key)}: {value}")
             rows.append([
                 self.cell(fmt_local(a.get("occurred_at"))),
