@@ -10,13 +10,21 @@ export async function getCropSeason(id: string): Promise<CropSeason | undefined>
  * 100 per page, `has_more`); reading only the first page silently dropped
  * everything past the newest 20 — found in Round 5.1 device UAT, where a season
  * with 27 records showed 20 on both Farmer and Management. */
+export const ACTIVITY_PAGE_SIZE = 100
+/** Upper bound on pages read for one season (5 000 records). Home and the
+ * season pages summarize the WHOLE season (record count, costs, harvested
+ * area, sowing/harvest dates), so they cannot stop at the newest records; the
+ * number of requests is ceil(records / 100) and never unbounded. Past the
+ * bound the read FAILS visibly instead of silently showing a partial season. */
+export const ACTIVITY_MAX_PAGES = 50
 export async function getActivities(id: string): Promise<Activity[]> {
   if (usingMockData) return activities.filter((x) => x.cropSeasonId === id)
   const items: any[] = []
   for (let page = 1; ; page++) {
-    const body = await apiRequest<{ items: any[]; has_more?: boolean }>(`/v1/crop-seasons/${id}/activities?page=${page}&page_size=100`)
+    const body = await apiRequest<{ items: any[]; has_more?: boolean }>(`/v1/crop-seasons/${id}/activities?page=${page}&page_size=${ACTIVITY_PAGE_SIZE}`)
     items.push(...body.items)
     if (!body.has_more || !body.items.length) break
+    if (page >= ACTIVITY_MAX_PAGES) throw new Error(`Vụ này có hơn ${ACTIVITY_PAGE_SIZE * ACTIVITY_MAX_PAGES} bản ghi — không hiển thị một phần để tránh số liệu sai.`)
   }
   return items.map(activity)
 }

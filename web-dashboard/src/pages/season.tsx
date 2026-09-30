@@ -4,7 +4,7 @@ import { label, seasonStatus } from '../vocab'
 import { getCropSeason, getActivities, getProductionBatches, endCropSeason, endSeasonErrorMessage } from '../api/crops'
 import { useState } from 'react'
 import { getPlot, usingMockData } from '../api/farms'
-import { listMrvBatches, listMrvCases } from '../api/mrv'
+import { getOrganizationMrvBatches } from '../api/mrv'
 import { getResourceMetrics } from '../api/metrics'
 import { ha, kg, date, perKg, vndPerKg } from '../format'
 import {
@@ -42,7 +42,7 @@ type Batches = Awaited<ReturnType<typeof getProductionBatches>>
  * Season "hub": the frame (hero + tabs) loads from one fast query, every tab's
  * data streams into its own section so a slow query never blanks the page.
  */
-export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?: Role }) {
+export function SeasonHub({ id, tab, role, organizationId }: { id: string; tab: SeasonTab; role?: Role; organizationId?: string | null }) {
   const frame = useAsync(async () => {
     const season = await getCropSeason(id)
     const plot = season?.plotId ? await getPlot(season.plotId).catch(() => undefined) : undefined
@@ -159,7 +159,7 @@ export function SeasonHub({ id, tab, role }: { id: string; tab: SeasonTab; role?
             )}
             {tab === 'mrv' && (
               <Async state={batches} skeleton="table">
-                {(rows) => <SeasonMrv seasonId={id} batches={rows} />}
+                {(rows) => <SeasonMrv seasonId={id} organizationId={organizationId ?? null} batches={rows} />}
               </Async>
             )}
           </>
@@ -286,15 +286,16 @@ function Performance({ metrics }: { metrics: Metrics }) {
  * season), so "has a batch" says nothing about MRV. This reads the cases in
  * scope and their linked batches, and claims membership only for a case that
  * actually lists this season. */
-function SeasonMrv({ seasonId, batches }: { seasonId: string; batches: Batches }) {
+function SeasonMrv({ seasonId, organizationId, batches }: { seasonId: string; organizationId: string | null; batches: Batches }) {
   const memberships = useAsync(async () => {
-    if (usingMockData) return []
-    const cases = await listMrvCases()
-    const linked = await Promise.all(cases.map(async (c) => ({
-      c, batches: (await listMrvBatches(c.caseId)).filter((b) => b.cropSeasonId === seasonId),
-    })))
-    return linked.filter((x) => x.batches.length > 0)
-  }, [seasonId])
+    if (usingMockData || !organizationId) return []
+    // One request for every case of the organization (Round 5.1: it was one
+    // batches request per case, unbounded).
+    const cases = await getOrganizationMrvBatches(organizationId)
+    return cases
+      .map(({ batches: all, ...c }) => ({ c, batches: all.filter((b) => b.cropSeasonId === seasonId) }))
+      .filter((x) => x.batches.length > 0)
+  }, [seasonId, organizationId])
   const linked = memberships.data ?? []
   const first = linked[0]
   return (

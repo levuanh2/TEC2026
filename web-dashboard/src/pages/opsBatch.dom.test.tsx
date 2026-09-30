@@ -19,7 +19,16 @@ let seasons: { id: string; plotId: string; name: string; status: string }[] = []
 
 vi.mock('../api/carbon', () => ({ getOrganizationCarbonStatus: (org: string) => { calls.push(org); return respond(org) } }))
 vi.mock('../api/engine', () => ({ getEngineInfo: () => Promise.resolve({ efConfigVersion: 'v1', engineVersion: 'e', carbonProductionReady: false }) }))
-vi.mock('../api/mrv', () => ({ listMrvCases: () => Promise.resolve([]), listMrvBatches: () => Promise.resolve([]) }))
+/* MRV: one organization-wide request for every case and its batches. The
+ * per-case functions must never be called, whatever the number of cases. */
+const mrvCalls: string[] = []
+const perCaseCalls: string[] = []
+let mrvCases: { caseId: string; caseCode: string; status: string; batches: { productionBatchId: string; batchCode: string; cropSeasonId: string; farmId: string; plotId: string }[] }[] = []
+vi.mock('../api/mrv', () => ({
+  getOrganizationMrvBatches: (org: string) => { mrvCalls.push(org); return Promise.resolve(mrvCases) },
+  listMrvCases: () => { perCaseCalls.push('cases'); return Promise.resolve([]) },
+  listMrvBatches: (id: string) => { perCaseCalls.push(id); return Promise.resolve([]) },
+}))
 const listingCalls: string[] = []
 const perFarmCalls: string[] = []
 vi.mock('../api/farms', () => ({
@@ -61,7 +70,7 @@ async function settle() {
   return hook.result.current.data!
 }
 
-beforeEach(() => { calls.length = 0; listingCalls.length = 0; perFarmCalls.length = 0 })
+beforeEach(() => { calls.length = 0; listingCalls.length = 0; perFarmCalls.length = 0; mrvCalls.length = 0; perCaseCalls.length = 0; mrvCases = [] })
 afterEach(cleanup)
 
 describe('Management Carbon state in one request', () => {
@@ -116,5 +125,24 @@ describe('Management Carbon state in one request', () => {
       expect(row.error).toBe('Không thể kết nối FastAPI.')
       expect(row.carbon).toBe('unknown')
     }
+  })
+})
+
+describe('Management MRV membership in one request', () => {
+  it.each([0, 1, 30])('%i MRV case(s): one request, every season mapped to its case', async (n) => {
+    const items = useSeasons(30)
+    respond = async () => ({ organization_id: 'org-1', items })
+    // Case k holds season s-k (the 30-case run covers every season; past the
+    // old 20-case first page too).
+    mrvCases = Array.from({ length: n }, (_, k) => ({ caseId: `case-${k}`, caseCode: `MRV-${k}`, status: 'draft',
+      batches: [{ productionBatchId: `b-${k}`, batchCode: 'L', cropSeasonId: `s-${k}`, farmId: 'farm-1', plotId: 'p' }] }))
+    const data = await settle()
+    expect(mrvCalls).toEqual(['org-1'])
+    expect(perCaseCalls).toEqual([])
+    // The whole load is a fixed set of requests: status, listing, MRV.
+    expect([calls.length, listingCalls.length, mrvCalls.length]).toEqual([1, 1, 1])
+    const linked = data.rows.filter((r) => r.mrv)
+    expect(linked).toHaveLength(n)
+    for (const r of linked) expect(r.mrv!.caseCode).toBe(`MRV-${r.seasonId.slice(2)}`)
   })
 })

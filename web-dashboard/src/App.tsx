@@ -207,15 +207,15 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'plot':
       return <PlotPage id={id} role={viewer.role} />
     case 'season':
-      return <SeasonHub id={id} tab="overview" role={viewer.role} />
+      return <SeasonHub id={id} tab="overview" role={viewer.role} organizationId={viewer.organizationId} />
     case 'activities':
-      return <SeasonHub id={id} tab="activities" role={viewer.role} />
+      return <SeasonHub id={id} tab="activities" role={viewer.role} organizationId={viewer.organizationId} />
     case 'season-performance':
-      return <SeasonHub id={id} tab="performance" role={viewer.role} />
+      return <SeasonHub id={id} tab="performance" role={viewer.role} organizationId={viewer.organizationId} />
     case 'season-mrv':
-      return <SeasonHub id={id} tab="mrv" role={viewer.role} />
+      return <SeasonHub id={id} tab="mrv" role={viewer.role} organizationId={viewer.organizationId} />
     case 'carbon':
-      return <SeasonHub id={id} tab={'carbon' as SeasonTab} role={viewer.role} />
+      return <SeasonHub id={id} tab={'carbon' as SeasonTab} role={viewer.role} organizationId={viewer.organizationId} />
     case 'mrv':
       return <MrvPage role={viewer.role} />
     case 'notFound':

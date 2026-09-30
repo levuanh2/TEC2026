@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getOrganizationCarbonStatus, type CarbonMissingInput, type CarbonSeasonStatus } from '../api/carbon'
 import { getOrganizationPlotsSeasons, listFarms } from '../api/farms'
-import { listMrvBatches, listMrvCases } from '../api/mrv'
+import { getOrganizationMrvBatches } from '../api/mrv'
 import { carbonView, type CarbonDisplayState, type CarbonView } from '../carbon/readiness'
 import { getEngineInfo } from '../api/engine'
 import { label, seasonStatus } from '../vocab'
@@ -161,10 +161,9 @@ export function useOperations(organizationId: string | null): OpsState {
         const mrvBySeason = new Map<string, { caseId: string; caseCode: string; status: string }>()
         const mrvWork = (async () => {
           try {
-            const cases = await listMrvCases()
-            const forOrg = cases.filter((c) => c.organizationId === organizationId)
-            const batchLists = await mapLimited(forOrg, CONCURRENCY, async (c) => ({ c, batches: await listMrvBatches(c.caseId) }))
-            for (const { c, batches } of batchLists) {
+            // One request for every case and its batches (Round 5.1: it was
+            // the first page of cases + one batches request per case).
+            for (const { batches, ...c } of await getOrganizationMrvBatches(organizationId)) {
               for (const b of batches) mrvBySeason.set(b.cropSeasonId, { caseId: c.caseId, caseCode: c.caseCode, status: c.status })
             }
           } catch {

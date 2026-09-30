@@ -879,7 +879,10 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
 
 /* Route-specific tables. Identity columns never wrap mid-code. */
 .ops-table .nowrap, .ops-table td b.nowrap { white-space: nowrap; }
-.ops-table td:nth-child(-n+3) small { white-space: nowrap; }
+/* Codes wrap only at their own hyphens (overflow-wrap stays normal: never
+ * mid-token). A real code such as UAT-R51-DEVICE-202609291548-PLOT kept on one
+ * line pushed /seasons 198px wider than 1363px (Round 5.1 real gate). */
+.ops-table td:nth-child(-n+3) small { white-space: normal; overflow-wrap: normal; }
 .ops-table th.num, .ops-table td.num { text-align: right; }
 .ops-table td.num small.unit { display: inline; color: var(--text-muted); margin: 0; }
 .ops-table td.ops-act { text-align: right; white-space: nowrap; width: 1%; }

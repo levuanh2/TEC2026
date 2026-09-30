@@ -32,4 +32,10 @@ describe('getActivities reads every page', () => {
     expect(calls).toHaveLength(requests)
     expect(calls.every((c) => c.includes('page_size=100'))).toBe(true)
   })
+
+  it('stops at the page bound and fails visibly instead of returning a partial season', async () => {
+    total = 100 * 50 + 1
+    await expect(getActivities('s')).rejects.toThrow(/hơn 5000 bản ghi/)
+    expect(calls).toHaveLength(50)
+  })
 })
