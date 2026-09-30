@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:io' show SocketException;
+
+import 'package:http/http.dart' show ClientException;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import 'secure_session_storage.dart';
 
 /// Tín hiệu vòng đời phiên đã được "làm phẳng" khỏi kiểu gotrue — [AuthController]
 /// chỉ cần biết "có phiên không" và "user id nào", không phụ thuộc `Session`/`User`
@@ -13,6 +18,52 @@ enum AuthSignalKind {
   tokenRefreshed,
   userUpdated,
   passwordRecovery,
+
+  /// Làm mới phiên hỏng vì KHÔNG tới được máy chủ (mất mạng, máy chủ tạm lỗi).
+  /// Phiên trên máy vẫn còn, người dùng vẫn làm việc offline được — đây KHÔNG
+  /// phải hết phiên, cũng không phải lỗi khiến phải đăng nhập lại.
+  refreshDeferred,
+}
+
+/// Kết quả kiểm tra phiên ngay trước khi gửi dữ liệu lên máy chủ.
+enum SessionFreshness {
+  /// Access token còn hạn (hoặc vừa làm mới thành công) — được gửi.
+  fresh,
+
+  /// Hết hạn và chưa làm mới được vì không tới được máy chủ — KHÔNG gửi gì,
+  /// giữ nguyên hàng đợi, thử lại khi có mạng.
+  offline,
+
+  /// Máy chủ từ chối làm mới (refresh token bị thu hồi, tài khoản bị khoá...)
+  /// hoặc không có phiên — KHÔNG gửi gì, giữ nguyên hàng đợi, phải đăng nhập lại.
+  rejected,
+}
+
+/// Lỗi làm mới phiên do mạng/máy chủ tạm thời (thử lại sau được), phân biệt với
+/// lỗi máy chủ TỪ CHỐI phiên (phải đăng nhập lại).
+bool isNetworkAuthError(Object error) =>
+    error is AuthRetryableFetchException ||
+    error is SocketException ||
+    error is TimeoutException ||
+    error is ClientException;
+
+/// Quyết định có được gửi dữ liệu hay không, theo phiên hiện tại. Còn hạn →
+/// gửi luôn; hết hạn → làm mới trước (máy chủ xác thực refresh token), chỉ
+/// được gửi khi làm mới thành công.
+Future<SessionFreshness> checkSessionFreshness({
+  required bool hasSession,
+  required bool isExpired,
+  required Future<bool> Function() refresh,
+}) async {
+  if (!hasSession) return SessionFreshness.rejected;
+  if (!isExpired) return SessionFreshness.fresh;
+  try {
+    return await refresh() ? SessionFreshness.fresh : SessionFreshness.rejected;
+  } catch (e) {
+    return isNetworkAuthError(e)
+        ? SessionFreshness.offline
+        : SessionFreshness.rejected;
+  }
 }
 
 class AuthSignal {
@@ -23,14 +74,14 @@ class AuthSignal {
 
 /// Bọc Supabase Auth. App KHÔNG tự chạm vào chuỗi JWT, không lưu tay, KHÔNG log.
 ///
-/// **Lưu phiên:** `supabase_flutter` 2.x (bản khoá ở `pubspec.lock`) mặc định
-/// lưu session qua `SharedPreferences` (`SharedPreferencesGotrueAsyncStorage`),
-/// KHÔNG phải `flutter_secure_storage` (đó là mặc định của `supabase_flutter`
-/// 1.x). Trên Android đây là file XML riêng của app trong sandbox; trên iOS là
-/// `NSUserDefaults`. Việc nâng lên lưu trữ được mã hoá (Keychain / Keystore) là
-/// một quyết định gia cố bảo mật, cần chèn `localStorage` tuỳ biến vào
-/// `Supabase.initialize(authOptions:)` và kiểm thử trên thiết bị — xem
-/// `app/README.md` mục "Blocker / quyết định ngoài code".
+/// **Lưu phiên:** [SecureSessionStorage] — Android Keystore / iOS Keychain,
+/// không phải `SharedPreferences` rõ chữ (mặc định của `supabase_flutter` 2.x).
+/// Phiên của bản cài cũ được chuyển sang một lần rồi xoá bản rõ chữ.
+///
+/// **Offline với access token đã hết hạn:** phiên vẫn được khôi phục từ máy, nên
+/// nông hộ vẫn mở được dữ liệu và hàng đợi. Việc làm mới hỏng vì mất mạng thành
+/// tín hiệu [AuthSignalKind.refreshDeferred], không phải lỗi. Trước khi gửi dữ
+/// liệu, [ensureFreshSession] bắt buộc làm mới thành công.
 ///
 /// KHÔNG có SUPABASE_SERVICE_ROLE_KEY trong app — chỉ publishable key
 /// (AppConfig.supabasePublishableKey). RLS vẫn là ranh giới quyền thật, giống
@@ -40,6 +91,12 @@ class AuthService {
   static Future<void> init() => Supabase.initialize(
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.supabasePublishableKey,
+        authOptions: FlutterAuthClientOptions(
+          localStorage: SecureSessionStorage(
+            persistSessionKey:
+                SecureSessionStorage.defaultKeyFor(AppConfig.supabaseUrl),
+          ),
+        ),
       );
 
   SupabaseClient get client => Supabase.instance.client;
@@ -54,9 +111,37 @@ class AuthService {
   /// KHÔNG log giá trị này.
   String? get accessToken => currentSession?.accessToken;
 
+  /// Access token đã hết hạn và chưa làm mới được (vd. đang offline). Dữ liệu
+  /// trên máy vẫn dùng được; chỉ việc gửi lên máy chủ phải chờ làm mới.
+  bool get onlineSessionExpired => currentSession?.isExpired ?? false;
+
+  /// Gọi ngay trước khi gửi dữ liệu. Hết hạn → làm mới (máy chủ xác thực
+  /// refresh token). Máy chủ từ chối → gotrue tự phát `signedOut`, app về màn
+  /// đăng nhập, hàng đợi vẫn nằm nguyên trên máy.
+  Future<SessionFreshness> ensureFreshSession() {
+    final session = currentSession;
+    return checkSessionFreshness(
+      hasSession: session != null,
+      isExpired: session?.isExpired ?? false,
+      refresh: () async =>
+          (await client.auth.refreshSession()).session != null,
+    );
+  }
+
   /// Stream tín hiệu phiên đã làm phẳng. Bọc `onAuthStateChange` của gotrue.
-  Stream<AuthSignal> get signals =>
-      client.auth.onAuthStateChange.map(_toSignal);
+  /// Làm mới hỏng vì mạng (gotrue đẩy thành LỖI trên stream) được đổi thành
+  /// tín hiệu [AuthSignalKind.refreshDeferred]; lỗi khác vẫn là lỗi.
+  Stream<AuthSignal> get signals => client.auth.onAuthStateChange
+      .map(_toSignal)
+      .transform(StreamTransformer.fromHandlers(
+        handleError: (error, stack, sink) {
+          if (isNetworkAuthError(error)) {
+            sink.add(AuthSignal(AuthSignalKind.refreshDeferred, currentUserId));
+          } else {
+            sink.addError(error, stack);
+          }
+        },
+      ));
 
   static AuthSignal _toSignal(AuthState state) {
     final uid = state.session?.user.id;

@@ -124,7 +124,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     const OfflineBanner(
                       icon: Icons.lock_clock_outlined,
                       message:
-                          'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+                          'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại. '
+                          'Dữ liệu chưa gửi vẫn được giữ trên máy.',
                     ),
                     const SizedBox(height: AppSpacing.md),
                   ],

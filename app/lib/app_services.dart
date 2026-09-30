@@ -112,6 +112,9 @@ class AppServices {
       sync: sync,
       db: db,
       connectivity: connectivity,
+      // Phiên hết hạn (vd. vừa có mạng lại sau nhiều giờ offline) phải được làm
+      // mới thành công rồi mới gửi bản ghi nào.
+      ensureSession: auth.ensureFreshSession,
     );
 
     final authController = AuthController(

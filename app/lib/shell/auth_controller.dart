@@ -61,6 +61,13 @@ class AuthController extends ChangeNotifier implements AuthActions {
   AuthPhase get phase => _phase;
   bool get isAuthenticated => _phase == AuthPhase.authenticated;
 
+  /// Đang trong phiên nhưng access token đã hết hạn và chưa làm mới được (vd.
+  /// mở app khi offline sau hơn 1 giờ). Vẫn xem/ghi dữ liệu trên máy được; chỉ
+  /// việc gửi lên máy chủ phải chờ làm mới thành công.
+  bool get onlineSessionExpired =>
+      _phase == AuthPhase.authenticated && _auth.onlineSessionExpired;
+  bool _lastOnlineSessionExpired = false;
+
   /// Bắt đầu nghe. Gọi một lần sau khi Supabase đã init.
   void start() {
     if (_sub != null) return;
@@ -120,10 +127,17 @@ class AuthController extends ChangeNotifier implements AuthActions {
         if (refreshUid == _currentUserId) {
           // Cùng user, DB đã mở — KHÔNG mở lại vùng dữ liệu.
           _setPhase(AuthPhase.authenticated);
+          _notifyIfSessionStateChanged();
           break;
         }
         // Khác user → phải chạy đủ vòng đời đổi tài khoản (dọn A trước khi mở B).
         if (await _switchTo(refreshUid)) _setPhase(AuthPhase.authenticated);
+      case AuthSignalKind.refreshDeferred:
+        // Không tới được máy chủ để làm mới: phiên và dữ liệu trên máy vẫn còn.
+        // KHÔNG đóng DB, KHÔNG về Login — chỉ cập nhật thông báo "hết phiên
+        // trực tuyến". Hết phiên thật (máy chủ từ chối) tới dưới dạng
+        // `signedOut`.
+        _notifyIfSessionStateChanged();
       case AuthSignalKind.signedOut:
         final hadUser = _currentUserId != null;
         // Đăng xuất phải về Login NGAY — cleanup lỗi cũng không chặn (lần đăng
@@ -191,8 +205,21 @@ class AuthController extends ChangeNotifier implements AuthActions {
   }
 
   void _onStreamError(Object error, StackTrace stackTrace) {
-    // Không log nội dung lỗi (có thể chứa dữ liệu nhạy cảm). Chỉ đổi phase.
+    // Không log nội dung lỗi (có thể chứa dữ liệu nhạy cảm).
+    // Đang trong phiên: một lỗi của stream (vd. lần làm mới nền hỏng) không lấy
+    // đi dữ liệu trên máy của người dùng — phiên chỉ kết thúc khi có `signedOut`.
+    if (_phase == AuthPhase.authenticated && _currentUserId != null) {
+      _notifyIfSessionStateChanged();
+      return;
+    }
     _setPhase(AuthPhase.error);
+  }
+
+  void _notifyIfSessionStateChanged() {
+    final now = onlineSessionExpired;
+    if (now == _lastOnlineSessionExpired || _disposed) return;
+    _lastOnlineSessionExpired = now;
+    notifyListeners();
   }
 
   @override
@@ -243,6 +270,7 @@ class AuthController extends ChangeNotifier implements AuthActions {
   void _setPhase(AuthPhase next) {
     if (_disposed || _phase == next) return;
     _phase = next;
+    _lastOnlineSessionExpired = onlineSessionExpired;
     notifyListeners();
   }
 
