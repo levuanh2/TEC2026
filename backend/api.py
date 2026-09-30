@@ -21,7 +21,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
@@ -397,6 +397,61 @@ def get_crop_carbon_readiness(
         raise
 
 
+def _error_body(exc: Exception, request_id: str) -> dict[str, str]:
+    """The `{code, message}` the per-season route would have answered with."""
+    for exc_type, _status, code in _ERROR_STATUS:
+        if isinstance(exc, exc_type):
+            return {"code": code, "message": str(exc)}
+    logger.error("carbon_status_part_failed request_id=%s error=%s", request_id, type(exc).__name__,
+                 exc_info=(type(exc), exc, exc.__traceback__))
+    return {"code": "internal_error", "message": f"Lỗi hệ thống. (request_id={request_id})"}
+
+
+@router.get(
+    "/organizations/{organization_id}/carbon-status", tags=['Carbon'],
+    response_model=schemas.CarbonStatusBatchResponse,
+)
+def organization_carbon_status(
+    organization_id: str,
+    crop_season_id: list[str] | None = Query(default=None, description="Optional: only these seasons."),
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: CarbonService = Depends(_service),
+) -> dict[str, Any]:
+    """Carbon readiness and the actual result of every season of an organization, in one request.
+
+    Replaces one readiness + one result request PER SEASON on the Management
+    screens. Scope is decided by RLS with the caller's JWT, exactly like the
+    per-season routes: only seasons of this organization the caller can read
+    are listed, and asking for any other id simply leaves it out. A missing
+    token is the standard 401 `unauthenticated` (from `_read_repo`), not the
+    legacy Carbon `missing_authorization` (EXC-API-02 covers only the three
+    per-season Carbon routes Flutter maps). Each item
+    equals what the per-season endpoints return for that season; one season
+    failing never changes another's answer.
+    """
+    request_id = str(uuid.uuid4())
+    visible = _read_or_404(lambda: repo.organization_season_ids(organization_id))
+    if crop_season_id:
+        wanted = set(crop_season_id)
+        visible = [sid for sid in visible if sid in wanted]
+    status = service.status_many(visible)
+    items = []
+    for sid in visible:
+        part = status[sid]
+        item: dict[str, Any] = {"crop_season_id": sid}
+        readiness, actual = part.get("readiness"), part.get("actual")
+        if isinstance(readiness, Exception):
+            item["readiness_error"] = _error_body(readiness, request_id)
+        else:
+            item["readiness"] = readiness
+        if isinstance(actual, Exception):
+            item["actual_error"] = _error_body(actual, request_id)
+        else:
+            item["actual"] = _json_ready(actual) if actual is not None else None
+        items.append(item)
+    return {"organization_id": organization_id, "items": items}
+
+
 @router.get("/carbon/scenarios", tags=['Carbon'], response_model=schemas.CarbonScenarioResponse)
 def list_scenarios() -> dict[str, Any]:
     return {"scenarios": list(SCENARIOS)}
@@ -702,6 +757,23 @@ def organization_summary(organization_id: str, repo: SupabaseReadRepository = De
 @router.get("/organizations/{organization_id}/metrics", tags=['Organizations'], response_model=schemas.MetricResponse)
 def get_organization_metrics(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.organization_metrics(organization_id))
+
+
+@router.get(
+    "/organizations/{organization_id}/plots-seasons", tags=['Organizations'],
+    response_model=schemas.OrganizationPlotsSeasonsResponse,
+)
+def organization_plots_seasons(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Plots and crop seasons of every farm of the organization, in one request.
+
+    Replaces `/farms/{id}/plots` + `/farms/{id}/crop-seasons` PER FARM on the
+    Management screens (Round 5.1). RLS decides scope, as for those routes; each
+    item is exactly what they return for that farm.
+    """
+    return _read_or_404(lambda: {
+        "organization_id": organization_id,
+        "items": repo.organization_plots_and_seasons(organization_id),
+    })
 
 
 @router.get("/organizations/{organization_id}/farm-performance", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.FarmPerformanceResponse])

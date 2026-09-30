@@ -475,6 +475,37 @@ class SupabaseReadRepository:
         totals_by_season = self._bulk_metric_totals(season_ids)
         return self._aggregate_from_totals([totals_by_season[sid] for sid in season_ids])
 
+    def organization_plots_and_seasons(self, organization_id: str) -> list[dict[str, Any]]:
+        """Every farm of the organization with its plots and seasons, by RLS.
+
+        Round 5.1: Management read `/farms/{id}/plots` and `/farms/{id}/crop-seasons`
+        once PER FARM. This is the same rows through the same views
+        (`plot_view`, `season_view`) and the same caller-bound client, in a fixed
+        number of round trips: organization + farms, then all plots, then all
+        seasons. Raises `ReadNotFoundError` when the organization is not visible.
+        """
+        farms = self._organization_farms(organization_id)
+        plots, seasons = self._plots_and_seasons_for_farms(farms)
+        farm_of_plot = {str(p["id"]): str(p["farm_id"]) for p in plots}
+        out = []
+        for farm in farms:
+            fid = str(farm["id"])
+            out.append({
+                "farm_id": fid,
+                "plots": [self.plot_view(p) for p in plots if str(p["farm_id"]) == fid],
+                "crop_seasons": [self.season_view(s) for s in seasons if farm_of_plot.get(str(s["plot_id"])) == fid],
+            })
+        return out
+
+    def organization_season_ids(self, organization_id: str) -> list[str]:
+        """The organization's crop seasons this caller may read, by RLS.
+
+        Same scope as the per-season Carbon routes' access check: each id here
+        is one `crop_seasons` row the caller's JWT can select. Raises
+        `ReadNotFoundError` when the organization itself is not visible.
+        """
+        return self._season_ids_for_farms(self._organization_farms(organization_id))
+
     def organization_metrics(self, organization_id: str) -> dict[str, Any]:
         return self._aggregate_metrics(self._season_ids_for_farms(self._organization_farms(organization_id)))
 

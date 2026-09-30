@@ -552,6 +552,44 @@ class CarbonReadinessResponse(BaseModel):
     ef_config_version: str | None = None
 
 
+class FarmPlotsSeasons(BaseModel):
+    """One farm's plots and seasons — exactly `/farms/{id}/plots` and `/farms/{id}/crop-seasons`."""
+    farm_id: str
+    plots: list[PlotResponse]
+    crop_seasons: list[CropSeasonResponse]
+
+
+class OrganizationPlotsSeasonsResponse(BaseModel):
+    organization_id: str
+    items: list[FarmPlotsSeasons]
+
+
+class CarbonStatusError(BaseModel):
+    """Why one season's part of a batch answer is missing (the rest still is)."""
+    code: str
+    message: str
+
+
+class CarbonSeasonStatus(BaseModel):
+    """One season in `GET /v1/organizations/{id}/carbon-status`.
+
+    `readiness` is exactly what `GET /v1/crop-seasons/{id}/carbon/readiness`
+    returns; `actual` exactly what `GET /v1/crop-seasons/{id}/carbon` returns
+    (the actual result), or null where that endpoint answers 404
+    `no_calculation`. A part that failed carries `*_error` instead.
+    """
+    crop_season_id: str
+    readiness: CarbonReadinessResponse | None = None
+    readiness_error: CarbonStatusError | None = None
+    actual: dict[str, Any] | None = None
+    actual_error: CarbonStatusError | None = None
+
+
+class CarbonStatusBatchResponse(BaseModel):
+    organization_id: str
+    items: list[CarbonSeasonStatus]
+
+
 # -- MRV --------------------------------------------------------------------
 
 class MrvStepResponse(BaseModel):

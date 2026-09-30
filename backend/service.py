@@ -164,7 +164,9 @@ class CarbonService:
         Không bao giờ "bản mới nhất bất kỳ": một kịch bản mô phỏng tính sau không
         được thay kết quả vận hành (`as_recorded`) của vụ.
         """
-        row = self._repo.latest_calculation(crop_season_id, scenario)
+        return self._stored_view(self._repo.latest_calculation(crop_season_id, scenario))
+
+    def _stored_view(self, row: dict[str, Any] | None) -> dict[str, Any] | None:
         if row is None:
             return None
         factor_set_id = row.get("factor_set_id")
@@ -182,7 +184,9 @@ class CarbonService:
         Built from the same `CropActivityData` the engine consumes, so a client
         can name the missing input without holding any methodology of its own.
         """
-        bundle = self._repo.get_crop_bundle(crop_season_id)
+        return self._readiness_of(self._repo.get_crop_bundle(crop_season_id))
+
+    def _readiness_of(self, bundle) -> dict[str, Any]:
         try:
             data = map_crop_activity_data(bundle)
         except CarbonEngineError as exc:
@@ -199,6 +203,69 @@ class CarbonService:
         body["input_hash"] = compute_input_hash(data, "as_recorded", self._params)
         body["ef_config_version"] = self._params.version
         return body
+
+    def status_many(self, crop_season_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Readiness and the stored ACTUAL result of many seasons at once.
+
+        Per season this is exactly `readiness(id)` and `stored(id, "as_recorded")`
+        — the same helpers over the same rows — so a batch answer never
+        disagrees with the per-season endpoints. Callers must already have
+        established that the caller may read every id. A season that fails is
+        an exception in its own slot; the others are unaffected.
+        """
+        ids = list(dict.fromkeys(crop_season_ids))
+        many_bundles = getattr(self._repo, "get_crop_bundles", None)
+        many_latest = getattr(self._repo, "latest_calculations", None)
+        out: dict[str, dict[str, Any]] = {sid: {} for sid in ids}
+
+        def settle(sid: str, key: str, compute: Callable[[], Any]) -> None:
+            try:
+                out[sid][key] = compute()
+            except Exception as exc:  # noqa: BLE001 - reported per season by the route
+                out[sid][key] = exc
+
+        if many_bundles is not None:
+            try:
+                bundles: dict[str, Any] = many_bundles(ids)
+            except Exception as exc:  # noqa: BLE001
+                bundles = {sid: exc for sid in ids}
+        else:
+            bundles = {}
+            for sid in ids:
+                try:
+                    bundles[sid] = self._repo.get_crop_bundle(sid)
+                except Exception as exc:  # noqa: BLE001
+                    bundles[sid] = exc
+
+        def readiness_for(sid: str) -> dict[str, Any]:
+            bundle = bundles[sid]
+            if isinstance(bundle, Exception):
+                raise bundle
+            return self._readiness_of(bundle)
+
+        if many_latest is not None:
+            try:
+                rows: dict[str, Any] = many_latest(ids, "as_recorded")
+            except Exception as exc:  # noqa: BLE001
+                rows = {sid: exc for sid in ids}
+        else:
+            rows = {}
+            for sid in ids:
+                try:
+                    rows[sid] = self._repo.latest_calculation(sid, "as_recorded")
+                except Exception as exc:  # noqa: BLE001
+                    rows[sid] = exc
+
+        def actual_for(sid: str) -> dict[str, Any] | None:
+            row = rows.get(sid)
+            if isinstance(row, Exception):
+                raise row
+            return self._stored_view(row)
+
+        for sid in ids:
+            settle(sid, "readiness", lambda sid=sid: readiness_for(sid))
+            settle(sid, "actual", lambda sid=sid: actual_for(sid))
+        return out
 
 
 class ActivityWriteAccessError(Exception):

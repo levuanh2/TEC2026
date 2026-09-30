@@ -158,6 +158,10 @@ def _run(journey: Journey, fx: dict) -> None:
     calc = j("POST", "/v1/carbon/calculate", json={"crop_season_id": sid}).json()
     assert calc["calculation_id"] and calc["co2e_total_kg"] is not None
     assert calc["calculation_id"] in j("GET", "/v1/crop-seasons/{crop_season_id}/carbon", crop_season_id=sid).text
+    listing = j("GET", "/v1/organizations/{organization_id}/plots-seasons", organization_id=org).json()["items"]
+    assert sid in [s["id"] for farm_item in listing for s in farm_item["crop_seasons"]]
+    status = j("GET", "/v1/organizations/{organization_id}/carbon-status", organization_id=org).json()["items"]
+    assert calc["calculation_id"] in [(i["actual"] or {}).get("calculation_id") for i in status if i["crop_season_id"] == sid]
 
     # -- recommendations (continuous flooding -> the AWD rule fires) ---------------
     recs = j("POST", "/v1/crop-seasons/{crop_season_id}/recommendations/generate", crop_season_id=sid).json()["items"]
