@@ -30,6 +30,19 @@ export async function getFarmCropSeasons(farmId: string): Promise<CropSeason[]> 
   return (await apiRequest<{ items: any[] }>(`/v1/farms/${farmId}/crop-seasons`)).items.map(farmSeason)
 }
 
+/** Plots and seasons of every farm of the organization in ONE request (Round
+ * 5.1) — per farm exactly what `getPlotsForFarm` / `getFarmCropSeasons` return. */
+export async function getOrganizationPlotsSeasons(organizationId: string): Promise<Map<string, { plots: Plot[]; seasons: CropSeason[] }>> {
+  if (usingMockData) {
+    return new Map(farms.map((f) => {
+      const own = plots.filter((p) => p.farmId === f.id)
+      return [f.id, { plots: own, seasons: cropSeasons.filter((s) => own.some((p) => p.id === s.plotId)) }]
+    }))
+  }
+  const body = await apiRequest<{ items: { farm_id: string; plots: any[]; crop_seasons: any[] }[] }>(`/v1/organizations/${organizationId}/plots-seasons`)
+  return new Map(body.items.map((i) => [i.farm_id, { plots: i.plots.map(plot), seasons: i.crop_seasons.map(farmSeason) }]))
+}
+
 export async function getFarmMetrics(farmId: string): Promise<SeasonMetrics | null> {
   if (usingMockData) return null
   const x = await apiRequest<any>(`/v1/farms/${farmId}/metrics`)

@@ -38,3 +38,19 @@ export interface CarbonReadiness {
   ef_config_version?: string | null
 }
 export const getCarbonReadiness = (id: string) => apiRequest<CarbonReadiness>(`/v1/crop-seasons/${id}/carbon/readiness`)
+
+export interface CarbonStatusError { code: string; message: string }
+/** One season of an organization's Carbon status: exactly what the per-season
+ * readiness and (actual) result endpoints return, or why a part is missing. */
+export interface CarbonSeasonStatus {
+  crop_season_id: string
+  readiness: CarbonReadiness | null
+  readiness_error: CarbonStatusError | null
+  /** The season's ACTUAL result; null when it has none yet. */
+  actual: CarbonResult | null
+  actual_error: CarbonStatusError | null
+}
+/** Readiness + actual result of every season of the organization the caller
+ * may read, in ONE request — instead of two requests per season. */
+export const getOrganizationCarbonStatus = (organizationId: string) =>
+  apiRequest<{ organization_id: string; items: CarbonSeasonStatus[] }>(`/v1/organizations/${organizationId}/carbon-status`)
