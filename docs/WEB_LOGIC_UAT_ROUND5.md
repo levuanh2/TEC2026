@@ -2,7 +2,9 @@
 
 > Branch `fix/agricarbon-round5-logic-integrity`, tạo từ `origin/main` = **`b461d31`** (fetch ngày 2026-09-29, không stale). Commit local. **Chưa push, merge, tag hay deploy.**
 
-**Kết luận: BLOCKED** — mọi lỗi P0 đã tái hiện và sửa, UAT trọn vẹn qua UI trên tài khoản mới đã chạy xong. Còn chặn: (1) hiệu năng tính Carbon p95 4,34 s > 3 s (PRD/SRS), (2) Management `/carbon`, `/seasons` settle ~10–11 s với request tăng tuyến tính theo số vụ, (3) 1 spec mock timeout do tải máy, (4) Flutter/device UAT chưa chạy, (5) MRV export chưa xác minh được factor version (hồ sơ demo không có vụ đã tính). Chi tiết §13.
+> **Round 5.1 (2026-09-30): xem §16** — các gate của vòng 5 đã được đóng trên code cuối.
+
+**Kết luận Round 5 (lịch sử): BLOCKED** — mọi lỗi P0 đã tái hiện và sửa, UAT trọn vẹn qua UI trên tài khoản mới đã chạy xong. Còn chặn: (1) hiệu năng tính Carbon p95 4,34 s > 3 s (PRD/SRS), (2) Management `/carbon`, `/seasons` settle ~10–11 s với request tăng tuyến tính theo số vụ, (3) 1 spec mock timeout do tải máy, (4) Flutter/device UAT chưa chạy, (5) MRV export chưa xác minh được factor version (hồ sơ demo không có vụ đã tính). Chi tiết §13.
 
 **Carbon formula / factor / GWP / methodology: KHÔNG thay đổi.** `git diff b461d31..HEAD -- backend/carbon backend/config` = 0 dòng. Mọi con số là của engine; vòng này chỉ đổi cách chọn, lưu, gọi tên và trình bày kết quả, cùng một tối ưu đọc song song (cùng rows, cùng `input_hash`, cùng calculation id).
 
@@ -268,3 +270,165 @@ axe-core, `wcag2a/2aa/21a/21aa`, không tắt rule: 54 lượt (§7) **0 violati
 - 3 bản MRV export mới trên hồ sơ demo `DEMO-MRV-2026` (JSON/XLSX/PDF, 2026-09-29 ~14:46).
 - Vụ UAT cũ: không đổi (chỉ đọc, 1 POST/PATCH bị từ chối 422).
 - Mật khẩu `demo-manager` và `qa-farmer-fw1` đã được reset theo yêu cầu (mật khẩu cũ vô hiệu).
+
+## 16. Round 5.1 — đóng gate (2026-09-29 → 2026-09-30)
+
+> Cùng branch, 16 commit local sau `3992b5e` (15 code + 1 docs). **Chưa push, merge, tag hay deploy.** Carbon formula / factor / GWP / methodology: **không đổi** (`git diff b461d31..HEAD -- backend/carbon backend/config` = 0 dòng).
+
+**Kết luận Round 5.1: mọi gate yêu cầu PASS trên code cuối**, kể cả NFR Carbon < 3 s (nhóm B). Phần còn skip có lý do ở §16.9; hạn chế còn lại ở §16.11.
+
+### 16.1 Commit (theo phạm vi)
+
+| Commit | Nội dung |
+|---|---|
+| `e46267a` | DB + app: diện tích thu hoạch ≤ diện tích thửa trên mọi đường ghi (trigger, migration `20260929120000` + rollback; Flutter chặn trước khi gửi, "Cần sửa") |
+| `2dbd046` | backend: một kết nối pool cho cả lượt tính Carbon; tra danh tính Auth chạy song song |
+| `5075dd8` | backend: `GET /organizations/{id}/carbon-status`, `/plots-seasons` — một request mỗi loại |
+| `2bf1f79` | MRV: export ghi loại kết quả + phiên bản bộ hệ số |
+| `7ca33d7` | web: Management đọc endpoint gộp; `getActivities` đọc đủ mọi trang |
+| `3f42271` | **app: offline + token hết hạn vẫn mở được dữ liệu và hàng đợi**; phiên lưu Keystore |
+| `f5f2fd0` | backend: `GET /organizations/{id}/mrv-batches` — mọi hồ sơ MRV trong một request |
+| `10642d1` | MRV: PDF chỉ nhãn tiếng Việt, không UUID/mã thô |
+| `d5368c5` | web: MRV một request; phân trang hoạt động có giới hạn; mã xuống dòng ở dấu gạch |
+| `9b97ea2` | app: request làm mới treo không còn chặn đồng bộ; hết phiên do máy chủ được báo lại khi mở app |
+| `dc79ce2` | **perf Carbon: kiểm quyền đọc+ghi và đọc dữ liệu vụ trong một lượt Postgres** |
+| `006ed9f` | backend: `/activity-summary`; `/activities` sắp mới nhất trước, ổn định |
+| `974d2ed` | MRV: XLSX sheet nghiệp vụ tiếng Việt, id/mã trong một sheet kỹ thuật, từ điển dữ liệu |
+| `7dabf36` | web: Trang chủ Farmer chỉ tải 5 bản ghi gần nhất + tóm tắt vụ |
+| `a46fe2c` | backend: JWT "issued at future" (lệch đồng hồ hosted) được thử lại một lần thay vì 500 |
+| (commit này) | docs: báo cáo + ownership `AGENTS.md` |
+
+### 16.2 Offline expired-session — điện thoại thật (Xiaomi, Android 16)
+
+**Nguyên nhân gốc:** gotrue 2.27 khôi phục phiên đã hết hạn từ máy, rồi lần làm mới offline hỏng với `AuthRetryableFetchException` và bị đẩy thành *lỗi* trên stream auth → `AuthPhase.error` ("Không kết nối được phiên đăng nhập"), khoá nông hộ khỏi dữ liệu của chính họ.
+
+**Sửa:** lỗi làm mới do mạng = `refreshDeferred` (vẫn ở trong app, DB mở, banner). Mọi lượt đồng bộ đi qua cổng `ensureFreshSession()`: hết hạn → làm mới trước; không tới được máy chủ → không gửi; bị từ chối → không gửi, giữ hàng đợi, về màn đăng nhập. Không lưu mật khẩu; đăng xuất chủ động vẫn là đường riêng (xoá phiên máy + phiên máy chủ).
+
+| Bước | Kết quả trên máy thật |
+|---|---|
+| 1. Đăng nhập online | 12:07:51; phiên server `7636aafc` |
+| 2. Token quá hạn trên 1 giờ | cấp 12:07:37, hết hạn 13:07:37; server xác nhận **chưa từng refresh** (1 refresh token) |
+| 3. Force-stop | không còn process |
+| 4. Mở lại offline (13:13) | vào thẳng Trang chủ, dữ liệu trên máy, banner **"Phiên trực tuyến đã hết hạn — bạn vẫn có thể ghi offline. Cần đăng nhập lại trước khi đồng bộ."** |
+| 5. Tạo/sửa/xoá, xem hàng đợi | tạo `R51X-01..03`; sửa `R51X-02` 502→522 m³; xoá `R51X-03` → hàng đợi **2**; SQLite: 2 pending, `retry_count 0` |
+| 5b. Force-stop/mở lại offline | hàng đợi vẫn **2** |
+| 6–7. Có mạng lại (14:28:22) | refresh token xoay lúc **14:28:29.303**, hoạt động ghi lúc **14:28:31.2 / .8** (refresh trước, rồi mới gửi); server đúng **2** dòng `R51X`, 501 và 522 m³, 2 `client_event_id`, không có `R51X-03`; 29→31 dòng |
+| 7b. Đồng bộ lần hai (force-stop, mở lại) | "Đã gửi hết"; server **vẫn 2** |
+| 8. Refresh bị từ chối | tài khoản UAT disposable bị ban **15 phút (tự hết hạn)**; ghi offline `R51Y-01/02`; có mạng → server **0** dòng `R51Y`, phiên trên máy bị xoá, về màn đăng nhập; SQLite giữ **2** pending chưa từng gửi |
+| 8b. Gỡ ban, đăng nhập lại | server đúng **2** `R51Y` (601/602 m³, 2 `client_event_id`), 31→33; mở lại app: "Đã gửi hết", vẫn 2 |
+
+Lưu trữ phiên: sau khi cài bản mới, phiên cũ (rõ chữ trong `FlutterSharedPreferences.xml`, có `refresh_token`) được chuyển sang `flutter_secure_storage` (Android Keystore, RSA-OAEP bọc AES-GCM) rồi xoá bản rõ chữ; SQLite: 0 token. Đăng xuất chủ động: kho bảo mật rỗng, phiên server bị xoá.
+
+**Lỗi thật tìm thêm trên máy và đã sửa:**
+- Ngay sau khi bật mạng, request làm mới **treo không có timeout**; gotrue gộp mọi lần làm mới cùng token vào đó nên cổng đồng bộ chờ mãi (không gửi, nhưng cũng không báo đăng nhập lại). Sửa: timeout 20 s cho mọi request Supabase + giới hạn 30 s cho cổng.
+- Offline với token hết hạn, màn "Hộ / Trang trại" chờ **~51 s** (gotrue thử lại refresh trước mỗi lời gọi) mới hiện cache. Sửa: không kéo danh mục từ máy chủ khi máy offline → **~4 s**.
+- Hết phiên do máy chủ trong lần chạy trước → lần mở sau chỉ thấy màn đăng nhập trống. Sửa: cờ không nhạy cảm → màn đăng nhập báo "phiên đã hết hạn … dữ liệu chưa gửi vẫn được giữ".
+
+Test: `app/test/expired_session_offline_test.dart` (16), toàn bộ Flutter **429 pass**, `flutter analyze` sạch.
+
+### 16.3 Carbon — benchmark A/B/C (HTTP thật, JWT, backend local → Supabase hosted)
+
+| Nhóm | n | median | p90 | p95 | max | calculation row trước → sau |
+|---|---|---|---|---|---|---|
+| **B. tính lại đầy đủ (mỗi lần input mới)** | 25 | **966 ms** | **1073 ms** | **1113 ms** | 2170 ms (lần lạnh đầu) | **65 → 90** (25 id khác nhau, 0 thiếu breakdown) |
+| C. gửi lại cùng input (idempotent) | 25 | 954 ms | 990 ms | 990 ms | 1047 ms | 90 → 90 |
+| A. đọc kết quả đã lưu | 25 | 582 ms | 631 ms | 645 ms | 1248 ms | 90 → 90 |
+
+**NFR < 3 s (chỉ nhóm B): PASS** — p95 1113 ms. A và C không dùng để chứng minh. Trước tối ưu (cùng cách đo): p95 **4605 ms** (lượt đầu), 3266 ms (lượt profile).
+
+Profile theo phase (`Server-Timing`, 20 lượt B, median): đọc bundle 469, lưu kết quả+breakdown 359, kiểm quyền ghi 344, **kiểm quyền đọc qua PostgREST 289 (p95 1703)**, tra danh tính Auth 296 (p95 1296), pg-acquire 110, **engine ~0**. RTT tới DB ~125 ms, thời gian SQL chỉ vài ms → nút cổ chai là số lượt mạng tuần tự, không phải engine hay SQL. Tối ưu: tra danh tính Auth song song với lấy kết nối; `get_crop_bundle_as` chạy **đúng luật RLS** trong Postgres với id đã xác thực (đọc = policy `crop_seasons_select`; ghi = `private.user_can_write_crop`) trong **một pipeline** cùng các câu đọc; mỗi câu đọc mang luật đó trong WHERE nên người bị từ chối không nhận dòng nào. Tương đương trên dữ liệu thật: mọi vụ × mọi thành viên (+ id lạ) — cho phép đúng khi RLS đọc VÀ luật ghi cho phép, bundle giống hệt, còn lại 0 dòng. Hợp đồng lỗi giữ nguyên (401/404).
+
+### 16.4 Management — số request cố định
+
+`GET /organizations/{id}/mrv-batches` thay `/mrv/cases` (chỉ 20 hồ sơ đầu!) + một request mỗi hồ sơ. Test 0/1/30 hồ sơ: backend ≤ 6 lần đọc, web 1 request, không gọi hàm theo từng hồ sơ. Thật (Manager, preview production, 5 lượt): `/dashboard`, `/seasons`, `/data-gaps`, `/carbon` đều **7 request** (mỗi endpoint một lần), settled median 2,7–2,9 s. Lịch sử: 32 → 17 → 8 → 7.
+
+### 16.5 Phân trang hoạt động
+
+- `/activities` giờ sắp **mới nhất trước**, ổn định (trước đây không có thứ tự → trang có thể lệch).
+- **Trang chủ** chỉ gọi `activities?page=1&page_size=5` + `/activity-summary` (đếm, chi phí theo loại, diện tích thu hoạch, cờ NPK, ngày gieo/thu hoạch — cùng luật với web, test so khớp với cách tính cũ). Thật: 2 request, hiện "33 hoạt động" = server 33.
+- **Nhật ký**: đọc đủ mọi trang, tối đa 50 trang (5 000 bản ghi) rồi báo lỗi rõ thay vì hiện một phần. Thật: 1 request, **33/33** bản ghi. Test 0/20/27/100/101/250 và giới hạn.
+
+### 16.6 MRV UAT
+
+Hồ sơ mới `UAT-R51-MRV-202609301629` (DEMO-MRV-2026 không đụng), 1 lô của vụ UAT thiết bị. Export **đúng 1 JSON, 1 XLSX, 1 PDF** (XLSX/PDF render từ cùng snapshot `70c1440b`).
+
+| Kiểm | JSON | XLSX | PDF |
+|---|---|---|---|
+| Kết quả actual | `6aa5f294…` (= bản tính B cuối), `calculation_kind: actual` | "Kết quả vận hành" | "Kết quả vận hành" |
+| Phiên bản bộ hệ số | `0.3.0-ipcc2019-tier1-ar5` | có | có |
+| Thời điểm xuất | `2026-09-30T09:29:44Z` | "Thời điểm xuất (UTC)" | 30/09/2026 |
+| Sáu phần MRV | Chuẩn bị, Đăng ký, Thiết lập đường cơ sở, Đo đạc, Báo cáo, Thẩm định | đủ | đủ |
+| UUID / mã thô / `undefined` ở phần người đọc | (JSON giữ id chuẩn) | sheet nghiệp vụ: **0 / 0 / 0** | **0 / 0 / 0** |
+
+Quyết định XLSX (theo yêu cầu): sheet nghiệp vụ chỉ nhãn tiếng Việt; **mọi id, mã gốc, đường dẫn lưu trữ, khối toàn vẹn** ở một sheet "Dữ liệu kỹ thuật (Audit)" (dòng đầu "Dữ liệu kỹ thuật / Audit metadata" — Excel cấm `/` trong tên sheet), cùng thứ tự dòng với sheet nghiệp vụ: **77/77 id** của JSON có mặt. Sheet "Từ điển dữ liệu": 142 dòng giải thích mọi mã và mọi cột định danh. Ba hồ sơ UAT trước (`…1157`, `…1236`, `…1624`) là bản trước khi sửa, giữ làm bằng chứng.
+
+### 16.7 Test gate trên code cuối
+
+| Gate | Kết quả |
+|---|---|
+| Backend full (`pytest tests`, venv, commit `a46fe2c`) | **1099 passed, 0 failed, 58 skipped** (58 = `test_route_positive_auth.py`, chỉ chạy với Supabase local). Một lượt trước đó 1098/1 fail: `test_batch_status_equals_per_season_answers_on_real_rows` đọc vụ QA `2e63e128…` đúng lúc real gate (`farmer-real-write`) đang ghi vào vụ đó → `input_hash` đổi giữa hai lần đọc; chạy riêng pass, chạy lại cả suite khi không có tác vụ ghi song song: pass |
+| Flutter | `flutter analyze` sạch; `flutter test` **429/429** |
+| Web | `tsc -b` sạch; vitest **64 file / 520 test**; `npm run build` pass |
+| Playwright mock (cấu hình CI, `CI=true`, 0 retry) | **111/111, 0 skip** (floor 97) |
+| Playwright real, 1 worker | **26 pass, 0 fail, 12 skip** (24 full + 2 lượt opt-in `farmer-real-write`, `farmer-real-recommendations`) |
+| Responsive + axe + console (9 route × 6 width, dữ liệu thật) | **54/54**: overflow 0, control ngoài viewport 0, axe serious/critical 0, target < 40 px 0, raw text 0, console error 0 |
+
+Trong lúc chạy real gate tìm ra và sửa: bảng `/seasons`, `/carbon` cuộn ngang 83–198 px vì mã thửa dài không xuống dòng (`round41-real`).
+
+### 16.8 Dữ liệu và hạ tầng quan sát được
+
+- Backend nền bị dừng ở giới hạn 30 phút của tác vụ nền giữa một lượt real gate → lượt đó bị huỷ và chạy lại từ đầu (không tính).
+- PostgREST hosted từ chối JWT vừa cấp (`PGRST303 "JWT issued at future"`, lệch đồng hồ < 1 s) → trước đây thành 500 không có CORS; nay đọc lại một lần sau 1 s.
+- Bàn phím Gboard trên điện thoại tự sửa "agricarbon" khi gõ qua adb; lần gõ đều được đọc lại và kiểm trước khi đăng nhập.
+
+### 16.9 Bảng 12 skip của real gate
+
+| Spec | Test | Lý do skip |
+|---|---|---|
+| `farmer-real-carbon-quickfix` | viewer thấy thiếu input, không có nút sửa/tính | do `hosted_carbon_quickfix_smoke.py` điều khiển (tạo/dọn dữ liệu riêng) |
+| `farmer-real-carbon-quickfix` | owner sửa input và tính Carbon | như trên |
+| `farmer-real-straw-quickfix` | quick-fix rơm rạ bền qua reload | do `hosted_straw_quickfix_smoke.py` điều khiển |
+| `farmer-real-straw-quickfix` | nhiên liệu vẫn là giới hạn riêng | như trên |
+| `season-provisioning-real` | manager cấp tài khoản, farmer bắt đầu vụ | do `hosted_season_provisioning_smoke.py` điều khiển (tạo tài khoản mới) |
+| `season-provisioning-real` | vụ đã thu hoạch chỉ đọc | như trên |
+| `farmer-real-cv` | suy luận model CV thật | cần `FARMER_REAL_CV_E2E` + model CV (không có trên máy/staging) |
+| `farmer-real-data` | farmer vào `/mrv` không có nút export | cần `REAL_MRV_EXPORT_E2E=true` — **tắt có chủ ý**: ghi export lên hồ sơ demo `DEMO-MRV-2026` |
+| `web-real-data` | tạo + tải PDF MRV | như trên; export MRV đã kiểm bằng hồ sơ UAT riêng (§16.6) |
+| `round5-real` (×3) | actual vs mô phỏng, nguồn, MRV membership | cần tài khoản farmer Round 5 (`ROUND5_FARMER_*`) — không có mật khẩu trong phiên này; vụ UAT thiết bị không thay được vì đã thuộc hồ sơ MRV UAT (một assertion yêu cầu "không thuộc MRV") |
+
+Hai spec opt-in còn lại (`farmer-real-write`, `farmer-real-recommendations`) được bật ở lượt thứ hai với tài khoản QA farmer riêng: **2/2 pass**.
+
+### 16.10 DONE / BLOCKED
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Offline expired-session (bước 1–8, máy thật) | **DONE** |
+| Refresh bị từ chối: không gửi, giữ hàng đợi, yêu cầu đăng nhập lại | **DONE** (ban 15 phút tự hết hạn, đã gỡ) |
+| Phiên trong Keystore, không rõ chữ | **DONE** |
+| Carbon NFR < 3 s (nhóm B) | **DONE** — p95 1113 ms |
+| Management request cố định (0/1/30 hồ sơ, 7 request thật) | **DONE** |
+| Trang chủ chỉ tải bản ghi gần nhất; Nhật ký đủ | **DONE** |
+| MRV UAT: 1 JSON / 1 XLSX / 1 PDF, nội dung | **DONE** |
+| Diện tích thu hoạch ≤ thửa, mọi đường ghi (migration trên staging) | **DONE** |
+| Account lifecycle (Round 5 §4) | BLOCKED (ngoài phạm vi 5.1, không đổi) |
+
+### 16.11 Hạn chế còn lại
+
+- `test_route_positive_auth.py` (57 test) chỉ chạy với Supabase **local** (tự từ chối hosted) → skip trong full suite; các route mới đã thêm vào journey của file đó và vào `route_auth_manifest` (inventory test pass).
+- PDF còn trích nguyên công thức phương pháp luận (ký hiệu biến IPCC như `cultivation_days × area_ha`) — là văn bản khoa học từ bộ hệ số, không phải mã trạng thái.
+- XLSX sheet "Cảnh báo": nội dung cảnh báo của engine giữ nguyên văn (đã thay id bằng mã vụ); mã cảnh báo gốc ở sheet kỹ thuật.
+
+### 16.12 Credential cleanup (Round 5.1)
+
+- Mật khẩu chỉ đi qua `qa.env` / `uat.env` trong scratchpad phiên (ngoài repo), nạp bằng `set -a` từng lệnh; không in ra log. Trên điện thoại, mật khẩu gõ qua adb từ biến môi trường; ô được đọc lại để so khớp (chỉ in đúng/sai, độ dài), Google Password Manager bị từ chối ("Không bao giờ").
+- Quét 7 giá trị mật khẩu + mẫu JWT (`eyJ….…`) trên 4 357 file: repo (tracked + untracked, gồm `.qa-screenshots/`, `test-results/`, `docs/`, `AGENTS.md`), `git log -p 3992b5e..HEAD`, scratchpad và log tác vụ của hai phiên, output công cụ đã lưu. **Repo và lịch sử git: 0.** Trúng ngoài repo: chính `qa.env`/`uat.env`; session state Playwright (`uat-state/*.json`, có JWT); một bản trích transcript phiên trước tôi tạo trong scratchpad (`prev.txt`, chứa 6 mật khẩu QA vì transcript gốc có chúng) — **đều đã xoá**. `backend/.env` có khoá Supabase dạng JWT: là cấu hình backend, được `.gitignore`, chưa từng được track.
+- Đã xoá: `qa.env`, `uat.env`, hai thư mục `uat-state/`, `prev.txt`, bản sao SQLite của điện thoại, file patch tạm.
+- **Nên đổi mật khẩu** các tài khoản QA (`demo-manager`, `qa-farmer-fw1`, tài khoản UAT thiết bị): transcript `.jsonl` của phiên trước (lịch sử hội thoại Claude Code, ngoài repo) vẫn chứa chúng.
+- Email tài khoản QA còn xuất hiện trong artifact QA đã gitignore (`.qa-screenshots/*/_report.json`, script UAT) — là định danh, không phải bí mật.
+- Điện thoại: app vẫn đăng nhập tài khoản UAT thiết bị (phiên trong Keystore); `adb reverse tcp:8010` đang bật; tài khoản không còn bị ban.
+
+### 16.13 Dữ liệu UAT còn lại (hosted staging)
+
+- Nông hộ UAT thiết bị `UAT-R51-DEVICE-202609291548` + thửa + vụ `8929b456…`: 33 hoạt động (20 `R51-30xx`, 2 `R51X`, 2 `R51Y`, cùng dữ liệu vòng trước) và ~90 bản tính Carbon (benchmark tạo mỗi lượt B một dòng; kết quả actual hiện hành là `6aa5f294…`).
+- 4 hồ sơ MRV UAT `UAT-R51-MRV-202609301157 / …1236 / …1624 / …1629`, mỗi hồ sơ 1 JSON + 1 XLSX + 1 PDF. Không có endpoint dọn dữ liệu qua sản phẩm.
+- Tài khoản UAT thiết bị: đã gỡ ban (`banned_until = null`).

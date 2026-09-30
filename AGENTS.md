@@ -530,3 +530,11 @@ Codex: đừng sửa `web-dashboard/**` trong round này trừ khi nhắn trư�
 | `backend/api.py` (GET carbon, activity write errors), `backend/service.py` (`CarbonService.stored/readiness`, harvest-area bound), `backend/schemas.py` (readiness fingerprint), `backend/infrastructure/{mapping,repository,supabase_repo}.py`, `backend/tests/test_round5_*.py`, `web-dashboard/**`, `docs/WEB_LOGIC_UAT_ROUND5.md` (new) | — (released) | Round 5: tách kết quả actual khỏi kịch bản mô phỏng, provenance/nhãn nguồn, fingerprint staleness, harvest-area bound, ngày vụ, MRV association, recommendation basis, precision. **Không** đổi công thức/hệ số/GWP/methodology. Branch `fix/agricarbon-round5-logic-integrity`, commit local, chưa push/merge/deploy. | — (released) · **BLOCKED** tại gate: xem `docs/WEB_LOGIC_UAT_ROUND5.md` §13 (Carbon p95 4,34 s; Management N+1; 1 mock timeout; Flutter chưa chạy; factor version trong MRV export). P0 DONE. |
 
 Codex: đừng sửa các file trên trong round này trừ khi nhắn trước qua Herdr.
+
+## AgriCarbon Round 5.1 — gate closure (2026-09-29)
+
+| Files | Owner | Task | Trạng thái |
+|---|---|---|---|
+| `backend/**`, `supabase/migrations/20260929120000_*` + rollback, `web-dashboard/**`, `app/lib/**` + `app/test/**` + `app/pubspec.*`, `docs/WEB_LOGIC_UAT_ROUND5.md` | — (released) | Round 5.1: offline expired-session (máy thật), Carbon p95 < 3 s, Management request cố định, phân trang Home/Journal, harvest-area invariant mọi write path, MRV export (PDF/XLSX/JSON), skip audit. **Không** đổi công thức/hệ số/GWP/methodology. Branch `fix/agricarbon-round5-logic-integrity`, commit local, chưa push/merge/deploy. | — (released) · **DONE**: xem `docs/WEB_LOGIC_UAT_ROUND5.md` §16 |
+
+Codex: đừng sửa các file trên trong round này trừ khi nhắn trước qua Herdr.
