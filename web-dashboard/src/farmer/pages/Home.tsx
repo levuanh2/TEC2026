@@ -7,10 +7,11 @@ import type { QueryState } from '../data'
 import { MiniTimeline } from '../journal'
 import { Chip, Empty, ErrorPanel, Flash, MoreLink, Section, Sk, SkBlock } from '../kit'
 import { CostPanel, PrimaryNextAction, SeasonContextBar, SummaryStrip, nextAction } from '../hybrid'
-import { seasonFacts } from '../metricsView'
+import { seasonFactsFromSummary } from '../metricsView'
 import { useWritableSeason } from '../writeAccess'
 import { NoActiveSeason } from '../StartSeason'
-import { primarySeason, useActivities, useCarbonReadiness, useMetrics, useScope, type SeasonCtx } from '../scope'
+import { HOME_RECENT, primarySeason, useActivitySummary, useCarbonReadiness, useMetrics, useRecentActivities, useScope, type SeasonCtx } from '../scope'
+import type { ActivitySummary } from '../../api/crops'
 
 /** While the scope itself is loading, dependent sections are still "loading" too. */
 function pending<T>(state: QueryState<T>, scopeLoading: boolean): QueryState<T> {
@@ -37,11 +38,15 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   const primary = primarySeason(scope.data)
   const sid = primary?.season.id ?? null
   const metrics = useMetrics(sid)
-  const activities = useActivities(sid)
+  /* Home lists the newest records and reads the season's totals from the
+   * server's summary — never the whole journal (Round 5.1): two small
+   * requests whatever the number of records. */
+  const activities = useRecentActivities(sid)
+  const summary = useActivitySummary(sid)
   const carbonReadiness = useCarbonReadiness(sid)
   const mutations = useActivityMutations()
   const primaryWriteCtx = useWritableSeason(primary)
-  const facts = seasonFacts(activities.data, primary?.plot?.areaHa)
+  const facts = seasonFactsFromSummary(summary.data, primary?.plot?.areaHa)
   const name = viewer.fullName?.trim()
   const action = nextAction({
     hasSeason: Boolean(sid),
@@ -66,9 +71,9 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
       <Flash message={mutations.flash} />
 
       <div className="fw-home-top">
-        <HomeHero scope={scope} primary={primary} activities={activities.data} />
+        <HomeHero scope={scope} primary={primary} summary={summary.data} />
         <PrimaryNextAction
-          loading={scope.loading || (Boolean(sid) && (activities.loading || carbonReadiness.loading || metrics.loading))}
+          loading={scope.loading || (Boolean(sid) && (activities.loading || summary.loading || carbonReadiness.loading || metrics.loading))}
           action={action}
           to={navigates ? '/farmer/carbon' : undefined}
           onAct={action?.kind === 'record' && primaryWriteCtx ? () => mutations.openPicker(primaryWriteCtx) : undefined}
@@ -77,14 +82,14 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
 
       {sid && (
         <Section className="fw-area-summary" title="Tổng quan vụ này">
-          <SummaryStrip activities={pending(activities, scope.loading)} metrics={pending(metrics, scope.loading)} readiness={pending(carbonReadiness, scope.loading)} facts={facts} />
+          <SummaryStrip activities={pending({ ...activities, loading: activities.loading || summary.loading }, scope.loading)} count={summary.data?.total ?? null} metrics={pending(metrics, scope.loading)} readiness={pending(carbonReadiness, scope.loading)} facts={facts} />
           <CostPanel metrics={pending(metrics, scope.loading)} facts={facts} moreTo="/farmer/performance" />
         </Section>
       )}
 
       {sid && (
         <Section className="fw-area-journal" title="Hoạt động gần đây" labelledBy="fw-home-recent" action={<MoreLink to="/farmer/journal">Xem toàn bộ nhật ký</MoreLink>}>
-          <MiniTimeline state={pending(activities, scope.loading)} limit={5} />
+          <MiniTimeline state={pending(activities, scope.loading)} limit={HOME_RECENT} />
         </Section>
       )}
       {mutations.node}
@@ -92,11 +97,11 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
   )
 }
 
-function HomeHero({ scope, primary, activities }: { scope: QueryState<{ farms: unknown[] }>; primary: SeasonCtx | null; activities?: Activity[] | null }) {
+function HomeHero({ scope, primary, summary }: { scope: QueryState<{ farms: unknown[] }>; primary: SeasonCtx | null; summary?: ActivitySummary | null }) {
   if (scope.loading) return <HeroSkeleton />
   if (scope.error) return <ErrorPanel error={scope.error} onRetry={scope.reload} />
   if (!primary) return <NoActiveSeason purpose="home" />
-  return <SeasonContextBar ctx={primary} activities={activities} />
+  return <SeasonContextBar ctx={primary} journal={summary ? { firstSeedingAt: summary.firstSeedingAt, lastHarvestAt: summary.lastHarvestAt } : undefined} />
 }
 
 export function HeroSkeleton() {

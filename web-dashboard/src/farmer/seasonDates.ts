@@ -28,14 +28,18 @@ export interface SeasonDate {
 /** A date-only value stays as written; a timestamp becomes the local day it fell on. */
 const day = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : localDay(new Date(iso)))
 
+/** Journal dates already known without the list (the server's activity
+ * summary, Round 5.1): first seeding and last harvest, as timestamps. */
+export interface JournalDates { firstSeedingAt?: string | null; lastHarvestAt?: string | null }
+
 function journalDay(activities: Activity[] | null | undefined, type: string, pick: 'first' | 'last'): string | null {
   const days = (activities ?? []).filter((a) => a.type === type && a.occurredAt).map((a) => day(a.occurredAt)).sort()
   if (!days.length) return null
   return pick === 'first' ? days[0] : days[days.length - 1]
 }
 
-export function sowingDate(season: Pick<CropSeason, 'plantingDate'>, activities?: Activity[] | null): SeasonDate {
-  const logged = journalDay(activities, 'seeding', 'first')
+export function sowingDate(season: Pick<CropSeason, 'plantingDate'>, activities?: Activity[] | null, journal?: JournalDates): SeasonDate {
+  const logged = journal ? (journal.firstSeedingAt ? day(journal.firstSeedingAt) : null) : journalDay(activities, 'seeding', 'first')
   const declared = season.plantingDate ? day(season.plantingDate) : null
   if (logged) {
     return {
@@ -48,10 +52,10 @@ export function sowingDate(season: Pick<CropSeason, 'plantingDate'>, activities?
 }
 
 export function harvestDate(
-  season: Pick<CropSeason, 'harvestDate' | 'expectedHarvestDate'>, activities?: Activity[] | null,
+  season: Pick<CropSeason, 'harvestDate' | 'expectedHarvestDate'>, activities?: Activity[] | null, journal?: JournalDates,
 ): SeasonDate {
   if (season.harvestDate) return { value: date(season.harvestDate), iso: day(season.harvestDate), source: 'season', note: 'ngày kết thúc vụ' }
-  const logged = journalDay(activities, 'harvest', 'last')
+  const logged = journal ? (journal.lastHarvestAt ? day(journal.lastHarvestAt) : null) : journalDay(activities, 'harvest', 'last')
   if (logged) return { value: date(logged), iso: logged, source: 'journal', note: 'theo nhật ký' }
   if (season.expectedHarvestDate) {
     const planned = day(season.expectedHarvestDate)

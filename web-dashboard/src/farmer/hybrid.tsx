@@ -11,7 +11,7 @@ import { Ico, type IconName } from './icons'
 import { Sk } from './kit'
 import { homeSummary, journalLine, metricDetails, readable, type Reading, type SeasonFacts } from './metricsView'
 import { seasonStatusLabel, type SeasonCtx } from './scope'
-import { harvestDate, sowingDate, type SeasonDate } from './seasonDates'
+import { harvestDate, sowingDate, type JournalDates, type SeasonDate } from './seasonDates'
 
 /* The hybrid Farmer surface: identity, ONE next action, and a compact read of
  * how the season is doing.
@@ -30,7 +30,7 @@ import { harvestDate, sowingDate, type SeasonDate } from './seasonDates'
  * status, day count and the two dates — and its only action is a quiet link,
  * so the page has exactly one primary button (the next action below it).
  */
-export function SeasonContextBar({ ctx, loading, activities }: { ctx: SeasonCtx | null; loading?: boolean; activities?: Activity[] | null }) {
+export function SeasonContextBar({ ctx, loading, activities, journal }: { ctx: SeasonCtx | null; loading?: boolean; activities?: Activity[] | null; journal?: JournalDates }) {
   if (loading) {
     return (
       <div className="fw-ctxbar" aria-busy="true">
@@ -40,8 +40,8 @@ export function SeasonContextBar({ ctx, loading, activities }: { ctx: SeasonCtx 
   }
   if (!ctx) return null
   const { season, plot, farm } = ctx
-  const sown = sowingDate(season, activities)
-  const harvested = harvestDate(season, activities)
+  const sown = sowingDate(season, activities, journal)
+  const harvested = harvestDate(season, activities, journal)
   const days = season.harvestDate || harvested.source === 'journal' ? null : daysSince(sown.iso ?? undefined)
   return (
     <section className="fw-ctxbar" aria-labelledby="fw-ctxbar-season">
@@ -177,8 +177,10 @@ export function PrimaryNextAction({ action, onAct, to, loading }: {
  * the journal, so it is said as one, in neutral text, with its link. Each
  * reading carries one short sentence and "Xem chi tiết"; the arithmetic, the
  * basis and the methodology live on Performance. */
-export function SummaryStrip({ activities, metrics, readiness, facts, loading }: {
+export function SummaryStrip({ activities, metrics, readiness, facts, loading, count: recordCount }: {
   activities: QueryState<Activity[]>
+  /** The season's record count when `activities` holds only recent ones. */
+  count?: number | null
   metrics: QueryState<SeasonMetrics>
   readiness: QueryState<CarbonReadiness | null>
   facts: SeasonFacts
@@ -192,7 +194,7 @@ export function SummaryStrip({ activities, metrics, readiness, facts, loading }:
     )
   }
   const m = metrics.data
-  const count = activities.data?.length ?? 0
+  const count = recordCount ?? activities.data?.length ?? 0
   // The one view model, so this tile cannot say "Sẵn sàng tính" while the
   // Carbon screen next door says a factor is missing.
   const view = carbonView({

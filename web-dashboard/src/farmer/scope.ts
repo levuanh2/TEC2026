@@ -3,7 +3,7 @@ import type { CropSeason, Farm, Plot } from '../types'
 import { ApiError } from '../api/client'
 import { seasonStatus } from '../vocab'
 import { getFarmerScope, usingMockData, type FarmerScope } from '../api/farms'
-import { getActivities } from '../api/crops'
+import { getActivities, getActivitySummary, getRecentActivities } from '../api/crops'
 import { getResourceMetrics, type SeasonMetrics } from '../api/metrics'
 import { generateRecommendations, getRecommendations, type Recommendation } from '../api/recommendations'
 import { getCvInferences } from '../api/cv'
@@ -63,6 +63,11 @@ export const placeOf = (farm: Farm) => [farm.commune, farm.district, farm.provin
 export const useScope = () => useQuery(keys.scope, getFarmerScope, STABLE_MS)
 export const useMetrics = (id: string | null) => useQuery(id ? keys.metrics(id) : null, () => getResourceMetrics(id!))
 export const useActivities = (id: string | null) => useQuery(id ? keys.activities(id) : null, () => getActivities(id!))
+/** Home: only the newest records it lists, plus the server's whole-season summary. */
+export const HOME_RECENT = 5
+export const useRecentActivities = (id: string | null, limit = HOME_RECENT) =>
+  useQuery(id ? keys.recentActivities(id, limit) : null, () => getRecentActivities(id!, limit))
+export const useActivitySummary = (id: string | null) => useQuery(id ? keys.activitySummary(id) : null, () => getActivitySummary(id!))
 export const useCvHistory = (id: string | null) => useQuery(id ? keys.cv(id) : null, () => getCvInferences(id!))
 
 /* M05 generation is a deliberate non-blocker.
@@ -199,7 +204,11 @@ export function prefetchNav(to: string): void {
   prefetchQuery(keys.scope, getFarmerScope, STABLE_MS)
   const season = primarySeason(peekQuery<FarmerScope>(keys.scope))?.season
   if (!season) return
-  if (to === '/farmer' || to === '/farmer/journal') prefetchQuery(keys.activities(season.id), () => getActivities(season.id))
+  if (to === '/farmer') {
+    prefetchQuery(keys.recentActivities(season.id, HOME_RECENT), () => getRecentActivities(season.id, HOME_RECENT))
+    prefetchQuery(keys.activitySummary(season.id), () => getActivitySummary(season.id))
+  }
+  if (to === '/farmer/journal') prefetchQuery(keys.activities(season.id), () => getActivities(season.id))
   if (to === '/farmer' || to === '/farmer/performance') prefetchQuery(keys.metrics(season.id), () => getResourceMetrics(season.id))
 }
 
