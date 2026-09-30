@@ -146,6 +146,8 @@ def _run(journey: Journey, fx: dict) -> None:
     activity("harvest", "20", {"yield_kg": 6000})
     extra = activity("irrigation", "10", {"method": "continuous_flooding", "water_volume_m3": 10})
     assert extra in j("GET", "/v1/crop-seasons/{crop_season_id}/activities", crop_season_id=sid).text
+    summary = j("GET", "/v1/crop-seasons/{crop_season_id}/activity-summary", crop_season_id=sid).json()
+    assert summary["crop_season_id"] == sid and summary["total"] >= 1
     j("GET", "/v1/activities/{activity_id}", activity_id=extra)
     assert j("PATCH", "/v1/activities/{activity_id}", activity_id=extra, json={"note": f"{tag} edited"}).json()["note"] == f"{tag} edited"
     j("DELETE", "/v1/activities/{activity_id}", activity_id=extra)

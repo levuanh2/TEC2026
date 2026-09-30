@@ -598,6 +598,15 @@ def list_activities(
     return _read_or_404(lambda: paginate(repo.activities(crop_season_id), page, page_size))
 
 
+@router.get("/crop-seasons/{crop_season_id}/activity-summary", tags=['Activities'], response_model=schemas.ActivitySummaryResponse)
+def activity_summary(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Whole-season journal facts (counts, recorded costs, harvested area,
+    first seeding / last harvest) in one small response, so the Farmer Home can
+    fetch only the few recent records it lists (Round 5.1). RLS decides scope,
+    as for `/activities`."""
+    return _read_or_404(lambda: repo.activity_summary(crop_season_id))
+
+
 @router.get("/activities/{activity_id}", tags=['Activities'], response_model=schemas.ActivityResponse)
 def get_activity(activity_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.activity(activity_id))

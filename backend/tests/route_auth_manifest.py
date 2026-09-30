@@ -57,6 +57,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/v1/organizations/{organization_id}/metrics"): ok(M, 200),
     ("GET", "/v1/organizations/{organization_id}/farm-performance"): ok(M, 200),
     ("GET", "/v1/organizations/{organization_id}/plots-seasons"): ok(M, 200, deny=X),
+    ("GET", "/v1/crop-seasons/{crop_season_id}/activity-summary"): ok(F, 200),
     ("GET", "/v1/organizations/{organization_id}/mrv-batches"): ok(M, 200, deny=X),
     ("GET", "/v1/organizations/{organization_id}/farmers"): ok(M, 200, deny=X),
     ("POST", "/v1/organizations/{organization_id}/farmers"): ok(M, 201, deny=X),

@@ -6,6 +6,8 @@ service-role key and never accepts a user id supplied by the frontend.
 """
 from __future__ import annotations
 
+import math
+
 import contextvars
 import time
 from collections import defaultdict
@@ -25,6 +27,25 @@ DETAIL_TABLES = {
 # MVP cost means directly recorded activity/input cost.  Labor and contract
 # machinery do not have separate fields in the current contract, so they are
 # never inferred here.
+# Fertilizer records that carry an N/P/K share (same keys as the web's seasonFacts).
+_NUTRIENT_FIELDS = ("nitrogen_percent", "phosphorus_percent", "potassium_percent", "n_percent")
+
+
+def _as_number(value: Any) -> float | None:
+    """The web's `toNumber`: a finite number, or a non-blank numeric string; else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
+        return parsed if math.isfinite(parsed) else None
+    return None
+
+
 _COST_FIELD_BY_ACTIVITY = {
     "seeding": "cost_vnd",
     "fertilizer": "total_cost_vnd",
@@ -289,7 +310,59 @@ class SupabaseReadRepository:
             lambda: self._many("profiles"),
         )
         users = {str(x["id"]): x.get("full_name") for x in users_rows}
-        return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in rows]
+        # Newest first, deterministically (Round 5.1): pages of the paginated
+        # endpoint are stable, and page 1 is the season's most recent records.
+        ordered = sorted(rows, key=lambda x: (str(x.get("occurred_at") or ""), str(x.get("recorded_at") or ""),
+                                              str(x["id"])), reverse=True)
+        return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in ordered]
+
+    def activity_summary(self, season_id: str) -> dict[str, Any]:
+        """Whole-season facts of the journal, so Home can load only recent records.
+
+        Exactly what the web's `seasonFacts` and season-date helpers derive from
+        the full activity list (same rows as `activities`, same cost fields,
+        same number parsing), plus the record count.
+        """
+        items = self.activities(season_id)
+        by_type: dict[str, dict[str, Any]] = {}
+        harvests = harvests_with_area = 0
+        harvested_area = 0.0
+        fertilizer_has_nutrient = False
+        first_seeding: str | None = None
+        last_harvest: str | None = None
+        for a in items:
+            kind, payload, at = str(a["activity_type"]), a.get("payload") or {}, a.get("occurred_at")
+            at_text = str(at) if at else None
+            if kind == "harvest":
+                harvests += 1
+                area = _as_number(payload.get("harvested_area_ha"))
+                if area is not None and area > 0:
+                    harvested_area += area
+                    harvests_with_area += 1
+                if at_text and (last_harvest is None or at_text > last_harvest):
+                    last_harvest = at_text
+            if kind == "seeding" and at_text and (first_seeding is None or at_text < first_seeding):
+                first_seeding = at_text
+            if kind == "fertilizer" and any(_as_number(payload.get(k)) is not None for k in _NUTRIENT_FIELDS):
+                fertilizer_has_nutrient = True
+            field = _COST_FIELD_BY_ACTIVITY.get(kind)
+            if field is None:
+                continue
+            entry = by_type.setdefault(kind, {"records": 0, "with_cost": 0, "recorded_vnd": 0.0})
+            entry["records"] += 1
+            cost = _as_number(payload.get(field))
+            if cost is not None:
+                entry["with_cost"] += 1
+                entry["recorded_vnd"] += cost
+        counts: dict[str, int] = {}
+        for a in items:
+            counts[str(a["activity_type"])] = counts.get(str(a["activity_type"]), 0) + 1
+        return {
+            "crop_season_id": season_id, "total": len(items), "count_by_type": counts,
+            "cost_by_type": by_type, "harvests": harvests, "harvests_with_area": harvests_with_area,
+            "harvested_area_ha": harvested_area, "fertilizer_has_nutrient": fertilizer_has_nutrient,
+            "first_seeding_at": first_seeding, "last_harvest_at": last_harvest,
+        }
 
     def _bulk_activities_by_season(self, season_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Same shape as calling `activities(season_id)` for each id, but a

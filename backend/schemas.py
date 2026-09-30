@@ -552,6 +552,26 @@ class CarbonReadinessResponse(BaseModel):
     ef_config_version: str | None = None
 
 
+class ActivityCostSummary(BaseModel):
+    records: int
+    with_cost: int
+    recorded_vnd: float
+
+
+class ActivitySummaryResponse(BaseModel):
+    """`/crop-seasons/{id}/activity-summary`: what Home derives from the whole journal."""
+    crop_season_id: str
+    total: int
+    count_by_type: dict[str, int]
+    cost_by_type: dict[str, ActivityCostSummary]
+    harvests: int
+    harvests_with_area: int
+    harvested_area_ha: float
+    fertilizer_has_nutrient: bool
+    first_seeding_at: str | None = None
+    last_harvest_at: str | None = None
+
+
 class FarmPlotsSeasons(BaseModel):
     """One farm's plots and seasons — exactly `/farms/{id}/plots` and `/farms/{id}/crop-seasons`."""
     farm_id: str
