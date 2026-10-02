@@ -33,7 +33,9 @@ Scope limits held in this work:
 - **Membership:** `user_can_write_farm` and `user_can_manage_farm_members` now require an
   ACTIVE membership in the farm's cooperative, and a farm that is not deleted.
   Every helper built on them inherits this.
-- **Reads are unchanged.** A former member can still read.
+- **Reads:** since `20261002090000` a farm editor/viewer whose membership ended reads nothing of
+  that farm. A former farm **owner** still reads their own farm (pending a product decision,
+  `docs/CORE_V1_CLOSURE.md` §3).
 - **Where the triggers apply:** only in client sessions (`row_security_active`). Backend,
   seed, import and cleanup paths behave as before.
 
@@ -163,8 +165,8 @@ sessions it does not change the outcome. Tests: `test_a_soft_deleted_activity_ta
 
 ## 9. Remaining (not in this work)
 
-- Reads by a former member are unchanged. They were not a business write, so they were
-  out of scope.
+- Reads by a former member: closed for farm editors/viewers by `20261002090000`; a former
+  farm owner still reads their own farm, pending a product decision (`docs/CORE_V1_CLOSURE.md` §3).
 - A Flutter build released before this change creates `planned` seasons. Until the app is
   updated, the DB refuses its activity writes (55000, shown as a permanent failure, never
   lost).
