@@ -36,12 +36,15 @@ class AuthController extends ChangeNotifier implements AuthActions {
     this._auth, {
     Future<void> Function(String userId)? onUserActive,
     Future<void> Function()? onUserInactive,
+    Future<void> Function()? onTemporaryPasswordReplaced,
   })  : _onUserActive = onUserActive,
-        _onUserInactive = onUserInactive;
+        _onUserInactive = onUserInactive,
+        _onTemporaryPasswordReplaced = onTemporaryPasswordReplaced;
 
   final AuthService _auth;
   final Future<void> Function(String userId)? _onUserActive;
   final Future<void> Function()? _onUserInactive;
+  final Future<void> Function()? _onTemporaryPasswordReplaced;
 
   StreamSubscription<AuthSignal>? _sub;
   AuthPhase _phase = AuthPhase.initializing;
@@ -60,6 +63,20 @@ class AuthController extends ChangeNotifier implements AuthActions {
 
   AuthPhase get phase => _phase;
   bool get isAuthenticated => _phase == AuthPhase.authenticated;
+
+  /// Đã đăng nhập nhưng còn mật khẩu tạm HTX cấp: [AuthGate] chỉ hiện màn đổi
+  /// mật khẩu (cờ do máy chủ giữ; máy chủ cũng từ chối mọi dữ liệu nghiệp vụ).
+  bool get mustChangePassword =>
+      _phase == AuthPhase.authenticated && _auth.mustChangePassword;
+
+  /// Đổi mật khẩu tạm. Ném [PasswordChangeException] để màn hiển thị lý do của
+  /// máy chủ. Thành công → phiên đã làm mới (cờ đã xoá) → chạy phần đăng nhập
+  /// bị hoãn (tải Trang chủ, tự gửi) rồi vào shell.
+  Future<void> replaceTemporaryPassword(String current, String next) async {
+    await _auth.replaceTemporaryPassword(current: current, next: next);
+    await _onTemporaryPasswordReplaced?.call();
+    if (!_disposed) notifyListeners();
+  }
 
   /// Đang trong phiên nhưng access token đã hết hạn và chưa làm mới được (vd.
   /// mở app khi offline sau hơn 1 giờ). Vẫn xem/ghi dữ liệu trên máy được; chỉ

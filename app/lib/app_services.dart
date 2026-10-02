@@ -129,9 +129,16 @@ class AppServices {
         sync.clearCache();
         devices.reset();
         await activeContext.attach(db);
-        await homeController.load();
         await syncCoordinator.attach();
+        // Còn mật khẩu tạm: máy chủ từ chối mọi dữ liệu — hoãn tải Trang chủ và
+        // tự gửi tới khi đổi xong (onTemporaryPasswordReplaced).
+        if (auth.mustChangePassword) return;
+        await homeController.load();
         // Tự gửi sau đăng nhập — chạy nền, KHÔNG chặn việc vào shell.
+        unawaited(syncCoordinator.onLogin());
+      },
+      onTemporaryPasswordReplaced: () async {
+        await homeController.load();
         unawaited(syncCoordinator.onLogin());
       },
       // Mất user (đăng xuất / hết phiên / đổi tài khoản): dọn RAM + đóng DB.

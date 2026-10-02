@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import 'password_change_api.dart';
 import 'secure_session_storage.dart';
 
 /// Tín hiệu vòng đời phiên đã được "làm phẳng" khỏi kiểu gotrue — [AuthController]
@@ -134,6 +135,22 @@ class AuthService {
   /// KHÔNG log giá trị này.
   String? get accessToken => currentSession?.accessToken;
 
+  /// Tài khoản HTX vừa cấp còn dùng mật khẩu tạm (`app_metadata` của Supabase
+  /// Auth — chỉ máy chủ đặt và xoá; app chỉ đọc). Trong lúc này máy chủ từ chối
+  /// mọi đọc/ghi nghiệp vụ, nên app chỉ cho đổi mật khẩu hoặc đăng xuất.
+  bool get mustChangePassword =>
+      currentSession?.user.appMetadata['must_change_password'] == true;
+
+  /// Đổi mật khẩu tạm qua FastAPI (máy chủ kiểm mật khẩu tạm, đặt mật khẩu mới
+  /// và xoá cờ), rồi làm mới phiên để token mới không còn cờ.
+  Future<void> replaceTemporaryPassword({
+    required String current,
+    required String next,
+  }) async {
+    await PasswordChangeApi(() => accessToken).replace(current: current, next: next);
+    await client.auth.refreshSession();
+  }
+
   /// Access token đã hết hạn và chưa làm mới được (vd. đang offline). Dữ liệu
   /// trên máy vẫn dùng được; chỉ việc gửi lên máy chủ phải chờ làm mới.
   bool get onlineSessionExpired => currentSession?.isExpired ?? false;
@@ -142,6 +159,9 @@ class AuthService {
   /// refresh token). Máy chủ từ chối → gotrue tự phát `signedOut`, app về màn
   /// đăng nhập, hàng đợi vẫn nằm nguyên trên máy.
   Future<SessionFreshness> ensureFreshSession() {
+    // Còn mật khẩu tạm: máy chủ từ chối mọi bản ghi (RLS) — không gửi gì, hàng
+    // đợi giữ nguyên tới khi đổi xong mật khẩu.
+    if (mustChangePassword) return Future.value(SessionFreshness.offline);
     final session = currentSession;
     return checkSessionFreshness(
       hasSession: session != null,
