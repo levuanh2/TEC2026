@@ -42,7 +42,7 @@ describe('the flag', () => {
   it('is read from /v1/me as the live server state', () => {
     const base = { roles: ['farmer'], organization_memberships: [] }
     expect(toCurrentUser({ ...base, must_change_password: true }).mustChangePassword).toBe(true)
-    expect(toCurrentUser(base).mustChangePassword).toBe(false)
+    expect(toCurrentUser(base).mustChangePassword).toBeUndefined()
   })
 })
 

@@ -28,7 +28,8 @@ export function toCurrentUser(response: MeResponse): CurrentUser {
     organizationId: response.organization_memberships[0]?.organization_id ?? null,
     fullName: response.full_name ?? null,
     writableFarmIds,
-    mustChangePassword: response.must_change_password === true,
+    // Present only when set, so every normal account keeps the same shape.
+    ...(response.must_change_password === true ? { mustChangePassword: true } : {}),
   }
 }
 

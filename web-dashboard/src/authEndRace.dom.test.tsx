@@ -22,6 +22,7 @@ vi.mock('./api/auth', () => ({
   restoreSession: async () => ({ access_token: 't', user: { id: 'u1', email: 'farmer@example.test' } }),
   signIn: vi.fn(),
   signOut: vi.fn(),
+  mustChangePassword: () => false,
 }))
 vi.mock('./api/me', () => ({
   getMe: () => new Promise((_, reject) => { rejectMe = reject }),
