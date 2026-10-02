@@ -141,7 +141,7 @@ the farmer replaces it.
 | Every other `/v1` operation: 403 `password_change_required` | FastAPI router guard (refuses only) |
 | Every business read/write, any client | **database**: `private.password_change_pending()` reads the live flag on `auth.users`; the root helpers (`user_can_read_farm`, `user_can_write_farm`, `user_can_manage_farm_members`, `user_is_org_member`, `user_is_org_manager`, `user_can_read_organization`, other members' profiles) answer false — migration `20261002100000`. Covers Flutter (PostgREST) and FastAPI pooled paths alike |
 | `POST /v1/me/password {current_password, new_password}` | FastAPI verifies the current password with Supabase Auth, then ONE Auth Admin call sets the new password and clears the flag. The only way the flag is cleared. 422 `current_password_incorrect` / `password_too_weak` / `password_too_long` / `password_unchanged`; `Cache-Control: no-store` |
-| Normal access | after the client refreshes its session (a token issued before the change still carries the old claim and is refused) |
+| Normal access | the client signs in again with the new password (Web and Flutter do it automatically). The change revokes every refresh token of the account — any session opened with the temporary password, by anyone, is dead; an access token issued before the change still carries the old claim and is refused by the API |
 
 Still readable while the flag is set: the caller's own profile and membership rows,
 own devices, public reference data. Accounts without the flag (every account

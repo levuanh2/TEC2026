@@ -55,7 +55,7 @@ describe('ForcedPasswordChange', () => {
     expect(screen.getByText('farmer@example.invalid')).toBeTruthy()
     fill('Temp-Pass-1', 'Own-Pass-22')
     await waitFor(() => expect(done).toHaveBeenCalledWith(fresh))
-    expect(replaceTemporaryPassword).toHaveBeenCalledWith('Temp-Pass-1', 'Own-Pass-22')
+    expect(replaceTemporaryPassword).toHaveBeenCalledWith('farmer@example.invalid', 'Temp-Pass-1', 'Own-Pass-22')
   })
 
   it('checks the new password locally before any request', () => {

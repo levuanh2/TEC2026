@@ -183,7 +183,8 @@ def test_provisioned_account_is_restricted_until_the_password_is_changed(stack):
     # 1. the flag starts true, server-side
     assert s.flag(farmer["user_id"]) is True
     # 2. the temporary password signs in
-    token = s.token(farmer["email"], farmer["temporary_password"])
+    temp_session = s.sign_in(farmer["email"], farmer["temporary_password"]).json()
+    token = temp_session["access_token"]
     me = s.get(token, "/v1/me")
     assert me.status_code == 200 and me.json()["must_change_password"] is True
     # 3. API: business routes refuse, with the explicit code
@@ -221,8 +222,12 @@ def test_provisioned_account_is_restricted_until_the_password_is_changed(stack):
     assert farmer["temporary_password"] not in r.text and new_password not in r.text
     # 5. cleared server-side
     assert s.flag(farmer["user_id"]) is False
-    # the temporary password is dead
+    # the temporary password is dead, and so is every session opened with it
+    # (e.g. by whoever saw it): changing the password revokes the refresh tokens
     assert s.sign_in(farmer["email"], farmer["temporary_password"]).status_code == 400
+    refresh = s.httpx.post(f"{s.url}/auth/v1/token?grant_type=refresh_token", headers={"apikey": s.publishable},
+                           json={"refresh_token": temp_session["refresh_token"]}, timeout=30)
+    assert refresh.status_code == 400, refresh.text[:200]
     # 6. a fresh token has normal access on every layer
     fresh = s.token(farmer["email"], new_password)
     assert s.get(fresh, "/v1/me").json()["must_change_password"] is False

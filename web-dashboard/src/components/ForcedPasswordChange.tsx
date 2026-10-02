@@ -23,7 +23,7 @@ export function ForcedPasswordChange({ session, done }: { session: Session; done
     if (problem) return
     setBusy(true)
     try {
-      done(await replaceTemporaryPassword(current, next))
+      done(await replaceTemporaryPassword(session.user.email ?? '', current, next))
     } catch (x) {
       setError(x instanceof Error ? x.message : 'Chưa đổi được mật khẩu. Vui lòng thử lại.')
     } finally {

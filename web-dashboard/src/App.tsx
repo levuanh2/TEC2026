@@ -380,6 +380,15 @@ export default function App() {
 
   if (!ready) return <main className="login">Đang khôi phục phiên…</main>
 
+  // Before the /login check: a flagged sign-in stays on /login (the role
+  // redirect needs /v1/me, which is skipped while the flag is set).
+  if (session && (mustChangePassword(session) || viewer.mustChangePassword)) {
+    return <ForcedPasswordChange session={session} done={(s) => {
+      setViewer({ role: 'farmer', organizationId: null })
+      setSession(s)
+    }} />
+  }
+
   // Explicit mock mode is an isolated development/test path.  It must not
   // silently affect normal production mode, but it also must not be blocked by
   // the real Supabase credentials loaded from .env during the mock smoke test.
@@ -391,12 +400,6 @@ export default function App() {
       // page of this app; the role redirect still applies once /v1/me answers.
       const next = new URLSearchParams(location.search).get('next')
       if (next && next.startsWith('/') && !next.startsWith('//')) { history.replaceState({}, '', next); setPath(next) }
-      setSession(s)
-    }} />
-  }
-  if (session && (mustChangePassword(session) || viewer.mustChangePassword)) {
-    return <ForcedPasswordChange session={session} done={(s) => {
-      setViewer({ role: 'farmer', organizationId: null })
       setSession(s)
     }} />
   }

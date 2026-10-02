@@ -143,14 +143,17 @@ export function mustChangePassword(session: Session | null): boolean {
 }
 
 /** Forced first login: the server checks the temporary password, sets the new
- *  one and clears the flag in one step (`POST /v1/me/password`); the session is
- *  then refreshed so the new token no longer carries the flag. */
-export async function replaceTemporaryPassword(current: string, next: string): Promise<Session> {
+ *  one and clears the flag in one step (`POST /v1/me/password`). Changing the
+ *  password revokes every refresh token of the account -- including any session
+ *  opened with the temporary password -- so the new session comes from signing
+ *  in with the new password, not from a refresh. */
+export async function replaceTemporaryPassword(email: string, current: string, next: string): Promise<Session> {
   await apiRequest<{ must_change_password: boolean }>('/v1/me/password', {
     method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }),
   })
-  const { data, error } = await requireAuthClient().auth.refreshSession()
-  if (error || !data.session) throw new Error('Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.')
-  setAccessToken(data.session.access_token)
-  return data.session
+  try {
+    const session = await signIn(email, next)
+    if (session) return session
+  } catch { /* fall through: the change itself succeeded */ }
+  throw new Error('Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.')
 }

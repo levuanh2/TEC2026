@@ -142,13 +142,19 @@ class AuthService {
       currentSession?.user.appMetadata['must_change_password'] == true;
 
   /// Đổi mật khẩu tạm qua FastAPI (máy chủ kiểm mật khẩu tạm, đặt mật khẩu mới
-  /// và xoá cờ), rồi làm mới phiên để token mới không còn cờ.
+  /// và xoá cờ). Đổi mật khẩu thu hồi MỌI refresh token của tài khoản — kể cả
+  /// phiên ai đó mở bằng mật khẩu tạm — nên phiên mới đến từ việc đăng nhập lại
+  /// bằng mật khẩu mới, không phải làm mới phiên cũ.
   Future<void> replaceTemporaryPassword({
     required String current,
     required String next,
   }) async {
+    final email = currentSession?.user.email;
     await PasswordChangeApi(() => accessToken).replace(current: current, next: next);
-    await client.auth.refreshSession();
+    if (email == null) {
+      throw PasswordChangeException(401, 'unauthenticated', 'Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.');
+    }
+    await client.auth.signInWithPassword(email: email, password: next);
   }
 
   /// Access token đã hết hạn và chưa làm mới được (vd. đang offline). Dữ liệu
