@@ -66,6 +66,20 @@ class MeResponse(BaseModel):
     organization_memberships: list[dict[str, Any]]
     farm_memberships: list[dict[str, Any]]
     roles: list[str]
+    # Live Supabase Auth `app_metadata.must_change_password`: the account still
+    # has the temporary password from provisioning. Until it is changed only
+    # /v1/me and POST /v1/me/password answer; everything else is 403
+    # `password_change_required` (and the database refuses too).
+    must_change_password: bool = False
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordChangeResponse(BaseModel):
+    must_change_password: bool
 
 
 # -- Farms / Plots / Crop Seasons ---------------------------------------

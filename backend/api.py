@@ -21,7 +21,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
@@ -37,7 +37,11 @@ from carbon.errors import (
 import schemas
 from infrastructure import profiling
 from infrastructure.api_errors import error_detail
-from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthError, extract_bearer_token
+from infrastructure.auth import (
+    CropAccessChecker, CropAccessError, InvalidTokenError, MissingAuthError, claims_for_denial_only,
+    extract_bearer_token, jwt_rejection_as_invalid_token,
+)
+from infrastructure.auth_admin import must_change_password
 from infrastructure.persist_access import CropPersistChecker
 from infrastructure.pagination import paginate
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
@@ -47,6 +51,7 @@ from service import (
     ActivityWriteAccessError,
     ActivityWriteService,
     CarbonService,
+    CurrentPasswordIncorrectError,
     CvAccessError,
     CvService,
     HarvestAreaExceedsPlotError,
@@ -54,6 +59,9 @@ from service import (
     InvalidImageError,
     MrvExportAccessError,
     MrvExportService,
+    PasswordChangeService,
+    PasswordChangeUnauthenticatedError,
+    PasswordPolicyError,
     RecommendationAccessError,
     ProvisioningFailedError,
     ProvisioningService,
@@ -74,7 +82,34 @@ from infrastructure.provisioning_repo import (
 )
 from infrastructure.write_repo import IdempotencyConflictError, SeasonNotOpenError
 
-router = APIRouter(prefix="/v1")
+# Forced first login: the only operations an account may use while it still has
+# the temporary password its manager handed over (POST /v1/me/password clears it).
+PASSWORD_CHANGE_ROUTES = frozenset({("GET", "/v1/me"), ("POST", "/v1/me/password")})
+
+
+def _password_change_guard(request: Request) -> None:
+    """403 `password_change_required` on every other /v1 operation while the
+    caller's token carries `app_metadata.must_change_password`.
+
+    This is the explicit API answer; the authority is the database, which reads
+    the live flag on auth.users (`private.password_change_pending`, migration
+    20261002100000) and refuses every business read/write on its own. Reading the
+    claim unverified is safe because it can only refuse (see
+    `claims_for_denial_only`). No/invalid header: the route's own auth answers.
+    """
+    route = request.scope.get("route")
+    if route is not None and (request.method, getattr(route, "path", None)) in PASSWORD_CHANGE_ROUTES:
+        return
+    scheme, _, token = (request.headers.get("authorization") or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return
+    if must_change_password(claims_for_denial_only(token).get("app_metadata")):
+        raise HTTPException(status_code=403, detail=error_detail(
+            "password_change_required",
+            "Tài khoản đang dùng mật khẩu tạm do HTX cấp. Hãy đổi mật khẩu trước khi tiếp tục."))
+
+
+router = APIRouter(prefix="/v1", dependencies=[Depends(_password_change_guard)])
 logger = logging.getLogger("agricarbon.api")
 
 Scenario = Literal["awd", "continuous_flooding", "as_recorded"]
@@ -507,6 +542,40 @@ def list_scenarios() -> dict[str, Any]:
 @router.get("/me", tags=['Auth'], response_model=schemas.MeResponse)
 def get_me(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(repo.me)
+
+
+def _password_change_service() -> PasswordChangeService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Password change is not configured."))
+
+
+def _bearer_token(authorization: str | None = Header(default=None)) -> str:
+    """The caller's token, or the standard 401 -- resolved before body validation."""
+    try:
+        return extract_bearer_token(authorization)
+    except MissingAuthError as exc:
+        raise HTTPException(status_code=401, detail=error_detail("unauthenticated", str(exc))) from exc
+
+
+@router.post("/me/password", tags=['Auth'], response_model=schemas.PasswordChangeResponse)
+def change_own_password(
+    response: Response,
+    token: str = Depends(_bearer_token),
+    payload: schemas.PasswordChangeRequest = Body(...),
+    service: PasswordChangeService = Depends(_password_change_service),
+) -> dict[str, Any]:
+    """Replace the caller's password. Requires the current one (checked with
+    Supabase Auth). Clears `must_change_password` -- the only way it is cleared --
+    so a provisioned farmer gets normal access after the next token refresh."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        with jwt_rejection_as_invalid_token():
+            return service.change(token, payload.current_password, payload.new_password)
+    except (InvalidTokenError, PasswordChangeUnauthenticatedError) as exc:
+        raise HTTPException(status_code=401, detail=error_detail("unauthenticated", "Token không hợp lệ hoặc đã hết hạn.")) from exc
+    except CurrentPasswordIncorrectError as exc:
+        raise HTTPException(status_code=422, detail=error_detail("current_password_incorrect", "Mật khẩu hiện tại không đúng.")) from exc
+    except PasswordPolicyError as exc:
+        raise HTTPException(status_code=422, detail=error_detail(exc.code, str(exc))) from exc
 
 
 @router.get("/farmer/scope", tags=['Farms'], response_model=schemas.FarmerScopeResponse)

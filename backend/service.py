@@ -529,6 +529,60 @@ class ProvisioningFailedError(Exception):
         self.compensated = compensated
 
 
+# -- Forced first-login password change -------------------------------------
+
+class PasswordChangeUnauthenticatedError(Exception):
+    """The token does not belong to a live Auth user."""
+
+
+class CurrentPasswordIncorrectError(Exception):
+    pass
+
+
+class PasswordPolicyError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def password_problem(current: str, new: str) -> PasswordPolicyError | None:
+    """The same rule Farmer Web shows next to the field (ChangePassword.tsx),
+    enforced here because the browser check alone is not a rule."""
+    if len(new) < 8 or not any(c.islower() for c in new) or not any(c.isupper() for c in new)             or not any(c.isdigit() for c in new):
+        return PasswordPolicyError("password_too_weak", "Mật khẩu mới cần ít nhất 8 ký tự, có chữ hoa, chữ thường và số.")
+    if len(new.encode("utf-8")) > 72:  # bcrypt ignores the rest
+        return PasswordPolicyError("password_too_long", "Mật khẩu mới dài tối đa 72 byte.")
+    if new == current:
+        return PasswordPolicyError("password_unchanged", "Mật khẩu mới phải khác mật khẩu hiện tại.")
+    return None
+
+
+class PasswordChangeService:
+    """`POST /v1/me/password`: replace the password and clear
+    `app_metadata.must_change_password` -- the only way the flag is cleared.
+
+    The current password is checked with Supabase Auth first, so a stolen
+    session alone cannot take the account over; then ONE Auth Admin call sets
+    the new password and clears the flag. Works for any signed-in account (the
+    flag may already be false). Passwords are never logged or returned.
+    """
+
+    def __init__(self, auth_admin: SupabaseAuthAdmin):
+        self._auth = auth_admin
+
+    def change(self, token: str, current_password: str, new_password: str) -> dict[str, Any]:
+        identity = self._auth.identity(token)
+        if identity is None or not identity.email:
+            raise PasswordChangeUnauthenticatedError()
+        problem = password_problem(current_password, new_password)
+        if problem is not None:
+            raise problem
+        if not self._auth.password_is_current(identity.email, current_password):
+            raise CurrentPasswordIncorrectError()
+        self._auth.replace_temporary_password(identity.user_id, new_password)
+        return {"must_change_password": False}
+
+
 class ProvisioningService:
     """Management "Thêm nông hộ": a farmer account inside the manager's own
     cooperative, optionally with its farm and first plot.

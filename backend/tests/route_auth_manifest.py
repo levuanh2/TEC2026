@@ -49,6 +49,8 @@ ROUTES: dict[tuple[str, str], Route] = {
 
     # -- identity / organizations (manager) ----------------------------------
     ("GET", "/v1/me"): ok(M, 200),
+    # Forced first login: the provisioned farmer replaces the temporary password.
+    ("POST", "/v1/me/password"): ok(F, 200),
     ("GET", "/v1/organizations"): ok(M, 200),
     ("GET", "/v1/organizations/{organization_id}"): ok(M, 200, deny=X),
     ("GET", "/v1/organizations/{organization_id}/farms"): ok(M, 200),

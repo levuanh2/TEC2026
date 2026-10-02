@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from . import auth, memberships, profiling, supabase_clients
+from .auth_admin import must_change_password
 from .config import Settings
 
 DETAIL_TABLES = {
@@ -183,14 +184,18 @@ class SupabaseReadRepository:
             futures = [pool.submit(contextvars.copy_context().run, t) for t in thunks]
             return tuple(f.result() for f in futures)
 
-    def user_id(self) -> str:
+    def _auth_user(self) -> Any:
         with profiling.observe("auth get_user"):
             user = self._retrying(lambda: self.client.auth.get_user(self.token).user)
         if user is None: raise ReadNotFoundError("user")
-        return str(user.id)
+        return user
+
+    def user_id(self) -> str:
+        return str(self._auth_user().id)
 
     def me(self) -> dict[str, Any]:
-        user_id = self.user_id()
+        user = self._auth_user()
+        user_id = str(user.id)
         # profile/orgs/farms are 3 independent filters on user_id — nothing
         # here depends on another's result, so they run concurrently instead
         # of as 3 sequential round trips.
@@ -205,7 +210,8 @@ class SupabaseReadRepository:
         # gates, web role routing, the MRV management check) must see exactly the
         # memberships the SQL helpers treat as active.
         orgs = memberships.active_memberships(orgs)
-        return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms})}
+        return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms}),
+                "must_change_password": must_change_password(getattr(user, "app_metadata", None))}
 
     @staticmethod
     def _farm_view(row: dict[str, Any], plot_count: int) -> dict[str, Any]:

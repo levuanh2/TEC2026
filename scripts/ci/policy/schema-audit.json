@@ -125,6 +125,13 @@
    "execute": [],
    "security_definer": true
   },
+  "private.password_change_pending()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.pm_check_assignment_total()": {
    "config": [
     "search_path=\"\""

@@ -102,7 +102,19 @@ def _run(journey: Journey, fx: dict) -> None:
         "plot": {"plot_code": f"{tag}-PLOT", "name": f"{tag} plot", "area_ha": 1.0},
     }).json()
     fx["users"].append(prov["user_id"])
+    # Forced first login: the temporary password signs in, but every business
+    # route refuses until it is replaced; then a fresh token has normal access.
     journey.tokens["farmer"] = fx["sign_in"](fx["farmer_email"], prov["temporary_password"])
+    me = journey._send("farmer", "GET", "/v1/me")
+    assert me.status_code == 200 and me.json()["must_change_password"] is True, me.text[:300]
+    blocked = journey._send("farmer", "GET", "/v1/farms")
+    assert blocked.status_code == 403 and _code(blocked) == "password_change_required", blocked.text[:300]
+    new_password = f"Nw-{uuid.uuid4().hex}!9A"
+    changed = j("POST", "/v1/me/password",
+                json={"current_password": prov["temporary_password"], "new_password": new_password}).json()
+    assert changed == {"must_change_password": False}
+    journey.tokens["farmer"] = fx["sign_in"](fx["farmer_email"], new_password)
+    assert journey._send("farmer", "GET", "/v1/me").json()["must_change_password"] is False
     farm, plot = prov["farm_id"], prov["plot_id"]
     assert prov["user_id"] in j("GET", "/v1/organizations/{organization_id}/farmers", organization_id=org).text
     farm2 = j("POST", "/v1/organizations/{organization_id}/farms", organization_id=org, json={

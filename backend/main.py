@@ -42,7 +42,7 @@ from infrastructure.request_context import RequestIdMiddleware
 from infrastructure.season_repo import PostgresSeasonRepository
 from infrastructure.provisioning_repo import PostgresProvisioningRepository
 from infrastructure.auth_admin import SupabaseAuthAdmin
-from service import ActivityWriteService, CarbonService, CvService, MrvExportService, ProvisioningService, RecommendationService, SeasonService, SeasonTransitionService
+from service import ActivityWriteService, CarbonService, CvService, MrvExportService, PasswordChangeService, ProvisioningService, RecommendationService, SeasonService, SeasonTransitionService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -187,6 +187,12 @@ if settings.auth_configured and settings.supabase_db_url and settings.supabase_c
         PostgresProvisioningRepository(settings), SupabaseAuthAdmin(settings)
     )
     app.dependency_overrides[api._provisioning_service] = lambda: _provisioning_service_singleton
+
+if settings.auth_configured and settings.supabase_configured:
+    # Forced first login: the same server-side Auth Admin adapter clears the
+    # temporary-password flag together with the new password.
+    _password_change_singleton = PasswordChangeService(SupabaseAuthAdmin(settings))
+    app.dependency_overrides[api._password_change_service] = lambda: _password_change_singleton
 
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
     _recommendation_service_singleton = RecommendationService(_service_singleton, PostgresRecommendationRepository(settings))
