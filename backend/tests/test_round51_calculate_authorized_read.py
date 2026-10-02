@@ -75,8 +75,15 @@ def post(c):
     return c.post("/v1/carbon/calculate", json={"crop_season_id": SEASON, "water_regime_scenario": "as_recorded"})
 
 
+# `main` wires the configured repositories into `main.app.dependency_overrides`
+# at import. Restore exactly that wiring after each test -- clearing it would
+# leave every later `main.app` test in the process on 503 `backend_not_configured`.
+_MAIN_OVERRIDES = dict(main.app.dependency_overrides)
+
+
 def teardown_function():
     main.app.dependency_overrides.clear()
+    main.app.dependency_overrides.update(_MAIN_OVERRIDES)
 
 
 def test_allowed_caller_gets_the_result_and_the_service_gets_the_verified_id():
