@@ -334,6 +334,35 @@ void main() {
     relaunched.dispose();
   });
 
+  test('bị từ chối -> đăng nhập lại hợp lệ -> hàng đợi giữ nguyên gửi đúng MỘT lần',
+      () async {
+    await openOffline();
+    await db.saveActivity(_act('e1'));
+    await db.saveActivity(_act('e2'));
+
+    auth.refreshError = AuthApiException('User is banned', statusCode: '400', code: 'user_banned');
+    conn.debugSet(online: true, wifi: true);
+    await co.runSync(manual: true);
+    await _until(() => controller.phase == AuthPhase.sessionExpired);
+    expect(server.calls, 0);
+
+    // Đăng nhập lại hợp lệ: phiên mới (còn hạn), mở lại đúng vùng dữ liệu, tự gửi.
+    auth
+      ..refreshError = null
+      ..expired = false
+      ..hasSession = true;
+    auth.emitSignal(const AuthSignal(AuthSignalKind.signedIn, _user));
+    await _until(() => controller.phase == AuthPhase.authenticated);
+    await _until(() => server.inserts == 2 && !co.isSyncing);
+    expect(server.activities.keys, unorderedEquals(['e1', 'e2']));
+    expect(await db.countPendingActivities(), 0);
+
+    await co.runSync(manual: true); // lần hai: không còn gì để gửi
+    expect(server.inserts, 2);
+    expect(server.activities.length, 2);
+    await closeAll();
+  });
+
   test('đăng xuất chủ động xoá lời nhắc hết phiên', () async {
     auth.endedByServer = true;
     await openOffline();
