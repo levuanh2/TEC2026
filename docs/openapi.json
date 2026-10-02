@@ -78,7 +78,7 @@
           "Carbon"
         ],
         "summary": "Get Crop Carbon",
-        "description": "Bản tính THÀNH CÔNG gần nhất của vụ. Không trả bản tính thất bại.",
+        "description": "Bản tính THÀNH CÔNG gần nhất của vụ CHO ĐÚNG KỊCH BẢN. Không trả bản tính thất bại.\n\nMặc định `as_recorded` = kết quả vận hành chính thức của vụ. AWD và ngập liên\ntục là kịch bản mô phỏng, chỉ trả khi hỏi đích danh (`?scenario=awd`) — tính\nmột kịch bản sau không bao giờ thay kết quả vận hành trong câu trả lời mặc định.\n`calculation_kind` cho biết \"actual\" hay \"scenario\".",
         "operationId": "get_crop_carbon_v1_crop_seasons__crop_season_id__carbon_get",
         "parameters": [
           {
@@ -95,19 +95,13 @@
             "in": "query",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "awd",
-                    "continuous_flooding",
-                    "as_recorded"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
+              "enum": [
+                "awd",
+                "continuous_flooding",
+                "as_recorded"
               ],
+              "type": "string",
+              "default": "as_recorded",
               "title": "Scenario"
             }
           },
@@ -201,6 +195,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CarbonReadinessResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/organizations/{organization_id}/carbon-status": {
+      "get": {
+        "tags": [
+          "Carbon"
+        ],
+        "summary": "Organization Carbon Status",
+        "description": "Carbon readiness and the actual result of every season of an organization, in one request.\n\nReplaces one readiness + one result request PER SEASON on the Management\nscreens. Scope is decided by RLS with the caller's JWT, exactly like the\nper-season routes: only seasons of this organization the caller can read\nare listed, and asking for any other id simply leaves it out. A missing\ntoken is the standard 401 `unauthenticated` (from `_read_repo`), not the\nlegacy Carbon `missing_authorization` (EXC-API-02 covers only the three\nper-season Carbon routes Flutter maps). Each item\nequals what the per-season endpoints return for that season; one season\nfailing never changes another's answer.",
+        "operationId": "organization_carbon_status_v1_organizations__organization_id__carbon_status_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "crop_season_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: only these seasons.",
+              "title": "Crop Season Id"
+            },
+            "description": "Optional: only these seasons."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarbonStatusBatchResponse"
                 }
               }
             }
@@ -1145,6 +1224,70 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ActivityWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/crop-seasons/{crop_season_id}/activity-summary": {
+      "get": {
+        "tags": [
+          "Activities"
+        ],
+        "summary": "Activity Summary",
+        "description": "Whole-season journal facts (counts, recorded costs, harvested area,\nfirst seeding / last harvest) in one small response, so the Farmer Home can\nfetch only the few recent records it lists (Round 5.1). RLS decides scope,\nas for `/activities`.",
+        "operationId": "activity_summary_v1_crop_seasons__crop_season_id__activity_summary_get",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivitySummaryResponse"
                 }
               }
             }
@@ -2469,6 +2612,134 @@
         ]
       }
     },
+    "/v1/organizations/{organization_id}/plots-seasons": {
+      "get": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Organization Plots Seasons",
+        "description": "Plots and crop seasons of every farm of the organization, in one request.\n\nReplaces `/farms/{id}/plots` + `/farms/{id}/crop-seasons` PER FARM on the\nManagement screens (Round 5.1). RLS decides scope, as for those routes; each\nitem is exactly what they return for that farm.",
+        "operationId": "organization_plots_seasons_v1_organizations__organization_id__plots_seasons_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPlotsSeasonsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/organizations/{organization_id}/mrv-batches": {
+      "get": {
+        "tags": [
+          "MRV"
+        ],
+        "summary": "Organization Mrv Batches",
+        "description": "Every MRV case of the organization with its batches, in one request.\n\nReplaces `/mrv/cases` + `/mrv/cases/{id}/batches` PER CASE on the Management\nscreens (Round 5.1); the request count no longer grows with the number of\ncases, and no case is lost past the first page. RLS decides scope.",
+        "operationId": "organization_mrv_batches_v1_organizations__organization_id__mrv_batches_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMrvBatchesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/v1/organizations/{organization_id}/farm-performance": {
       "get": {
         "tags": [
@@ -3553,6 +3824,29 @@
   },
   "components": {
     "schemas": {
+      "ActivityCostSummary": {
+        "properties": {
+          "records": {
+            "type": "integer",
+            "title": "Records"
+          },
+          "with_cost": {
+            "type": "integer",
+            "title": "With Cost"
+          },
+          "recorded_vnd": {
+            "type": "number",
+            "title": "Recorded Vnd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "records",
+          "with_cost",
+          "recorded_vnd"
+        ],
+        "title": "ActivityCostSummary"
+      },
       "ActivityCreateRequest": {
         "properties": {
           "idempotency_key": {
@@ -3653,6 +3947,83 @@
           "payload"
         ],
         "title": "ActivityResponse"
+      },
+      "ActivitySummaryResponse": {
+        "properties": {
+          "crop_season_id": {
+            "type": "string",
+            "title": "Crop Season Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "count_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Count By Type"
+          },
+          "cost_by_type": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ActivityCostSummary"
+            },
+            "type": "object",
+            "title": "Cost By Type"
+          },
+          "harvests": {
+            "type": "integer",
+            "title": "Harvests"
+          },
+          "harvests_with_area": {
+            "type": "integer",
+            "title": "Harvests With Area"
+          },
+          "harvested_area_ha": {
+            "type": "number",
+            "title": "Harvested Area Ha"
+          },
+          "fertilizer_has_nutrient": {
+            "type": "boolean",
+            "title": "Fertilizer Has Nutrient"
+          },
+          "first_seeding_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seeding At"
+          },
+          "last_harvest_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Harvest At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "crop_season_id",
+          "total",
+          "count_by_type",
+          "cost_by_type",
+          "harvests",
+          "harvests_with_area",
+          "harvested_area_ha",
+          "fertilizer_has_nutrient"
+        ],
+        "title": "ActivitySummaryResponse",
+        "description": "`/crop-seasons/{id}/activity-summary`: what Home derives from the whole journal."
       },
       "ActivityUpdateRequest": {
         "properties": {
@@ -3921,6 +4292,28 @@
             },
             "type": "array",
             "title": "Missing Inputs"
+          },
+          "input_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Hash"
+          },
+          "ef_config_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ef Config Version"
           }
         },
         "type": "object",
@@ -3946,6 +4339,102 @@
           "scenarios"
         ],
         "title": "CarbonScenarioResponse"
+      },
+      "CarbonSeasonStatus": {
+        "properties": {
+          "crop_season_id": {
+            "type": "string",
+            "title": "Crop Season Id"
+          },
+          "readiness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CarbonReadinessResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "readiness_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CarbonStatusError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actual": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual"
+          },
+          "actual_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CarbonStatusError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "crop_season_id"
+        ],
+        "title": "CarbonSeasonStatus",
+        "description": "One season in `GET /v1/organizations/{id}/carbon-status`.\n\n`readiness` is exactly what `GET /v1/crop-seasons/{id}/carbon/readiness`\nreturns; `actual` exactly what `GET /v1/crop-seasons/{id}/carbon` returns\n(the actual result), or null where that endpoint answers 404\n`no_calculation`. A part that failed carries `*_error` instead."
+      },
+      "CarbonStatusBatchResponse": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CarbonSeasonStatus"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_id",
+          "items"
+        ],
+        "title": "CarbonStatusBatchResponse"
+      },
+      "CarbonStatusError": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "CarbonStatusError",
+        "description": "Why one season's part of a batch answer is missing (the rest still is)."
       },
       "CropSeasonCreateRequest": {
         "properties": {
@@ -4810,6 +5299,36 @@
           "data_status"
         ],
         "title": "FarmPerformanceResponse"
+      },
+      "FarmPlotsSeasons": {
+        "properties": {
+          "farm_id": {
+            "type": "string",
+            "title": "Farm Id"
+          },
+          "plots": {
+            "items": {
+              "$ref": "#/components/schemas/PlotResponse"
+            },
+            "type": "array",
+            "title": "Plots"
+          },
+          "crop_seasons": {
+            "items": {
+              "$ref": "#/components/schemas/CropSeasonResponse"
+            },
+            "type": "array",
+            "title": "Crop Seasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "farm_id",
+          "plots",
+          "crop_seasons"
+        ],
+        "title": "FarmPlotsSeasons",
+        "description": "One farm's plots and seasons — exactly `/farms/{id}/plots` and `/farms/{id}/crop-seasons`."
       },
       "FarmResponse": {
         "properties": {
@@ -5726,6 +6245,38 @@
         ],
         "title": "MrvBatchResponse"
       },
+      "MrvCaseBatches": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "case_code": {
+            "type": "string",
+            "title": "Case Code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "batches": {
+            "items": {
+              "$ref": "#/components/schemas/MrvBatchResponse"
+            },
+            "type": "array",
+            "title": "Batches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_id",
+          "case_code",
+          "status",
+          "batches"
+        ],
+        "title": "MrvCaseBatches",
+        "description": "One MRV case and its batches — per batch exactly `/mrv/cases/{id}/batches`."
+      },
       "MrvCaseResponse": {
         "properties": {
           "case_id": {
@@ -6177,6 +6728,48 @@
           "status"
         ],
         "title": "MrvStepResponse"
+      },
+      "OrganizationMrvBatchesResponse": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MrvCaseBatches"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_id",
+          "items"
+        ],
+        "title": "OrganizationMrvBatchesResponse"
+      },
+      "OrganizationPlotsSeasonsResponse": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FarmPlotsSeasons"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_id",
+          "items"
+        ],
+        "title": "OrganizationPlotsSeasonsResponse"
       },
       "OrganizationResponse": {
         "properties": {
