@@ -638,6 +638,27 @@ void main() {
     c.dispose();
   });
 
+  test(
+      'Trang chủ đếm TRONG lúc đang gửi rồi lượt gửi hỏng -> vẫn đếm đúng '
+      '(bản ghi đang gửi chưa phải đã gửi)', () async {
+    await _seedFarm();
+    await _seedActivePlotSeason(serverId: null); // vụ chờ gửi -> đếm 1
+    // SyncService đánh dấu "đang gửi" trước khi gọi mạng.
+    await _db.markCropSeasonSyncing('cs1');
+
+    final c = _make(online: true)..attach();
+    await c.load();
+    await c.debugSettle();
+    expect(c.snapshot.pendingCount, 1);
+
+    // Lượt gửi hỏng, không tiến triển: không có onSynced/markSynced nào.
+    await _db.markCropSeasonSyncFailed('cs1', 'network');
+    expect(await _db.countAllPending(), 1);
+    expect(c.snapshot.pendingCount, 1);
+    expect(c.snapshot.todo?.kind, HomeTodoKind.pushPending);
+    c.dispose();
+  });
+
   group('race: response cũ KHÔNG được ghi đè sau khi ngữ cảnh đổi', () {
     Future<void> seedTwoSeasons() async {
       await _seedFarm();
