@@ -83,11 +83,43 @@ def _outcome(service: CarbonService, season: str, scenario: str):
         return (type(exc).__name__, str(exc))
 
 
-def _calculable(conn, service: CarbonService) -> str:
+def _has_fertilizer(conn, season: str) -> bool:
+    return conn.execute(
+        "select 1 from public.fertilizer_applications d join public.activities a on a.id = d.activity_id"
+        " join public.production_batches b on b.id = a.production_batch_id"
+        " where b.crop_season_id = %s and a.deleted_at is null limit 1",
+        (season,),
+    ).fetchone() is not None
+
+
+def _first_calculable(conn, service: CarbonService, with_fertilizer: bool) -> str | None:
     for season in _live_seasons(conn):
+        if with_fertilizer and not _has_fertilizer(conn, season):
+            continue
         if _outcome(service, season, "as_recorded")[0] == "ok":
             return season
-    pytest.skip("no live crop season in this database can be calculated as recorded")
+    return None
+
+
+def _calculable(conn, service: CarbonService, with_fertilizer: bool = False) -> str:
+    season = _first_calculable(conn, service, with_fertilizer)
+    if season is not None:
+        return season
+    # The CI seed (scripts/ci/seed_ci_db.py) has an active demo season with
+    # seeding, fertilizer and harvest records but no declared water regimes and
+    # no cultivation days (it is still active: no actual harvest date), so
+    # `as_recorded` refuses it. Declare them inside this test's transaction
+    # (always rolled back) rather than skip: CI allows no skip here.
+    conn.execute(
+        "update public.crop_seasons"
+        " set ipcc_water_regime = coalesce(ipcc_water_regime, 'irrigated_continuous_flooding'),"
+        "     pre_season_water_regime = coalesce(pre_season_water_regime, 'non_flooded_pre_season_lt_180d'),"
+        "     cultivation_days = coalesce(cultivation_days, 100)"
+        " where deleted_at is null and status = 'active'"
+    )
+    season = _first_calculable(conn, service, with_fertilizer)
+    assert season is not None, "no live crop season in this database can be calculated as recorded"
+    return season
 
 
 # -- equivalence ---------------------------------------------------------------
@@ -245,14 +277,13 @@ def _clone_as_active(db, season: str) -> str:
 def test_fingerprint_ignores_cost_follows_carbon_inputs_and_recalculation_clears_it(db):
     repo = PostgresCarbonRepository(None, connect=_savepoints(db))
     service = CarbonService(repo, _PARAMS)
-    season = _clone_as_active(db, _calculable(db, service))
+    season = _clone_as_active(db, _calculable(db, service, with_fertilizer=True))
     fertilizer = db.execute(
         "select d.activity_id from public.fertilizer_applications d join public.activities a on a.id = d.activity_id"
         " join public.production_batches b on b.id = a.production_batch_id where b.crop_season_id = %s limit 1",
         (season,),
     ).fetchone()
-    if fertilizer is None:
-        pytest.skip("the calculable season has no fertilizer record")
+    assert fertilizer is not None, "the clone lost the source season's fertilizer record"
     fertilizer = fertilizer["activity_id"]
     service.calculate(season, "as_recorded")
     current = service.readiness(season)["input_hash"]
