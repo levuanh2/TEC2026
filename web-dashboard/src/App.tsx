@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
+import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
@@ -18,6 +18,7 @@ import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
 import { AccountName, Sidebar } from './components/Sidebar'
 import { useMobileDrawer } from './components/useMobileDrawer'
 import { FarmerExperience } from './farmer/FarmerExperience'
+import { ForcedPasswordChange } from './components/ForcedPasswordChange'
 import { prefetchFarmerScope } from './farmer/scope'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -322,6 +323,12 @@ export default function App() {
     }
     let alive = true
     liveSession.current = session
+    // Still on the temporary password: every business read would be refused,
+    // so none is sent; the change form is all this session gets.
+    if (mustChangePassword(session)) {
+      setViewerReady(true)
+      return () => { alive = false }
+    }
     const current = () => alive && liveSession.current === session
     // A cached role hint for this same user lets a refresh/deep link paint
     // its shell immediately; /v1/me still revalidates below and its result
@@ -384,6 +391,12 @@ export default function App() {
       // page of this app; the role redirect still applies once /v1/me answers.
       const next = new URLSearchParams(location.search).get('next')
       if (next && next.startsWith('/') && !next.startsWith('//')) { history.replaceState({}, '', next); setPath(next) }
+      setSession(s)
+    }} />
+  }
+  if (session && (mustChangePassword(session) || viewer.mustChangePassword)) {
+    return <ForcedPasswordChange session={session} done={(s) => {
+      setViewer({ role: 'farmer', organizationId: null })
       setSession(s)
     }} />
   }
