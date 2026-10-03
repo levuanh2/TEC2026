@@ -88,6 +88,7 @@ AuthController _make(_FakeAuthService auth, [_Scope? scope]) => AuthController(
     );
 
 void main() {
+  _offlineSessionTests();
   test('start(): không có phiên -> signedOut (đồng bộ)', () {
     final c = _make(_FakeAuthService())..start();
     expect(c.phase, AuthPhase.signedOut);
@@ -344,3 +345,53 @@ void main() {
     expect(c.phase, AuthPhase.authenticated); // không đổi sau dispose
   });
 }
+
+class _OfflineAuth extends _FakeAuthService {
+  _OfflineAuth() : super(initialUserId: 'u1');
+  bool expired = false;
+  @override
+  bool get onlineSessionExpired => expired;
+  @override
+  Future<bool> sessionEndedByServer() async => false;
+  @override
+  Future<void> rememberSessionEndedByServer(bool ended) async {}
+}
+
+void _offlineSessionTests() {
+  test('a refresh deferred by the network keeps the user in, data open, and only updates the banner', () async {
+    final auth = _OfflineAuth();
+    final scope = _Scope();
+    final c = _make(auth, scope)..start();
+    await pumpEventQueue();
+    var notified = 0;
+    c.addListener(() => notified++);
+
+    auth.expired = true;
+    auth.emit(const AuthSignal(AuthSignalKind.refreshDeferred, 'u1'));
+    await pumpEventQueue();
+    expect(c.phase, AuthPhase.authenticated);
+    expect(c.onlineSessionExpired, isTrue);
+    expect(scope.inactiveCalls, 0); // the local data stays open
+    expect(notified, 1);
+
+    auth.emit(const AuthSignal(AuthSignalKind.refreshDeferred, 'u1'));
+    await pumpEventQueue();
+    expect(notified, 1); // nothing changed: no extra rebuild
+    c.dispose();
+  });
+
+  test('the stored session turns out absent: the user is torn down and lands on sign-in', () async {
+    final auth = _OfflineAuth();
+    final scope = _Scope();
+    final c = _make(auth, scope)..start();
+    await pumpEventQueue();
+    expect(c.phase, AuthPhase.authenticated);
+
+    auth.emit(const AuthSignal(AuthSignalKind.initialSessionAbsent, null));
+    await pumpEventQueue();
+    expect(c.phase, AuthPhase.signedOut);
+    expect(scope.inactiveCalls, 1);
+    c.dispose();
+  });
+}
+

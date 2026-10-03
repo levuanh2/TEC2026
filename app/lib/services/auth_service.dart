@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show SocketException;
 
+import 'package:flutter/foundation.dart' show protected;
 import 'package:http/http.dart' as http show BaseClient, BaseRequest, Client, StreamedResponse;
 import 'package:http/http.dart' show ClientException;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -110,6 +111,13 @@ class AuthSignal {
 /// (AppConfig.supabasePublishableKey). RLS vẫn là ranh giới quyền thật, giống
 /// hệt web-dashboard/src/utils/supabase.ts.
 class AuthService {
+  AuthService({PasswordChangeApi Function(String? Function() token)? passwordChangeApi})
+      : _passwordChangeApi = passwordChangeApi ?? ((token) => PasswordChangeApi(token));
+
+  final PasswordChangeApi Function(String? Function() token) _passwordChangeApi;
+
+  static const _changedSignInAgain = 'Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.';
+
   /// Chỉ gọi khi [AppConfig.canInitSupabase] = true (URL + key không rỗng).
   static Future<void> init() => Supabase.initialize(
         url: AppConfig.supabaseUrl,
@@ -150,11 +158,17 @@ class AuthService {
     required String next,
   }) async {
     final email = currentSession?.user.email;
-    await PasswordChangeApi(() => accessToken).replace(current: current, next: next);
+    await _passwordChangeApi(() => accessToken).replace(current: current, next: next);
+    // Từ đây mật khẩu ĐÃ đổi. Đăng nhập lại hỏng (vd. mất mạng) không được hiện
+    // như "chưa đổi được": nông hộ thử lại bằng mật khẩu tạm sẽ bị từ chối.
     if (email == null) {
-      throw PasswordChangeException(401, 'unauthenticated', 'Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.');
+      throw PasswordChangeException(401, 'password_changed_sign_in_again', _changedSignInAgain);
     }
-    await client.auth.signInWithPassword(email: email, password: next);
+    try {
+      await signIn(email: email, password: next);
+    } catch (_) {
+      throw PasswordChangeException(0, 'password_changed_sign_in_again', _changedSignInAgain);
+    }
   }
 
   /// Access token đã hết hạn và chưa làm mới được (vd. đang offline). Dữ liệu
@@ -182,10 +196,14 @@ class AuthService {
     );
   }
 
+  /// Nguồn sự kiện phiên của gotrue (tách ra để test thay được nguồn).
+  @protected
+  Stream<AuthState> get authStateChanges => client.auth.onAuthStateChange;
+
   /// Stream tín hiệu phiên đã làm phẳng. Bọc `onAuthStateChange` của gotrue.
   /// Làm mới hỏng vì mạng (gotrue đẩy thành LỖI trên stream) được đổi thành
   /// tín hiệu [AuthSignalKind.refreshDeferred]; lỗi khác vẫn là lỗi.
-  Stream<AuthSignal> get signals => client.auth.onAuthStateChange
+  Stream<AuthSignal> get signals => authStateChanges
       .map(_toSignal)
       .transform(StreamTransformer.fromHandlers(
         handleError: (error, stack, sink) {

@@ -468,6 +468,11 @@ void main() {
 
   group('SecureSessionStorage', () {
     const key = 'sb-proj-auth-token';
+    test('the key is the supabase_flutter 2.x default, so the legacy session is found', () {
+      // supabase_flutter: "sb-${Uri.parse(url).host.split(".").first}-auth-token"
+      expect(SecureSessionStorage.defaultKeyFor('https://awazhdq.supabase.co'), 'sb-awazhdq-auth-token');
+      expect(SecureSessionStorage.defaultKeyFor('http://127.0.0.1:54321'), 'sb-127-auth-token');
+    });
     test('phiên cũ ở SharedPreferences được chuyển sang kho bảo mật rồi xoá',
         () async {
       SharedPreferences.setMockInitialValues({key: '{"legacy":1}'});

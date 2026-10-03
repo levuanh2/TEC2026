@@ -169,6 +169,39 @@ void main() {
       expect(find.byType(ForcedPasswordChangeScreen), findsOneWidget);
     });
 
+    testWidgets('an unexpected failure shows a generic retry message, never the exception', (t) async {
+      await pump(t, (c, n) async => throw StateError('socket closed at 0x1f'));
+      await fill(t, 'Temp-Pass-1', 'Own-Pass-22');
+      await t.pump();
+      expect(find.text('Chưa đổi được mật khẩu. Vui lòng thử lại.'), findsOneWidget);
+      expect(find.textContaining('socket'), findsNothing);
+    });
+
+    testWidgets('changed but not signed in again: says so, so the farmer does not retry the temporary password',
+        (t) async {
+      await pump(t, (c, n) async => throw PasswordChangeException(
+          0, 'password_changed_sign_in_again', 'Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.'));
+      await fill(t, 'Temp-Pass-1', 'Own-Pass-22');
+      await t.pump();
+      expect(find.text('Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.'), findsOneWidget);
+    });
+
+    testWidgets('the keyboard "done" on the last field submits; the eye toggles visibility', (t) async {
+      final calls = <List<String>>[];
+      await pump(t, (c, n) async => calls.add([c, n]));
+      await t.enterText(find.byKey(const Key('forced-current')), 'Temp-Pass-1');
+      await t.enterText(find.byKey(const Key('forced-next')), 'Own-Pass-22');
+      await t.enterText(find.byKey(const Key('forced-confirm')), 'Own-Pass-22');
+      expect(find.byTooltip('Hiện mật khẩu'), findsOneWidget);
+      await t.tap(find.byTooltip('Hiện mật khẩu'));
+      await t.pump();
+      expect(find.byTooltip('Ẩn mật khẩu'), findsOneWidget);
+      await t.showKeyboard(find.byKey(const Key('forced-confirm')));
+      await t.testTextInput.receiveAction(TextInputAction.done);
+      await t.pump();
+      expect(calls, [['Temp-Pass-1', 'Own-Pass-22']]);
+    });
+
     testWidgets('sign-out is the only other way out', (t) async {
       var out = 0;
       await pump(t, (c, n) async {}, signOut: () async => out++);
