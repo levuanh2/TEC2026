@@ -1,6 +1,7 @@
 import '../db/local_database.dart';
 import '../models/activity.dart';
 import '../models/activity_field_spec.dart';
+import '../models/activity_validation.dart' show harvestAreaError;
 import '../models/farm.dart';
 import 'device_service.dart';
 import 'sync_errors.dart';
@@ -29,12 +30,19 @@ const _kDetailTableFor = <String, String>{
 /// Mọi thao tác mạng đi qua [SyncGateway] — test bơm bản giả, không cần Supabase.
 class SyncService {
   SyncService(this._gateway, this._db, this._devices,
-      {Future<void> Function()? onSynced})
-      : _onSynced = onSynced;
+      {Future<void> Function()? onSynced, bool Function()? isOnline})
+      : _onSynced = onSynced,
+        _isOnline = isOnline;
   final SyncGateway _gateway;
   final LocalDatabase _db;
   final DeviceService _devices;
   final Future<void> Function()? _onSynced;
+
+  /// Trạng thái mạng của máy. Khi offline, việc kéo danh mục từ máy chủ bị bỏ
+  /// qua ngay: với phiên đã hết hạn, mỗi lời gọi Supabase sẽ thử làm mới phiên
+  /// (gotrue tự thử lại tới ~10 s) trước khi hỏng — màn "Hộ / Trang trại" từng
+  /// chờ ~51 s mới hiện dữ liệu trên máy (Round 5.1, điện thoại thật).
+  final bool Function()? _isOnline;
 
   final _batchCache =
       <String, String>{}; // cropSeason server id -> batch server id
@@ -155,6 +163,24 @@ class SyncService {
       if (seasonServerId == null) {
         summary.deferred++;
         continue; // vụ cha chưa có id thật trên server
+      }
+
+      // Diện tích thu hoạch > diện tích thửa: máy chủ sẽ từ chối (trigger DB),
+      // và bản ghi hoạt động đã gửi trước bảng chi tiết sẽ nằm lại thiếu chi
+      // tiết. Chặn ngay tại đây, không gọi mạng; đánh dấu lỗi vĩnh viễn để
+      // hàng đợi không tự thử lại — nông dân sửa bản ghi rồi mới gửi.
+      if (activity.type == 'harvest' && season != null) {
+        final plot = await _db.getPlotByClientId(season.plotClientId);
+        if (harvestAreaError(activity.payload['harvested_area_ha'], plot?.areaHa) != null) {
+          const kind = SyncErrorKind.harvestAreaExceedsPlot;
+          await _db.updateActivitySyncState(
+            activity.clientEventId,
+            state: SyncState.failed,
+            error: kind.name,
+          );
+          summary.record('Hoạt động ${activity.type}', kind);
+          continue;
+        }
       }
       try {
         await _db.updateActivitySyncState(activity.clientEventId,
@@ -281,6 +307,7 @@ class SyncService {
   /// hoặc bị thu hồi quyền phía server). Caller nên gọi
   /// `activeContext.revalidate()` sau đó để dọn lựa chọn đã mất.
   Future<void> pullFarmsPlotsSeasons() async {
+    if (_isOnline?.call() == false) throw const OfflineSkipped();
     final farms = await _gateway.fetchFarms();
     await _db.replaceFarms([for (final row in farms) Farm.fromServer(row)]);
 
@@ -300,6 +327,13 @@ class SyncService {
       {for (final row in seasons) row['id'] as String},
     );
   }
+}
+
+/// Không gọi máy chủ vì máy đang offline — người gọi hiện dữ liệu trên máy.
+class OfflineSkipped implements Exception {
+  const OfflineSkipped();
+  @override
+  String toString() => 'OfflineSkipped';
 }
 
 class SyncSummary {

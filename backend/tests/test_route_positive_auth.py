@@ -102,7 +102,19 @@ def _run(journey: Journey, fx: dict) -> None:
         "plot": {"plot_code": f"{tag}-PLOT", "name": f"{tag} plot", "area_ha": 1.0},
     }).json()
     fx["users"].append(prov["user_id"])
+    # Forced first login: the temporary password signs in, but every business
+    # route refuses until it is replaced; then a fresh token has normal access.
     journey.tokens["farmer"] = fx["sign_in"](fx["farmer_email"], prov["temporary_password"])
+    me = journey._send("farmer", "GET", "/v1/me")
+    assert me.status_code == 200 and me.json()["must_change_password"] is True, me.text[:300]
+    blocked = journey._send("farmer", "GET", "/v1/farms")
+    assert blocked.status_code == 403 and _code(blocked) == "password_change_required", blocked.text[:300]
+    new_password = f"Nw-{uuid.uuid4().hex}!9A"
+    changed = j("POST", "/v1/me/password",
+                json={"current_password": prov["temporary_password"], "new_password": new_password}).json()
+    assert changed == {"must_change_password": False}
+    journey.tokens["farmer"] = fx["sign_in"](fx["farmer_email"], new_password)
+    assert journey._send("farmer", "GET", "/v1/me").json()["must_change_password"] is False
     farm, plot = prov["farm_id"], prov["plot_id"]
     assert prov["user_id"] in j("GET", "/v1/organizations/{organization_id}/farmers", organization_id=org).text
     farm2 = j("POST", "/v1/organizations/{organization_id}/farms", organization_id=org, json={
@@ -146,6 +158,8 @@ def _run(journey: Journey, fx: dict) -> None:
     activity("harvest", "20", {"yield_kg": 6000})
     extra = activity("irrigation", "10", {"method": "continuous_flooding", "water_volume_m3": 10})
     assert extra in j("GET", "/v1/crop-seasons/{crop_season_id}/activities", crop_season_id=sid).text
+    summary = j("GET", "/v1/crop-seasons/{crop_season_id}/activity-summary", crop_season_id=sid).json()
+    assert summary["crop_season_id"] == sid and summary["total"] >= 1
     j("GET", "/v1/activities/{activity_id}", activity_id=extra)
     assert j("PATCH", "/v1/activities/{activity_id}", activity_id=extra, json={"note": f"{tag} edited"}).json()["note"] == f"{tag} edited"
     j("DELETE", "/v1/activities/{activity_id}", activity_id=extra)
@@ -158,6 +172,10 @@ def _run(journey: Journey, fx: dict) -> None:
     calc = j("POST", "/v1/carbon/calculate", json={"crop_season_id": sid}).json()
     assert calc["calculation_id"] and calc["co2e_total_kg"] is not None
     assert calc["calculation_id"] in j("GET", "/v1/crop-seasons/{crop_season_id}/carbon", crop_season_id=sid).text
+    listing = j("GET", "/v1/organizations/{organization_id}/plots-seasons", organization_id=org).json()["items"]
+    assert sid in [s["id"] for farm_item in listing for s in farm_item["crop_seasons"]]
+    status = j("GET", "/v1/organizations/{organization_id}/carbon-status", organization_id=org).json()["items"]
+    assert calc["calculation_id"] in [(i["actual"] or {}).get("calculation_id") for i in status if i["crop_season_id"] == sid]
 
     # -- recommendations (continuous flooding -> the AWD rule fires) ---------------
     recs = j("POST", "/v1/crop-seasons/{crop_season_id}/recommendations/generate", crop_season_id=sid).json()["items"]
@@ -183,6 +201,8 @@ def _run(journey: Journey, fx: dict) -> None:
     j("GET", "/v1/mrv/cases/{mrv_case_id}", mrv_case_id=case)
     for suffix in ("steps", "batches", "evidence"):
         j("GET", "/v1/mrv/cases/{mrv_case_id}/" + suffix, mrv_case_id=case)
+    grouped = j("GET", "/v1/organizations/{organization_id}/mrv-batches", organization_id=org).json()["items"]
+    assert batch in [b["production_batch_id"] for c in grouped if c["case_id"] == case for b in c["batches"]]
     export = j("POST", "/v1/mrv/cases/{mrv_case_id}/exports", mrv_case_id=case, json={"format": "json"}).json()
     export_id = export["export_id"]
     assert export_id in j("GET", "/v1/mrv/cases/{mrv_case_id}/exports", mrv_case_id=case).text

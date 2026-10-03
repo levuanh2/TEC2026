@@ -2,11 +2,74 @@ import { activities, cropSeasons } from '../mocks/data'
 import type { Activity, CropSeason } from '../types'
 import { ApiError, apiRequest } from './client'
 import { usingMockData } from './farms'
-const season = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, status: x.status, ipccWaterRegime: x.ipcc_water_regime ?? null, preSeasonWaterRegime: x.pre_season_water_regime ?? null, cultivationDays: x.cultivation_days ?? null })
+const season = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, expectedHarvestDate: x.expected_harvest_date ?? undefined, status: x.status, ipccWaterRegime: x.ipcc_water_regime ?? null, preSeasonWaterRegime: x.pre_season_water_regime ?? null, cultivationDays: x.cultivation_days ?? null })
 const activity = (x: any): Activity => ({ id: x.id, cropSeasonId: '', occurredAt: x.occurred_at, type: x.activity_type, detail: JSON.stringify(x.payload), recorder: x.recorded_by ?? '—', source: x.source })
 export async function getCropSeasons(id: string): Promise<CropSeason[]> { return usingMockData ? cropSeasons.filter((x) => x.plotId === id) : (await apiRequest<{ items: any[] }>(`/v1/plots/${id}/crop-seasons`)).items.map(season) }
 export async function getCropSeason(id: string): Promise<CropSeason | undefined> { return usingMockData ? cropSeasons.find((x) => x.id === id) : season(await apiRequest<any>(`/v1/crop-seasons/${id}`)) }
-export async function getActivities(id: string): Promise<Activity[]> { return usingMockData ? activities.filter((x) => x.cropSeasonId === id) : (await apiRequest<{ items: any[] }>(`/v1/crop-seasons/${id}/activities`)).items.map(activity) }
+/** Every activity of the season. The endpoint is paginated (default 20, max
+ * 100 per page, `has_more`); reading only the first page silently dropped
+ * everything past the newest 20 — found in Round 5.1 device UAT, where a season
+ * with 27 records showed 20 on both Farmer and Management. */
+/** The season's newest records only — one request of `limit` rows. The
+ * endpoint orders newest first (Round 5.1), so page 1 IS the recent records. */
+export async function getRecentActivities(id: string, limit: number): Promise<Activity[]> {
+  if (usingMockData) return activities.filter((x) => x.cropSeasonId === id).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, limit)
+  const body = await apiRequest<{ items: any[] }>(`/v1/crop-seasons/${id}/activities?page=1&page_size=${limit}`)
+  return body.items.map(activity)
+}
+
+/** Whole-season journal facts computed by the server from every record, so
+ * Home needs no full activity list (Round 5.1). */
+export interface ActivitySummary {
+  total: number
+  countByType: Record<string, number>
+  costByType: Record<string, { records: number; withCost: number; recordedVnd: number }>
+  harvests: number
+  harvestsWithArea: number
+  harvestedAreaHa: number
+  fertilizerHasNutrient: boolean
+  firstSeedingAt: string | null
+  lastHarvestAt: string | null
+}
+export async function getActivitySummary(id: string): Promise<ActivitySummary> {
+  if (usingMockData) return summarize(activities.filter((x) => x.cropSeasonId === id))
+  const x = await apiRequest<any>(`/v1/crop-seasons/${id}/activity-summary`)
+  return {
+    total: x.total, countByType: x.count_by_type ?? {},
+    costByType: Object.fromEntries(Object.entries(x.cost_by_type ?? {}).map(([k, v]: [string, any]) => [k, { records: v.records, withCost: v.with_cost, recordedVnd: Number(v.recorded_vnd) }])),
+    harvests: x.harvests, harvestsWithArea: x.harvests_with_area, harvestedAreaHa: Number(x.harvested_area_ha),
+    fertilizerHasNutrient: Boolean(x.fertilizer_has_nutrient),
+    firstSeedingAt: x.first_seeding_at ?? null, lastHarvestAt: x.last_harvest_at ?? null,
+  }
+}
+/** Mock mode only: the same summary from a local list. */
+function summarize(list: Activity[]): ActivitySummary {
+  const countByType: Record<string, number> = {}
+  for (const a of list) countByType[a.type] = (countByType[a.type] ?? 0) + 1
+  const seeding = list.filter((a) => a.type === 'seeding').map((a) => a.occurredAt).sort()
+  const harvest = list.filter((a) => a.type === 'harvest').map((a) => a.occurredAt).sort()
+  return { total: list.length, countByType, costByType: {}, harvests: harvest.length, harvestsWithArea: 0, harvestedAreaHa: 0,
+    fertilizerHasNutrient: false, firstSeedingAt: seeding[0] ?? null, lastHarvestAt: harvest[harvest.length - 1] ?? null }
+}
+
+export const ACTIVITY_PAGE_SIZE = 100
+/** Upper bound on pages read for one season (5 000 records). Home and the
+ * season pages summarize the WHOLE season (record count, costs, harvested
+ * area, sowing/harvest dates), so they cannot stop at the newest records; the
+ * number of requests is ceil(records / 100) and never unbounded. Past the
+ * bound the read FAILS visibly instead of silently showing a partial season. */
+export const ACTIVITY_MAX_PAGES = 50
+export async function getActivities(id: string): Promise<Activity[]> {
+  if (usingMockData) return activities.filter((x) => x.cropSeasonId === id)
+  const items: any[] = []
+  for (let page = 1; ; page++) {
+    const body = await apiRequest<{ items: any[]; has_more?: boolean }>(`/v1/crop-seasons/${id}/activities?page=${page}&page_size=${ACTIVITY_PAGE_SIZE}`)
+    items.push(...body.items)
+    if (!body.has_more || !body.items.length) break
+    if (page >= ACTIVITY_MAX_PAGES) throw new Error(`Vụ này có hơn ${ACTIVITY_PAGE_SIZE * ACTIVITY_MAX_PAGES} bản ghi — không hiển thị một phần để tránh số liệu sai.`)
+  }
+  return items.map(activity)
+}
 
 /**
  * Record the season's IPCC methodology inputs.

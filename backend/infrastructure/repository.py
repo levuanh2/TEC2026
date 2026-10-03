@@ -40,6 +40,8 @@ class CarbonRepository(Protocol):
 
     def factor_ids_by_code(self, factor_set_id: str) -> dict[str, str]: ...
 
+    def factor_set_version(self, factor_set_id: str) -> str | None: ...
+
     def save_calculation(
         self, calculation: dict[str, Any], breakdowns: list[dict[str, Any]]
     ) -> str: ...
@@ -81,6 +83,9 @@ class InMemoryCarbonRepository:
 
     def factor_ids_by_code(self, factor_set_id: str) -> dict[str, str]:
         return self.factors.get(factor_set_id, {})
+
+    def factor_set_version(self, factor_set_id: str) -> str | None:
+        return next((code for code, sid in self.factor_sets.items() if sid == factor_set_id), None)
 
     def save_calculation(
         self, calculation: dict[str, Any], breakdowns: list[dict[str, Any]]

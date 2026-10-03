@@ -5,7 +5,7 @@ import {
   getOrganizationMetrics,
 } from '../api/organizations'
 import { listMrvCases, getMrvCase } from '../api/mrv'
-import { ha, kg, num, perKg } from '../format'
+import { ha, kg, num, perKg, vndPerKg } from '../format'
 import { mrvProgress } from '../utils/mrvPresentation'
 import { Async, EmptyState, Hero, Link, LoadingSkeleton, MetricCard, PageHead, Section, useAsync, type Tone } from '../ui'
 import { Ico, type IconName } from '../icons'
@@ -93,7 +93,7 @@ function DashboardBody({ organizationId }: { organizationId: string }) {
               <MetricCard name="Nước / kg" value={m.waterPerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.waterPerKg, '')} unit="m³/kg" context="Tổng m³ nước / tổng kg thóc" status={completenessTone(m.completeness.water)} />
               <MetricCard name="Phân bón / kg" value={m.fertilizerPerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.fertilizerPerKg, '')} unit="kg/kg" context="Tổng kg phân / tổng kg thóc" status={completenessTone(m.completeness.fertilizer)} />
               <MetricCard name="CO₂e / kg" value={m.co2ePerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.co2ePerKg, '')} unit="kg/kg" context={m.co2ePerKg == null ? 'Chưa có kết quả Carbon đã tính' : 'Theo các kết quả Carbon đã lưu'} />
-              <MetricCard name="Chi phí / kg" value={m.costPerKg == null ? 'Chưa đủ dữ liệu' : perKg(m.costPerKg, '')} unit="₫/kg" context="Tổng chi phí đầu vào / kg thóc" status={completenessTone(m.completeness.cost)} />
+              <MetricCard name="Chi phí / kg" value={m.costPerKg == null ? 'Chưa đủ dữ liệu' : vndPerKg(m.costPerKg)} unit="₫/kg" context="Tổng chi phí đầu vào / kg thóc" status={completenessTone(m.completeness.cost)} />
             </div>
           )}
         </Async>
@@ -172,8 +172,8 @@ function AttentionSection({ metrics, mrv, loading }: { metrics?: OrgMetrics; mrv
     if (metrics.co2ePerKg == null) {
       items.push({
         icon: 'carbon',
-        title: 'Chưa có kết quả CO₂e cấp vùng',
-        detail: 'Bộ hệ số phát thải (GWP theo QĐ 4801 / IPCC) chưa được xác minh, nên chưa có số phát thải nào được tính.',
+        title: 'Chưa công bố CO₂e/kg cấp HTX',
+        detail: 'Chỉ số toàn HTX chỉ công bố khi mọi vụ trong phạm vi có kết quả Carbon vận hành và sản lượng. Xem từng vụ ở mục Carbon.',
       })
     }
   }

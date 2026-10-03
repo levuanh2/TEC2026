@@ -142,9 +142,15 @@ export function SeasonMethodologyPanel({
     >
       <div className="stack">
         {missing.length > 0 ? (
-          <Notice kind="warning">
-            Chưa tính được carbon vì còn thiếu: <strong>{missing.join(' · ')}</strong>.
-            {canEdit ? ' Bổ sung bên dưới rồi bấm Lưu.' : ' Hãy liên hệ chủ hộ hoặc cán bộ hợp tác xã để bổ sung.'}
+          /* Only what the season record itself lacks. Whether Carbon can be
+           * calculated is the server's readiness answer shown with the result:
+           * an empty in-season regime is often inferred from the irrigation
+           * records, so "chưa tính được" here contradicted it (Round 5 UAT). */
+          <Notice kind="info">
+            Chưa khai báo trên vụ: <strong>{missing.join(' · ')}</strong>.
+            {!season.ipccWaterRegime && ' Nếu để trống, chế độ nước trong vụ có thể được suy ra từ nhật ký tưới.'}
+            {' '}Thông tin thật sự còn thiếu để tính Carbon được liệt kê ở phần trạng thái Carbon.
+            {canEdit ? ' Có thể khai báo bên dưới.' : ' Hãy liên hệ chủ hộ hoặc cán bộ hợp tác xã để khai báo.'}
           </Notice>
         ) : (
           <Notice kind="success">Đã đủ thông tin chế độ nước để tính phát thải.</Notice>

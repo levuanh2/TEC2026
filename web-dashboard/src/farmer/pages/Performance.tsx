@@ -1,5 +1,5 @@
 import type { SeasonMetrics } from '../../api/metrics'
-import { carbonView } from '../../carbon/readiness'
+import { carbonView, isResultStale } from '../../carbon/readiness'
 import type { Activity } from '../../types'
 import { Link } from '../../ui'
 import { useActivityMutations, type ActivityMutations, type SeasonContext } from '../ActivityForms'
@@ -51,7 +51,8 @@ export function MetricCards({ state, season, mutations, loading, ctx, activities
     fixable: view.userFixableGaps,
     limitations: view.methodologyLimitations,
     result,
-    stale: Boolean(result?.calculated_at && changedAt && changedAt > result.calculated_at),
+    // Same fingerprint rule as the Carbon screen: only a Carbon input change stales it.
+    stale: Boolean(result && isResultStale({ readiness: readiness.data, result, latestInputAt: changedAt })),
     fixTo: carbonTo,
   }
   const y = yieldContext(m, facts)

@@ -1,9 +1,11 @@
 import type { CarbonMissingInput, CarbonResult } from '../api/carbon'
 import type { SeasonMetrics } from '../api/metrics'
 import { perKg as perKgText } from '../format'
+import type { ActivitySummary } from '../api/crops'
 import type { Activity } from '../types'
 import { fmtNumber, toNumber, type QuickType } from './activityView'
 import type { IconName } from './icons'
+import { carbonSourceLabel } from '../carbon/presentation'
 
 /* View model for the season's metrics (Round 4.3).
  *
@@ -179,6 +181,35 @@ export function seasonFacts(activities: Pick<Activity, 'type' | 'detail'>[] | nu
   }
 }
 
+/** `seasonFacts` from the server's whole-season summary instead of the full
+ * list (Round 5.1): the same rules — cost per type, harvested area only when
+ * every harvest carries one — applied by the server to every record. */
+export function seasonFactsFromSummary(
+  summary: Pick<ActivitySummary, 'countByType' | 'costByType' | 'harvests' | 'harvestsWithArea' | 'harvestedAreaHa' | 'fertilizerHasNutrient'> | null | undefined,
+  plotAreaHa?: number | null,
+): SeasonFacts {
+  if (!summary) return seasonFacts(null, plotAreaHa)
+  const costCategories = COST_ORDER.filter((t) => summary.costByType[t]).map((t) => ({
+    type: t, label: COST_LABEL[t] ?? t, records: summary.costByType[t].records,
+    withCost: summary.costByType[t].withCost, recordedVnd: summary.costByType[t].recordedVnd,
+  }))
+  const harvestedAreaHa = summary.harvests > 0 && summary.harvestsWithArea === summary.harvests ? summary.harvestedAreaHa : null
+  const plot = plotAreaHa != null && plotAreaHa > 0 ? plotAreaHa : null
+  return {
+    areaHa: harvestedAreaHa ?? plot,
+    areaSource: harvestedAreaHa != null ? 'harvested' : plot != null ? 'plot' : null,
+    plotAreaHa: plot,
+    harvestedAreaHa,
+    irrigationRecords: summary.countByType.irrigation ?? 0,
+    fertilizerRecords: summary.countByType.fertilizer ?? 0,
+    fertilizerHasNutrient: summary.fertilizerHasNutrient,
+    costCategories,
+    recordedCostVnd: costCategories.reduce((s, c) => s + c.recordedVnd, 0),
+    recordsWithCost: costCategories.reduce((s, c) => s + c.withCost, 0),
+    costableRecords: costCategories.reduce((s, c) => s + c.records, 0),
+  }
+}
+
 const areaWords = (f: SeasonFacts) => f.areaSource === 'harvested' ? 'diện tích thu hoạch đã ghi' : 'diện tích thửa'
 
 /* ------------------------------------------------------------ yield context */
@@ -218,14 +249,6 @@ export interface CarbonInputs {
   fixTo: string
 }
 
-export const SOURCE_LABEL: Record<string, string> = {
-  ch4_rice_cultivation: 'Khí mê-tan từ ruộng lúa',
-  ch4_straw_burning: 'Đốt rơm rạ (CH₄)',
-  n2o_straw_burning: 'Đốt rơm rạ (N₂O)',
-  n2o_fertilizer_direct: 'Phân đạm — phát thải trực tiếp',
-  n2o_fertilizer_indirect: 'Phân đạm — phát thải gián tiếp',
-  co2_fuel_combustion: 'Nhiên liệu máy móc',
-}
 
 const needYield = 'Thiếu sản lượng thóc: hãy ghi hoạt động Thu hoạch có số kg.'
 
@@ -358,7 +381,7 @@ function carbon(m: SeasonMetrics, c: CarbonInputs | null): MetricDetail {
     primary, secondary,
     meaning: 'Lượng khí nhà kính ước tính cho cả vụ, quy về CO₂ tương đương.',
     basis: primary
-      ? [top ? `Nguồn đóng góp nhiều nhất: ${SOURCE_LABEL[top.source] ?? 'Nguồn khác'}.` : null,
+      ? [top ? `Nguồn đóng góp nhiều nhất: ${carbonSourceLabel(top)}.` : null,
         r?.calculated_at ? `Tính lúc ${new Date(r.calculated_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.` : null]
         .filter(Boolean).join(' ') || null
       : null,

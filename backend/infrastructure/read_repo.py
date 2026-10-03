@@ -6,6 +6,8 @@ service-role key and never accepts a user id supplied by the frontend.
 """
 from __future__ import annotations
 
+import math
+
 import contextvars
 import time
 from collections import defaultdict
@@ -13,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from . import auth, memberships, profiling, supabase_clients
+from .auth_admin import must_change_password
 from .config import Settings
 
 DETAIL_TABLES = {
@@ -25,6 +28,25 @@ DETAIL_TABLES = {
 # MVP cost means directly recorded activity/input cost.  Labor and contract
 # machinery do not have separate fields in the current contract, so they are
 # never inferred here.
+# Fertilizer records that carry an N/P/K share (same keys as the web's seasonFacts).
+_NUTRIENT_FIELDS = ("nitrogen_percent", "phosphorus_percent", "potassium_percent", "n_percent")
+
+
+def _as_number(value: Any) -> float | None:
+    """The web's `toNumber`: a finite number, or a non-blank numeric string; else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
+        return parsed if math.isfinite(parsed) else None
+    return None
+
+
 _COST_FIELD_BY_ACTIVITY = {
     "seeding": "cost_vnd",
     "fertilizer": "total_cost_vnd",
@@ -45,6 +67,15 @@ except Exception:  # noqa: BLE001 - absence just disables the retry below
 # not enough to paper over Supabase actually being down.
 _READ_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 0.15
+# Round 5.1: right after sign-in, hosted PostgREST can reject a brand-new JWT
+# with PGRST303 "JWT issued at future" (its clock trails Auth's by < 1 s). The
+# token becomes valid a moment later, so this one rejection is retried once
+# after a short wait instead of surfacing as a 500 (without CORS headers).
+_CLOCK_SKEW_WAIT_SECONDS = 1.0
+
+
+def _is_clock_skew(exc: BaseException) -> bool:
+    return getattr(exc, "code", None) == "PGRST303" and "future" in str(getattr(exc, "message", exc)).lower()
 
 
 class ReadNotFoundError(Exception): pass
@@ -83,16 +114,21 @@ class SupabaseReadRepository:
         # every attempt, so it must leave this loop as `InvalidTokenError` (-> 401)
         # instead of escaping raw and becoming a 500.
         with auth.jwt_rejection_as_invalid_token():
-            for remaining in range(_READ_ATTEMPTS - 1, -1, -1):
+            transport_retries, skew_retried = _READ_ATTEMPTS - 1, False
+            while True:
                 failed = self.client
                 try:
                     return attempt()
-                except _TRANSPORT_ERRORS:
-                    if not self._pooled or remaining == 0:
+                except Exception as exc:  # noqa: BLE001 - re-raised unless it is one of the two retryable cases
+                    if _is_clock_skew(exc) and not skew_retried:
+                        skew_retried = True
+                        time.sleep(_CLOCK_SKEW_WAIT_SECONDS)
+                        continue
+                    if not isinstance(exc, _TRANSPORT_ERRORS) or not self._pooled or transport_retries == 0:
                         raise
+                    transport_retries -= 1
                     time.sleep(_RETRY_BACKOFF_SECONDS)
                     self.client = supabase_clients.renew(self._settings, self.token, failed)
-        raise AssertionError("unreachable")  # pragma: no cover
 
     def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
         with profiling.observe(label):
@@ -148,14 +184,18 @@ class SupabaseReadRepository:
             futures = [pool.submit(contextvars.copy_context().run, t) for t in thunks]
             return tuple(f.result() for f in futures)
 
-    def user_id(self) -> str:
+    def _auth_user(self) -> Any:
         with profiling.observe("auth get_user"):
             user = self._retrying(lambda: self.client.auth.get_user(self.token).user)
         if user is None: raise ReadNotFoundError("user")
-        return str(user.id)
+        return user
+
+    def user_id(self) -> str:
+        return str(self._auth_user().id)
 
     def me(self) -> dict[str, Any]:
-        user_id = self.user_id()
+        user = self._auth_user()
+        user_id = str(user.id)
         # profile/orgs/farms are 3 independent filters on user_id — nothing
         # here depends on another's result, so they run concurrently instead
         # of as 3 sequential round trips.
@@ -170,7 +210,8 @@ class SupabaseReadRepository:
         # gates, web role routing, the MRV management check) must see exactly the
         # memberships the SQL helpers treat as active.
         orgs = memberships.active_memberships(orgs)
-        return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms})}
+        return {"user_id": user_id, "full_name": profile.get("full_name"), "organization_memberships": orgs, "farm_memberships": farms, "roles": sorted({str(x["role"]) for x in orgs} | {str(x["farm_role"]) for x in farms}),
+                "must_change_password": must_change_password(getattr(user, "app_metadata", None))}
 
     @staticmethod
     def _farm_view(row: dict[str, Any], plot_count: int) -> dict[str, Any]:
@@ -289,7 +330,59 @@ class SupabaseReadRepository:
             lambda: self._many("profiles"),
         )
         users = {str(x["id"]): x.get("full_name") for x in users_rows}
-        return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in rows]
+        # Newest first, deterministically (Round 5.1): pages of the paginated
+        # endpoint are stable, and page 1 is the season's most recent records.
+        ordered = sorted(rows, key=lambda x: (str(x.get("occurred_at") or ""), str(x.get("recorded_at") or ""),
+                                              str(x["id"])), reverse=True)
+        return [self._activity_view(x, details.get(str(x["id"]), {}), users) for x in ordered]
+
+    def activity_summary(self, season_id: str) -> dict[str, Any]:
+        """Whole-season facts of the journal, so Home can load only recent records.
+
+        Exactly what the web's `seasonFacts` and season-date helpers derive from
+        the full activity list (same rows as `activities`, same cost fields,
+        same number parsing), plus the record count.
+        """
+        items = self.activities(season_id)
+        by_type: dict[str, dict[str, Any]] = {}
+        harvests = harvests_with_area = 0
+        harvested_area = 0.0
+        fertilizer_has_nutrient = False
+        first_seeding: str | None = None
+        last_harvest: str | None = None
+        for a in items:
+            kind, payload, at = str(a["activity_type"]), a.get("payload") or {}, a.get("occurred_at")
+            at_text = str(at) if at else None
+            if kind == "harvest":
+                harvests += 1
+                area = _as_number(payload.get("harvested_area_ha"))
+                if area is not None and area > 0:
+                    harvested_area += area
+                    harvests_with_area += 1
+                if at_text and (last_harvest is None or at_text > last_harvest):
+                    last_harvest = at_text
+            if kind == "seeding" and at_text and (first_seeding is None or at_text < first_seeding):
+                first_seeding = at_text
+            if kind == "fertilizer" and any(_as_number(payload.get(k)) is not None for k in _NUTRIENT_FIELDS):
+                fertilizer_has_nutrient = True
+            field = _COST_FIELD_BY_ACTIVITY.get(kind)
+            if field is None:
+                continue
+            entry = by_type.setdefault(kind, {"records": 0, "with_cost": 0, "recorded_vnd": 0.0})
+            entry["records"] += 1
+            cost = _as_number(payload.get(field))
+            if cost is not None:
+                entry["with_cost"] += 1
+                entry["recorded_vnd"] += cost
+        counts: dict[str, int] = {}
+        for a in items:
+            counts[str(a["activity_type"])] = counts.get(str(a["activity_type"]), 0) + 1
+        return {
+            "crop_season_id": season_id, "total": len(items), "count_by_type": counts,
+            "cost_by_type": by_type, "harvests": harvests, "harvests_with_area": harvests_with_area,
+            "harvested_area_ha": harvested_area, "fertilizer_has_nutrient": fertilizer_has_nutrient,
+            "first_seeding_at": first_seeding, "last_harvest_at": last_harvest,
+        }
 
     def _bulk_activities_by_season(self, season_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Same shape as calling `activities(season_id)` for each id, but a
@@ -377,7 +470,11 @@ class SupabaseReadRepository:
         """Pure aggregation over already-fetched rows — no DB access — shared
         by the single-season path above and `_bulk_metric_totals` (rollups).
         """
-        yield_kg = water_m3 = fertilizer_kg = total_cost = 0.0
+        # Quantities are collected and summed with math.fsum: the exact sum,
+        # independent of record order. The single-season path lists activities
+        # newest first and the bulk path in table order; a plain float sum gave
+        # them different last digits for the same season (F-METRICS-FSUM).
+        yields: list[float] = []; waters: list[float] = []; fertilizers: list[float] = []; costs: list[float] = []
         has_yield = has_cost = True
         # Seen at least one record / any record missing its value. Tracked
         # separately so the result cannot depend on which record comes last (B1):
@@ -387,18 +484,20 @@ class SupabaseReadRepository:
             payload = item["payload"]; kind = item["activity_type"]
             if kind == "harvest":
                 if payload.get("yield_kg") is None: has_yield = False
-                else: yield_kg += float(payload["yield_kg"])
+                else: yields.append(float(payload["yield_kg"]))
             if kind == "irrigation":
                 seen_water = True
                 if payload.get("water_volume_m3") is None: missing_water = True
-                else: water_m3 += float(payload["water_volume_m3"])
+                else: waters.append(float(payload["water_volume_m3"]))
             if kind == "fertilizer":
                 seen_fertilizer = True
                 if payload.get("amount_kg") is None: missing_fertilizer = True
-                else: fertilizer_kg += float(payload["amount_kg"])
+                else: fertilizers.append(float(payload["amount_kg"]))
             cost = SupabaseReadRepository._activity_cost_vnd(kind, payload)
             if cost is None: has_cost = False
-            else: total_cost += cost
+            else: costs.append(cost)
+        yield_kg, water_m3 = math.fsum(yields), math.fsum(waters)
+        fertilizer_kg, total_cost = math.fsum(fertilizers), math.fsum(costs)
         has_water = seen_water and not missing_water
         has_fertilizer = seen_fertilizer and not missing_fertilizer
         succeeded = [x for x in carbon if x.get("status") == "succeeded" and x.get("scenario") == "actual"]
@@ -474,6 +573,37 @@ class SupabaseReadRepository:
         """
         totals_by_season = self._bulk_metric_totals(season_ids)
         return self._aggregate_from_totals([totals_by_season[sid] for sid in season_ids])
+
+    def organization_plots_and_seasons(self, organization_id: str) -> list[dict[str, Any]]:
+        """Every farm of the organization with its plots and seasons, by RLS.
+
+        Round 5.1: Management read `/farms/{id}/plots` and `/farms/{id}/crop-seasons`
+        once PER FARM. This is the same rows through the same views
+        (`plot_view`, `season_view`) and the same caller-bound client, in a fixed
+        number of round trips: organization + farms, then all plots, then all
+        seasons. Raises `ReadNotFoundError` when the organization is not visible.
+        """
+        farms = self._organization_farms(organization_id)
+        plots, seasons = self._plots_and_seasons_for_farms(farms)
+        farm_of_plot = {str(p["id"]): str(p["farm_id"]) for p in plots}
+        out = []
+        for farm in farms:
+            fid = str(farm["id"])
+            out.append({
+                "farm_id": fid,
+                "plots": [self.plot_view(p) for p in plots if str(p["farm_id"]) == fid],
+                "crop_seasons": [self.season_view(s) for s in seasons if farm_of_plot.get(str(s["plot_id"])) == fid],
+            })
+        return out
+
+    def organization_season_ids(self, organization_id: str) -> list[str]:
+        """The organization's crop seasons this caller may read, by RLS.
+
+        Same scope as the per-season Carbon routes' access check: each id here
+        is one `crop_seasons` row the caller's JWT can select. Raises
+        `ReadNotFoundError` when the organization itself is not visible.
+        """
+        return self._season_ids_for_farms(self._organization_farms(organization_id))
 
     def organization_metrics(self, organization_id: str) -> dict[str, Any]:
         return self._aggregate_metrics(self._season_ids_for_farms(self._organization_farms(organization_id)))
@@ -625,6 +755,44 @@ class SupabaseReadRepository:
                 "crop_season_id": season["id"], "farm_id": plot["farm_id"], "plot_id": plot["id"],
             })
         return items
+
+    def organization_mrv_batches(self, organization_id: str) -> list[dict[str, Any]]:
+        """Every MRV case of the organization with its batches, by RLS.
+
+        Round 5.1: Management read `/mrv/cases` (paginated: only the first 20
+        cases) and then `/mrv/cases/{id}/batches` once PER CASE, and each of those
+        read 3 rows per batch. This is the same rows through the same caller-bound
+        client in a fixed number of round trips: organization, cases, links,
+        batches, seasons, plots. A batch whose season/plot the caller cannot read
+        is left out (never guessed). Raises `ReadNotFoundError` when the
+        organization is not visible.
+        """
+        _, cases = self._concurrent(
+            lambda: self._one("organizations", organization_id),
+            lambda: self._many("mrv_cases", organization_id=organization_id),
+        )
+        links = self._many_in("mrv_case_batches", "mrv_case_id", [str(c["id"]) for c in cases])
+        batches = {str(b["id"]): b for b in self._many_in(
+            "production_batches", "id", sorted({str(link["production_batch_id"]) for link in links}))}
+        seasons = {str(s["id"]): s for s in self._many_in(
+            "crop_seasons", "id", sorted({str(b["crop_season_id"]) for b in batches.values()}))}
+        plots = {str(p["id"]): p for p in self._many_in(
+            "plots", "id", sorted({str(s["plot_id"]) for s in seasons.values()}))}
+        by_case: dict[str, list[dict[str, Any]]] = {str(c["id"]): [] for c in cases}
+        for link in links:
+            batch = batches.get(str(link["production_batch_id"]))
+            season = seasons.get(str(batch["crop_season_id"])) if batch else None
+            plot = plots.get(str(season["plot_id"])) if season else None
+            if plot is None:
+                continue
+            by_case[str(link["mrv_case_id"])].append({
+                "production_batch_id": batch["id"], "batch_code": batch["batch_code"],
+                "crop_season_id": season["id"], "farm_id": plot["farm_id"], "plot_id": plot["id"],
+            })
+        return [
+            {"case_id": c["id"], "case_code": c["case_code"], "status": c["status"], "batches": by_case[str(c["id"])]}
+            for c in sorted(cases, key=lambda c: str(c.get("case_code") or ""))
+        ]
 
     def mrv_evidence(self, case_id: str) -> list[dict[str, Any]]:
         self._one("mrv_cases", case_id)

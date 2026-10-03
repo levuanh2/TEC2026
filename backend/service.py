@@ -6,6 +6,7 @@ repository không biết Carbon Engine.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import logging
@@ -17,18 +18,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from carbon import CarbonResult, ParameterSet, calculate_carbon
+from carbon import CarbonResult, ParameterSet, calculate_carbon, compute_input_hash
 from carbon.errors import CarbonEngineError
 from carbon.readiness import mapping_refused, readiness as carbon_readiness
-from infrastructure import memberships
+from infrastructure import memberships, profiling
 from infrastructure.mapping import (
     breakdown_rows,
     calculation_row,
     map_crop_activity_data,
+    stored_calculation_view,
     record_refs,
 )
 from infrastructure.repository import CarbonRepository
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
+from infrastructure.crop_write_authz import CropWriteDeniedError
 from infrastructure.cv_repo import CvNotFoundError, DuplicateImageError, PostgresCvRepository
 from infrastructure.recommendation_repo import PostgresRecommendationRepository, RecommendationNotFoundError
 from infrastructure.mrv_export_repo import (
@@ -101,39 +104,67 @@ class CarbonService:
     def parameters(self) -> ParameterSet:
         return self._params
 
+    def session(self):
+        """The repository's one-connection block, when it has one (Round 5.1)."""
+        session = getattr(self._repo, "session", None)
+        return session() if session is not None else contextlib.nullcontext()
+
     def calculate(
         self, crop_season_id: str, scenario: str = "as_recorded", *, persist: bool = True,
-        prepare: Callable[[CarbonResult], Any] | None = None,
+        prepare: Callable[[CarbonResult], Any] | None = None, caller: str | None = None,
     ) -> CalculationOutcome:
-        bundle = self._repo.get_crop_bundle(crop_season_id)
-        activity_data = map_crop_activity_data(bundle)
+        # A repository that can keep one connection for the read-then-write
+        # does (Round 5.1); others behave exactly as before.
+        session = getattr(self._repo, "session", None)
+        with session() if session is not None else contextlib.nullcontext():
+            return self._calculate(crop_season_id, scenario, persist=persist, prepare=prepare, caller=caller)
 
-        # Mọi lỗi phương pháp luận/thiếu hệ số nổ ra từ đây — fail closed, không nuốt.
-        result = calculate_carbon(activity_data, scenario, self._params)
+    def can_authorize_reads(self) -> bool:
+        """The repository can check the caller's read+write rules while it reads."""
+        return hasattr(self._repo, "get_crop_bundle_as")
+
+    def _calculate(
+        self, crop_season_id: str, scenario: str, *, persist: bool,
+        prepare: Callable[[CarbonResult], Any] | None, caller: str | None = None,
+    ) -> CalculationOutcome:
+        with profiling.phase("bundle read"):
+            # `caller` (a verified user id): the repository enforces the caller's
+            # read and write rules in the same round trip as the read, and
+            # raises CropAccessError when either refuses (Round 5.1).
+            bundle = (self._repo.get_crop_bundle_as(crop_season_id, caller) if caller is not None
+                      else self._repo.get_crop_bundle(crop_season_id))
+        with profiling.phase("engine"):
+            activity_data = map_crop_activity_data(bundle)
+
+            # Mọi lỗi phương pháp luận/thiếu hệ số nổ ra từ đây — fail closed, không nuốt.
+            result = calculate_carbon(activity_data, scenario, self._params)
 
         # The success representation is built before the first write: a result
         # the API cannot serialize must fail here, with nothing saved, rather
         # than after `save_calculation` has stored it (an HTTP 500 for a saved
         # calculation, which a retry would then silently reuse).
-        prepared = prepare(result) if prepare is not None else None
+        with profiling.phase("serialize"):
+            prepared = prepare(result) if prepare is not None else None
 
         if not persist:
             return CalculationOutcome(result=result, calculation_id=None, persisted=False, prepared=prepared)
 
-        factor_set_id = self._repo.resolve_factor_set_id(result.ef_config_version)
-        factor_ids = self._repo.factor_ids_by_code(factor_set_id)
+        with profiling.phase("factor lookup"):
+            factor_set_id = self._repo.resolve_factor_set_id(result.ef_config_version)
+            factor_ids = self._repo.factor_ids_by_code(factor_set_id)
 
-        calculation_id = self._repo.save_calculation(
-            calculation_row(
-                result,
-                crop_season_id=crop_season_id,
-                factor_set_id=factor_set_id,
-                area_ha=activity_data.area_ha,
-                cultivation_days=activity_data.recorded_cultivation_days,
-                pre_season_water_regime=activity_data.pre_season_water_regime,
-            ),
-            breakdown_rows(result, factor_ids),
-        )
+        with profiling.phase("save result+breakdown"):
+            calculation_id = self._repo.save_calculation(
+                calculation_row(
+                    result,
+                    crop_season_id=crop_season_id,
+                    factor_set_id=factor_set_id,
+                    area_ha=activity_data.area_ha,
+                    cultivation_days=activity_data.recorded_cultivation_days,
+                    pre_season_water_regime=activity_data.pre_season_water_regime,
+                ),
+                breakdown_rows(result, factor_ids),
+            )
         return CalculationOutcome(
             result=result, calculation_id=calculation_id, persisted=True, prepared=prepared
         )
@@ -141,13 +172,35 @@ class CarbonService:
     def latest(self, crop_season_id: str, scenario: str | None = None) -> dict[str, Any] | None:
         return self._repo.latest_calculation(crop_season_id, scenario)
 
+    def stored(self, crop_season_id: str, scenario: str = "as_recorded") -> dict[str, Any] | None:
+        """Bản tính đã lưu gần nhất CỦA ĐÚNG KỊCH BẢN, theo từ vựng API.
+
+        Không bao giờ "bản mới nhất bất kỳ": một kịch bản mô phỏng tính sau không
+        được thay kết quả vận hành (`as_recorded`) của vụ.
+        """
+        return self._stored_view(self._repo.latest_calculation(crop_season_id, scenario))
+
+    def _stored_view(self, row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        factor_set_id = row.get("factor_set_id")
+        version = self._repo.factor_set_version(str(factor_set_id)) if factor_set_id else None
+        view = stored_calculation_view(row, ef_config_version=version)
+        # Phương pháp chỉ gắn khi bản tính dùng ĐÚNG bộ tham số engine đang chạy —
+        # không gán mô tả của bộ khác cho một kết quả cũ.
+        if version and version == self._params.version:
+            view["methodology"] = self._params.methodology.to_dict()
+        return view
+
     def readiness(self, crop_season_id: str) -> dict[str, Any]:
         """Which Carbon inputs the season still lacks, derived server-side.
 
         Built from the same `CropActivityData` the engine consumes, so a client
         can name the missing input without holding any methodology of its own.
         """
-        bundle = self._repo.get_crop_bundle(crop_season_id)
+        return self._readiness_of(self._repo.get_crop_bundle(crop_season_id))
+
+    def _readiness_of(self, bundle) -> dict[str, Any]:
         try:
             data = map_crop_activity_data(bundle)
         except CarbonEngineError as exc:
@@ -156,7 +209,77 @@ class CarbonService:
             # different fix, so name the one that actually applies.
             return mapping_refused(area_missing=bundle.plot.get("area_ha") is None, detail=str(exc))
         # Record identity rides alongside, so the client can open the exact record.
-        return carbon_readiness(data, record_refs(bundle))
+        body = carbon_readiness(data, record_refs(bundle))
+        # Fingerprint của kết quả vận hành nếu tính bây giờ: đúng `input_hash` mà
+        # engine sẽ ghi cho `as_recorded`. Chỉ Activity Data engine tiêu thụ đi vào
+        # hash (không có chi phí, ghi chú), nên client so khớp hash thay vì so thời
+        # điểm sửa bản ghi — sửa chi phí không còn làm kết quả "cần tính lại".
+        body["input_hash"] = compute_input_hash(data, "as_recorded", self._params)
+        body["ef_config_version"] = self._params.version
+        return body
+
+    def status_many(self, crop_season_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Readiness and the stored ACTUAL result of many seasons at once.
+
+        Per season this is exactly `readiness(id)` and `stored(id, "as_recorded")`
+        — the same helpers over the same rows — so a batch answer never
+        disagrees with the per-season endpoints. Callers must already have
+        established that the caller may read every id. A season that fails is
+        an exception in its own slot; the others are unaffected.
+        """
+        ids = list(dict.fromkeys(crop_season_ids))
+        many_bundles = getattr(self._repo, "get_crop_bundles", None)
+        many_latest = getattr(self._repo, "latest_calculations", None)
+        out: dict[str, dict[str, Any]] = {sid: {} for sid in ids}
+
+        def settle(sid: str, key: str, compute: Callable[[], Any]) -> None:
+            try:
+                out[sid][key] = compute()
+            except Exception as exc:  # noqa: BLE001 - reported per season by the route
+                out[sid][key] = exc
+
+        if many_bundles is not None:
+            try:
+                bundles: dict[str, Any] = many_bundles(ids)
+            except Exception as exc:  # noqa: BLE001
+                bundles = {sid: exc for sid in ids}
+        else:
+            bundles = {}
+            for sid in ids:
+                try:
+                    bundles[sid] = self._repo.get_crop_bundle(sid)
+                except Exception as exc:  # noqa: BLE001
+                    bundles[sid] = exc
+
+        def readiness_for(sid: str) -> dict[str, Any]:
+            bundle = bundles[sid]
+            if isinstance(bundle, Exception):
+                raise bundle
+            return self._readiness_of(bundle)
+
+        if many_latest is not None:
+            try:
+                rows: dict[str, Any] = many_latest(ids, "as_recorded")
+            except Exception as exc:  # noqa: BLE001
+                rows = {sid: exc for sid in ids}
+        else:
+            rows = {}
+            for sid in ids:
+                try:
+                    rows[sid] = self._repo.latest_calculation(sid, "as_recorded")
+                except Exception as exc:  # noqa: BLE001
+                    rows[sid] = exc
+
+        def actual_for(sid: str) -> dict[str, Any] | None:
+            row = rows.get(sid)
+            if isinstance(row, Exception):
+                raise row
+            return self._stored_view(row)
+
+        for sid in ids:
+            settle(sid, "readiness", lambda sid=sid: readiness_for(sid))
+            settle(sid, "actual", lambda sid=sid: actual_for(sid))
+        return out
 
 
 class ActivityWriteAccessError(Exception):
@@ -165,6 +288,17 @@ class ActivityWriteAccessError(Exception):
 
 class InvalidCropSeasonStateError(Exception):
     pass
+
+
+class HarvestAreaExceedsPlotError(Exception):
+    """A harvest claims more hectares than the season's plot has."""
+
+    def __init__(self, harvested_area_ha: float, plot_area_ha: float) -> None:
+        self.harvested_area_ha = harvested_area_ha
+        self.plot_area_ha = plot_area_ha
+        super().__init__(
+            f"Diện tích thu hoạch ({harvested_area_ha:g} ha) không được lớn hơn diện tích thửa ({plot_area_ha:g} ha)."
+        )
 
 
 class ActivityWriteService:
@@ -203,6 +337,30 @@ class ActivityWriteService:
         return str(batches[0]["id"])
 
     @staticmethod
+    def _assert_harvest_within_plot(
+        read_repository: SupabaseReadRepository, crop_season_id: str, activity_type: str, data: dict[str, Any],
+    ) -> None:
+        """`harvested_area_ha` may equal the plot area, never exceed it.
+
+        Enforced here, not only in the form: the API is the boundary every client
+        (Farmer Web, Flutter, scripts) goes through. A plot without a recorded
+        area applies no bound — nothing is guessed.
+        """
+        if activity_type != "harvest" or data.get("harvested_area_ha") is None:
+            return
+        try:
+            plot_id = read_repository.season(crop_season_id).get("plot_id")
+            plot = read_repository.plot(str(plot_id)) if plot_id else {}
+        except ReadNotFoundError as exc:
+            raise ActivityWriteAccessError() from exc
+        plot_area = plot.get("area_ha")
+        if plot_area is None:
+            return
+        harvested = float(data["harvested_area_ha"])
+        if harvested > float(plot_area) + 1e-9:
+            raise HarvestAreaExceedsPlotError(harvested, float(plot_area))
+
+    @staticmethod
     def _response(row: dict[str, Any], *, replay: bool = False) -> dict[str, Any]:
         return {
             "id": row["id"], "crop_season_id": row["crop_season_id"],
@@ -219,6 +377,7 @@ class ActivityWriteService:
         actor_id = self._actor_and_farmer_scope(read_repository)
         batch_id = self._write_batch(read_repository, crop_season_id)
         data = schemas.validate_activity_data(request.activity_type, request.data).model_dump()
+        self._assert_harvest_within_plot(read_repository, crop_season_id, request.activity_type, data)
         try:
             # The repository re-checks write permission (farm owner/editor or
             # cooperative manager) inside its transaction; a read-only farm
@@ -253,6 +412,9 @@ class ActivityWriteService:
             data = schemas.validate_activity_data(
                 existing["activity_type"], {**existing["data"], **request.data}
             ).model_dump()
+            self._assert_harvest_within_plot(
+                read_repository, str(existing["crop_season_id"]), existing["activity_type"], data,
+            )
         try:
             return self._write_repository.update(
                 activity_id=activity_id, actor_id=actor_id, occurred_at=request.occurred_at,
@@ -366,6 +528,60 @@ class ProvisioningFailedError(Exception):
     def __init__(self, *, compensated: bool):
         super().__init__("farmer provisioning failed")
         self.compensated = compensated
+
+
+# -- Forced first-login password change -------------------------------------
+
+class PasswordChangeUnauthenticatedError(Exception):
+    """The token does not belong to a live Auth user."""
+
+
+class CurrentPasswordIncorrectError(Exception):
+    pass
+
+
+class PasswordPolicyError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def password_problem(current: str, new: str) -> PasswordPolicyError | None:
+    """The same rule Farmer Web shows next to the field (ChangePassword.tsx),
+    enforced here because the browser check alone is not a rule."""
+    if len(new) < 8 or not any(c.islower() for c in new) or not any(c.isupper() for c in new)             or not any(c.isdigit() for c in new):
+        return PasswordPolicyError("password_too_weak", "Mật khẩu mới cần ít nhất 8 ký tự, có chữ hoa, chữ thường và số.")
+    if len(new.encode("utf-8")) > 72:  # bcrypt ignores the rest
+        return PasswordPolicyError("password_too_long", "Mật khẩu mới dài tối đa 72 byte.")
+    if new == current:
+        return PasswordPolicyError("password_unchanged", "Mật khẩu mới phải khác mật khẩu hiện tại.")
+    return None
+
+
+class PasswordChangeService:
+    """`POST /v1/me/password`: replace the password and clear
+    `app_metadata.must_change_password` -- the only way the flag is cleared.
+
+    The current password is checked with Supabase Auth first, so a stolen
+    session alone cannot take the account over; then ONE Auth Admin call sets
+    the new password and clears the flag. Works for any signed-in account (the
+    flag may already be false). Passwords are never logged or returned.
+    """
+
+    def __init__(self, auth_admin: SupabaseAuthAdmin):
+        self._auth = auth_admin
+
+    def change(self, token: str, current_password: str, new_password: str) -> dict[str, Any]:
+        identity = self._auth.identity(token)
+        if identity is None or not identity.email:
+            raise PasswordChangeUnauthenticatedError()
+        problem = password_problem(current_password, new_password)
+        if problem is not None:
+            raise problem
+        if not self._auth.password_is_current(identity.email, current_password):
+            raise CurrentPasswordIncorrectError()
+        self._auth.replace_temporary_password(identity.user_id, new_password)
+        return {"must_change_password": False}
 
 
 class ProvisioningService:
@@ -529,42 +745,51 @@ class RecommendationService:
         self._write_repository = write_repository
 
     @staticmethod
-    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> str:
+    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> dict[str, Any]:
         me = read_repository.me()
         if "farmer" not in me["roles"]:
             raise RecommendationAccessError()
-        return str(me["user_id"])
+        return me
 
     def generate(self, *, read_repository: SupabaseReadRepository, crop_season_id: str) -> list[dict[str, Any]]:
-        self._actor_and_farmer_scope(read_repository)
+        actor_id = str(self._actor_and_farmer_scope(read_repository)["user_id"])
         try:
             read_repository.season(crop_season_id)
+            # Persisting is a write: a viewer, a former member or a data-grant
+            # reader can read the season but gets the same 404 as an unknown id.
+            # Refused before the Carbon what-ifs run; re-checked in the save.
+            self._write_repository.assert_can_write(crop_season_id=crop_season_id, actor_id=actor_id)
             metrics = read_repository.metrics(crop_season_id)
-        except ReadNotFoundError as exc:
+        except (ReadNotFoundError, CropWriteDeniedError) as exc:
             raise RecommendationAccessError() from exc
 
         candidates = generate_recommendations(crop_season_id, carbon=self._carbon, metrics=metrics)
         # One transaction for the whole run: same rows as upserting each rule
         # then pruning, but a single DB connection and no window in which a
         # reader could see half of this run applied.
-        return self._write_repository.save_generated(
-            crop_season_id=crop_season_id, recs=candidates,
-            prepare=lambda rows: [schemas.success_payload(schemas.RecommendationResponse, row) for row in rows],
-        )
+        try:
+            return self._write_repository.save_generated(
+                crop_season_id=crop_season_id, recs=candidates, actor_id=actor_id,
+                prepare=lambda rows: [schemas.success_payload(schemas.RecommendationResponse, row) for row in rows],
+            )
+        except CropWriteDeniedError as exc:
+            raise RecommendationAccessError() from exc
 
     def set_status(
         self, *, read_repository: SupabaseReadRepository, recommendation_id: str, status: str,
     ) -> dict[str, Any]:
-        self._actor_and_farmer_scope(read_repository)
+        actor_id = str(self._actor_and_farmer_scope(read_repository)["user_id"])
         try:
             existing = self._write_repository.get(recommendation_id)
             read_repository.season(str(existing["crop_season_id"]))
-        except (ReadNotFoundError, RecommendationNotFoundError) as exc:
+            # Accept/dismiss is a write: the repository checks write authority
+            # on the row's own season inside the update's transaction.
+            return self._write_repository.set_status(
+                recommendation_id, status, actor_id=actor_id,
+                prepare=lambda row: schemas.success_payload(schemas.RecommendationResponse, row),
+            )
+        except (ReadNotFoundError, RecommendationNotFoundError, CropWriteDeniedError) as exc:
             raise RecommendationAccessError() from exc
-        return self._write_repository.set_status(
-            recommendation_id, status,
-            prepare=lambda row: schemas.success_payload(schemas.RecommendationResponse, row),
-        )
 
 
 class CvAccessError(Exception):
@@ -648,8 +873,19 @@ class CvService:
         return image, _ALLOWED_MIME_EXTENSIONS[content_type]
 
     def infer(self, *, read_repository: SupabaseReadRepository, crop_season_id: str, file_bytes: bytes, content_type: str) -> dict[str, Any]:
+        try:
+            return self._infer(read_repository=read_repository, crop_season_id=crop_season_id,
+                               file_bytes=file_bytes, content_type=content_type)
+        except CropWriteDeniedError as exc:  # lost write authority between the early check and a row write
+            raise CvAccessError() from exc
+
+    def _infer(self, *, read_repository: SupabaseReadRepository, crop_season_id: str, file_bytes: bytes, content_type: str) -> dict[str, Any]:
         actor_id = self._actor_and_farmer_scope(read_repository)
         farm_id = self._resolve_farm_id(read_repository, crop_season_id)
+        # An upload is a write (`plant_images_insert` needs user_can_write_crop):
+        # a viewer or a former member gets the read-refusal 404, before any
+        # byte reaches Storage. The row writes re-check in their transactions.
+        self._write_repository.assert_can_write(crop_season_id=crop_season_id, actor_id=actor_id)
         image, extension = self._decode_and_validate(file_bytes, content_type)
         sha256 = hashlib.sha256(file_bytes).hexdigest()
         model_version_id = self._model_version_id_cached()
@@ -695,7 +931,7 @@ class CvService:
         # the API response maps it back to `label: null` below.
         predicted_label = predicted["label"] or "unknown"
         return self._write_repository.create_inference(
-            image_id=image_id, model_version_id=model_version_id,
+            image_id=image_id, model_version_id=model_version_id, actor_id=actor_id,
             predicted_label=predicted_label, confidence=predicted["confidence"], threshold_used=self._threshold,
             prepare=lambda row: schemas.success_payload(schemas.CvInferenceResponse, self._to_response(row)),
         )

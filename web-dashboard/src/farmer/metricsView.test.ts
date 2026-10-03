@@ -120,7 +120,7 @@ describe('Carbon, when calculated, reads in the agreed order', () => {
     }), 'carbon')
     expect(carbon.primary).toEqual({ value: '5,4', unit: 't CO₂e cả vụ' })
     expect(carbon.secondary[0]).toEqual({ value: '1,038', unit: 'kg CO₂e / kg lúa' })
-    expect(carbon.basis).toMatch(/^Nguồn đóng góp nhiều nhất: Khí mê-tan từ ruộng lúa\. Tính lúc /)
+    expect(carbon.basis).toMatch(/^Nguồn đóng góp nhiều nhất: Phát thải methane \(CH₄\) từ ruộng lúa và quản lý nước\. Tính lúc/)
     expect(carbon.status).toEqual({ ok: false, text: 'Cần tính lại — dữ liệu đã đổi sau lần tính' })
   })
 })

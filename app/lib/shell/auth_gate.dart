@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_services.dart';
 import '../design/design.dart';
+import '../screens/forced_password_change_screen.dart';
 import '../screens/login_screen.dart';
 import '../screens/reset_password_screen.dart';
 import 'auth_controller.dart';
@@ -24,6 +25,12 @@ class AuthGate extends StatelessWidget {
           case AuthPhase.restoringSession:
             return const _AuthSplash();
           case AuthPhase.authenticated:
+            if (auth.mustChangePassword) {
+              return ForcedPasswordChangeScreen(
+                onSubmit: auth.replaceTemporaryPassword,
+                onSignOut: auth.signOut,
+              );
+            }
             if (auth.isPasswordRecovery) {
               return ResetPasswordScreen(
                 onSubmit: auth.updatePassword,

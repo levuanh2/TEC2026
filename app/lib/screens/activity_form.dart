@@ -53,6 +53,9 @@ class _ActivityFormState extends State<ActivityForm> {
   bool _saving = false;
   CropSeason? _activeSeason;
 
+  /// Diện tích thửa của vụ — giới hạn trên của diện tích thu hoạch.
+  double? _plotAreaHa;
+
   List<ActivityFieldSpec> get _specs =>
       kActivityFieldSpecs[widget.activityType] ?? const [];
 
@@ -86,7 +89,13 @@ class _ActivityFormState extends State<ActivityForm> {
   Future<void> _loadSeason() async {
     final s =
         await widget.db.getCropSeasonByClientId(widget.cropSeasonClientId);
-    if (mounted) setState(() => _activeSeason = s);
+    final plot = s == null ? null : await widget.db.getPlotByClientId(s.plotClientId);
+    if (mounted) {
+      setState(() {
+        _activeSeason = s;
+        _plotAreaHa = plot?.areaHa;
+      });
+    }
   }
 
   @override
@@ -170,6 +179,7 @@ class _ActivityFormState extends State<ActivityForm> {
       parsed: parsed,
       occurredAt: _occurredAt,
       activeSeason: _activeSeason,
+      plotAreaHa: _plotAreaHa,
     );
     if (result.hasError) {
       setState(() {

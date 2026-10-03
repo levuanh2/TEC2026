@@ -544,7 +544,7 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 .carbon-hero__cell.is-primary .carbon-hero__value { color: var(--text-primary); }
 
 .share-row { display: grid; gap: 8px; }
-.share { display: grid; grid-template-columns: 160px minmax(0, 1fr) 96px; gap: 12px; align-items: center; font-size: var(--fs-sm); }
+.share { display: grid; grid-template-columns: minmax(160px, 300px) minmax(0, 1fr) 96px; gap: 12px; align-items: center; font-size: var(--fs-sm); }
 .share__track { height: 4px; border-radius: 0; background: var(--bg-subtle); overflow: hidden; }
 .share__fill { height: 100%; background: var(--accent); border-radius: 0; }
 .share__fill.gas-ch4 { background: var(--accent); }
@@ -632,7 +632,8 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
   .kpi-strip { border-bottom: 0; }
   .carbon-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .dl { grid-template-columns: minmax(0, 1fr); }
-  .share { grid-template-columns: 110px minmax(0, 1fr) 72px; }
+  .share { grid-template-columns: minmax(0, 1fr) auto; }
+  .share__track { grid-column: 1 / -1; grid-row: 2; }
   .page-head h1 { font-size: 22px; }
   .hero__stats { gap: 20px; }
 }
@@ -742,8 +743,10 @@ select.select:focus, input.search:focus { outline: none; border-bottom: 2px soli
 /* Phones: the table becomes ranked rows — every cell keeps its label, and no
  * column is dropped silently. */
 /* Tablet and phone: ranked rows, not a squeezed or sideways-scrolling table
- * (Round 4 found /seasons 99px wider than a 768px viewport). */
-@media (max-width: 900px) {
+ * (Round 4 found /seasons 99px wider than a 768px viewport). Round 5: at 1024
+ * (216px rail) /seasons needed 1041px in 758px and its row actions sat off
+ * screen, so the row layout starts at 1100px. */
+@media (max-width: 1100px) {
   .ops-table__wrap { border: 0; background: none; overflow: visible; }
   .ops-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .ops-table tbody tr { display: grid; gap: 4px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--ac-radius); background: var(--ac-elevated); }
@@ -876,7 +879,10 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
 
 /* Route-specific tables. Identity columns never wrap mid-code. */
 .ops-table .nowrap, .ops-table td b.nowrap { white-space: nowrap; }
-.ops-table td:nth-child(-n+3) small { white-space: nowrap; }
+/* Codes wrap only at their own hyphens (overflow-wrap stays normal: never
+ * mid-token). A real code such as UAT-R51-DEVICE-202609291548-PLOT kept on one
+ * line pushed /seasons 198px wider than 1363px (Round 5.1 real gate). */
+.ops-table td:nth-child(-n+3) small { white-space: normal; overflow-wrap: normal; }
 .ops-table th.num, .ops-table td.num { text-align: right; }
 .ops-table td.num small.unit { display: inline; color: var(--text-muted); margin: 0; }
 .ops-table td.ops-act { text-align: right; white-space: nowrap; width: 1%; }
@@ -894,7 +900,7 @@ select.select, input.search { min-height: var(--ac-control-h-sm); }
 .cell-note { color: var(--text-muted); font-size: var(--fs-caption); }
 .btn--sm { white-space: nowrap; }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .ops-table td.ops-act { display: flex; gap: 8px; width: auto; text-align: left; }
   .ops-table td.ops-act::before { content: none; }
   .ops-table td.ops-act .btn { margin: 0; }
@@ -1079,3 +1085,28 @@ aside.sidebar :where(a, button):focus-visible { outline: 2px solid var(--ac-side
 .acct-cred dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 .acct-cred code { font-size: 1.15em; letter-spacing: .04em; }
 @media (max-width: 560px) { .acct-cred div { grid-template-columns: minmax(0, 1fr); } }
+
+/* Round 5 — Carbon result kind, categories without a numeric line, warnings. */
+.carbon-kind { font-weight: 650; }
+.carbon-kind--sim { color: var(--text-muted, inherit); font-style: italic; }
+.carbon-notcounted { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 14px; }
+.carbon-notcounted ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.carbon-warnings { margin: 0 0 12px; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+
+/* Round 5 gate: at 1280px the ops tables still scroll sideways inside their
+ * wrapper and the row actions sat outside the viewport. Where the table is a
+ * table (above the 1100px row layout), the action column is pinned to the
+ * scroller's right edge, so the CTA is always visible. Identity codes keep
+ * their no-wrap rule. */
+/* Names are words, not identifiers: a real farm/plot/season name such as
+ * "Hộ UAT R5 09290717" may wrap between words so the table fits (Round 5 real
+ * data pushed /seasons to 1041px in 990px at 1280). Codes (the <small> under
+ * each name) still never break mid-token. */
+.ops-table--seasons td:nth-child(1) b, .ops-table--seasons td:nth-child(2) b,
+.ops-table td:nth-child(-n+3) b { white-space: normal; overflow-wrap: normal; }
+@media (min-width: 1101px) {
+  .ops-table th:last-child, .ops-table td.ops-act { position: sticky; right: 0; background: var(--ac-elevated); box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .12); }
+  .ops-table tbody tr:hover td.ops-act, .ops-table tbody tr:focus-within td.ops-act { background: var(--ac-subtle); }
+  .ops-table tbody tr[aria-selected="true"] td.ops-act { background: var(--ac-select); }
+}
+.segmented button { min-height: 40px; }

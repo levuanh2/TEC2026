@@ -1,0 +1,345 @@
+{
+  "_doc": "Mutation ratchet baseline (scripts/ci/mutation_ratchet.py, docs/MUTATION_BASELINE.md). Measured with mutmut 2.5.1 on commit a9a685b, test sets as in strict-ci.yml. Classes: B equivalent, C unreachable, D low value, E product/science decision (needs `decision`). A (real test gap) is never accepted.",
+  "modules": {
+    "carbon/engine.py": {
+      "module_sha256": "a9f72bd6ce331287028930f223308ec33da7455a8bc8192df3abeff7bd1366f4",
+      "total": 133,
+      "min_killed": 81,
+      "max_survived": 52,
+      "accepted_survivors": {
+        "4": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "5": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "6": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "7": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "9": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "10": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "11": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "12": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "13": {
+          "class": "B",
+          "reason": "CarbonResult field default replaced; calculate_carbon always passes every field"
+        },
+        "42": {
+          "class": "D",
+          "reason": "missing-nitrogen error message prose (the error type and code are pinned)"
+        },
+        "43": {
+          "class": "D",
+          "reason": "missing-nitrogen error message prose (the error type and code are pinned)"
+        },
+        "44": {
+          "class": "D",
+          "reason": "missing-nitrogen error message prose (the error type and code are pinned)"
+        },
+        "49": {
+          "class": "D",
+          "reason": "invalid-scenario error message prose / list separator"
+        },
+        "50": {
+          "class": "D",
+          "reason": "invalid-scenario error message prose / list separator"
+        },
+        "55": {
+          "class": "D",
+          "reason": "invalid water_regime error message prose / list separator"
+        },
+        "56": {
+          "class": "D",
+          "reason": "invalid water_regime error message prose / list separator"
+        },
+        "57": {
+          "class": "D",
+          "reason": "invalid water_regime error message prose / list separator"
+        },
+        "61": {
+          "class": "D",
+          "reason": "missing water_regime error message prose"
+        },
+        "62": {
+          "class": "D",
+          "reason": "missing water_regime error message prose"
+        },
+        "66": {
+          "class": "D",
+          "reason": "conflicting water regime error message prose / list separator"
+        },
+        "67": {
+          "class": "D",
+          "reason": "conflicting water regime error message prose / list separator"
+        },
+        "68": {
+          "class": "D",
+          "reason": "conflicting water regime error message prose / list separator"
+        },
+        "70": {
+          "class": "D",
+          "reason": "no water regime record error message prose"
+        },
+        "73": {
+          "class": "D",
+          "reason": "missing cultivation days error message prose"
+        },
+        "74": {
+          "class": "D",
+          "reason": "missing cultivation days error message prose"
+        },
+        "75": {
+          "class": "D",
+          "reason": "missing cultivation days error message prose"
+        },
+        "78": {
+          "class": "D",
+          "reason": "invalid cultivation days error message prose"
+        },
+        "80": {
+          "class": "D",
+          "reason": "co2e_per_kg unavailable reason prose (the None result is pinned)"
+        },
+        "83": {
+          "class": "D",
+          "reason": "invalid yield error message prose"
+        },
+        "84": {
+          "class": "D",
+          "reason": "invalid yield error message prose"
+        },
+        "90": {
+          "class": "B",
+          "reason": "origin.split(':', 1) -> split(':', 2) on 'straw:<method>'; straw methods are enum values without ':'"
+        },
+        "95": {
+          "class": "D",
+          "reason": "straw double-count error message prose / list separator"
+        },
+        "96": {
+          "class": "D",
+          "reason": "straw double-count error message prose / list separator"
+        },
+        "97": {
+          "class": "D",
+          "reason": "straw double-count error message prose / list separator"
+        },
+        "98": {
+          "class": "D",
+          "reason": "straw double-count error message prose / list separator"
+        },
+        "101": {
+          "class": "D",
+          "reason": "no straw record warning prose"
+        },
+        "102": {
+          "class": "D",
+          "reason": "no straw record warning prose"
+        },
+        "104": {
+          "class": "D",
+          "reason": "no fertilizer record warning prose"
+        },
+        "105": {
+          "class": "D",
+          "reason": "no fertilizer record warning prose"
+        },
+        "107": {
+          "class": "D",
+          "reason": "out-of-boundary (pesticide/seed upstream) warning prose"
+        },
+        "108": {
+          "class": "D",
+          "reason": "out-of-boundary (pesticide/seed upstream) warning prose"
+        },
+        "109": {
+          "class": "D",
+          "reason": "out-of-boundary (pesticide/seed upstream) warning prose"
+        },
+        "110": {
+          "class": "D",
+          "reason": "out-of-boundary (pesticide/seed upstream) warning prose"
+        },
+        "111": {
+          "class": "D",
+          "reason": "off-season CH4 warning prose"
+        },
+        "112": {
+          "class": "D",
+          "reason": "off-season CH4 warning prose"
+        },
+        "121": {
+          "class": "D",
+          "reason": "unverified-parameter list item formatting"
+        },
+        "124": {
+          "class": "D",
+          "reason": "unverified-parameter warning prose"
+        },
+        "126": {
+          "class": "D",
+          "reason": "unverified-parameter list separator"
+        },
+        "128": {
+          "class": "D",
+          "reason": "unverified-parameter warning prose"
+        },
+        "131": {
+          "class": "D",
+          "reason": "Tier 1 / not MRV-compliant warning prose"
+        },
+        "132": {
+          "class": "D",
+          "reason": "Tier 1 / not MRV-compliant warning prose"
+        },
+        "133": {
+          "class": "D",
+          "reason": "Tier 1 / not MRV-compliant warning prose"
+        }
+      }
+    },
+    "recommendation/rules.py": {
+      "module_sha256": "abe8abf168a496817e620f3a2b7d3391af5ed2a7906f3d1e8426d47e4a63c267",
+      "total": 97,
+      "min_killed": 71,
+      "max_survived": 26,
+      "accepted_survivors": {
+        "1": {
+          "class": "D",
+          "reason": "logger name text"
+        },
+        "3": {
+          "class": "B",
+          "reason": "default of the CarbonCalculator Protocol stub; the stub body is never executed"
+        },
+        "4": {
+          "class": "B",
+          "reason": "default of the CarbonCalculator Protocol stub; the stub body is never executed"
+        },
+        "6": {
+          "class": "B",
+          "reason": "GeneratedRecommendation.evidence default; both constructors always pass evidence"
+        },
+        "7": {
+          "class": "B",
+          "reason": "GeneratedRecommendation.input_hash default; both constructors always pass it"
+        },
+        "8": {
+          "class": "B",
+          "reason": "GeneratedRecommendation.input_hash default; both constructors always pass it"
+        },
+        "9": {
+          "class": "B",
+          "reason": "'str | None' -> 'str & None' in a lazily evaluated annotation (from __future__ import annotations)"
+        },
+        "10": {
+          "class": "B",
+          "reason": "GeneratedRecommendation.engine_version default; both constructors always pass it"
+        },
+        "17": {
+          "class": "D",
+          "reason": "AWD title prose (non-empty is pinned; exact Vietnamese wording is not)"
+        },
+        "19": {
+          "class": "D",
+          "reason": "AWD compared_to prose (non-empty is pinned)"
+        },
+        "24": {
+          "class": "D",
+          "reason": "log message text"
+        },
+        "26": {
+          "class": "D",
+          "reason": "AWD reason prose (non-empty is pinned)"
+        },
+        "27": {
+          "class": "D",
+          "reason": "AWD reason prose (non-empty is pinned)"
+        },
+        "28": {
+          "class": "D",
+          "reason": "AWD reason prose (non-empty is pinned)"
+        },
+        "34": {
+          "class": "D",
+          "reason": "log message text"
+        },
+        "35": {
+          "class": "D",
+          "reason": "generic 'try again later' prose for an infra failure (non-empty is pinned)"
+        },
+        "60": {
+          "class": "D",
+          "reason": "data-task impact_unavailable_reason prose (non-empty is pinned)"
+        },
+        "63": {
+          "class": "D",
+          "reason": "data-task title prose"
+        },
+        "64": {
+          "class": "D",
+          "reason": "data-task reason prose"
+        },
+        "65": {
+          "class": "D",
+          "reason": "data-task reason prose"
+        },
+        "67": {
+          "class": "D",
+          "reason": "data-task title prose"
+        },
+        "68": {
+          "class": "D",
+          "reason": "data-task reason prose"
+        },
+        "70": {
+          "class": "D",
+          "reason": "data-task title prose"
+        },
+        "71": {
+          "class": "D",
+          "reason": "data-task reason prose"
+        },
+        "73": {
+          "class": "D",
+          "reason": "data-task title prose"
+        },
+        "74": {
+          "class": "D",
+          "reason": "data-task reason prose"
+        }
+      }
+    },
+    "infrastructure/memberships.py": {
+      "module_sha256": "2ed6d028676c891a45b4f941aa770ee724e5ca804f62d2ee609dbef357d87e77",
+      "total": 13,
+      "min_killed": 12,
+      "max_survived": 1,
+      "accepted_survivors": {
+        "1": {
+          "class": "B",
+          "reason": "value.replace('Z','+00:00') -> 'XXZXX': Python 3.11 datetime.fromisoformat parses 'Z' itself (CI and Render pin 3.11.9)"
+        }
+      }
+    }
+  }
+}

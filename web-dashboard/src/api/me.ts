@@ -3,7 +3,7 @@ import type { Role } from '../types'
 
 interface Membership { organization_id?: string }
 interface FarmMembership { farm_id?: string; farm_role?: string }
-interface MeResponse { user_id?: string; full_name?: string | null; roles: string[]; organization_memberships: Membership[]; farm_memberships?: FarmMembership[] }
+interface MeResponse { user_id?: string; full_name?: string | null; roles: string[]; organization_memberships: Membership[]; farm_memberships?: FarmMembership[]; must_change_password?: boolean }
 
 // Canonical backend role names (`organization_role` enum). A user with none of
 // them falls back to the Farmer shell, whose data is still RLS-scoped and whose
@@ -14,7 +14,9 @@ const WRITE_FARM_ROLES = new Set(['owner', 'editor'])
 /** `writableFarmIds`: farms where the caller's `farm_role` allows journal
  *  writes (owner/editor). Only drives which write buttons the Farmer UI shows —
  *  FastAPI and RLS enforce the rule. Absent = not known yet. */
-export interface CurrentUser { role: Role; organizationId: string | null; fullName?: string | null; writableFarmIds?: string[] }
+export interface CurrentUser { role: Role; organizationId: string | null; fullName?: string | null; writableFarmIds?: string[]
+  /** Live server flag: the account still has its temporary password. */
+  mustChangePassword?: boolean }
 
 export function toCurrentUser(response: MeResponse): CurrentUser {
   const role = rolePriority.find((candidate) => response.roles.includes(candidate)) ?? 'farmer'
@@ -26,6 +28,8 @@ export function toCurrentUser(response: MeResponse): CurrentUser {
     organizationId: response.organization_memberships[0]?.organization_id ?? null,
     fullName: response.full_name ?? null,
     writableFarmIds,
+    // Present only when set, so every normal account keeps the same shape.
+    ...(response.must_change_password === true ? { mustChangePassword: true } : {}),
   }
 }
 

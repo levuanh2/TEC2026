@@ -40,6 +40,7 @@ from __future__ import annotations
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Iterator
 
 from . import profiling
@@ -53,6 +54,7 @@ TIMEOUT_SECONDS = 30.0
 
 _lock = threading.Lock()
 _pools: dict[str, Any] = {}
+_bound: ContextVar[dict[str, Any] | None] = ContextVar("agricarbon_pg_bound", default=None)
 
 
 def _pool_for(conninfo: str) -> Any | None:
@@ -95,6 +97,17 @@ def connection(conninfo: str) -> Iterator[Any]:
     statements: a slow acquire means the pool is saturated or still opening,
     which is a different problem from a slow query.
     """
+    bound_conn = (_bound.get() or {}).get(conninfo)
+    if bound_conn is not None:
+        # Inside `bound()`: same connection, same transaction contract — commit
+        # on success (free when no transaction is open), roll back on error.
+        try:
+            yield bound_conn
+        except BaseException:
+            bound_conn.rollback()
+            raise
+        bound_conn.commit()
+        return
     pool = _pool_for(conninfo)
     started = time.monotonic()
     if pool is None:
@@ -108,6 +121,28 @@ def connection(conninfo: str) -> Iterator[Any]:
     with pool.connection() as conn:
         _record("pg acquire", started)
         yield conn
+
+
+@contextmanager
+def bound(conninfo: str) -> Iterator[None]:
+    """Serve every `connection(conninfo)` inside the block from ONE checkout.
+
+    Round 5.1: a Carbon calculation's write check, bundle read and save each
+    checked a connection out, and every checkout costs a liveness round trip
+    (the P1-B check). Callers keep their own commit/rollback behaviour; only
+    the checkout is shared. Request-scoped through a ContextVar, so concurrent
+    requests never share a connection. A nested `bound` reuses the outer one.
+    """
+    current = _bound.get() or {}
+    if conninfo in current:
+        yield
+        return
+    with connection(conninfo) as conn:
+        token = _bound.set({**current, conninfo: conn})
+        try:
+            yield
+        finally:
+            _bound.reset(token)
 
 
 def close_all() -> None:

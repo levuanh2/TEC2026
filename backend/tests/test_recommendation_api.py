@@ -25,6 +25,7 @@ from infrastructure.read_repo import ReadNotFoundError  # noqa: E402
 from infrastructure.recommendation_repo import RecommendationNotFoundError  # noqa: E402
 from recommendation import GeneratedRecommendation  # noqa: E402
 from infrastructure.config import Settings  # noqa: E402
+from infrastructure.crop_write_authz import CropWriteDeniedError  # noqa: E402
 from service import RecommendationAccessError, RecommendationService  # noqa: E402
 
 DUMMY_SETTINGS = Settings(
@@ -37,12 +38,12 @@ ACTOR, SEASON = "farmer-a", "season-a"
 
 
 class FakeRead:
-    def __init__(self, *, role: str = "farmer", visible: bool = True, metrics: dict | None = None):
-        self.role, self.visible = role, visible
+    def __init__(self, *, role: str = "farmer", visible: bool = True, metrics: dict | None = None, actor: str = ACTOR):
+        self.role, self.visible, self.actor = role, visible, actor
         self.metrics_result = metrics or {"yield_kg": None, "data_completeness": {"water": False, "fertilizer": False, "cost": False, "carbon": False}}
 
     def me(self):
-        return {"user_id": ACTOR, "roles": [self.role]}
+        return {"user_id": self.actor, "roles": [self.role]}
 
     def season(self, season_id):
         if not self.visible or season_id != SEASON:
@@ -68,7 +69,14 @@ class FakeCarbonService:
 class FakeRecommendationRepository:
     rows: dict[str, dict] = field(default_factory=dict)
     by_key: dict[tuple[str, str], str] = field(default_factory=dict)
+    # Who `private.user_can_write_crop` says may write SEASON. Readers outside
+    # it -- a farm viewer, a former owner, a data-grant reader -- may not.
+    writers: set[str] = field(default_factory=lambda: {ACTOR})
     _next: int = 1
+
+    def assert_can_write(self, *, crop_season_id, actor_id):
+        if actor_id not in self.writers:
+            raise CropWriteDeniedError()
 
     def upsert(self, *, crop_season_id, rec: GeneratedRecommendation):
         key = (crop_season_id, rec.rule_code)
@@ -96,7 +104,8 @@ class FakeRecommendationRepository:
         self.by_key[key] = row_id
         return deepcopy(row)
 
-    def save_generated(self, *, crop_season_id, recs, prepare=None):
+    def save_generated(self, *, crop_season_id, recs, actor_id, prepare=None):
+        self.assert_can_write(crop_season_id=crop_season_id, actor_id=actor_id)
         rows = [self.upsert(crop_season_id=crop_season_id, rec=rec) for rec in recs]
         self.prune_missing(crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in recs])
         return prepare(rows) if prepare is not None else rows
@@ -116,9 +125,10 @@ class FakeRecommendationRepository:
             raise RecommendationNotFoundError()
         return deepcopy(self.rows[recommendation_id])
 
-    def set_status(self, recommendation_id, status, prepare=None):
+    def set_status(self, recommendation_id, status, *, actor_id, prepare=None):
         if recommendation_id not in self.rows:
             raise RecommendationNotFoundError()
+        self.assert_can_write(crop_season_id=self.rows[recommendation_id]["crop_season_id"], actor_id=actor_id)
         column = "accepted_at" if status == "accepted" else "dismissed_at"
         self.rows[recommendation_id]["status"] = status
         self.rows[recommendation_id][column] = "2026-09-11T01:00:00Z"
@@ -160,6 +170,39 @@ def test_generation_never_fabricates_a_quantified_impact_when_data_is_missing():
 def test_non_farmer_or_cross_scope_cannot_generate(read):
     with pytest.raises(RecommendationAccessError):
         service().generate(read_repository=read, crop_season_id=SEASON)
+
+
+@pytest.mark.parametrize("status", ["accepted", "dismissed"])
+def test_a_reader_without_write_authority_cannot_generate_accept_or_dismiss(status):
+    """Viewer is read-only (product decision 2026-10-03): a farm viewer, a former
+    owner (historical read) or a data-grant reader READS the season through RLS
+    and may even hold a farmer role, but `user_can_write_crop` says no -- every
+    recommendation write is refused like an unknown id, and nothing changes."""
+    repo = FakeRecommendationRepository()
+    write = service(repo)
+    [row] = write.generate(read_repository=FakeRead(metrics=missing_data_metrics()), crop_season_id=SEASON)[:1]
+    before = deepcopy(repo.rows)
+
+    reader = FakeRead(metrics=missing_data_metrics(), actor="viewer-or-former-owner")
+    with pytest.raises(RecommendationAccessError):
+        write.generate(read_repository=reader, crop_season_id=SEASON)
+    with pytest.raises(RecommendationAccessError):
+        write.set_status(read_repository=reader, recommendation_id=row["id"], status=status)
+    assert repo.rows == before
+
+
+def test_generation_is_refused_before_any_carbon_work_for_a_reader():
+    class CountingCarbon(FakeCarbonService):
+        calls = 0
+
+        def calculate(self, *a, **k):
+            CountingCarbon.calls += 1
+            return super().calculate(*a, **k)
+
+    write = RecommendationService(CountingCarbon(), FakeRecommendationRepository())
+    with pytest.raises(RecommendationAccessError):
+        write.generate(read_repository=FakeRead(actor="viewer"), crop_season_id=SEASON)
+    assert CountingCarbon.calls == 0
 
 
 def test_regenerating_is_idempotent_not_duplicating_rows():
@@ -299,10 +342,13 @@ class _Cursor:
     def __exit__(self, *_exc): return False
 
     def execute(self, sql, params=None):
-        self._log.append("insert" if "insert into" in sql else "delete")
+        if "set_config" in sql:
+            return
+        self._authz = "user_can_write_crop" in sql
+        self._log.append("authz" if self._authz else "insert" if "insert into" in sql else "delete")
 
     def fetchone(self):
-        return {"id": uuid.uuid4(), "crop_season_id": uuid.uuid4()}
+        return {"allowed": True} if self._authz else {"id": uuid.uuid4(), "crop_season_id": uuid.uuid4()}
 
 
 class _Connection:
@@ -334,8 +380,9 @@ def test_one_generation_run_opens_one_connection_for_every_rule():
         for i in range(3)
     ]
 
-    rows = repo.save_generated(crop_season_id=str(uuid.uuid4()), recs=recs)
+    rows = repo.save_generated(crop_season_id=str(uuid.uuid4()), recs=recs, actor_id="actor")
 
     assert len(rows) == 3
     assert log.count("connect") == 1
-    assert log == ["connect", "insert", "insert", "insert", "delete"]
+    # Write authority is decided inside the same transaction, before any row.
+    assert log == ["connect", "authz", "insert", "insert", "insert", "delete"]

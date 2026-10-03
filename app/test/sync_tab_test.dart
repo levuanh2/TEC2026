@@ -186,6 +186,38 @@ void main() {
     expect(find.text('Chưa gửi lên'), findsNothing);
   });
 
+  testWidgets(
+      'harvest over the plot area: the only way out is "Sửa bản ghi" for THAT record; '
+      'other failures get no edit button', (tester) async {
+    await _seedSyncedTree();
+    await _seedActivity('h1', 'harvest', const {'yield_kg': 4000, 'harvested_area_ha': 1.5});
+    await _seedActivity('a2', 'seeding', const {'seed_kg': 40});
+    await _db.updateActivitySyncState('h1',
+        state: SyncState.failed, error: 'harvestAreaExceedsPlot');
+    await _db.updateActivitySyncState('a2', state: SyncState.failed, error: 'network');
+    await _co.attach();
+    final fixed = <String>[];
+
+    await tester.pumpWidget(_wrap(SyncTab(coordinator: _co, onFixActivity: (id) async => fixed.add(id))));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sửa bản ghi'), findsOneWidget);
+    await tester.tap(find.text('Sửa bản ghi'));
+    await tester.pump();
+    expect(fixed, ['h1']);
+  });
+
+  testWidgets('no edit callback (e.g. a read-only host): no edit button at all', (tester) async {
+    await _seedSyncedTree();
+    await _seedActivity('h1', 'harvest', const {'yield_kg': 4000, 'harvested_area_ha': 1.5});
+    await _db.updateActivitySyncState('h1',
+        state: SyncState.failed, error: 'harvestAreaExceedsPlot');
+    await _co.attach();
+    await tester.pumpWidget(_wrap(SyncTab(coordinator: _co)));
+    await tester.pumpAndSettle();
+    expect(find.text('Sửa bản ghi'), findsNothing);
+  });
+
   testWidgets('không lộ exception kỹ thuật ở bất kỳ state nào', (tester) async {
     await _seedSyncedTree();
     await _seedActivity('a1', 'seeding', const {'seed_kg': 40});

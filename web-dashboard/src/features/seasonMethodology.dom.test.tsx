@@ -34,7 +34,7 @@ describe('SeasonMethodologyPanel', () => {
 
   it('names only the input still missing when one is already recorded', () => {
     render(<SeasonMethodologyPanel season={season({ ipccWaterRegime: 'upland' })} canEdit />)
-    const notice = screen.getByText(/Chưa tính được carbon/)
+    const notice = screen.getByText(/Chưa khai báo trên vụ/)
     expect(notice.textContent).toContain('Chế độ nước trước vụ')
     expect(notice.textContent).not.toContain('Chế độ nước trong vụ')
   })
@@ -85,5 +85,13 @@ describe('SeasonMethodologyPanel', () => {
     render(<SeasonMethodologyPanel season={season()} canEdit={false} />)
     expect(screen.getByText(/liên hệ chủ hộ hoặc cán bộ hợp tác xã/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Khai báo/ })).toBeNull()
+  })
+})
+
+describe('SeasonMethodologyPanel never contradicts server readiness (Round 5)', () => {
+  it('an undeclared in-season regime is "chưa khai báo", never "chưa tính được"', () => {
+    render(<SeasonMethodologyPanel season={season()} canEdit />)
+    expect(screen.queryByText(/Chưa tính được carbon/)).toBeNull()
+    expect(screen.getByText(/có thể được suy ra từ nhật ký tưới/)).toBeTruthy()
   })
 })

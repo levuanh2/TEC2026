@@ -15,6 +15,7 @@ the activity write path does (`write_repo._assert_can_write_batch`).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
 from typing import Any, Callable, Protocol
@@ -23,6 +24,7 @@ from . import pg_pool
 from .auth import CropAccessError, jwt_rejection_as_invalid_token
 from .config import Settings
 
+_UNRESOLVED = object()
 _DENIED = "'{}' không tồn tại hoặc không thuộc phạm vi truy cập của người dùng hiện tại."
 
 
@@ -54,22 +56,38 @@ class PostgresCropPersistChecker:
             return self._connect()
         return pg_pool.connection(self._settings.require_db())
 
-    def assert_can_persist(self, token: str, crop_season_id: str) -> None:
+    def verified_user_id(self, token: str) -> str | None:
+        """Who the Auth server says this JWT belongs to (no scope decided here).
+
+        Exposed so the route can ask Auth while the RLS read check is still in
+        flight, then hand the answer to `assert_can_persist`.
+        """
+        return self._user_id_for(token)
+
+    def assert_can_persist(self, token: str, crop_season_id: str, *, user_id: Any = _UNRESOLVED) -> None:
         try:
             uuid.UUID(str(crop_season_id))
         except ValueError as exc:
             raise CropAccessError(_DENIED.format(crop_season_id)) from exc
-        user_id = self._user_id_for(token)
+        if user_id is _UNRESOLVED:
+            user_id = self._user_id_for(token)
         if not user_id:
             raise CropAccessError(_DENIED.format(crop_season_id))
-        with self._connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "select set_config('request.jwt.claims', %s, true)",
-                [json.dumps({"sub": user_id, "role": "authenticated"})],
-            )
-            cur.execute("select private.user_can_write_crop(%s::uuid) as allowed", [str(crop_season_id)])
-            allowed = bool(cur.fetchone()["allowed"])
-            cur.execute("select set_config('request.jwt.claims', '', true)")
+        # The three statements are sent in one round trip when the connection
+        # supports pipelining (Round 5.1: 4 sequential trips cost ~685 ms of
+        # every calculation); the helper's answer is read once all have run.
+        with self._connection() as conn, conn.cursor() as cur, conn.cursor() as verdict:
+            pipeline = conn.pipeline() if hasattr(conn, "pipeline") else contextlib.nullcontext()
+            with pipeline:
+                cur.execute(
+                    "select set_config('request.jwt.claims', %s, true)",
+                    [json.dumps({"sub": user_id, "role": "authenticated"})],
+                )
+                verdict.execute("select private.user_can_write_crop(%s::uuid) as allowed", [str(crop_season_id)])
+                cur.execute("select set_config('request.jwt.claims', '', true)")
+                if hasattr(conn, "pipeline"):
+                    conn.commit()  # travels with the statements instead of on return to the pool
+            allowed = bool(verdict.fetchone()["allowed"])
         if not allowed:
             # Same 404 as "cannot read": a reader must not learn that a write
             # rule, rather than scope, is what stopped them.

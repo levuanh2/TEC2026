@@ -11,7 +11,7 @@ export type IpccPreSeasonRegime =
   | 'non_flooded_pre_season_lt_180d' | 'non_flooded_pre_season_gt_180d'
   | 'flooded_pre_season_gt_30d' | 'non_flooded_pre_season_gt_365d'
 
-export interface CropSeason { id: string; plotId: string; name: string; variety?: string; plantingDate?: string; harvestDate?: string; status?: string; totalYieldKg?: number | null;
+export interface CropSeason { id: string; plotId: string; name: string; variety?: string; plantingDate?: string; harvestDate?: string; expectedHarvestDate?: string; status?: string; totalYieldKg?: number | null;
   /** Carbon methodology inputs. `null` = chưa ghi nhận — never defaulted client-side. */
   ipccWaterRegime?: IpccWaterRegime | null; preSeasonWaterRegime?: IpccPreSeasonRegime | null; cultivationDays?: number | null }
 export interface Activity { id: string; cropSeasonId: string; occurredAt: string; type: string; detail: string; recorder: string; source: string }

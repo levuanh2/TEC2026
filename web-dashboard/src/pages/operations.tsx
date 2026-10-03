@@ -3,6 +3,7 @@ import { Ico } from '../icons'
 import { Link, SideDrawer } from '../ui'
 import { exceptionsOf, useOperations, type Exception, type OpsRow, type Severity } from './ops'
 import { label } from '../vocab'
+import { perKg as perKgFmt } from '../format'
 
 /* Management is an operations workspace: the queue of work comes first, a
  * summary second, and there is no chart on this page. Every row is something
@@ -453,7 +454,7 @@ function SeasonRow({ r, focus, selected, onOpen }: { r: OpsRow; focus: SeasonsFo
 export function carbonIssue(r: OpsRow): { head: string; sub?: string } {
   const missing = r.missing.map((m) => m.label.replace(/^Thiếu\s+/i, ''))
   const total = r.totalCo2eKg != null ? `${nf.format(r.totalCo2eKg)} kg CO₂e` : null
-  const perKg = r.carbonPerKg != null ? `${nf.format(r.carbonPerKg)} kg CO₂e / kg lúa` : null
+  const perKg = r.carbonPerKg != null ? `${perKgFmt(r.carbonPerKg, 'kg CO₂e / kg lúa')}` : null
   switch (r.carbon) {
     case 'missing_data':
       return { head: missing.length ? `Thiếu ${missing.length} thông tin` : 'Thiếu dữ liệu', sub: missing.join(', ') || undefined }
@@ -542,7 +543,7 @@ function SeasonDetailPanel({ row, focus, onClose }: { row: OpsRow; focus: Season
         <p>{row.loading ? <Sk w={92} /> : <Badge role={carbon.role}>{carbon.text}</Badge>}</p>
         {!row.loading && row.view && <p className="ops-note">{row.view.detail}</p>}
         {row.totalCo2eKg != null && <p className="ops-note">Tổng: {nf.format(row.totalCo2eKg)} kg CO₂e</p>}
-        {row.carbonPerKg != null && <p className="ops-note">{nf.format(row.carbonPerKg)} kg CO₂e / kg lúa</p>}
+        {row.carbonPerKg != null && <p className="ops-note">{perKgFmt(row.carbonPerKg, 'kg CO₂e / kg lúa')}</p>}
         {row.limitations.map((m) => (
           <p key={m.code} className="ops-limit role--methodology"><Ico name="info" size={13} /><span><b>{m.label}</b> — {m.detail}</span></p>
         ))}

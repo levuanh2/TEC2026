@@ -19,6 +19,12 @@ enum SyncErrorKind {
   /// hoặc từ chối mở lại vụ (`illegal_crop_season_transition`). Vĩnh viễn:
   /// thử lại y nguyên sẽ luôn hỏng, và app KHÔNG tự mở lại vụ.
   seasonClosed,
+
+  /// Diện tích thu hoạch lớn hơn diện tích thửa: máy từ chối gửi (kiểm tra
+  /// trước khi đẩy) hoặc cơ sở dữ liệu từ chối (SQLSTATE 23514,
+  /// `harvested_area_exceeds_plot`). Vĩnh viễn: phải SỬA bản ghi, gửi lại y
+  /// nguyên luôn hỏng.
+  harvestAreaExceedsPlot,
   unknown,
 }
 
@@ -32,6 +38,10 @@ SyncErrorKind classifySyncError(Object error) {
         msg.contains('crop_season_not_open') ||
         msg.contains('illegal_crop_season_transition')) {
       return SyncErrorKind.seasonClosed;
+    }
+    // Trước lớp chung `23xxx` (validation): lỗi này có cách sửa riêng.
+    if (msg.contains('harvested_area_exceeds_plot')) {
+      return SyncErrorKind.harvestAreaExceedsPlot;
     }
     if (code == '42501' ||
         msg.contains('row-level security') ||
@@ -85,6 +95,7 @@ extension SyncErrorKindRetry on SyncErrorKind {
         SyncErrorKind.duplicate => false,
         SyncErrorKind.validation => false,
         SyncErrorKind.seasonClosed => false,
+        SyncErrorKind.harvestAreaExceedsPlot => false,
       };
 
   /// Thử lại y nguyên payload/phiên hiện tại sẽ luôn hỏng như cũ — phải có ai
@@ -120,5 +131,8 @@ String syncErrorMessage(SyncErrorKind kind) {
     case SyncErrorKind.seasonClosed:
       return 'Vụ này đã kết thúc trên hệ thống nên không nhận thêm thay đổi. '
           'Bản ghi vẫn giữ trên máy; liên hệ cán bộ HTX nếu cần ghi bổ sung.';
+    case SyncErrorKind.harvestAreaExceedsPlot:
+      return 'Diện tích thu hoạch lớn hơn diện tích thửa. Mở bản ghi, sửa diện '
+          'tích rồi gửi lại — bản ghi vẫn giữ trên máy.';
   }
 }

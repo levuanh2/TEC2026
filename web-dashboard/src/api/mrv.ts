@@ -17,6 +17,15 @@ export async function listMrvEvidence(caseId: string): Promise<MrvEvidence[]> {
   const r = await apiRequest<{ items: any[] }>(`/v1/mrv/cases/${caseId}/evidence`)
   return r.items.map((x) => ({ id: x.id, stepNo: x.step_no, evidenceType: x.evidence_type, fileName: x.file_name, mimeType: x.mime_type, sha256: x.sha256 ?? null, uploadedAt: x.uploaded_at, productionBatchId: x.production_batch_id ?? null }))
 }
+/** Every MRV case of the organization with its batches in ONE request (Round
+ * 5.1) — per case exactly what `listMrvBatches` returns, and every case, not
+ * only the first page of `/v1/mrv/cases`. */
+export async function getOrganizationMrvBatches(organizationId: string): Promise<{ caseId: string; caseCode: string; status: string; batches: MrvBatch[] }[]> {
+  const r = await apiRequest<{ items: { case_id: string; case_code: string; status: string; batches: any[] }[] }>(`/v1/organizations/${organizationId}/mrv-batches`)
+  return r.items.map((c) => ({ caseId: c.case_id, caseCode: c.case_code, status: c.status, batches: c.batches.map(mrvBatch) }))
+}
+const mrvBatch = (x: any): MrvBatch => ({ productionBatchId: x.production_batch_id, batchCode: x.batch_code, cropSeasonId: x.crop_season_id, farmId: x.farm_id, plotId: x.plot_id })
+
 export async function listMrvBatches(caseId: string): Promise<MrvBatch[]> {
   const r = await apiRequest<{ items: any[] }>(`/v1/mrv/cases/${caseId}/batches`)
   return r.items.map((x) => ({ productionBatchId: x.production_batch_id, batchCode: x.batch_code, cropSeasonId: x.crop_season_id, farmId: x.farm_id, plotId: x.plot_id }))

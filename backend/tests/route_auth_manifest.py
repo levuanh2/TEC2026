@@ -49,6 +49,8 @@ ROUTES: dict[tuple[str, str], Route] = {
 
     # -- identity / organizations (manager) ----------------------------------
     ("GET", "/v1/me"): ok(M, 200),
+    # Forced first login: the provisioned farmer replaces the temporary password.
+    ("POST", "/v1/me/password"): ok(F, 200),
     ("GET", "/v1/organizations"): ok(M, 200),
     ("GET", "/v1/organizations/{organization_id}"): ok(M, 200, deny=X),
     ("GET", "/v1/organizations/{organization_id}/farms"): ok(M, 200),
@@ -56,6 +58,9 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/v1/organizations/{organization_id}/summary"): ok(M, 200),
     ("GET", "/v1/organizations/{organization_id}/metrics"): ok(M, 200),
     ("GET", "/v1/organizations/{organization_id}/farm-performance"): ok(M, 200),
+    ("GET", "/v1/organizations/{organization_id}/plots-seasons"): ok(M, 200, deny=X),
+    ("GET", "/v1/crop-seasons/{crop_season_id}/activity-summary"): ok(F, 200),
+    ("GET", "/v1/organizations/{organization_id}/mrv-batches"): ok(M, 200, deny=X),
     ("GET", "/v1/organizations/{organization_id}/farmers"): ok(M, 200, deny=X),
     ("POST", "/v1/organizations/{organization_id}/farmers"): ok(M, 201, deny=X),
 
@@ -90,6 +95,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/v1/crop-seasons/{crop_season_id}/carbon/readiness"): ok(F, 200, deny=X),
     ("POST", "/v1/carbon/calculate"): ok(F, 200, deny=X),
     ("GET", "/v1/crop-seasons/{crop_season_id}/carbon"): ok(F, 200, deny=X),
+    ("GET", "/v1/organizations/{organization_id}/carbon-status"): ok(M, 200, deny=X),
 
     # -- recommendations --------------------------------------------------------
     ("POST", "/v1/crop-seasons/{crop_season_id}/recommendations/generate"): ok(F, 200, deny=X),

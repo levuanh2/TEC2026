@@ -19,12 +19,14 @@ from infrastructure.recommendation_repo import PostgresRecommendationRepository 
 class _FakeCursor:
     def __init__(self, row: dict):
         self._row = row
+        self._authz = False
 
-    def execute(self, *args, **kwargs):
-        return None
+    def execute(self, sql, *args, **kwargs):
+        # `private.user_can_write_crop` (crop_write_authz) answers for itself.
+        self._authz = "user_can_write_crop" in sql
 
     def fetchone(self):
-        return dict(self._row)
+        return {"allowed": True} if self._authz else dict(self._row)
 
     def __enter__(self):
         return self
@@ -68,6 +70,6 @@ def test_get_normalizes_uuid_columns_to_plain_strings():
 
 
 def test_set_status_normalizes_uuid_columns_to_plain_strings():
-    row = _repo(_row_with_uuid_columns()).set_status("a345d473-d768-4e3f-be4d-4c5a835bf88d", "accepted")
+    row = _repo(_row_with_uuid_columns()).set_status("a345d473-d768-4e3f-be4d-4c5a835bf88d", "accepted", actor_id="actor")
     assert isinstance(row["id"], str)
     assert isinstance(row["crop_season_id"], str)

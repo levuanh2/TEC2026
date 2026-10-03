@@ -67,6 +67,7 @@ ActivityValidation validateActivity({
   required DateTime occurredAt,
   DateTime? now,
   CropSeason? activeSeason,
+  double? plotAreaHa,
 }) {
   final errors = <String, String>{};
   final warnings = <String>[];
@@ -115,6 +116,8 @@ ActivityValidation validateActivity({
     if (y == null || y.isEmpty) {
       errors.putIfAbsent('yield_kg', () => 'Thu hoạch cần nhập sản lượng.');
     }
+    final area = harvestAreaError(parsed['harvested_area_ha']?.value, plotAreaHa);
+    if (area != null) errors.putIfAbsent('harvested_area_ha', () => area);
   }
 
   // -- Cảnh báo (không chặn — SRS FR-1a-04) -----------------------------
@@ -136,3 +139,16 @@ ActivityValidation validateActivity({
 
 String _n(num v) =>
     v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+
+/// Diện tích thu hoạch được BẰNG diện tích thửa, không được lớn hơn — cùng
+/// luật với Farmer Web, FastAPI (422 `harvested_area_exceeds_plot`) và trigger
+/// cơ sở dữ liệu. Thửa chưa có diện tích hoặc ô để trống: không áp giới hạn,
+/// không đoán. Dùng cả ở form lẫn trước khi hàng đợi gửi lên máy chủ.
+String? harvestAreaError(Object? harvestedAreaHa, double? plotAreaHa) {
+  if (harvestedAreaHa is! num || plotAreaHa == null) return null;
+  if (harvestedAreaHa <= plotAreaHa) return null;
+  return 'Diện tích thu hoạch không được lớn hơn diện tích thửa '
+      '(${_vnDecimal(plotAreaHa)} ha).';
+}
+
+String _vnDecimal(num v) => _n(v).replaceAll('.', ',');

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import threading
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
@@ -106,19 +107,11 @@ def _register_fonts() -> None:
 # Vocabulary. Codes are always shown next to labels so nothing is reinterpreted.
 # --------------------------------------------------------------------------
 
-STEP_STATUS = {
-    "completed": "Hoàn thành", "in_progress": "Đang thực hiện", "not_started": "Chưa bắt đầu",
-    "blocked": "Bị chặn", "skipped": "Bỏ qua", "failed": "Không đạt",
-}
-ACTIVITY_TYPE = {
-    "seeding": "Gieo sạ", "fertilizer": "Bón phân", "irrigation": "Tưới nước",
-    "pesticide": "Phun thuốc BVTV", "straw_management": "Xử lý rơm rạ", "harvest": "Thu hoạch",
-    "fuel": "Nhiên liệu", "fuel_usage": "Nhiên liệu",
-}
-SOURCE = {"mobile_offline": "Di động (ngoại tuyến)", "mobile": "Di động", "web": "Web"}
-SEVERITY = {"warning": "Cảnh báo", "info": "Thông tin"}
-COMPLETENESS = {"water": "Nước", "fertilizer": "Phân bón", "cost": "Chi phí", "carbon": "Carbon"}
-CARBON_REASON = {"no_succeeded_calculation": "chưa có bản tính CO₂e thành công"}
+from .labels import (  # noqa: E402 - one vocabulary for the PDF and the XLSX (Round 5.1)
+    ACTIVITY_TYPE, CALCULATION_KIND, CARBON_REASON, CASE_STATUS, CATEGORY, COMPLETENESS, DETAIL_VALUE,
+    CARBON_SCOPE, FACTOR_SET_STATUS, GAS, PARAMETER_KIND, ROLE, VERIFICATION, SCENARIO, SEASON_STATUS, SEVERITY, SOURCE, STEP_STATUS, UNIT, WARNING_CODE,
+)
+from . import labels as _labels  # noqa: E402
 
 # (key, label, unit, completeness key, is_ratio)
 _METRIC_ROWS = [
@@ -222,8 +215,10 @@ def _compact(value: Any) -> str | None:
 def _status(code: Any, labels: dict[str, str]) -> str:
     if not code:
         return NULL_REF
-    label = labels.get(str(code))
-    return f"{label} ({code})" if label else str(code)
+    # The report is read by people: the Vietnamese label only (Round 5.1). The
+    # code stays in the JSON snapshot and the XLSX data sheets. A code with no
+    # label is printed as-is rather than given an invented name.
+    return labels.get(str(code)) or str(code)
 
 
 # --------------------------------------------------------------------------
@@ -346,14 +341,15 @@ class _Report:
         story.append(self.kv([
             ("Mã hồ sơ", case.get("case_code")),
             ("Tên hồ sơ", case.get("name")),
-            ("Trạng thái hồ sơ", case.get("status")),
+            ("Trạng thái hồ sơ", _status(case.get("status"), CASE_STATUS)),
             ("Kỳ báo cáo", f"{fmt_date(case.get('period_start')) or NULL_REF} – {fmt_date(case.get('period_end')) or NULL_REF}"),
             ("Tổ chức", ((self.m.get("scope") or {}).get("organization") or {}).get("name")),
             ("Snapshot tạo lúc", f"{fmt_local(self.m.get('generated_at')) or NULL_REF} (giờ Việt Nam, UTC+7)"),
-            ("Người tạo snapshot", f"{by.get('user_id') or NULL_REF} · vai trò: {', '.join(by.get('roles') or []) or NULL_REF}"),
+            ("Người tạo snapshot", f"mã người dùng {_short(by.get('user_id')) or NULL_REF} · vai trò: "
+                                   f"{', '.join(_status(r, ROLE) for r in (by.get('roles') or [])) or NULL_REF}"),
             ("Phiên bản lược đồ", self.m.get("schema_version")),
-            ("Mã snapshot (export_id)", self.m.get("export_id")),
-            ("Mã bản PDF", self.export_id),
+            ("Mã snapshot", _short(self.m.get("export_id"))),
+            ("Mã bản PDF", _short(self.export_id)),
             ("Tình trạng tài liệu", "Không phải chứng nhận — tài liệu hỗ trợ tổng hợp dữ liệu"),
         ]))
         story.append(Spacer(1, 12))
@@ -384,7 +380,7 @@ class _Report:
         for season_id in sorted(per_season):
             flags = (per_season[season_id] or {}).get("data_completeness") or {}
             parts = [f"{COMPLETENESS.get(k, k)}: {'đủ' if v else 'chưa đủ'}" for k, v in sorted(flags.items())]
-            completeness.append(f"Vụ {_short(season_id)}: " + (" · ".join(parts) or NULL_REF))
+            completeness.append(f"Vụ {self.season_label(season_id)}: " + (" · ".join(parts) or NULL_REF))
         story.append(_p("Chỉ các con số có trong snapshot. Không có điểm số hay tỷ lệ \"sẵn sàng\" do hệ thống tự đặt ra.", self.s.note))
         story.append(self.kv([
             ("Số bước đã hoàn thành", f"{r.get('completed_steps', NULL_REF)} / {r.get('total_steps', NULL_REF)}"),
@@ -411,7 +407,7 @@ class _Report:
             rows.append([
                 self.cell(f"{farm.get('farm_code') or NULL_REF}\n{farm.get('name') or ''}".strip()),
                 self.cell(f"{plot.get('plot_code') or NULL_REF} · {area + ' ha' if area else NULL_VALUE}"),
-                self.cell(f"{season.get('season_code') or NULL_REF} · {season.get('status') or NULL_REF} · "
+                self.cell(f"{season.get('season_code') or NULL_REF} · {_status(season.get('status'), SEASON_STATUS)} · "
                           f"{fmt_date(season.get('started_on')) or NULL_REF} – {fmt_date(season.get('closed_on')) or 'chưa đóng'}"),
                 self.cell(b.get("batch_code")),
             ])
@@ -446,8 +442,8 @@ class _Report:
         for e in items:
             checksum = (e.get("checksum") or {}).get("value")
             rows.append([
-                self.cell(e.get("step_no")), self.cell(e.get("evidence_type")),
-                self.cell(f"{e.get('file_name') or NULL_REF} · {e.get('mime_type') or NULL_REF}"),
+                self.cell(e.get("step_no")), self.cell(_labels.label(e.get("evidence_type"), _labels.EVIDENCE_TYPE)),
+                self.cell(e.get("file_name") or NULL_REF),
                 self.cell(f"{fmt_local(e.get('uploaded_at')) or NULL_REF} · {_short(e.get('uploaded_by')) or NULL_REF}"),
                 _p(checksum, self.s.mono) if checksum else self.cell("Chưa có mã băm", muted=True),
                 self.cell(e.get("evidence_id")),
@@ -532,8 +528,24 @@ class _Report:
             # Appended flat, not wrapped in KeepTogether: ReportLab will not chain a
             # keepWithNext heading/note onto a KeepTogether, which stranded the
             # section heading at a page bottom. h2 keeps with its table instead.
-            story.append(Paragraph(f"Vụ canh tác {escape(str(season_id))}", self.s.h2))
+            story.append(Paragraph(escape(f"Vụ canh tác {self.season_label(season_id)}"), self.s.h2))
             story.append(_grid(rows, [w * .46, w * .2, w * .14, w * .2]))
+
+    def human(self, text: Any) -> str | None:
+        """A snapshot message as a person reads it (see `labels.humanize`)."""
+        return _labels.humanize(self.m, text)
+
+    def related(self, value: Any) -> str | None:
+        return _labels.related(self.m, value)
+
+    def season_label(self, season_id: Any) -> str:
+        """`<season code> · <short id>` from the snapshot's own scope; the id alone
+        only when the scope does not name the season."""
+        for b in (self.m.get("scope") or {}).get("production_batches") or []:
+            season = b.get("crop_season") or {}
+            if str(season.get("crop_season_id")) == str(season_id) and season.get("season_code"):
+                return f"{season['season_code']} · mã {_short(season_id)}"
+        return f"mã {_short(season_id)}"
 
     def carbon(self, story: list[Any]) -> None:
         self.section("Carbon", story)
@@ -545,7 +557,7 @@ class _Report:
         w = self.CONTENT_WIDTH
         for season_id in sorted(per_season):
             c = per_season[season_id] or {}
-            story.append(Paragraph(f"Vụ canh tác {escape(str(season_id))}", self.s.h2))
+            story.append(Paragraph(escape(f"Vụ canh tác {self.season_label(season_id)}"), self.s.h2))
             if c.get("status") != "succeeded":
                 reason = CARBON_REASON.get(str(c.get("reason")), c.get("reason") or NULL_REF)
                 story.append(self.kv([
@@ -559,19 +571,20 @@ class _Report:
                 ("Tổng CO₂e", f"{fmt_number(c.get('total_co2e_kg')) or NULL_VALUE} kgCO₂e"),
                 ("CO₂e trên mỗi kg", f"{fmt_number(c.get('co2e_per_kg'), sig=_RATIO_SIG_DIGITS) or NULL_VALUE} kgCO₂e/kg"),
                 ("Sản lượng dùng khi tính", f"{fmt_number(c.get('yield_kg')) or NULL_VALUE} kg"),
-                ("Mã bản tính", c.get("calculation_id")),
+                ("Mã bản tính", _short(c.get("calculation_id"))),
                 ("Thời điểm tính (giờ VN)", fmt_local(c.get("calculated_at"))),
-                ("Kịch bản", c.get("scenario")),
+                ("Loại kết quả", _status(c.get("calculation_kind"), CALCULATION_KIND)),
+                ("Kịch bản", _status(c.get("scenario"), SCENARIO)),
                 ("Phiên bản engine · bậc phương pháp", f"{c.get('engine_version') or NULL_REF} · Tier {c.get('methodology_tier') or NULL_REF}"),
-                ("Bộ hệ số", c.get("factor_set_id")),
+                ("Phiên bản bộ hệ số", c.get("ef_config_version") or "Không đọc được phiên bản (xem mục Nguồn gốc hệ số)"),
             ]))
             breakdown = sorted(c.get("breakdown") or [], key=lambda b: (
                 str(b.get("category") or ""), str(b.get("gas") or ""), str(b.get("emission_factor_id") or "")))
             rows = [self.head("Hạng mục", "Khí", "Giá trị hoạt động", "Hệ số áp dụng", "Khí (kg)", "CO₂e (kg)", "Công thức")]
             for b in breakdown:
                 rows.append([
-                    self.cell(b.get("category")), self.cell(b.get("gas")),
-                    self.cell(f"{fmt_number(b.get('activity_value')) or NULL_VALUE} {b.get('activity_unit') or ''}".strip()),
+                    self.cell(_status(b.get("category"), CATEGORY)), self.cell(_status(b.get("gas"), GAS)),
+                    self.cell(f"{fmt_number(b.get('activity_value')) or NULL_VALUE} {_status(b.get('activity_unit'), UNIT) if b.get('activity_unit') else ''}".strip()),
                     self.cell(fmt_number(b.get("factor_value_used")), null=NULL_VALUE),
                     self.cell(fmt_number(b.get("gas_kg")), null=NULL_VALUE),
                     self.cell(fmt_number(b.get("co2e_kg")), null=NULL_VALUE),
@@ -587,10 +600,10 @@ class _Report:
         prov = self.m.get("provenance") or {}
         acts = prov.get("activities") or {}
         story.append(self.kv([
-            ("Phạm vi tính carbon", prov.get("carbon_scope")),
+            ("Phạm vi tính carbon", _status(prov.get("carbon_scope"), CARBON_SCOPE) if prov.get("carbon_scope") else None),
             ("Bao gồm hoạt động đã xoá", _compact(acts.get("includes_deleted"))),
             ("Kèm tệp bằng chứng gốc", _compact(prov.get("evidence_binaries_included"))),
-            ("Bảng nguồn hoạt động", _compact(acts.get("source_tables"))),
+            ("Nguồn dữ liệu hoạt động", ", ".join(_status(t, _labels.SOURCE_TABLE) for t in acts.get("source_tables") or []) or None),
         ]))
         sets = sorted(prov.get("emission_factor_sets") or [], key=lambda x: str(x.get("factor_set_id") or ""))
         if not sets:
@@ -608,17 +621,21 @@ class _Report:
                 ("Tên", fs.get("name")),
                 ("Phương pháp luận", f"{fs.get('methodology_name') or NULL_REF} · {fs.get('methodology_version') or NULL_REF}"),
                 ("Nguồn", f"{fs.get('source_name') or NULL_REF} · {fs.get('source_url') or NULL_REF}"),
-                ("Trạng thái bộ hệ số", fs.get("status")),
+                ("Trạng thái bộ hệ số", _status(fs.get("status"), FACTOR_SET_STATUS)),
                 ("Hiệu lực", f"{fmt_date(fs.get('valid_from')) or NULL_REF} – {fmt_date(fs.get('valid_to')) or 'không giới hạn'}"),
             ]))
-            rows = [self.head("Mã hệ số", "Hạng mục · khí", "Giá trị", "Đơn vị", "Tham chiếu nguồn", "Đối chiếu")]
+            # People read the parameter's kind; its factor code is in the JSON
+            # snapshot and the XLSX audit sheet (Round 5.1).
+            rows = [self.head("Loại tham số", "Hạng mục · khí", "Giá trị", "Đơn vị", "Tham chiếu nguồn", "Đối chiếu")]
             for f in sorted(fs.get("factors") or [], key=lambda x: str(x.get("factor_code") or "")):
                 rows.append([
-                    self.cell(f.get("factor_code")), self.cell(f"{f.get('category') or NULL_REF} · {f.get('gas') or NULL_REF}"),
+                    self.cell(_status(f.get("parameter_kind"), PARAMETER_KIND)),
+                    self.cell(f"{_status(f.get('category'), CATEGORY)} · {_status(f.get('gas'), GAS)}"),
                     self.cell(fmt_number(f.get("factor_value")), null=NULL_VALUE),
-                    self.cell(f"{f.get('activity_unit') or '?'} › {f.get('result_unit') or '?'}"),
+                    self.cell(f"{_status(f.get('activity_unit'), UNIT) if f.get('activity_unit') else '?'} › {_status(f.get('result_unit'), UNIT) if f.get('result_unit') else '?'}"),
                     self.cell(f.get("source_reference"), null="Không ghi nguồn"),
-                    self.cell(f.get("verification_status"), null="Không rõ"),
+                    self.cell(_status(f.get("verification_status"), VERIFICATION) if f.get("verification_status") else None,
+                              null="Không rõ"),
                 ])
             if len(rows) == 1:
                 rows.append([self.cell("Bộ hệ số không kèm hệ số chi tiết trong snapshot.", muted=True), "", "", "", "", ""])
@@ -629,14 +646,15 @@ class _Report:
         self.section("Cảnh báo", story)
         items = self.m.get("warnings") or []
         story.append(_p(f"Toàn bộ {len(items)} cảnh báo trong snapshot, không lược bớt. Mức độ giữ nguyên; "
-                        "\"Thông tin\" (info) là dữ liệu chưa đầy đủ, không phải lỗi.", self.s.note))
+                        "\"Thông tin\" là dữ liệu chưa đầy đủ, không phải lỗi. Mã đầy đủ của từng cảnh báo "
+                        "có trong JSON/XLSX của cùng snapshot.", self.s.note))
         order = {"warning": 0, "info": 1}
         rows = [self.head("Mức độ", "Mã", "Nội dung", "Liên quan")]
         for w_ in sorted(items, key=lambda x: (order.get(str(x.get("severity")), 2), str(x.get("code") or ""),
                                                 json.dumps(x.get("related") or {}, sort_keys=True))):
             rows.append([
-                self.cell(_status(w_.get("severity"), SEVERITY)), self.cell(w_.get("code")),
-                self.cell(w_.get("message")), self.cell(_compact(w_.get("related")), null="—"),
+                self.cell(_status(w_.get("severity"), SEVERITY)), self.cell(_status(w_.get("code"), WARNING_CODE)),
+                self.cell(self.human(w_.get("message"))), self.cell(self.related(w_.get("related")), null="—"),
             ])
         if not items:
             rows.append([self.cell("Không có cảnh báo nào.", muted=True), "", "", ""])
@@ -648,16 +666,17 @@ class _Report:
         integ = self.m.get("package_integrity") or {}
         digest = integ.get("manifest_sha256")
         story.append(self.kv([
-            ("Phiên bản lược đồ (schema_version)", self.m.get("schema_version")),
-            ("Snapshot nguồn (source_snapshot_export_id)", self.m.get("export_id")),
-            ("Mã bản PDF (export_id)", self.export_id),
-            ("payload_sha256 (manifest_sha256)", _p(digest, self.s.mono) if digest else None),
-            ("Thuật toán · phạm vi băm", f"{integ.get('algorithm') or NULL_REF} · {integ.get('canonical_over') or NULL_REF}"),
-            ("Cách chuẩn hoá", integ.get("canonical_form")),
+            ("Phiên bản lược đồ", self.m.get("schema_version")),
+            ("Mã snapshot nguồn", _short(self.m.get("export_id"))),
+            ("Mã bản PDF", _short(self.export_id)),
+            ("Mã băm SHA-256 của snapshot", _p(digest, self.s.mono) if digest else None),
+            ("Thuật toán · phạm vi băm", f"{(integ.get('algorithm') or NULL_REF).upper()} · "
+                                         f"{_status(integ.get('canonical_over'), _labels.HASH_SCOPE)}"),
+            ("Cách chuẩn hoá", _status(integ.get("canonical_form"), _labels.CANONICAL_FORM) if integ.get("canonical_form") else None),
             ("Snapshot tạo lúc (UTC)", self.m.get("generated_at")),
             ("PDF kết xuất lúc (UTC)", mrv_manifest.iso_utc(self.rendered_at) if self.rendered_at else None),
-            ("SHA-256 của tệp PDF (artifact_sha256)",
-             "Ghi trong hồ sơ xuất (file_sha256) và được kiểm tra mỗi lần tải về. Một tệp không thể chứa mã băm của chính nó."),
+            ("SHA-256 của tệp PDF",
+             "Ghi trong hồ sơ xuất và được kiểm tra mỗi lần tải về. Một tệp không thể chứa mã băm của chính nó."),
         ], label_width=62 * mm))
         story.append(Spacer(1, 6))
         story.append(_p(
@@ -686,7 +705,8 @@ class _Report:
                 if key in _DETAIL_SKIP or detail.get(key) is None or detail.get(key) == "":
                     continue
                 raw = detail[key]
-                value = fmt_number(raw) if kinds.get(key) == "num" else _compact(raw)
+                value = (fmt_number(raw) if kinds.get(key) == "num"
+                         else _status(raw, DETAIL_VALUE[key]) if key in DETAIL_VALUE else _compact(raw))
                 values.append(f"{labels.get(key, key)}: {value}")
             rows.append([
                 self.cell(fmt_local(a.get("occurred_at"))),

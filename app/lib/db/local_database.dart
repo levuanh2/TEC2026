@@ -816,9 +816,11 @@ class LocalDatabase {
     );
   }
 
+  /// Hoạt động CHƯA gửi xong — kể cả bản đang gửi ('syncing'): đang gửi chưa
+  /// phải đã gửi, lượt đó vẫn có thể hỏng.
   Future<int> countPendingActivities() async {
     final result = await _require.rawQuery(
-      "select count(*) as c from activities where sync_state in ('pending', 'failed')",
+      "select count(*) as c from activities where sync_state in ('pending', 'syncing', 'failed')",
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
@@ -861,12 +863,17 @@ class LocalDatabase {
   }
 
   /// Tổng số bản ghi CHƯA gửi được (plot + vụ + hoạt động) — cho card "gửi dữ liệu".
+  ///
+  /// Gồm cả bản đang gửi ('syncing'): Trang chủ có thể đếm giữa một lượt gửi;
+  /// nếu lượt đó hỏng mà không tiến triển thì không có `onSynced` nào báo đếm
+  /// lại, nên con số phải đúng ngay từ lúc đếm — đang gửi chưa phải đã gửi.
+  /// SQLite là nguồn đúng; mở lại app thì 'syncing' trở về 'pending'.
   Future<int> countAllPending() async {
     final result = await _require.rawQuery(
       "select "
-      "(select count(*) from plots where sync_state in ('pending','failed')) + "
-      "(select count(*) from crop_seasons where sync_state in ('pending','failed')) + "
-      "(select count(*) from activities where sync_state in ('pending','failed')) "
+      "(select count(*) from plots where sync_state in ('pending','syncing','failed')) + "
+      "(select count(*) from crop_seasons where sync_state in ('pending','syncing','failed')) + "
+      "(select count(*) from activities where sync_state in ('pending','syncing','failed')) "
       "as c",
     );
     return Sqflite.firstIntValue(result) ?? 0;

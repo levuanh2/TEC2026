@@ -59,8 +59,12 @@ class _FakeGateway implements SyncGateway {
   Future<String> ensureDefaultBatch(String cropSeasonServerId) async =>
       'batch-$cropSeasonServerId';
 
+  /// Called at every activity upsert, i.e. while the record is 'syncing'.
+  Future<void> Function()? onActivityUpsert;
+
   @override
   Future<String> upsertActivity(Map<String, dynamic> row) async {
+    await onActivityUpsert?.call();
     if (activityThrows != null) throw activityThrows!;
     final ceid = row['client_event_id'] as String;
     final existing = serverActivities[ceid];
@@ -365,5 +369,96 @@ void main() {
     await _co.attach();
     expect(_co.queue, isEmpty);
     expect(_co.pendingCount, 0);
+  });
+
+  // -- Home "chờ gửi" badge (Core V1 closure 3C) -----------------------------
+  // Home reads `countAllPending()` from SQLite when SyncService calls
+  // `onSynced` (wired to HomeController.markSynced in AppServices), on load and
+  // on reopen. These pin that count for every sync outcome, read exactly where
+  // Home reads it.
+  group('Home pending badge', () {
+    late List<int> notified;
+    late List<int> midFlight;
+
+    setUp(() {
+      notified = [];
+      midFlight = [];
+      _sync = SyncService(_gw, _db, DeviceService.fixed('dev-1'),
+          onSynced: () async => notified.add(await _db.countAllPending()));
+      _gw.onActivityUpsert = () async => midFlight.add(await _db.countAllPending());
+      _co.dispose();
+      _co = _makeCoordinator();
+    });
+
+    test('success: 3 -> 0 and Home is told, without a restart', () async {
+      await _seedSyncedTree();
+      await _seedActivities(3);
+      await _co.attach();
+      expect(await _db.countAllPending(), 3);
+      await _co.runSync(manual: true);
+      expect(notified, [0]);
+      expect(_co.pendingCount, 0);
+    });
+
+    test('mid-flight: a record being sent still counts as unsent', () async {
+      await _seedSyncedTree();
+      await _seedActivities(2);
+      await _co.attach();
+      await _co.runSync(manual: true);
+      // The first upsert sees 2 unsent (itself 'syncing'), the second 1.
+      expect(midFlight, [2, 1]);
+    });
+
+    test('failed with no progress: the count stays 3, never drops', () async {
+      await _seedSyncedTree();
+      await _seedActivities(3);
+      _gw.activityThrows = Exception('SocketException: Failed host lookup');
+      await _co.attach();
+      await _co.runSync(manual: true);
+      expect(midFlight.every((n) => n == 3), isTrue, reason: '$midFlight');
+      // Whatever Home is told, it is the true count -- never fewer.
+      expect(notified.every((n) => n == 3), isTrue, reason: '$notified');
+      expect(await _db.countAllPending(), 3);
+      expect(_co.pendingCount, 3);
+    });
+
+    test('partial: Home is told the remaining count', () async {
+      await _seedSyncedTree();
+      await _seedActivities(3);
+      _gw.detailThrowsOnce['a1'] = Exception('SocketException: Failed host lookup');
+      await _co.attach();
+      await _co.runSync(manual: true);
+      expect(notified, [1]);
+      expect(_co.status, SyncStatus.partialSuccess);
+      // The retry finishes it; replaying is idempotent and the badge reaches 0.
+      await _co.runSync(manual: true);
+      expect(notified, [1, 0]);
+      expect(_gw.activityInserts, 3);
+    });
+
+    test('idempotent replay: a record the server already has is counted once', () async {
+      await _seedSyncedTree();
+      await _seedActivities(2);
+      _gw.serverActivities['a0'] = 'srv-act-a0'; // sent before a crash
+      await _co.attach();
+      await _co.runSync(manual: true);
+      expect(notified, [0]);
+      expect(_gw.serverActivityCount, 2);
+      await _co.runSync(manual: true);
+      expect(notified.toSet(), {0}, reason: 'a replay never changes the count');
+      expect(_gw.serverActivityCount, 2);
+    });
+
+    test('force-stop mid-sync: reopening restores the count from SQLite', () async {
+      await _seedSyncedTree();
+      await _seedActivities(2);
+      await _db.updateActivitySyncState('a0', state: SyncState.syncing);
+      expect(await _db.countAllPending(), 2);
+      await _db.close();
+      _db = LocalDatabase(factory: databaseFactoryFfi, directoryOverride: _tmp.path);
+      await _db.openForUser(_userA);
+      expect(await _db.countAllPending(), 2);
+      expect(await _db.countPendingActivities(), 2);
+    });
   });
 }

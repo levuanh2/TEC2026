@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getCarbon, getCarbonReadiness, type CarbonMissingInput, type CarbonResult } from '../api/carbon'
-import { getFarmCropSeasons, getPlotsForFarm, listFarms } from '../api/farms'
-import { listMrvBatches, listMrvCases } from '../api/mrv'
+import { getOrganizationCarbonStatus, type CarbonMissingInput, type CarbonSeasonStatus } from '../api/carbon'
+import { getOrganizationPlotsSeasons, listFarms } from '../api/farms'
+import { getOrganizationMrvBatches } from '../api/mrv'
 import { carbonView, type CarbonDisplayState, type CarbonView } from '../carbon/readiness'
 import { getEngineInfo } from '../api/engine'
 import { label, seasonStatus } from '../vocab'
@@ -9,8 +9,9 @@ import type { CropSeason, Farm, Plot } from '../types'
 
 /* The cooperative's work queue, assembled from the endpoints that already
  * exist. There is no "seasons of an organization" route, so this composes
- * farms → seasons → per-season readiness/carbon, and maps MRV cases to seasons
- * through their production batches. Nothing is derived beyond what the server
+ * farms → seasons, reads every season's readiness + actual Carbon result in
+ * ONE organization-wide request (Round 5.1: it used to be two requests per
+ * season), and maps MRV cases to seasons through their production batches. Nothing is derived beyond what the server
  * already said: readiness decides what is missing, the Carbon result decides
  * whether a season has one, MRV state is the case's own status.
  */
@@ -93,45 +94,42 @@ function baseRow(farm: Farm, season: CropSeason, plot: Plot | undefined,
   }
 }
 
-async function seasonRow(
-  farm: Farm, season: CropSeason, plot: Plot | undefined,
-  mrvBySeason: Map<string, { caseId: string; caseCode: string; status: string }>,
+/** A season's row from its item of the organization-wide Carbon status. */
+export function seasonRow(
+  base: OpsRow,
+  status: CarbonSeasonStatus | undefined,
   efConfigVersion: string | null,
-): Promise<OpsRow> {
-  const base = baseRow(farm, season, plot, mrvBySeason)
-  try {
-    const readiness = await getCarbonReadiness(season.id)
-    let result: CarbonResult | null = null
-    try {
-      result = await getCarbon(season.id)
-    } catch {
-      // No stored calculation is a normal state, not an error.
-    }
-    // One decision, taken in one place, for Overview, Seasons, Data gaps,
-    // Carbon and the season's own Carbon tab alike.
-    const view = carbonView({
-      readiness,
-      result,
-      liveEfConfigVersion: efConfigVersion,
-      fixTarget: `/crop-seasons/${season.id}`,
-      resultTarget: `/crop-seasons/${season.id}/carbon`,
-    })
-    return {
-      ...base,
-      missing: view.userFixableGaps,
-      limitations: view.methodologyLimitations,
-      // "Đủ dữ liệu" is about what a person can still supply, so a factor
-      // limitation never makes a season look incomplete — and a remaining
-      // user-fixable gap never lets it look complete.
-      data: view.userFixableGaps.length ? 'missing' : 'complete',
-      carbon: view.calculationStatus,
-      view,
-      carbonPerKg: result?.co2e_per_kg ?? null,
-      totalCo2eKg: result ? (result.total_co2e_kg ?? result.co2e_total_kg ?? null) : null,
-      calculatedAt: result?.calculated_at ?? null,
-    }
-  } catch (e) {
-    return { ...base, error: e instanceof Error ? e.message : 'Không đọc được dữ liệu vụ này.' }
+): OpsRow {
+  const { seasonId } = base
+  if (!status) return { ...base, loading: false, error: 'Không đọc được trạng thái Carbon của vụ này.' }
+  const failed = status.readiness_error ?? status.actual_error
+  if (failed || !status.readiness) {
+    return { ...base, loading: false, error: failed?.message ?? 'Không đọc được trạng thái Carbon của vụ này.' }
+  }
+  const result = status.actual
+  // One decision, taken in one place, for Overview, Seasons, Data gaps,
+  // Carbon and the season's own Carbon tab alike.
+  const view = carbonView({
+    readiness: status.readiness,
+    result,
+    liveEfConfigVersion: efConfigVersion,
+    fixTarget: `/crop-seasons/${seasonId}`,
+    resultTarget: `/crop-seasons/${seasonId}/carbon`,
+  })
+  return {
+    ...base,
+    loading: false,
+    missing: view.userFixableGaps,
+    limitations: view.methodologyLimitations,
+    // "Đủ dữ liệu" is about what a person can still supply, so a factor
+    // limitation never makes a season look incomplete — and a remaining
+    // user-fixable gap never lets it look complete.
+    data: view.userFixableGaps.length ? 'missing' : 'complete',
+    carbon: view.calculationStatus,
+    view,
+    carbonPerKg: result?.co2e_per_kg ?? null,
+    totalCo2eKg: result ? (result.total_co2e_kg ?? result.co2e_total_kg ?? null) : null,
+    calculatedAt: result?.calculated_at ?? null,
   }
 }
 
@@ -147,6 +145,13 @@ export function useOperations(organizationId: string | null): OpsState {
     setState((s) => ({ ...s, loading: true, error: null }))
     void (async () => {
       try {
+        /* Every season's Carbon state in one request. It needs nothing from
+         * the farm→season chain, so it runs beside it; its count of requests
+         * does not grow with the number of seasons. */
+        const statusWork = getOrganizationCarbonStatus(organizationId)
+          .then((body) => ({ items: new Map(body.items.map((i) => [i.crop_season_id, i])), error: null as string | null }))
+          .catch((e: unknown) => ({ items: new Map<string, CarbonSeasonStatus>(), error: e instanceof Error ? e.message : 'Không đọc được trạng thái Carbon.' }))
+        const engineWork = getEngineInfo()
         // RLS already scopes /v1/farms to what this manager may see.
         const farms = await listFarms()
 
@@ -156,10 +161,9 @@ export function useOperations(organizationId: string | null): OpsState {
         const mrvBySeason = new Map<string, { caseId: string; caseCode: string; status: string }>()
         const mrvWork = (async () => {
           try {
-            const cases = await listMrvCases()
-            const forOrg = cases.filter((c) => c.organizationId === organizationId)
-            const batchLists = await mapLimited(forOrg, CONCURRENCY, async (c) => ({ c, batches: await listMrvBatches(c.caseId) }))
-            for (const { c, batches } of batchLists) {
+            // One request for every case and its batches (Round 5.1: it was
+            // the first page of cases + one batches request per case).
+            for (const { batches, ...c } of await getOrganizationMrvBatches(organizationId)) {
               for (const b of batches) mrvBySeason.set(b.cropSeasonId, { caseId: c.caseId, caseCode: c.caseCode, status: c.status })
             }
           } catch {
@@ -167,43 +171,32 @@ export function useOperations(organizationId: string | null): OpsState {
           }
         })()
 
-        // Plots come with the seasons, per farm, in the same parallel pass:
-        // a row without its plot name is a row an officer cannot tell apart.
-        const [byFarm] = await Promise.all([
-          mapLimited(farms, CONCURRENCY, async (f) => {
-            const [seasons, plots] = await Promise.all([
-              getFarmCropSeasons(f.id).catch(() => [] as CropSeason[]),
-              getPlotsForFarm(f.id).catch(() => [] as Plot[]),
-            ])
-            return { farm: f, seasons, plots }
-          }),
-          mrvWork,
-        ])
-        const engine = await getEngineInfo()
+        // Plots come with the seasons, for every farm in ONE request (Round
+        // 5.1: it was two per farm): a row without its plot name is a row an
+        // officer cannot tell apart.
+        const [listing] = await Promise.all([getOrganizationPlotsSeasons(organizationId), mrvWork])
+        const byFarm = farms.map((f) => ({ farm: f, seasons: listing.get(f.id)?.seasons ?? [], plots: listing.get(f.id)?.plots ?? [] }))
+        const engine = await engineWork
         const efConfigVersion = engine?.efConfigVersion ?? null
         const pairs = byFarm.flatMap(({ farm, seasons, plots }) => {
           const plotById = new Map(plots.map((pl) => [pl.id, pl]))
           return seasons.map((season) => ({ farm, season, plot: plotById.get(season.plotId) }))
         })
 
-        /* Readiness for one season measured 6-8s against hosted Supabase, so a
-         * cooperative with several seasons would stare at an empty table for
-         * half a minute. Each season's row is published the moment it resolves:
-         * the list fills in front of the officer, and the count says how many
-         * are still coming. */
+        /* The table paints as soon as the seasons are known; Carbon state
+         * fills every row at once when the organization-wide status answers. */
         const rows: OpsRow[] = pairs.map(({ farm, season, plot }) => ({
           ...baseRow(farm, season, plot, mrvBySeason), loading: true,
         }))
         let pending = rows.length
         const publish = () => { if (live) setState({ data: { rows: [...rows], farms, pending }, loading: pending > 0, error: null }) }
         publish()
-        await mapLimited(pairs, CONCURRENCY, async ({ farm, season, plot }) => {
-          const row = await seasonRow(farm, season, plot, mrvBySeason, efConfigVersion)
-          const at = rows.findIndex((r) => r.seasonId === season.id)
-          if (at >= 0) rows[at] = row
-          pending -= 1
-          publish()
-        })
+        const status = await statusWork
+        for (let i = 0; i < rows.length; i++) {
+          rows[i] = status.error
+            ? { ...rows[i], loading: false, error: status.error }
+            : seasonRow(rows[i], status.items.get(rows[i].seasonId), efConfigVersion)
+        }
         pending = 0
         publish()
       } catch (e) {

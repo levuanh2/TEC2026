@@ -1,10 +1,12 @@
 """Transactional persistence for M05 season recommendations.
 
-Same trust model as `write_repo.py`: authorization is established by the
-caller (via `SupabaseReadRepository`, RLS) *before* reaching this repository;
-this class only performs the actual write/lookup using a backend-only
-service-role Postgres connection. It never accepts a farm/organization/actor
-from an HTTP payload.
+Same trust model as `write_repo.py`: read scope is established by the caller
+(via `SupabaseReadRepository`, RLS); WRITE authority is decided here, inside
+each write's transaction, by `private.user_can_write_crop` for the JWT-verified
+actor (`crop_write_authz`) -- a farm viewer, a former member or a data-grant
+reader can read a season but writes nothing. The service-role connection
+bypasses RLS, so this check is the only one. It never accepts a
+farm/organization/actor from an HTTP payload.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ from typing import Any, Callable
 
 from . import pg_pool, profiling
 from .config import Settings
+from .crop_write_authz import assert_can_write_crop
 
 
 class RecommendationNotFoundError(Exception):
@@ -52,8 +55,14 @@ class PostgresRecommendationRepository:
         # dwarfed the statements themselves (see infrastructure/pg_pool).
         return pg_pool.connection(self._settings.require_db())
 
+    def assert_can_write(self, *, crop_season_id: str, actor_id: str) -> None:
+        """Early refusal, before the generation's Carbon work; each write
+        re-checks inside its own transaction."""
+        with self._connection() as conn, conn.cursor() as cur:
+            assert_can_write_crop(cur, crop_season_id=crop_season_id, actor_id=actor_id)
+
     def save_generated(
-        self, *, crop_season_id: str, recs: list[Any],
+        self, *, crop_season_id: str, recs: list[Any], actor_id: str,
         prepare: Callable[[list[dict[str, Any]]], Any] | None = None,
     ) -> Any:
         """Persist one whole generation run in a single transaction.
@@ -66,22 +75,12 @@ class PostgresRecommendationRepository:
         never a half-applied mix of the two.
         """
         with profiling.observe("recommendation save_generated"), self._connection() as conn, conn.cursor() as cur:
+            assert_can_write_crop(cur, crop_season_id=crop_season_id, actor_id=actor_id)
             rows = [self._upsert(cur, crop_season_id=crop_season_id, rec=rec) for rec in recs]
             self._prune(cur, crop_season_id=crop_season_id, keep_rule_codes=[rec.rule_code for rec in recs])
             # Built before the `with` commits: a representation that cannot be
             # produced rolls the run back rather than 500ing a saved one.
             return prepare(rows) if prepare is not None else rows
-
-    def upsert(self, *, crop_season_id: str, rec: Any) -> dict[str, Any]:
-        """Insert or refresh one rule's row for a season.
-
-        A farmer's already-made decision (accepted/dismissed) is preserved
-        across regeneration — only the evidence/impact/title/reason fields
-        and `generated_at` are refreshed; `status`/`accepted_at`/`dismissed_at`
-        are untouched.
-        """
-        with profiling.observe("recommendation upsert"), self._connection() as conn, conn.cursor() as cur:
-            return self._upsert(cur, crop_season_id=crop_season_id, rec=rec)
 
     @staticmethod
     def _upsert(cur: Any, *, crop_season_id: str, rec: Any) -> dict[str, Any]:
@@ -104,14 +103,6 @@ class PostgresRecommendationRepository:
         )
         return _normalize(cur.fetchone())
 
-    def prune_missing(self, *, crop_season_id: str, keep_rule_codes: list[str]) -> None:
-        """Remove a still-`generated` (never accepted/dismissed) row whose rule
-        no longer applies this run — keeps the list honest as data changes.
-        A farmer's own accept/dismiss decision is never pruned.
-        """
-        with profiling.observe("recommendation prune"), self._connection() as conn, conn.cursor() as cur:
-            self._prune(cur, crop_season_id=crop_season_id, keep_rule_codes=keep_rule_codes)
-
     @staticmethod
     def _prune(cur: Any, *, crop_season_id: str, keep_rule_codes: list[str]) -> None:
         cur.execute(
@@ -130,11 +121,19 @@ class PostgresRecommendationRepository:
             return _normalize(row)
 
     def set_status(
-        self, recommendation_id: str, status: str,
+        self, recommendation_id: str, status: str, *, actor_id: str,
         prepare: Callable[[dict[str, Any]], Any] | None = None,
     ) -> Any:
         column = "accepted_at" if status == "accepted" else "dismissed_at"
         with profiling.observe("recommendation set_status"), self._connection() as conn, conn.cursor() as cur:
+            # Authority on the season the row belongs to, read and locked in
+            # this transaction -- never a season id supplied by the caller.
+            cur.execute("select crop_season_id::text as crop_season_id from public.season_recommendations"
+                        " where id = %s for update", [recommendation_id])
+            owner = cur.fetchone()
+            if owner is None:
+                raise RecommendationNotFoundError()
+            assert_can_write_crop(cur, crop_season_id=owner["crop_season_id"], actor_id=actor_id)
             cur.execute(
                 f"""update public.season_recommendations
                     set status = %s, {column} = now(), updated_at = now()

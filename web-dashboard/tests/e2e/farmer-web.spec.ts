@@ -15,9 +15,23 @@ async function quickEntry(page: Page, label: string) {
   await expect(picker).toHaveCount(0)
 }
 
-test('Farmer V2 shell, navigation, pages and activity forms render correctly (mock data)', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/farmer')
+const desktopNav = (page: Page) => page.getByRole('navigation', { name: 'Điều hướng nông hộ', exact: true })
+const bottomNav = (page: Page) => page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })
+
+async function open(page: Page, path: string, width = 1440, height = 900) {
+  await page.setViewportSize({ width, height })
+  await page.goto(path)
+}
+
+/* Round 5.1: this was ONE test walking ten independent journeys. Alone it took
+ * 4-11 s; under the 8-worker mock suite every step ran 2-4x slower and the sum
+ * crossed the 30 s budget in 3 of 3 full runs. Each journey is now its own
+ * test with its own page, so none depends on another's leftovers and each is
+ * judged against the default budget. Every assertion of the original is kept. */
+test.describe.configure({ mode: 'parallel' })
+
+test('home: one context bar, grouped navigation, one next action (mock data)', async ({ page }) => {
+  await open(page, '/farmer')
   await expect(page.getByRole('heading', { name: 'Hôm nay trên ruộng của bạn', level: 1 })).toBeVisible()
   // One context bar states which season this is — farm, plot, season, status,
   // day count and both dates. (Round 2 removed the separate ledger hero: it
@@ -32,7 +46,7 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(ctx.locator('#fw-ctxbar-season')).toHaveText(/Hè Thu 2026|Thu Đông 2026/)
 
   // V2 shell: grouped desktop nav with one icon family (SVG, no emoji glyphs).
-  const nav = page.getByRole('navigation', { name: 'Điều hướng nông hộ', exact: true })
+  const nav = desktopNav(page)
   for (const label of ['Tổng quan', 'Nhật ký', 'Ruộng / Vụ mùa', 'Hiệu suất', 'Carbon', 'Tôi']) {
     await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible()
   }
@@ -51,10 +65,11 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   }
   await page.keyboard.press('Escape')
   await expect(homePicker).toHaveCount(0)
+})
 
+test('journal: every activity form opens with its own fields (mock data)', async ({ page }) => {
   // The rest of the forms are reached the way a farmer records: from the journal.
-  await page.goto('/farmer/journal')
-
+  await open(page, '/farmer/journal')
   await quickEntry(page, 'Bón phân')
   const fertilizer = page.getByRole('dialog', { name: 'Bón phân' })
   await expect(fertilizer).toBeVisible()
@@ -106,9 +121,11 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByText('Tỷ lệ chất khô của rơm').first()).toBeVisible()
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(page.getByRole('dialog', { name: 'Rơm rạ' })).toHaveCount(0)
+})
 
+test('season page: leaf check dialog stays disabled without a photo (mock data)', async ({ page }) => {
   // CV lives on the season page now (Home is one action only).
-  await page.goto('/farmer/crop-seasons/crop-demo-01')
+  await open(page, '/farmer/crop-seasons/crop-demo-01')
   // CV: picker opens, analyze stays disabled with no file, disclaimer always visible.
   await page.getByRole('button', { name: 'Kiểm tra lá lúa' }).click()
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toBeVisible()
@@ -116,10 +133,12 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByText('Kết quả chỉ mang tính hỗ trợ, chưa được xác nhận thực địa.')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Kiểm tra lá lúa' })).toHaveCount(0)
+})
 
+test('journal: a record goes to the season chosen, not the primary one (mock data)', async ({ page }) => {
   // Two active seasons: the journal names which season a record goes to, and
   // the form opens for the season actually chosen — not the primary one.
-  await page.goto('/farmer/journal')
+  await open(page, '/farmer/journal')
   await page.getByRole('group', { name: 'Chọn vụ canh tác' }).getByRole('button', { name: /Thu Đông 2026/ }).click()
   await quickEntry(page, 'Tưới nước')
   const forSecondSeason = page.getByRole('dialog', { name: 'Ghi tưới nước' })
@@ -129,7 +148,11 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(forSecondSeason.locator('.fw-fn__target')).toHaveText(/Thu Đông 2026 · Thửa A-02/)
   await page.getByRole('button', { name: 'Hủy' }).click()
   await expect(forSecondSeason).toHaveCount(0)
+})
 
+test('navigation: journal, farms, farm, plot and season keep the right item active (mock data)', async ({ page }) => {
+  await open(page, '/farmer/journal')
+  const nav = desktopNav(page)
   await nav.getByRole('link', { name: 'Nhật ký', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Nhật ký canh tác', level: 1 })).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Nhật ký', exact: true })).toHaveAttribute('aria-current', 'page')
@@ -154,7 +177,10 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   // Season pages keep the "Ruộng" nav destination active.
   await expect(nav.getByRole('link', { name: 'Ruộng / Vụ mùa', exact: true })).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('heading', { name: 'Mức đầy đủ dữ liệu' })).toBeVisible()
+})
 
+test('season journal: record drawer offers edit and a confirmed delete (mock data)', async ({ page }) => {
+  await open(page, '/farmer/crop-seasons/crop-demo-01')
   await page.getByRole('tab', { name: 'Nhật ký' }).click()
   await expect(page.getByRole('heading', { name: 'Nhật ký của vụ này' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Ghi hoạt động' }).first()).toBeVisible()
@@ -167,7 +193,10 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await page.getByRole('button', { name: 'Đóng' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
 
+test('season tabs: no fabricated zero, calm Carbon state without readiness (mock data)', async ({ page }) => {
+  await open(page, '/farmer/crop-seasons/crop-demo-01')
   await page.getByRole('tab', { name: 'Hiệu suất' }).click()
   await expect(page.getByRole('heading', { name: 'Hiệu suất vụ này' })).toBeVisible()
   // Mock metrics are all null: every card must say so, never show a fabricated 0.
@@ -181,20 +210,32 @@ test('Farmer V2 shell, navigation, pages and activity forms render correctly (mo
   await expect(page.getByRole('button', { name: /Tính lại/i })).toHaveCount(0)
   // Cost is never presented as a Carbon input.
   await expect(page.getByText(/Chi phí không phải đầu vào của Carbon/)).toBeVisible()
+})
 
+test('top pages: performance and account (mock data)', async ({ page }) => {
+  await open(page, '/farmer')
+  const nav = desktopNav(page)
   await nav.getByRole('link', { name: 'Hiệu suất', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Hiệu suất vụ của tôi', level: 1 })).toBeVisible()
   await nav.getByRole('link', { name: 'Tôi', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Phạm vi truy cập' })).toBeVisible()
+})
 
+test('account page has no horizontal overflow at 1024, 768 and 390 (mock data)', async ({ page }) => {
+  await open(page, '/farmer')
+  await desktopNav(page).getByRole('link', { name: 'Tôi', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Phạm vi truy cập' })).toBeVisible()
   for (const width of [1024, 768, 390]) {
     await page.setViewportSize({ width, height: 844 })
     await expect.poll(() => noHorizontalOverflow(page)).toBe(true)
   }
+})
 
+test('390: real bottom navigation, the form fits, journal (mock data)', async ({ page }) => {
   // 390: real bottom navigation, no squeezed sidebar.
-  await page.goto('/farmer')
-  const bottom = page.getByRole('navigation', { name: 'Điều hướng nông hộ trên điện thoại' })
+  await open(page, '/farmer', 390, 844)
+  const nav = desktopNav(page)
+  const bottom = bottomNav(page)
   await expect(bottom).toBeVisible()
   await expect(nav).toBeHidden()
   await expect(bottom.getByRole('link')).toHaveCount(6)
