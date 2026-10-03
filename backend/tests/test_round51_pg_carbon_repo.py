@@ -124,7 +124,10 @@ def _calculable(conn, service: CarbonService, with_fertilizer: bool = False) -> 
 
 # -- equivalence ---------------------------------------------------------------
 
-@pytest.mark.skipif(not _SETTINGS.supabase_configured, reason="PostgREST side needs the service-role key.")
+# Without a database the module mark skips it under the allowlisted reason; a
+# function mark is evaluated first, so it must not fire then.
+@pytest.mark.skipif(bool(_DB_URL) and not _SETTINGS.supabase_configured,
+                    reason="PostgREST side needs the service-role key.")
 def test_every_season_reads_and_calculates_identically_to_the_postgrest_repository(db):
     postgrest = SupabaseCarbonRepository(_SETTINGS)
     pooled = PostgresCarbonRepository(_SETTINGS)
