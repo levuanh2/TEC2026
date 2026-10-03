@@ -72,3 +72,14 @@ route (it reads the same claim), until it expires;
 a token minted after the change has normal access. `/v1/me` and
 `POST /v1/me/password` keep working so the user can leave the state. Test:
 `test_forced_password_change.py::test_a_token_minted_with_the_temporary_password_stays_refused_after_the_change`.
+
+## 3E. Review findings re-evaluated (PR #3, 2026-10-03)
+
+| Finding | Reproduced | Severity | Action |
+|---|---|---|---|
+| A. A writer refused on a harvest over the plot area gets 422 `harvested_area_exceeds_plot`, not the refusal 404 | Confirmed (validation runs before the write-authority check) | LOW | Defer. No existence leak: the season read (RLS) runs first, so only a caller who can already READ the season and its plot area sees it; an unreadable or unknown season is 404. |
+| B. A plot shrunk between the API's area check and the insert makes the DB trigger raise 23514, returned as 500 | Confirmed in code; needs a concurrent plot-area change | LOW | Defer. No API route changes a plot's area; the database still refuses the row (integrity holds), only the status is wrong. |
+| C. Restoring a soft-deleted harvest could bypass the area trigger | Not reproduced: as the owner, `update activities set deleted_at = null` affects 0 rows (the select policy hides deleted rows); no restore/undelete function exists | — | None. An undelete feature must re-check the area rule. |
+| D. Flutter: a stale local plot area marks a valid harvest as a permanent failure | Not reproduced | — | None now. The record stays in the queue with "Sửa bản ghi" (re-saving re-queues it). |
+| E. Flutter: password changed but the sign-in with the new one fails → shown as "not changed" | Confirmed | LOW | Fixed (a17cf7b): says the password WAS changed, as Web does. |
+| F. Data-dependent `test.skip` in the manual real spec `round5-real` | Confirmed | LOW | None: real/hosted specs are excluded from the CI mock suite; no skip added. |
