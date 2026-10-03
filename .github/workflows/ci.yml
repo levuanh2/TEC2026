@@ -103,6 +103,8 @@ jobs:
           python scripts/ci/ci_policy.py --base-ref "$BASE"
       - name: ci-gate logic on synthetic job results
         run: bash scripts/ci/ci_gate_selftest.sh
+      - name: mutation ratchet on synthetic results
+        run: python scripts/ci/mutation_ratchet_selftest.py
       - name: PowerShell helper syntax (.herdr)
         shell: pwsh
         run: |

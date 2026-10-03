@@ -1,24 +1,30 @@
 # Mutation testing baseline
 
 Strict CI (`.github/workflows/strict-ci.yml`, job *Mutation testing*) runs
-mutmut 2.5.1 on three critical modules and uploads every surviving mutant's diff
-(`mutation-<n>` artifacts). The result is **reported, not gated** (status:
-PARTIAL): there is no score threshold yet. A future PR introduces a ratchet once
-the `missing test` items below are closed, so the bar is set on triaged data,
-not an invented number.
+mutmut 2.5.1 on three critical modules and **gates them with a ratchet**
+(`scripts/ci/mutation_ratchet.py`, baseline `scripts/ci/policy/mutation.json`,
+self-test `scripts/ci/mutation_ratchet_selftest.py` in PR CI). A module fails
+when it loses a killed mutant, gains a survivor that is not in its accepted
+list, or changed since triage (the policy pins the module's sha256: mutmut
+numbers mutants by position, so an edit means re-triaging). Every accepted
+survivor carries a class (B, C, D; E only with a recorded decision) and a
+reason. A real test gap (A) is never accepted.
 
-Baseline: GitHub run 36330193098 (commit a71c47a, 2026-09-27); totals confirmed
-unchanged by strict run 36332895849 (commit 1c3a0fa). Every survivor below was
-read from its diff and classified exactly once.
+Core V1 hardening, measured locally on commit a9a685b with the strict-ci test
+sets (2026-10-03):
 
-| Module | Survivors | Equivalent / likely equivalent | Missing meaningful test | Low-value text | Needs investigation |
-|---|---|---|---|---|---|
-| `carbon/engine.py` | 67 of 133 | 10 | 12 | 45 | 0 |
-| `recommendation/rules.py` | 52 of 97 | 10 | 26 | 16 | 0 |
-| `infrastructure/memberships.py` | 3 of 13 | 1 | 2 | 0 | 0 |
+| Module | Before | After | A | B | C | D | E |
+|---|---|---|---|---|---|---|---|
+| `carbon/engine.py` | 66/133 | **81/133** | 0 | 10 | 0 | 42 | 0 |
+| `recommendation/rules.py` | 45/97 | **71/97** | 0 | 7 | 0 | 19 | 0 |
+| `infrastructure/memberships.py` | 10/13 | **12/13** | 0 | 1 | 0 | 0 | 0 |
 
-Mutation scores (killed/total, `mutmut junitxml`, printed in the strict job
-summary): engine 66/133, rules 45/97, memberships 10/13.
+"Before" is GitHub run 36330193098 (commit a71c47a, 2026-09-27). Closing the A
+items added `tests/test_carbon_engine_contract.py`,
+`tests/test_recommendation_contract.py` and two `test_memberships.py` cases;
+the strict-ci matrix now runs them. No Carbon factor, formula or expected value
+changed: the tests pin identity, contracts and boundaries only. Engine mutants
+116, 118 and 120 (class D before) died with the provenance-warning tests.
 
 ## Categories
 
@@ -33,7 +39,8 @@ summary): engine 66/133, rules 45/97, memberships 10/13.
 - memberships 1: `value.replace("Z", "+00:00")` -- Python 3.11
   `datetime.fromisoformat` parses `Z` itself.
 
-**Missing meaningful test** -- real behaviour no test pins. To close first:
+**Missing meaningful test (A)** -- all killed by the Core V1 hardening; kept
+for the record of what each test pins:
 - engine 1: `ENGINE_VERSION` is persisted with every result and drives
   idempotency; pin it in a golden test. 45: the `compute_input_hash` payload
   separator (a changed hash silently defeats idempotent save); golden hash.
@@ -58,7 +65,7 @@ summary): engine 66/133, rules 45/97, memberships 10/13.
 
 **Low-value text** -- human-readable Vietnamese messages, warnings and list
 separators (engine 42-44, 49-50, 55-57, 61-62, 66-68, 70, 73-75, 78, 80, 83-84,
-95-98, 101-102, 104-105, 107-112, 116, 118, 120-121, 124, 126, 128, 131-133;
+95-98, 101-102, 104-105, 107-112, 121, 124, 126, 128, 131-133;
 rules 17, 19, 26-28, 35, 60, 63-65, 67-68, 70-71, 73-74). Asserting exact prose
 would make tests brittle; the codes and structure around them are what clients
-read. Not counted against a future ratchet.
+read. Accepted in the ratchet as class D, one entry per mutant.
