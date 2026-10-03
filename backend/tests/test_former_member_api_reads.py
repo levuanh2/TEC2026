@@ -326,6 +326,8 @@ def test_the_active_owner_writes_through_the_same_routes(tenant):
     assert after["recommendations"] >= 1
     # A former owner (any farmer role elsewhere) cannot accept/dismiss them.
     rec = r.json()["items"][0]
+    # Generation keeps an earlier accept/dismiss, so compare with the status now.
+    status_before = rec["status"]
     for who in ("former_owner", "moved_owner"):
         refused = client.patch(f"/v1/recommendations/{rec['id']}", json={"status": "accepted"},
                                headers={"Authorization": f"Bearer {tokens[who]}"})
@@ -334,7 +336,7 @@ def test_the_active_owner_writes_through_the_same_routes(tenant):
         assert refused.status_code == missing.status_code == 404, (who, refused.text[:200])
         assert refused.json() == missing.json(), who
     listed = _get(client, tokens["owner"], f"/v1/crop-seasons/{ids['write_season']}/recommendations").json()["items"]
-    assert {x["id"]: x["status"] for x in listed}[rec["id"]] == "generated"
+    assert {x["id"]: x["status"] for x in listed}[rec["id"]] == status_before
 
 
 # -- Viewer is read-only (product decision 2026-10-03) -----------------------------
@@ -358,6 +360,10 @@ def test_generate_accept_and_dismiss_are_refused_without_write_authority(tenant,
     assert generated.status_code == 200, generated.text[:200]
     rec = generated.json()["items"][0]
     before = _counts(ids)
+    statuses = lambda: {x["id"]: x["status"] for x in _get(  # noqa: E731
+        client, tokens["owner"], f"/v1/crop-seasons/{season}/recommendations").json()["items"]}
+    # Generation keeps a farmer's earlier accept/dismiss, so compare, never assume.
+    status_before = statuses()
 
     refused = client.post(f"/v1/crop-seasons/{season}/recommendations/generate", headers=_auth(tokens, who))
     missing = client.post(f"/v1/crop-seasons/{unknown}/recommendations/generate", headers=_auth(tokens, who))
@@ -370,8 +376,7 @@ def test_generate_accept_and_dismiss_are_refused_without_write_authority(tenant,
         assert refused.json() == missing.json(), (who, status)
 
     assert _counts(ids) == before, who
-    listed = _get(client, tokens["owner"], f"/v1/crop-seasons/{season}/recommendations").json()["items"]
-    assert {x["id"]: x["status"] for x in listed}[rec["id"]] == "generated", who
+    assert statuses() == status_before, who
 
 
 @pytest.mark.parametrize("who", WRITERS)
