@@ -252,6 +252,10 @@ for (const vw of [1363, 1024]) {
     for (const path of MANAGER_ROUTES) {
       await page.goto(path)
       await expect(page.locator('main h1').first()).toBeVisible()
+      // Measure the laid-out webfont, as the other parity tests do: with the
+      // fallback font still showing, "Tổng quan vận hành" is wider and read as
+      // clipped on the CI runner although the final rail fits it.
+      await page.evaluate(() => document.fonts.ready)
       const w = await page.locator(MANAGER_SIDE).evaluate((el) => el.getBoundingClientRect().width)
       expect(Math.abs(w - TOKEN_W(vw)), path).toBeLessThanOrEqual(1)
       const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
