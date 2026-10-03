@@ -42,6 +42,7 @@ PERSONAS = {  # name -> (organization, organization role, farm role, membership 
     "manager": ("coop", "cooperative_manager", None, False),
     "owner": ("coop", "farmer", "owner", False),
     "viewer": ("coop", "farmer", "viewer", False),
+    "editor": ("coop", "farmer", "editor", False),
     "former_viewer": ("coop", "farmer", "viewer", True),
     "former_editor": ("coop", "farmer", "editor", True),
     "former_owner": ("coop", "farmer", "owner", True),
@@ -334,3 +335,78 @@ def test_the_active_owner_writes_through_the_same_routes(tenant):
         assert refused.json() == missing.json(), who
     listed = _get(client, tokens["owner"], f"/v1/crop-seasons/{ids['write_season']}/recommendations").json()["items"]
     assert {x["id"]: x["status"] for x in listed}[rec["id"]] == "generated"
+
+
+# -- Viewer is read-only (product decision 2026-10-03) -----------------------------
+# Recommendation and CV writes go through a service-role connection; write
+# authority is `private.user_can_write_crop` for the JWT-verified caller. The
+# farmer-role gate stays on top (an HTX manager is refused these farmer actions).
+
+WRITERS = ["owner", "editor"]
+NOT_WRITERS = ["viewer", "former_owner", "moved_owner", "former_viewer", "former_editor", "outsider", "manager"]
+
+
+def _auth(tokens, who):
+    return {"Authorization": f"Bearer {tokens[who]}"}
+
+
+@pytest.mark.parametrize("who", NOT_WRITERS)
+def test_generate_accept_and_dismiss_are_refused_without_write_authority(tenant, who):
+    client, tokens, ids = tenant
+    season, unknown = ids["write_season"], str(uuid.uuid4())
+    generated = client.post(f"/v1/crop-seasons/{season}/recommendations/generate", headers=_auth(tokens, "owner"))
+    assert generated.status_code == 200, generated.text[:200]
+    rec = generated.json()["items"][0]
+    before = _counts(ids)
+
+    refused = client.post(f"/v1/crop-seasons/{season}/recommendations/generate", headers=_auth(tokens, who))
+    missing = client.post(f"/v1/crop-seasons/{unknown}/recommendations/generate", headers=_auth(tokens, who))
+    assert refused.status_code == missing.status_code == 404, (who, refused.text[:200])
+    assert refused.json() == missing.json(), who
+    for status in ("accepted", "dismissed"):
+        refused = client.patch(f"/v1/recommendations/{rec['id']}", json={"status": status}, headers=_auth(tokens, who))
+        missing = client.patch(f"/v1/recommendations/{uuid.uuid4()}", json={"status": status}, headers=_auth(tokens, who))
+        assert refused.status_code == missing.status_code == 404, (who, status, refused.text[:200])
+        assert refused.json() == missing.json(), (who, status)
+
+    assert _counts(ids) == before, who
+    listed = _get(client, tokens["owner"], f"/v1/crop-seasons/{season}/recommendations").json()["items"]
+    assert {x["id"]: x["status"] for x in listed}[rec["id"]] == "generated", who
+
+
+@pytest.mark.parametrize("who", WRITERS)
+def test_owner_and_editor_generate_accept_and_dismiss(tenant, who):
+    client, tokens, ids = tenant
+    season = ids["write_season"]
+    generated = client.post(f"/v1/crop-seasons/{season}/recommendations/generate", headers=_auth(tokens, who))
+    assert generated.status_code == 200, (who, generated.text[:200])
+    rec = generated.json()["items"][0]
+    for status in ("accepted", "dismissed"):
+        r = client.patch(f"/v1/recommendations/{rec['id']}", json={"status": status}, headers=_auth(tokens, who))
+        assert r.status_code == 200 and r.json()["status"] == status, (who, status, r.text[:200])
+
+
+@pytest.mark.parametrize("who,allowed", [
+    ("owner", True), ("editor", True), ("manager", True),  # the DB helper; the service adds the farmer gate
+    ("viewer", False), ("former_owner", False), ("moved_owner", False),
+    ("former_viewer", False), ("former_editor", False), ("outsider", False),
+])
+def test_cv_upload_write_authority_is_the_plant_images_insert_rule(tenant, who, allowed):
+    from infrastructure.crop_write_authz import CropWriteDeniedError
+    from infrastructure.cv_repo import PostgresCvRepository
+
+    _, _, ids = tenant
+    repo = PostgresCvRepository(_SETTINGS)
+    user = str(ids["users"][who])
+    if allowed:
+        repo.assert_can_write(crop_season_id=str(ids["write_season"]), actor_id=user)
+    else:
+        with pytest.raises(CropWriteDeniedError):
+            repo.assert_can_write(crop_season_id=str(ids["write_season"]), actor_id=user)
+        # The row write itself refuses too, and nothing is written.
+        with pytest.raises(CropWriteDeniedError):
+            repo.create_image(crop_season_id=str(ids["write_season"]), uploaded_by=user,
+                              storage_object_path=f"{ids['farm']}/{ids['write_season']}/x.jpg", mime_type="image/jpeg",
+                              file_size_bytes=1, sha256=uuid.uuid4().hex * 2)
+    with pytest.raises(CropWriteDeniedError):  # unknown season: same refusal
+        repo.assert_can_write(crop_season_id=str(uuid.uuid4()), actor_id=user)

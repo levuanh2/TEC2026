@@ -27,23 +27,18 @@ import api  # noqa: E402
 from infrastructure.cv_repo import CvNotFoundError, DuplicateImageError  # noqa: E402
 from infrastructure.read_repo import ReadNotFoundError  # noqa: E402
 from ml.model import build_model  # noqa: E402
+from infrastructure.crop_write_authz import CropWriteDeniedError  # noqa: E402
 from service import CvAccessError, CvService, InvalidImageError, MAX_IMAGE_BYTES  # noqa: E402
 
-ACTOR, SEASON, FARM, PLOT, COOP = "farmer-a", "season-a", "farm-a", "plot-a", "coop-a"
+ACTOR, SEASON, FARM, PLOT = "farmer-a", "season-a", "farm-a", "plot-a"
 
 
 class FakeRead:
-    def __init__(self, *, role: str = "farmer", visible: bool = True, organization: str = COOP):
-        self.role, self.visible, self.organization = role, visible, organization
+    def __init__(self, *, role: str = "farmer", visible: bool = True, actor: str = ACTOR):
+        self.role, self.visible, self.actor = role, visible, actor
 
     def me(self):
-        # Like the real me(): only ACTIVE memberships, and a role per membership.
-        return {"user_id": ACTOR, "roles": [self.role],
-                "organization_memberships": [{"organization_id": self.organization, "role": self.role, "ended_at": None}]}
-
-    def crop_season_cooperative_id(self, season_id):
-        self.season(season_id)
-        return COOP
+        return {"user_id": self.actor, "roles": [self.role]}
 
     def season(self, season_id):
         if not self.visible:
@@ -63,7 +58,13 @@ class FakeCvRepository:
         self.model_versions: dict[str, str] = {}
         self.model_version_codes: dict[str, str] = {}
         self.uploads: list[str] = []
+        # Who `private.user_can_write_crop` says may write the season.
+        self.writers: set[str] = {ACTOR}
         self._next = 1
+
+    def assert_can_write(self, *, crop_season_id, actor_id):
+        if actor_id not in self.writers:
+            raise CropWriteDeniedError()
 
     def get_or_create_model_version(self, **kwargs):
         code = kwargs["version_code"]
@@ -86,6 +87,7 @@ class FakeCvRepository:
         return path
 
     def create_image(self, *, crop_season_id, uploaded_by, storage_object_path, mime_type, file_size_bytes, sha256):
+        self.assert_can_write(crop_season_id=crop_season_id, actor_id=uploaded_by)
         image_id = f"img-{self._next}"
         self._next += 1
         self.images[image_id] = {"id": image_id, "crop_season_id": crop_season_id, "sha256": sha256}
@@ -97,7 +99,9 @@ class FakeCvRepository:
                 return dict(row)
         return None
 
-    def create_inference(self, *, image_id, model_version_id, predicted_label, confidence, threshold_used, prepare=None):
+    def create_inference(self, *, image_id, model_version_id, predicted_label, confidence, threshold_used, actor_id,
+                         prepare=None):
+        self.assert_can_write(crop_season_id=self.images[image_id]["crop_season_id"], actor_id=actor_id)
         inference_id = f"inf-{self._next}"
         self._next += 1
         crop_season_id = self.images[image_id]["crop_season_id"]
@@ -240,14 +244,36 @@ def test_manager_can_list_and_get_but_never_calls_infer_in_this_test():
     assert fetched["id"] == created["id"]
 
 
-def test_a_farmer_of_another_cooperative_cannot_upload_or_infer():
-    """Core V1 former-member contract: a former farm owner still reads their own
-    farm; a farmer role in ANOTHER cooperative must not turn that into a write."""
+def test_a_reader_without_write_authority_uploads_nothing():
+    """Viewer is read-only (product decision 2026-10-03): a farm viewer or a
+    former owner READS the season, may hold a farmer role, but
+    `user_can_write_crop` says no -- refused like an unknown id, before a byte
+    reaches Storage."""
     repo = FakeCvRepository()
     with pytest.raises(CvAccessError):
-        _service(repo).infer(read_repository=FakeRead(organization="coop-elsewhere"), crop_season_id=SEASON,
+        _service(repo).infer(read_repository=FakeRead(actor="viewer-or-former-owner"), crop_season_id=SEASON,
                              file_bytes=_fake_jpeg_bytes(), content_type="image/jpeg")
     assert repo.uploads == [] and repo.images == {} and repo.inferences == {}
+
+
+def test_write_authority_lost_after_the_early_check_still_refuses_and_cleans_storage():
+    """The row writes re-check in their own transaction; a refusal there is the
+    same 404 and the uploaded object is removed."""
+    class Revoking(FakeCvRepository):
+        removed: list[str] = []
+
+        def assert_can_write(self, *, crop_season_id, actor_id):
+            if self.uploads:  # authority gone by the time the row is written
+                raise CropWriteDeniedError()
+
+        def delete_image_object(self, object_path):
+            self.removed.append(object_path)
+
+    repo = Revoking()
+    with pytest.raises(CvAccessError):
+        _service(repo).infer(read_repository=FakeRead(), crop_season_id=SEASON,
+                             file_bytes=_fake_jpeg_bytes(), content_type="image/jpeg")
+    assert repo.images == {} and repo.inferences == {} and repo.removed == repo.uploads
 
 
 def test_cross_scope_list_normalizes_to_404():

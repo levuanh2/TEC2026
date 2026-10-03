@@ -1,8 +1,11 @@
 """Trusted persistence + storage for M03 CV Farmer integration.
 
-Same trust model as write_repo.py/recommendation_repo.py: authorization is
-established by the caller (via SupabaseReadRepository, RLS) *before*
-reaching this repository. `plant_images`/`cv_inferences`/`cv_model_versions`
+Same trust model as write_repo.py/recommendation_repo.py: read scope is
+established by the caller (via SupabaseReadRepository, RLS); WRITE authority
+is `private.user_can_write_crop` for the JWT-verified actor -- the helper of
+the `plant_images_insert` policy -- checked before the Storage upload and again
+inside each row-writing transaction (`crop_write_authz`). A farm viewer or a
+former member uploads nothing. `plant_images`/`cv_inferences`/`cv_model_versions`
 writes use a service-role psycopg connection; the image bytes go to the
 existing `plant-images` Supabase Storage bucket (already provisioned —
 see baseline migration comment — not a second storage architecture).
@@ -15,6 +18,7 @@ from typing import Any, Callable
 
 from . import pg_pool
 from .config import Settings
+from .crop_write_authz import assert_can_write_crop
 
 STORAGE_BUCKET = "plant-images"
 
@@ -61,6 +65,11 @@ class PostgresCvRepository:
             url, key = self._settings.require_supabase()
             self._storage_client = create_client(url, key)
         return self._storage_client
+
+    def assert_can_write(self, *, crop_season_id: str, actor_id: str) -> None:
+        """Refuse before anything is uploaded; the row writes re-check."""
+        with self._connection() as conn, conn.cursor() as cur:
+            assert_can_write_crop(cur, crop_season_id=crop_season_id, actor_id=actor_id)
 
     def upload_image(self, *, farm_id: str, crop_season_id: str, file_bytes: bytes, mime_type: str, extension: str) -> str:
         """Object path MUST be `<farm_uuid>/<crop_season_uuid>/<file>` — enforced
@@ -117,6 +126,7 @@ class PostgresCvRepository:
         mime_type: str, file_size_bytes: int, sha256: str,
     ) -> str:
         with self._connection() as conn, conn.cursor() as cur:
+            assert_can_write_crop(cur, crop_season_id=crop_season_id, actor_id=uploaded_by)
             cur.execute(
                 """insert into public.plant_images
                    (crop_season_id, storage_bucket, storage_object_path, mime_type, file_size_bytes, sha256, uploaded_by)
@@ -134,9 +144,15 @@ class PostgresCvRepository:
 
     def create_inference(
         self, *, image_id: str, model_version_id: str, predicted_label: str, confidence: float, threshold_used: float,
-        prepare: Callable[[dict[str, Any]], Any] | None = None,
+        actor_id: str, prepare: Callable[[dict[str, Any]], Any] | None = None,
     ) -> Any:
         with self._connection() as conn, conn.cursor() as cur:
+            cur.execute("select crop_season_id::text as crop_season_id from public.plant_images where id = %s",
+                        [image_id])
+            image = cur.fetchone()
+            if image is None:
+                raise CvNotFoundError()
+            assert_can_write_crop(cur, crop_season_id=image["crop_season_id"], actor_id=actor_id)
             cur.execute(
                 """insert into public.cv_inferences (image_id, model_version_id, predicted_label, confidence, threshold_used)
                    values (%s,%s,%s,%s,%s) returning id::text""",

@@ -31,6 +31,7 @@ from infrastructure.mapping import (
 )
 from infrastructure.repository import CarbonRepository
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
+from infrastructure.crop_write_authz import CropWriteDeniedError
 from infrastructure.cv_repo import CvNotFoundError, DuplicateImageError, PostgresCvRepository
 from infrastructure.recommendation_repo import PostgresRecommendationRepository, RecommendationNotFoundError
 from infrastructure.mrv_export_repo import (
@@ -730,28 +731,6 @@ class RecommendationAccessError(Exception):
     """Normalized to 404 so scope cannot enumerate other farmers' seasons."""
 
 
-def _require_farmer_of_season_cooperative(
-    read_repository: SupabaseReadRepository, me: dict[str, Any], crop_season_id: str, error: type[Exception],
-) -> None:
-    """A farmer acts on a season only through an ACTIVE farmer membership in
-    that farm's cooperative (Core V1 former-member contract, 2026-10-03).
-
-    The recommendation and CV writes go through a service-role connection, so
-    RLS does not stop them. Reading the season is not enough: a farm owner who
-    left the HTX still reads their own farm's history, and a farmer role in
-    ANOTHER cooperative must not turn that read into a write.
-    """
-    try:
-        cooperative_id = read_repository.crop_season_cooperative_id(crop_season_id)
-    except ReadNotFoundError as exc:
-        raise error() from exc
-    if not any(
-        str(m.get("organization_id")) == cooperative_id and m.get("role") == "farmer"
-        for m in memberships.active_memberships(me.get("organization_memberships") or [])
-    ):
-        raise error()
-
-
 class RecommendationService:
     """M05 domain service: generate deterministic recommendations for a crop
     season, and let the farmer accept/dismiss one.
@@ -773,37 +752,44 @@ class RecommendationService:
         return me
 
     def generate(self, *, read_repository: SupabaseReadRepository, crop_season_id: str) -> list[dict[str, Any]]:
-        me = self._actor_and_farmer_scope(read_repository)
-        _require_farmer_of_season_cooperative(read_repository, me, crop_season_id, RecommendationAccessError)
+        actor_id = str(self._actor_and_farmer_scope(read_repository)["user_id"])
         try:
             read_repository.season(crop_season_id)
+            # Persisting is a write: a viewer, a former member or a data-grant
+            # reader can read the season but gets the same 404 as an unknown id.
+            # Refused before the Carbon what-ifs run; re-checked in the save.
+            self._write_repository.assert_can_write(crop_season_id=crop_season_id, actor_id=actor_id)
             metrics = read_repository.metrics(crop_season_id)
-        except ReadNotFoundError as exc:
+        except (ReadNotFoundError, CropWriteDeniedError) as exc:
             raise RecommendationAccessError() from exc
 
         candidates = generate_recommendations(crop_season_id, carbon=self._carbon, metrics=metrics)
         # One transaction for the whole run: same rows as upserting each rule
         # then pruning, but a single DB connection and no window in which a
         # reader could see half of this run applied.
-        return self._write_repository.save_generated(
-            crop_season_id=crop_season_id, recs=candidates,
-            prepare=lambda rows: [schemas.success_payload(schemas.RecommendationResponse, row) for row in rows],
-        )
+        try:
+            return self._write_repository.save_generated(
+                crop_season_id=crop_season_id, recs=candidates, actor_id=actor_id,
+                prepare=lambda rows: [schemas.success_payload(schemas.RecommendationResponse, row) for row in rows],
+            )
+        except CropWriteDeniedError as exc:
+            raise RecommendationAccessError() from exc
 
     def set_status(
         self, *, read_repository: SupabaseReadRepository, recommendation_id: str, status: str,
     ) -> dict[str, Any]:
-        me = self._actor_and_farmer_scope(read_repository)
+        actor_id = str(self._actor_and_farmer_scope(read_repository)["user_id"])
         try:
             existing = self._write_repository.get(recommendation_id)
             read_repository.season(str(existing["crop_season_id"]))
-        except (ReadNotFoundError, RecommendationNotFoundError) as exc:
+            # Accept/dismiss is a write: the repository checks write authority
+            # on the row's own season inside the update's transaction.
+            return self._write_repository.set_status(
+                recommendation_id, status, actor_id=actor_id,
+                prepare=lambda row: schemas.success_payload(schemas.RecommendationResponse, row),
+            )
+        except (ReadNotFoundError, RecommendationNotFoundError, CropWriteDeniedError) as exc:
             raise RecommendationAccessError() from exc
-        _require_farmer_of_season_cooperative(read_repository, me, str(existing["crop_season_id"]), RecommendationAccessError)
-        return self._write_repository.set_status(
-            recommendation_id, status,
-            prepare=lambda row: schemas.success_payload(schemas.RecommendationResponse, row),
-        )
 
 
 class CvAccessError(Exception):
@@ -848,11 +834,10 @@ class CvService:
         return self._model_version_id
 
     @staticmethod
-    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository, crop_season_id: str) -> str:
+    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> str:
         me = read_repository.me()
         if "farmer" not in me["roles"]:
             raise CvAccessError()
-        _require_farmer_of_season_cooperative(read_repository, me, crop_season_id, CvAccessError)
         return str(me["user_id"])
 
     @staticmethod
@@ -888,8 +873,19 @@ class CvService:
         return image, _ALLOWED_MIME_EXTENSIONS[content_type]
 
     def infer(self, *, read_repository: SupabaseReadRepository, crop_season_id: str, file_bytes: bytes, content_type: str) -> dict[str, Any]:
-        actor_id = self._actor_and_farmer_scope(read_repository, crop_season_id)
+        try:
+            return self._infer(read_repository=read_repository, crop_season_id=crop_season_id,
+                               file_bytes=file_bytes, content_type=content_type)
+        except CropWriteDeniedError as exc:  # lost write authority between the early check and a row write
+            raise CvAccessError() from exc
+
+    def _infer(self, *, read_repository: SupabaseReadRepository, crop_season_id: str, file_bytes: bytes, content_type: str) -> dict[str, Any]:
+        actor_id = self._actor_and_farmer_scope(read_repository)
         farm_id = self._resolve_farm_id(read_repository, crop_season_id)
+        # An upload is a write (`plant_images_insert` needs user_can_write_crop):
+        # a viewer or a former member gets the read-refusal 404, before any
+        # byte reaches Storage. The row writes re-check in their transactions.
+        self._write_repository.assert_can_write(crop_season_id=crop_season_id, actor_id=actor_id)
         image, extension = self._decode_and_validate(file_bytes, content_type)
         sha256 = hashlib.sha256(file_bytes).hexdigest()
         model_version_id = self._model_version_id_cached()
@@ -935,7 +931,7 @@ class CvService:
         # the API response maps it back to `label: null` below.
         predicted_label = predicted["label"] or "unknown"
         return self._write_repository.create_inference(
-            image_id=image_id, model_version_id=model_version_id,
+            image_id=image_id, model_version_id=model_version_id, actor_id=actor_id,
             predicted_label=predicted_label, confidence=predicted["confidence"], threshold_used=self._threshold,
             prepare=lambda row: schemas.success_payload(schemas.CvInferenceResponse, self._to_response(row)),
         )
