@@ -1,4 +1,4 @@
-"""Core V1 closure (3A) through the API: a former farm editor/viewer reads nothing.
+"""Core V1 closure (3A) through the API: the former-member contract.
 
 Real `main.app`, real Supabase Auth JWTs, real RLS (FastAPI forwards the
 caller's JWT or sets `request.jwt.claims` before calling the same
@@ -6,8 +6,11 @@ caller's JWT or sets `request.jwt.claims` before calling the same
 of an id that does not exist -- same status, same error envelope -- so nothing
 about the farm leaks.
 
-The former OWNER keeps reading their own farm: unchanged, pending a product
-decision (docs/CORE_V1_CLOSURE.md, 3A).
+Product decision 2026-10-03 (docs/CORE_V1_CLOSURE.md): a former farm OWNER keeps
+READ-ONLY access to the history of the farm they own -- no write, no other farm,
+no HTX dashboard or aggregate. A former editor/viewer reads nothing. `moved_owner`
+left this HTX as the farm's owner and is an active farmer of ANOTHER one: that
+farmer role must not turn the historical read into a write.
 
 Creates users and a tenant, so it only runs against a LOCAL Supabase stack and
 deletes everything it created.
@@ -42,10 +45,12 @@ PERSONAS = {  # name -> (organization, organization role, farm role, membership 
     "former_viewer": ("coop", "farmer", "viewer", True),
     "former_editor": ("coop", "farmer", "editor", True),
     "former_owner": ("coop", "farmer", "owner", True),
+    "moved_owner": ("coop", "farmer", "owner", True),
     "outsider": ("other", "farmer", None, False),
 }
-READERS = ["manager", "owner", "viewer", "former_owner"]  # former_owner: pending product decision
+READERS = ["manager", "owner", "viewer", "former_owner", "moved_owner"]
 REFUSED = ["former_viewer", "former_editor", "outsider"]
+FORMER = ["former_owner", "moved_owner", "former_viewer", "former_editor"]
 
 
 @pytest.fixture(scope="module")
@@ -88,6 +93,18 @@ def tenant():
                                 " values (%s, %s, 'active') returning id", (ids["plot"], f"FMR-{run}"))
             ids["batch"] = one("insert into public.production_batches (crop_season_id, batch_code)"
                                " values (%s, 'default') returning id", (ids["season"],))
+            # A second open season of the same farm, for the write tests only.
+            ids["write_season"] = one("insert into public.crop_seasons (plot_id, season_code, status)"
+                                      " values (%s, %s, 'active') returning id", (ids["plot"], f"FMR-W-{run}"))
+            one("insert into public.production_batches (crop_season_id, batch_code)"
+                " values (%s, 'default') returning id", (ids["write_season"],))
+            # Another farm of the same HTX, owned by `owner` only.
+            ids["other_farm"] = one("insert into public.farms (cooperative_id, farm_code, farm_name)"
+                                    " values (%s, %s, 'FMR') returning id", (ids["coop"], f"FMR-O-{run}"))
+            ids["other_plot"] = one("insert into public.plots (farm_id, plot_code, name, area_ha)"
+                                    " values (%s, %s, 'FMR', 1) returning id", (ids["other_farm"], f"FMR-O-{run}"))
+            ids["other_season"] = one("insert into public.crop_seasons (plot_id, season_code, status)"
+                                      " values (%s, %s, 'active') returning id", (ids["other_plot"], f"FMR-O-{run}"))
             ids["activity"] = one(
                 "insert into public.activities (production_batch_id, activity_type, occurred_at, recorded_at, source,"
                 " recorded_by, note) values (%s, 'irrigation', now(), now(), 'web', %s, 'FMR') returning id",
@@ -100,9 +117,14 @@ def tenant():
                 if farm_role:  # a farm role can only be given to an active member (validate_farm_member)
                     conn.execute("insert into public.farm_members (farm_id, user_id, farm_role) values (%s, %s, %s)",
                                  (ids["farm"], ids["users"][name], farm_role))
+                if name == "owner":
+                    conn.execute("insert into public.farm_members (farm_id, user_id, farm_role) values (%s, %s, 'owner')",
+                                 (ids["other_farm"], ids["users"][name]))
                 if ended:  # the membership ends afterwards: the farm role outlives it
                     conn.execute("update public.organization_memberships set ended_at = now() - interval '1 day'"
                                  " where user_id = %s", (ids["users"][name],))
+            conn.execute("insert into public.organization_memberships (organization_id, user_id, role, joined_at)"
+                         " values (%s, %s, 'farmer', now() - interval '1 day')", (ids["other"], ids["users"]["moved_owner"]))
             conn.commit()
         yield TestClient(app, raise_server_exceptions=False), tokens, ids
     finally:
@@ -121,6 +143,7 @@ def _cleanup(admin, ids):
         batches = f"select id from public.production_batches where crop_season_id in ({seasons})"
         activities = f"select id from public.activities where production_batch_id in ({batches})"
         for statement in (
+            f"delete from public.season_recommendations where crop_season_id in ({seasons})",
             f"delete from public.irrigation_events where activity_id in ({activities})",
             f"delete from public.activities where id in ({activities})",
             f"delete from public.production_batches where id in ({batches})",
@@ -196,3 +219,118 @@ def test_a_former_member_has_no_organization_role_left(tenant):
         assert "farmer" not in me["roles"], who
         r = _get(client, tokens[who], f"/v1/organizations/{ids['coop']}/farms")
         assert r.status_code in (403, 404), (who, r.status_code)
+
+
+def _org_routes(org: str) -> list[str]:
+    return [f"/v1/organizations/{org}{tail}" for tail in
+            ("", "/farms", "/summary", "/metrics", "/farm-performance", "/plots-seasons", "/mrv-batches")]
+
+
+@pytest.mark.parametrize("who", FORMER + ["outsider"])
+def test_htx_dashboards_and_aggregates_look_like_an_unknown_organization(tenant, who):
+    client, tokens, ids = tenant
+    unknown = str(uuid.uuid4())
+    for path, missing_path in zip(_org_routes(ids["coop"]), _org_routes(unknown)):
+        refused, missing = _get(client, tokens[who], path), _get(client, tokens[who], missing_path)
+        assert refused.status_code == missing.status_code == 404, (who, path, refused.status_code)
+        assert refused.json() == missing.json(), (who, path)
+    listed = _get(client, tokens[who], "/v1/organizations").json()["items"]
+    assert str(ids["coop"]) not in {o["id"] for o in listed}, who
+
+
+def test_the_manager_reads_the_same_dashboards(tenant):
+    # Control for the test above: the routes do answer for an active manager.
+    client, tokens, ids = tenant
+    for path in _org_routes(ids["coop"]):
+        r = _get(client, tokens["manager"], path)
+        assert r.status_code == 200, (path, r.status_code, r.text[:200])
+
+
+@pytest.mark.parametrize("who", ["former_owner", "moved_owner"])
+def test_a_former_owner_reads_no_other_farm_of_the_htx(tenant, who):
+    client, tokens, ids = tenant
+    unknown = str(uuid.uuid4())
+    pairs = [
+        (f"/v1/farms/{ids['other_farm']}", f"/v1/farms/{unknown}"),
+        (f"/v1/farms/{ids['other_farm']}/plots", f"/v1/farms/{unknown}/plots"),
+        (f"/v1/plots/{ids['other_plot']}", f"/v1/plots/{unknown}"),
+        (f"/v1/crop-seasons/{ids['other_season']}", f"/v1/crop-seasons/{unknown}"),
+        (f"/v1/crop-seasons/{ids['other_season']}/activities", f"/v1/crop-seasons/{unknown}/activities"),
+    ]
+    for path, missing_path in pairs:
+        refused, missing = _get(client, tokens[who], path), _get(client, tokens[who], missing_path)
+        assert refused.status_code == missing.status_code == 404, (who, path, refused.status_code)
+        assert refused.json() == missing.json(), (who, path)
+    assert str(ids["other_farm"]) not in {f["id"] for f in _get(client, tokens[who], "/v1/farms").json()["items"]}
+    # Control: its owner reads it.
+    assert _get(client, tokens["owner"], pairs[0][0]).status_code == 200
+
+
+def _activity(key: str) -> dict:
+    return {"idempotency_key": key, "activity_type": "irrigation", "occurred_at": "2026-09-10T08:00:00Z",
+            "data": {"method": "awd", "water_volume_m3": 3}}
+
+
+def _counts(ids) -> dict[str, int]:
+    import psycopg
+
+    with psycopg.connect(_DB_URL) as conn:
+        one = lambda sql, p: conn.execute(sql, p).fetchone()[0]  # noqa: E731
+        return {
+            "activities": one("select count(*) from public.activities a join public.production_batches b"
+                              " on b.id = a.production_batch_id where b.crop_season_id = %s", (ids["write_season"],)),
+            "recommendations": one("select count(*) from public.season_recommendations where crop_season_id = %s",
+                                   (ids["write_season"],)),
+            "plots": one("select count(*) from public.plots where farm_id = %s", (ids["farm"],)),
+            "seasons": one("select count(*) from public.crop_seasons where plot_id = %s", (ids["plot"],)),
+        }
+
+
+@pytest.mark.parametrize("who", FORMER)
+def test_former_members_write_nothing_and_the_refusal_looks_like_an_unknown_id(tenant, who):
+    client, tokens, ids = tenant
+    auth = {"Authorization": f"Bearer {tokens[who]}"}
+    unknown = str(uuid.uuid4())
+    before = _counts(ids)
+    attempts = [
+        (f"/v1/crop-seasons/{ids['write_season']}/activities", f"/v1/crop-seasons/{unknown}/activities",
+         lambda: _activity(str(uuid.uuid4()))),
+        (f"/v1/crop-seasons/{ids['write_season']}/recommendations/generate",
+         f"/v1/crop-seasons/{unknown}/recommendations/generate", lambda: None),
+        (f"/v1/farms/{ids['farm']}/plots", f"/v1/farms/{unknown}/plots",
+         lambda: {"plot_code": f"X-{uuid.uuid4().hex[:6]}", "name": "X", "area_ha": 1}),
+        (f"/v1/plots/{ids['plot']}/crop-seasons", f"/v1/plots/{unknown}/crop-seasons",
+         lambda: {"season_code": f"X-{uuid.uuid4().hex[:6]}"}),
+    ]
+    for path, missing_path, body in attempts:
+        refused = client.post(path, headers=auth, json=body())
+        missing = client.post(missing_path, headers=auth, json=body())
+        assert refused.status_code == missing.status_code and refused.status_code in (403, 404), (
+            who, path, refused.status_code, refused.text[:200], missing.status_code)
+        assert refused.json() == missing.json(), (who, path)
+    assert _counts(ids) == before, who
+
+
+def test_the_active_owner_writes_through_the_same_routes(tenant):
+    # Control for the test above (contract A): same routes, same season, 2xx.
+    client, tokens, ids = tenant
+    auth = {"Authorization": f"Bearer {tokens['owner']}"}
+    before = _counts(ids)
+    r = client.post(f"/v1/crop-seasons/{ids['write_season']}/activities", headers=auth, json=_activity(str(uuid.uuid4())))
+    assert r.status_code == 201, r.text[:300]
+    r = client.post(f"/v1/crop-seasons/{ids['write_season']}/recommendations/generate", headers=auth)
+    assert r.status_code == 200, r.text[:300]
+    after = _counts(ids)
+    assert after["activities"] == before["activities"] + 1
+    assert after["recommendations"] >= 1
+    # A former owner (any farmer role elsewhere) cannot accept/dismiss them.
+    rec = r.json()["items"][0]
+    for who in ("former_owner", "moved_owner"):
+        refused = client.patch(f"/v1/recommendations/{rec['id']}", json={"status": "accepted"},
+                               headers={"Authorization": f"Bearer {tokens[who]}"})
+        missing = client.patch(f"/v1/recommendations/{uuid.uuid4()}", json={"status": "accepted"},
+                               headers={"Authorization": f"Bearer {tokens[who]}"})
+        assert refused.status_code == missing.status_code == 404, (who, refused.text[:200])
+        assert refused.json() == missing.json(), who
+    listed = _get(client, tokens["owner"], f"/v1/crop-seasons/{ids['write_season']}/recommendations").json()["items"]
+    assert {x["id"]: x["status"] for x in listed}[rec["id"]] == "generated"

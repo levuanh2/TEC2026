@@ -272,6 +272,14 @@ class SupabaseReadRepository:
         return {key: row.get(key) for key in ("id", "plot_id", "season_code", "crop_type", "variety_name", "planting_date", "expected_harvest_date", "actual_harvest_date", "status", "ipcc_water_regime", "pre_season_water_regime", "cultivation_days")}
 
     def season(self, season_id: str) -> dict[str, Any]: return self.season_view(self._one("crop_seasons", season_id))
+
+    def crop_season_cooperative_id(self, season_id: str) -> str:
+        """Cooperative of the farm a season belongs to, through the caller's RLS:
+        a season, plot or farm the caller cannot read raises ReadNotFoundError."""
+        season = self._one("crop_seasons", season_id)
+        plot = self._one("plots", str(season["plot_id"]))
+        return str(self._one("farms", str(plot["farm_id"]))["cooperative_id"])
+
     def seasons_for_plot(self, plot_id: str) -> list[dict[str, Any]]:
         self._one("plots", plot_id); return [self.season_view(x) for x in self._many("crop_seasons", plot_id=plot_id)]
 

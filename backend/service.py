@@ -730,6 +730,28 @@ class RecommendationAccessError(Exception):
     """Normalized to 404 so scope cannot enumerate other farmers' seasons."""
 
 
+def _require_farmer_of_season_cooperative(
+    read_repository: SupabaseReadRepository, me: dict[str, Any], crop_season_id: str, error: type[Exception],
+) -> None:
+    """A farmer acts on a season only through an ACTIVE farmer membership in
+    that farm's cooperative (Core V1 former-member contract, 2026-10-03).
+
+    The recommendation and CV writes go through a service-role connection, so
+    RLS does not stop them. Reading the season is not enough: a farm owner who
+    left the HTX still reads their own farm's history, and a farmer role in
+    ANOTHER cooperative must not turn that read into a write.
+    """
+    try:
+        cooperative_id = read_repository.crop_season_cooperative_id(crop_season_id)
+    except ReadNotFoundError as exc:
+        raise error() from exc
+    if not any(
+        str(m.get("organization_id")) == cooperative_id and m.get("role") == "farmer"
+        for m in memberships.active_memberships(me.get("organization_memberships") or [])
+    ):
+        raise error()
+
+
 class RecommendationService:
     """M05 domain service: generate deterministic recommendations for a crop
     season, and let the farmer accept/dismiss one.
@@ -744,14 +766,15 @@ class RecommendationService:
         self._write_repository = write_repository
 
     @staticmethod
-    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> str:
+    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> dict[str, Any]:
         me = read_repository.me()
         if "farmer" not in me["roles"]:
             raise RecommendationAccessError()
-        return str(me["user_id"])
+        return me
 
     def generate(self, *, read_repository: SupabaseReadRepository, crop_season_id: str) -> list[dict[str, Any]]:
-        self._actor_and_farmer_scope(read_repository)
+        me = self._actor_and_farmer_scope(read_repository)
+        _require_farmer_of_season_cooperative(read_repository, me, crop_season_id, RecommendationAccessError)
         try:
             read_repository.season(crop_season_id)
             metrics = read_repository.metrics(crop_season_id)
@@ -770,12 +793,13 @@ class RecommendationService:
     def set_status(
         self, *, read_repository: SupabaseReadRepository, recommendation_id: str, status: str,
     ) -> dict[str, Any]:
-        self._actor_and_farmer_scope(read_repository)
+        me = self._actor_and_farmer_scope(read_repository)
         try:
             existing = self._write_repository.get(recommendation_id)
             read_repository.season(str(existing["crop_season_id"]))
         except (ReadNotFoundError, RecommendationNotFoundError) as exc:
             raise RecommendationAccessError() from exc
+        _require_farmer_of_season_cooperative(read_repository, me, str(existing["crop_season_id"]), RecommendationAccessError)
         return self._write_repository.set_status(
             recommendation_id, status,
             prepare=lambda row: schemas.success_payload(schemas.RecommendationResponse, row),
@@ -824,10 +848,11 @@ class CvService:
         return self._model_version_id
 
     @staticmethod
-    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository) -> str:
+    def _actor_and_farmer_scope(read_repository: SupabaseReadRepository, crop_season_id: str) -> str:
         me = read_repository.me()
         if "farmer" not in me["roles"]:
             raise CvAccessError()
+        _require_farmer_of_season_cooperative(read_repository, me, crop_season_id, CvAccessError)
         return str(me["user_id"])
 
     @staticmethod
@@ -863,7 +888,7 @@ class CvService:
         return image, _ALLOWED_MIME_EXTENSIONS[content_type]
 
     def infer(self, *, read_repository: SupabaseReadRepository, crop_season_id: str, file_bytes: bytes, content_type: str) -> dict[str, Any]:
-        actor_id = self._actor_and_farmer_scope(read_repository)
+        actor_id = self._actor_and_farmer_scope(read_repository, crop_season_id)
         farm_id = self._resolve_farm_id(read_repository, crop_season_id)
         image, extension = self._decode_and_validate(file_bytes, content_type)
         sha256 = hashlib.sha256(file_bytes).hexdigest()

@@ -33,16 +33,22 @@ DUMMY_SETTINGS = Settings(
 )
 
 
-ACTOR, SEASON = "farmer-a", "season-a"
+ACTOR, SEASON, COOP = "farmer-a", "season-a", "coop-a"
 
 
 class FakeRead:
-    def __init__(self, *, role: str = "farmer", visible: bool = True, metrics: dict | None = None):
-        self.role, self.visible = role, visible
+    def __init__(self, *, role: str = "farmer", visible: bool = True, metrics: dict | None = None, organization: str = COOP):
+        self.role, self.visible, self.organization = role, visible, organization
         self.metrics_result = metrics or {"yield_kg": None, "data_completeness": {"water": False, "fertilizer": False, "cost": False, "carbon": False}}
 
     def me(self):
-        return {"user_id": ACTOR, "roles": [self.role]}
+        # Like the real me(): only ACTIVE memberships, and a role per membership.
+        return {"user_id": ACTOR, "roles": [self.role],
+                "organization_memberships": [{"organization_id": self.organization, "role": self.role, "ended_at": None}]}
+
+    def crop_season_cooperative_id(self, season_id):
+        self.season(season_id)
+        return COOP
 
     def season(self, season_id):
         if not self.visible or season_id != SEASON:
@@ -160,6 +166,23 @@ def test_generation_never_fabricates_a_quantified_impact_when_data_is_missing():
 def test_non_farmer_or_cross_scope_cannot_generate(read):
     with pytest.raises(RecommendationAccessError):
         service().generate(read_repository=read, crop_season_id=SEASON)
+
+
+def test_a_farmer_of_another_cooperative_cannot_generate_or_set_status():
+    """Core V1 former-member contract: a farm owner who left the HTX still READS
+    their own farm (RLS), and may be an active farmer elsewhere. That read plus a
+    farmer role in ANOTHER cooperative must not write recommendations."""
+    repo = FakeRecommendationRepository()
+    write = service(repo)
+    [row] = write.generate(read_repository=FakeRead(metrics=missing_data_metrics()), crop_season_id=SEASON)[:1]
+    before = {k: dict(v) for k, v in repo.rows.items()}
+
+    former_owner = FakeRead(metrics=missing_data_metrics(), organization="coop-elsewhere")
+    with pytest.raises(RecommendationAccessError):
+        write.generate(read_repository=former_owner, crop_season_id=SEASON)
+    with pytest.raises(RecommendationAccessError):
+        write.set_status(read_repository=former_owner, recommendation_id=row["id"], status="accepted")
+    assert repo.rows == before
 
 
 def test_regenerating_is_idempotent_not_duplicating_rows():

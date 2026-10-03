@@ -29,15 +29,21 @@ from infrastructure.read_repo import ReadNotFoundError  # noqa: E402
 from ml.model import build_model  # noqa: E402
 from service import CvAccessError, CvService, InvalidImageError, MAX_IMAGE_BYTES  # noqa: E402
 
-ACTOR, SEASON, FARM, PLOT = "farmer-a", "season-a", "farm-a", "plot-a"
+ACTOR, SEASON, FARM, PLOT, COOP = "farmer-a", "season-a", "farm-a", "plot-a", "coop-a"
 
 
 class FakeRead:
-    def __init__(self, *, role: str = "farmer", visible: bool = True):
-        self.role, self.visible = role, visible
+    def __init__(self, *, role: str = "farmer", visible: bool = True, organization: str = COOP):
+        self.role, self.visible, self.organization = role, visible, organization
 
     def me(self):
-        return {"user_id": ACTOR, "roles": [self.role]}
+        # Like the real me(): only ACTIVE memberships, and a role per membership.
+        return {"user_id": ACTOR, "roles": [self.role],
+                "organization_memberships": [{"organization_id": self.organization, "role": self.role, "ended_at": None}]}
+
+    def crop_season_cooperative_id(self, season_id):
+        self.season(season_id)
+        return COOP
 
     def season(self, season_id):
         if not self.visible:
@@ -232,6 +238,16 @@ def test_manager_can_list_and_get_but_never_calls_infer_in_this_test():
     assert any(i["id"] == created["id"] for i in items)
     fetched = service.get(read_repository=manager_read, inference_id=created["id"])
     assert fetched["id"] == created["id"]
+
+
+def test_a_farmer_of_another_cooperative_cannot_upload_or_infer():
+    """Core V1 former-member contract: a former farm owner still reads their own
+    farm; a farmer role in ANOTHER cooperative must not turn that into a write."""
+    repo = FakeCvRepository()
+    with pytest.raises(CvAccessError):
+        _service(repo).infer(read_repository=FakeRead(organization="coop-elsewhere"), crop_season_id=SEASON,
+                             file_bytes=_fake_jpeg_bytes(), content_type="image/jpeg")
+    assert repo.uploads == [] and repo.images == {} and repo.inferences == {}
 
 
 def test_cross_scope_list_normalizes_to_404():
