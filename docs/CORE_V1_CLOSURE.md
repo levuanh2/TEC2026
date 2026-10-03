@@ -30,14 +30,45 @@ Where it is enforced:
   HTX routes (`/v1/organizations/{id}/...`) are gated on the organization row,
   so they answer 404 to a former member, the same as an unknown id.
 - **Service-role writes** (recommendations, CV images and inferences): RLS does
-  not apply, so `service._require_farmer_of_season_cooperative` requires an
-  active `farmer` membership in the cooperative of the season's farm. Before it,
-  a former owner who had joined ANOTHER HTX as a farmer could generate and
-  accept/dismiss recommendations, and upload CV images, on the farm they left.
+  not apply, so the repositories evaluate `private.user_can_write_crop` for the
+  JWT-verified caller inside each write's transaction (`crop_write_authz`), see
+  3C. This also closes the gap where a former owner who had joined ANOTHER HTX
+  as a farmer could write recommendations and CV images on the farm they left.
 - A refused read or write looks exactly like a request for an unknown id
   (same status and body), so nothing leaks the farm's existence.
 
 Tests: `backend/tests/test_former_member_reads.py` (real RLS),
 `backend/tests/test_former_member_api_reads.py` (real `main.app`, real JWTs, local
-stack only), and the cross-cooperative cases in `test_recommendation_api.py` and
-`test_cv_service.py`.
+stack only), and the reader-without-write-authority cases in
+`test_recommendation_api.py` and `test_cv_service.py`.
+
+## 3C. A viewer is read-only
+
+Product decision, 2026-10-03. Reading a farm or a season grants no business
+write. A farm `viewer`, a former member, and a data-grant reader may NOT
+generate, persist, accept or dismiss a recommendation, or upload a CV / plant
+image. A "preview" of recommendations for a viewer would be a separate
+non-persisting flow; none exists.
+
+- Write authority is `private.user_can_write_crop` (active owner/editor of the
+  farm, or active manager of its HTX) -- the rule of `plant_images_insert` --
+  evaluated in the database, not re-derived in FastAPI: refused before any
+  Carbon work or Storage upload, and re-checked inside each row-writing
+  transaction (accept/dismiss on the row's own season, locked).
+- On top, recommendation and CV actions stay **farmer** actions, as on main: an
+  HTX manager is refused them too (decision 2026-10-03, "keep managers out").
+- A refusal is the same 404 as an unknown id.
+
+## 3D. A token minted with the temporary password stays refused
+
+Changing the temporary password clears the server-side flag and revokes the
+refresh tokens, but an access token minted before stays valid for up to an
+hour. Migration `20261003090000` makes `private.password_change_pending()`
+fail closed: pending when the request's JWT still carries
+`app_metadata.must_change_password = true` OR the authoritative `auth.users`
+flag is set. Such a token (TOKEN_OLD) is refused by every root authorization
+helper on PostgREST (reads and writes), and by FastAPI's guard on every API
+route (it reads the same claim), until it expires;
+a token minted after the change has normal access. `/v1/me` and
+`POST /v1/me/password` keep working so the user can leave the state. Test:
+`test_forced_password_change.py::test_a_token_minted_with_the_temporary_password_stays_refused_after_the_change`.

@@ -8,7 +8,9 @@ does it, then used three ways:
 * PostgREST with the user's JWT -- what Flutter does (RLS returns nothing and
   refuses writes, whatever the client shows);
 * the SQL helpers with `request.jwt.claims` = {sub} -- what FastAPI's pooled
-  paths do (the live flag on auth.users decides, not a token claim).
+  paths do (the live flag on auth.users decides) -- and with a token's own
+  claims, as PostgREST sets them (a token minted with the temporary password
+  stays refused after the change, 20261003090000).
 
 Creates users and a tenant, so it only runs against a LOCAL stack, and deletes
 everything it created.
@@ -301,3 +303,69 @@ def test_missing_or_invalid_sessions_get_the_standard_401(stack):
                    json={"current_password": farmer["temporary_password"], "new_password": "After-Logout-9"})
     assert r.status_code == 401 and r.json()["detail"]["error"]["code"] == "unauthenticated"
     assert s.flag(farmer["user_id"]) is True
+
+
+def _claims(token: str) -> dict:
+    payload = token.split(".")[1]
+    return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+
+
+def test_a_token_minted_with_the_temporary_password_stays_refused_after_the_change(stack):
+    """TOKEN_OLD (minted while the flag was true) is refused on every layer
+    BEFORE and AFTER the change, until it expires; TOKEN_NEW gets normal access
+    (migration 20261003090000). Whoever saw the temporary password and signed in
+    early must not inherit the farmer's access once the farmer changes it."""
+    import psycopg
+
+    s = stack
+    farmer = _provision(s, "stale")                                   # 1. flag = true
+    batch = _season(s, farmer["plot_id"])
+    old = s.token(farmer["email"], farmer["temporary_password"])       # 2. TOKEN_OLD
+    assert _claims(old)["app_metadata"]["must_change_password"] is True
+
+    def activity(token):
+        return s.rest(token, "POST", "activities", json={
+            "production_batch_id": batch, "activity_type": "irrigation", "occurred_at": "2026-06-01T00:00:00Z",
+            "recorded_at": "2026-06-01T00:00:00Z", "source": "web", "recorded_by": farmer["user_id"]})
+
+    def refused_everywhere(token):
+        for table in ("farms", "plots", "crop_seasons", "production_batches", "activities"):
+            assert s.rest(token, "GET", table, params={"select": "id"}).json() == [], table
+        assert activity(token).status_code in (401, 403)
+        renamed = s.rest(token, "PATCH", "plots", params={"id": f"eq.{farmer['plot_id']}"}, json={"name": "STALE"})
+        assert renamed.status_code in (200, 401, 403) and (renamed.status_code != 200 or renamed.json() == [])
+        assert s.get(token, "/v1/farms").status_code == 403
+        # The SQL helpers with the token's own claims, as PostgREST sets them.
+        with psycopg.connect(_DB_URL) as conn:
+            conn.execute("select set_config('request.jwt.claims', %s, true)", (json.dumps(_claims(token)),))
+            for fn in ("user_can_read_farm", "user_can_write_farm"):
+                assert conn.execute(f"select private.{fn}(%s::uuid)", (farmer["farm_id"],)).fetchone()[0] is False, fn
+
+    refused_everywhere(old)                                            # 3. before the change
+
+    new_password = f"Own-{uuid.uuid4().hex[:10]}A1"                    # 4. change
+    r = s.api.post("/v1/me/password", headers={"Authorization": f"Bearer {old}"},
+                   json={"current_password": farmer["temporary_password"], "new_password": new_password})
+    assert r.status_code == 200
+    assert s.flag(farmer["user_id"]) is False                          # 5. authoritative flag cleared
+
+    refused_everywhere(old)                                            # 6. TOKEN_OLD still refused
+
+    new = s.token(farmer["email"], new_password)                       # 7. TOKEN_NEW
+    assert not _claims(new).get("app_metadata", {}).get("must_change_password")
+    assert [f["id"] for f in s.rest(new, "GET", "farms", params={"select": "id"}).json()] == [farmer["farm_id"]]
+    created = activity(new)                                            # 8. normal permissions
+    assert created.status_code == 201, created.text[:200]
+    activity_id = created.json()[0]["id"]
+    assert farmer["farm_id"] in {f["id"] for f in s.get(new, "/v1/farms").json()["items"]}
+    # TOKEN_OLD can neither see nor touch what TOKEN_NEW wrote.
+    assert s.rest(old, "GET", "activities", params={"select": "id", "id": f"eq.{activity_id}"}).json() == []
+    s.rest(old, "DELETE", "activities", params={"id": f"eq.{activity_id}"})
+    assert [a["id"] for a in s.rest(new, "GET", "activities", params={"select": "id", "id": f"eq.{activity_id}"}).json()] \
+        == [activity_id]
+    with psycopg.connect(_DB_URL) as conn:
+        assert conn.execute("select name from public.plots where id = %s", (farmer["plot_id"],)).fetchone()[0] != "STALE"
+
+    forged = _forge(old, must_change_password=False)                   # 9. edited claim: signature fails
+    assert s.rest(forged, "GET", "farms", params={"select": "id"}).status_code == 401
+    assert s.get(forged, "/v1/farms").status_code == 401
