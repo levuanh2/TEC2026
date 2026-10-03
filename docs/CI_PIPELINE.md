@@ -613,7 +613,7 @@ reviewers check that no gate got weaker, and relaxations carry the trailer.
 - Fixed: `index.html` declared no favicon: every page logged a 404.
 - `docs/openapi.json` was 11 operations stale; regenerated, 5 historical breaks acknowledged.
 - Mock mode leaks carbon/readiness/health/organizations calls to the network (EXC-WEB-01); locally they reached `.env`'s backend.
-- Resource Metrics use plain float `sum()`: record order changes the last digit (property test); `math.fsum` would make MRV-hashed values order-exact (F-METRICS-FSUM).
+- Fixed (Core V1): Resource Metrics summed with plain float `sum()`, so record order changed the last digit and the single-season and rollup paths disagreed (property test); now `math.fsum` (F-METRICS-FSUM).
 - Production code imports `PIL`, `postgrest`, `starlette`, `supabase_auth` that are only transitive dependencies; declare them.
 - `infrastructure/auth_admin.py` coverage 42.9%; mutation score of `carbon/engine.py` ~50% despite 96.8% line coverage (Core V1: 81/133, every remaining survivor equivalent or message text; ratcheted).
 - Android `allowBackup` is unset (backups on, incl. the Supabase session in SharedPreferences): needs a product decision.
