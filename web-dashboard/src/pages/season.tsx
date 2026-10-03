@@ -286,7 +286,7 @@ function Performance({ metrics }: { metrics: Metrics }) {
  * season), so "has a batch" says nothing about MRV. This reads the cases in
  * scope and their linked batches, and claims membership only for a case that
  * actually lists this season. */
-function SeasonMrv({ seasonId, organizationId, batches }: { seasonId: string; organizationId: string | null; batches: Batches }) {
+export function SeasonMrv({ seasonId, organizationId, batches }: { seasonId: string; organizationId: string | null; batches: Batches }) {
   const memberships = useAsync(async () => {
     if (usingMockData || !organizationId) return []
     // One request for every case of the organization (Round 5.1: it was one

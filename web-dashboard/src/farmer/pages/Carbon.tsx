@@ -187,7 +187,7 @@ const SIMULATIONS: Scenario[] = ['awd', 'continuous_flooding']
  * Each scenario is read by name. A missing one is "Chưa tính", not an error,
  * and calculating it touches only its own query: the actual result above is
  * not re-read, so a simulation cannot change the season's numbers. */
-function ScenarioCompare({ seasonId, actual, canCalculate }: { seasonId: string; actual: CarbonResult; canCalculate: boolean }) {
+export function ScenarioCompare({ seasonId, actual, canCalculate }: { seasonId: string; actual: CarbonResult; canCalculate: boolean }) {
   const [busy, setBusy] = useState<Scenario | null>(null)
   const [error, setError] = useState<string | null>(null)
   const key = `${keys.carbon(seasonId)}:simulations`
