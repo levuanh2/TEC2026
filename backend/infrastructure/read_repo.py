@@ -478,7 +478,11 @@ class SupabaseReadRepository:
         """Pure aggregation over already-fetched rows — no DB access — shared
         by the single-season path above and `_bulk_metric_totals` (rollups).
         """
-        yield_kg = water_m3 = fertilizer_kg = total_cost = 0.0
+        # Quantities are collected and summed with math.fsum: the exact sum,
+        # independent of record order. The single-season path lists activities
+        # newest first and the bulk path in table order; a plain float sum gave
+        # them different last digits for the same season (F-METRICS-FSUM).
+        yields: list[float] = []; waters: list[float] = []; fertilizers: list[float] = []; costs: list[float] = []
         has_yield = has_cost = True
         # Seen at least one record / any record missing its value. Tracked
         # separately so the result cannot depend on which record comes last (B1):
@@ -488,18 +492,20 @@ class SupabaseReadRepository:
             payload = item["payload"]; kind = item["activity_type"]
             if kind == "harvest":
                 if payload.get("yield_kg") is None: has_yield = False
-                else: yield_kg += float(payload["yield_kg"])
+                else: yields.append(float(payload["yield_kg"]))
             if kind == "irrigation":
                 seen_water = True
                 if payload.get("water_volume_m3") is None: missing_water = True
-                else: water_m3 += float(payload["water_volume_m3"])
+                else: waters.append(float(payload["water_volume_m3"]))
             if kind == "fertilizer":
                 seen_fertilizer = True
                 if payload.get("amount_kg") is None: missing_fertilizer = True
-                else: fertilizer_kg += float(payload["amount_kg"])
+                else: fertilizers.append(float(payload["amount_kg"]))
             cost = SupabaseReadRepository._activity_cost_vnd(kind, payload)
             if cost is None: has_cost = False
-            else: total_cost += cost
+            else: costs.append(cost)
+        yield_kg, water_m3 = math.fsum(yields), math.fsum(waters)
+        fertilizer_kg, total_cost = math.fsum(fertilizers), math.fsum(costs)
         has_water = seen_water and not missing_water
         has_fertilizer = seen_fertilizer and not missing_fertilizer
         succeeded = [x for x in carbon if x.get("status") == "succeeded" and x.get("scenario") == "actual"]

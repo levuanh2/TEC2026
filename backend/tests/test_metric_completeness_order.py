@@ -96,3 +96,13 @@ def test_no_records_stays_unknown_not_zero():
     assert single == bulk
     assert single["water_m3"] is None and single["data_completeness"]["water"] is False
     assert single["fertilizer_kg"] is None and single["data_completeness"]["fertilizer"] is False
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations([1.0, 1e-05, 1e-05])))
+def test_single_season_and_rollup_agree_exactly_in_any_record_order(order):
+    # Found by the strict property test: the single-season path lists records
+    # newest first, the rollup in table order; a plain float sum gave the same
+    # season 1.00002 in one and 1.0000200000000001 in the other (F-METRICS-FSUM).
+    single, bulk = both_paths(repository(list(order), list(order)))
+    assert single == bulk
+    assert single["fertilizer_kg"] == single["water_m3"] == 1.00002
