@@ -138,11 +138,16 @@ def diff(base: str) -> None:
 DRIFT_BASELINE = ROOT / "backend/constraints.txt"
 
 
-def drift(freeze: Path, strict: bool) -> int:
+def drift(freeze: Path, strict: bool, subset: bool = False) -> int:
     """backend/requirements.txt applies backend/constraints.txt, the exact tested
     set. Compare the clean venv's `pip freeze` with it: a difference means the
     lock is incomplete or out of date (a package it does not pin, or a pin pip
-    could not honour). Both PR CI and strict CI pass --strict (DEP_DRIFT fails)."""
+    could not honour). Both PR CI and strict CI pass --strict (DEP_DRIFT fails).
+
+    `subset` is for a TEST environment that also holds the CV stack (torch,
+    ml/requirements.txt): packages outside the lock may exist, but every locked
+    package must be installed at exactly its locked version, so the backend
+    tests run on the set Render installs. It always fails (DEP_LOCK_CHANGED)."""
     def parse(text: str) -> dict[str, str]:  # PEP 503 names: `PyJWT` and `pyjwt` are one package
         pins = (l.split("#", 1)[0].strip().split("==", 1) for l in text.splitlines() if "==" in l.split("#", 1)[0])
         return {re.sub(r"[-_.]+", "-", name).lower(): version for name, version in pins}
@@ -152,6 +157,17 @@ def drift(freeze: Path, strict: bool) -> int:
         print(f"::{'error' if strict else 'warning'} title=Dependency drift::{msg}")
         return 1 if strict else 0
     base = parse(DRIFT_BASELINE.read_text(encoding="utf-8"))
+    if subset:
+        changed = [f"{k}: {v} -> {now.get(k, '-')}" for k, v in sorted(base.items()) if now.get(k) != v]
+        for c in changed:
+            print(f"locked package changed: {c}")
+        if changed:
+            print(f"::error title=Dependency lock::DEP_LOCK_CHANGED: {len(changed)} locked backend package(s) are not at "
+                  "their backend/constraints.txt version in this test environment -- an extra install moved them")
+            return 1
+        print(f"all {len(base)} locked backend packages at their locked version "
+              f"({len(set(now) - set(base))} extra test-only package(s) allowed)")
+        return 0
     changes = [f"{k}: {base.get(k, '-')} -> {now.get(k, '-')}" for k in sorted(set(base) | set(now)) if base.get(k) != now.get(k)]
     for c in changes:
         print(f"resolved change: {c}")
@@ -170,12 +186,14 @@ def main() -> int:
     ap.add_argument("--diff")
     ap.add_argument("--drift", type=Path, help="pip freeze of the clean backend venv")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--lock-subset", action="store_true",
+                    help="test env: extra packages allowed, every locked package must keep its version (always fails)")
     args = ap.parse_args()
     if args.diff:
         diff(args.diff)
         return 0
     if args.drift:
-        return drift(args.drift, args.strict)
+        return drift(args.drift, args.strict, subset=args.lock_subset)
     audit(args.osv_scanner)
     for line in report:
         print(line)

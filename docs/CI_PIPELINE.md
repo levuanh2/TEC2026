@@ -468,6 +468,19 @@ in the constraints file; both files are guarded paths (CODEOWNERS). The test
 tools in `requirements.txt` (pytest, httpx, pypdf) are part of the set: Render
 installs the same single file.
 
+The test jobs that also need the CV stack (`backend-unit`,
+`backend-db-integration`, strict `backend-order-and-repeatability`) install
+torch/torchvision and `ml/requirements.txt` under the same lock
+(`-c backend/constraints.txt`): if one of them needs another version of a locked
+package, pip fails instead of moving it. The next step proves it
+(`dep_audit.py --drift <freeze> --lock-subset`, `DEP_LOCK_CHANGED`): extra
+test-only packages are allowed, but every locked package must be at its locked
+version, so the backend tests run on the set Render installs.
+`ci_policy.py` `CI_UNCONSTRAINED_INSTALL` refuses a job that installs next to
+the backend without the lock or without that proof;
+`scripts/ci/dep_lock_selftest.py` (workflow-policy) tests both gates on
+synthetic input.
+
 Updating a dependency is a PR of its own: change the pin in
 `backend/constraints.txt` (and the range in `requirements.txt` if needed), let
 CI run, take the new freeze from that run's `backend-startup` artifact (never a

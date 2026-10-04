@@ -16,6 +16,8 @@ WORKFLOWS (.github/workflows/*.yml)
   CI_UNGUARDED_SCRIPT       a workflow runs a script outside policy guarded_paths
   CI_UNGUARDED_TEST         a protected_tests module is outside policy guarded_paths
   DEP_SOURCE                a lockfile/requirements entry installs from outside the public registry
+  CI_UNCONSTRAINED_INSTALL  a job installs next to the backend without `-c backend/constraints.txt`,
+                            or without a `dep_audit.py --lock-subset` proof after its installs
   TEST_ENV_DETECTION        production code references the test runner or CI environment
   HIDDEN_ROUTE              production code uses include_in_schema (routes invisible to the sweeps)
   ROUTE_MUTATION            product code edits the routing table / lifespan outside router decorators
@@ -51,6 +53,7 @@ import ast
 import io
 import json
 import os
+import posixpath
 import py_compile
 import re
 import subprocess
@@ -102,6 +105,50 @@ def run_blocks(doc: dict):
                 yield job_id, i, step["run"]
 
 
+PIP_INSTALL = re.compile(r"\bpip3?\s+install\b")
+BACKEND_REQUIREMENTS, BACKEND_LOCK = "backend/requirements.txt", "backend/constraints.txt"
+
+
+def install_constraint_problems(wf: str, doc: dict) -> list[str]:
+    """A job that installs the backend (requirements.txt applies the lock) and
+    then installs anything else -- the CV test stack -- must pass the same lock
+    to every other install (`-c .../backend/constraints.txt`), so pip refuses to
+    move a locked package, and must then prove none moved
+    (`dep_audit.py --drift ... --lock-subset`, after the last install). Paths are
+    resolved against the step's working-directory."""
+    out = []
+    for job_id, job in (doc.get("jobs") or {}).items():
+        job_wd = ((job.get("defaults") or {}).get("run") or {}).get("working-directory", ".")
+        backend, extra, last_install, verified_at = False, [], -1, -1
+        for i, step in enumerate(job.get("steps") or []):
+            wd = step.get("working-directory", job_wd)
+            resolve = lambda p: posixpath.normpath(posixpath.join(wd, p.strip("\"'")))  # noqa: E731
+            run = step.get("run") or ""
+            if re.search(r"dep_audit\.py\s+--drift\s+\S+\s+--lock-subset\b", run):
+                verified_at = i
+            for line in run.splitlines():
+                if not PIP_INSTALL.search(line):
+                    continue
+                last_install = i
+                reqs = [resolve(p) for p in re.findall(r"(?:^|\s)(?:-r|--requirement)[\s=]+(\S+)", line)]
+                locks = [resolve(p) for p in re.findall(r"(?:^|\s)(?:-c|--constraint)[\s=]+(\S+)", line)]
+                if BACKEND_REQUIREMENTS in reqs:
+                    backend = True
+                elif BACKEND_LOCK not in locks:
+                    extra.append(line.strip())
+                else:
+                    extra.append(None)  # constrained: still needs the post-install proof
+        if not backend:
+            continue
+        for line in (x for x in extra if x):
+            out.append(f"{wf} job {job_id}: `{line}` installs next to the backend without "
+                       f"`-c` {BACKEND_LOCK} -- pip could move a locked package")
+        if extra and verified_at < last_install:
+            out.append(f"{wf} job {job_id}: installs beyond the backend but does not run "
+                       "`dep_audit.py --drift <freeze> --lock-subset` after its last install")
+    return out
+
+
 def check_workflows(policy: dict) -> None:
     allow = {(a["file"], a["line"].strip()) for a in policy["bypass_allowlist"]}
     for wf in sorted(WORKFLOWS.glob("*.yml")):
@@ -145,6 +192,8 @@ def check_workflows(policy: dict) -> None:
                     if not is_guarded(rel(c.resolve()), policy):
                         fail("CI_UNGUARDED_SCRIPT", f"{rel(wf)} job {job_id} runs {rel(c.resolve())}, "
                                                     "which is not under policy guarded_paths")
+        for msg in install_constraint_problems(rel(wf), doc):
+            fail("CI_UNCONSTRAINED_INSTALL", msg)
         if wf.name == "ci.yml":
             if "secrets." in text:
                 fail("CI_SECRETS_IN_PR_CI", "ci.yml references secrets.* -- PR CI must not receive secrets")
