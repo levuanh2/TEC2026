@@ -450,14 +450,33 @@ lower its own bar.
 `strict-ci.yml` (nightly + manual): backend suite in random order (seed =
 run number, printed), critical DB suites twice in fresh processes, property
 tests (`backend/tests_strict`), mutation testing (ratchet, fails on a lost
-kill or an untriaged survivor; `docs/MUTATION_BASELINE.md`), resolved-dependency drift (fails),
+kill or an untriaged survivor; `docs/MUTATION_BASELINE.md`), installed dependencies == `backend/constraints.txt` (fails),
 license inventory (report).
 
-**Resolved-dependency baseline.** `backend/requirements.txt` uses floating
-`>=` ranges. `scripts/ci/policy/backend-resolved.txt` is the `pip freeze` of the
-clean venv on the Linux runner (taken from the `backend-startup` artifact, not a
-developer machine). PR CI prints every resolved change as a warning; strict-ci
-fails on it. Refresh it deliberately, together with `docs/openapi.json`: a
+**Backend dependency lock.** `backend/requirements.txt` states what the backend
+needs (human-maintained `>=` ranges) and applies `backend/constraints.txt` with
+`-c constraints.txt`. The constraints file pins the whole resolved set (direct
+and transitive) of a clean Linux venv on Python 3.11.9 to exact versions, so
+every `pip install -r requirements.txt` -- Render's `buildCommand`, each CI job,
+a developer venv -- installs exactly what CI tested, and an upstream release
+cannot change staging or production. Both PR CI (`backend-startup`) and
+strict-ci compare a fresh install's `pip freeze` with it and fail on any
+difference (`DEP_DRIFT`: a package the lock does not pin, or a pin pip did not
+honour). `ci_policy.py` `DEP_SOURCE` allows exactly one option line in
+`backend/requirements.txt`, `-c constraints.txt`, and only `name==version` lines
+in the constraints file; both files are guarded paths (CODEOWNERS). The test
+tools in `requirements.txt` (pytest, httpx, pypdf) are part of the set: Render
+installs the same single file.
+
+Updating a dependency is a PR of its own: change the pin in
+`backend/constraints.txt` (and the range in `requirements.txt` if needed), let
+CI run, take the new freeze from that run's `backend-startup` artifact (never a
+developer machine; Windows resolves extra packages such as `colorama`), review
+the diff, merge. The flip side of the lock: a security fix upstream no longer
+arrives on its own. A new advisory against a pinned version fails
+`dependency-audit` on every PR until a PR bumps that pin (or a time-boxed
+`dependency_exceptions` entry, with owner and expiry, accepts it), so plan
+regular dependency-update PRs. Refresh `docs/openapi.json` with it when FastAPI moves: a
 FastAPI upgrade alone changes the generated spec (0.141 renders uploads as
 `contentMediaType` and adds `input`/`ctx` to `ValidationError`) and nests
 included routers so a flat `app.routes` walk sees no `/v1` routes -- the route

@@ -44,7 +44,7 @@ def declared() -> set[str]:
     out = set()
     for line in (BACKEND / "requirements.txt").read_text(encoding="utf-8").splitlines():
         line = line.split("#", 1)[0].strip()
-        if line:
+        if line and not line.startswith("-"):  # `-c constraints.txt` declares nothing
             out.add(canon(re.split(r"[\[<>=!~ ;]", line, maxsplit=1)[0]))
     return out
 

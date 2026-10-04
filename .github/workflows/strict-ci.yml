@@ -144,7 +144,7 @@ jobs:
           python -m venv "$RUNNER_TEMP/v"
           "$RUNNER_TEMP/v/bin/python" -m pip install --quiet -r backend/requirements.txt
           "$RUNNER_TEMP/v/bin/python" -m pip freeze --exclude pip > backend-resolved.txt
-      - name: Drift vs committed snapshot (fails here)
+      - name: Installed dependencies == backend/constraints.txt (fails here)
         run: python scripts/ci/dep_audit.py --drift backend-resolved.txt --strict
       - name: License inventory (report GPL/AGPL/unknown)
         run: "\"$RUNNER_TEMP/v/bin/python\" scripts/ci/licenses_report.py --npm-lock web-dashboard/package-lock.json"

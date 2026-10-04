@@ -136,6 +136,11 @@ start). Deploy chạy được không có nghĩa là dùng được cho người
 Không tạo Render Postgres/Redis/worker/cron/disk: dữ liệu vẫn ở Supabase hosted.
 `autoDeployTrigger: "off"` — deploy bằng tay trong giai đoạn kiểm thử.
 
+Lệnh build backend cài đúng bộ version CI đã test: `requirements.txt` áp
+`-c constraints.txt` (ghim chính xác toàn bộ dependency, kể cả bắc cầu), nên một
+bản phát hành mới ở upstream không tự lọt vào staging. Đổi version = một PR sửa
+`backend/constraints.txt` (docs/CI_PIPELINE.md, "Backend dependency lock").
+
 CV (M03) **không chạy** trên bản cài này: `backend/requirements.txt` không có
 torch/Pillow (chúng ở `ml/requirements.txt`), nên các route `/v1/.../cv/*` trả
 503 `backend_not_configured`, phần còn lại của API chạy bình thường. Muốn có CV

@@ -102,13 +102,14 @@ def lock_versions(text: str, kind: str) -> dict[str, str]:
     if kind == "pub":
         return dict(re.findall(r"^  ([\w-]+):\n(?:    .*\n)*?    version: \"([^\"]+)\"", text, re.M))
     return {re.split(r"[\[<>=!~ ;]", l, 1)[0].lower(): l.strip() for l in text.splitlines()
-            if l.strip() and not l.lstrip().startswith("#")}
+            if l.strip() and not l.lstrip().startswith(("#", "-"))}
 
 
 def diff(base: str) -> None:
     rows = ["### Dependency changes vs " + base, ""]
     for path, kind in (("web-dashboard/package-lock.json", "npm"), ("app/pubspec.lock", "pub"),
-                       ("backend/requirements.txt", "pip"), ("ml/requirements.txt", "pip")):
+                       ("backend/requirements.txt", "pip"), ("backend/constraints.txt", "pip"),
+                       ("ml/requirements.txt", "pip")):
         old = run(["git", "show", f"{base}:{path}"]).stdout
         new = (ROOT / path).read_text(encoding="utf-8") if (ROOT / path).exists() else ""
         o, n = lock_versions(old, kind), lock_versions(new, kind)
@@ -134,14 +135,17 @@ def diff(base: str) -> None:
             fh.write("\n".join(rows) + "\n")
 
 
-DRIFT_BASELINE = ROOT / "scripts/ci/policy/backend-resolved.txt"
+DRIFT_BASELINE = ROOT / "backend/constraints.txt"
 
 
 def drift(freeze: Path, strict: bool) -> int:
-    """backend/requirements.txt uses floating `>=` ranges, so the resolved set can
-    change with no repository change. Compare the clean venv's `pip freeze` with
-    the committed Linux snapshot: PR CI warns, strict CI fails (DEP_DRIFT)."""
-    parse = lambda text: dict(l.split("==", 1) for l in text.splitlines() if "==" in l)
+    """backend/requirements.txt applies backend/constraints.txt, the exact tested
+    set. Compare the clean venv's `pip freeze` with it: a difference means the
+    lock is incomplete or out of date (a package it does not pin, or a pin pip
+    could not honour). Both PR CI and strict CI pass --strict (DEP_DRIFT fails)."""
+    def parse(text: str) -> dict[str, str]:  # PEP 503 names: `PyJWT` and `pyjwt` are one package
+        pins = (l.split("#", 1)[0].strip().split("==", 1) for l in text.splitlines() if "==" in l.split("#", 1)[0])
+        return {re.sub(r"[-_.]+", "-", name).lower(): version for name, version in pins}
     now = parse(freeze.read_text(encoding="utf-8"))
     if not DRIFT_BASELINE.is_file():
         msg = f"DEP_DRIFT: no baseline {DRIFT_BASELINE.relative_to(ROOT)}; commit this freeze as the baseline"
@@ -152,11 +156,11 @@ def drift(freeze: Path, strict: bool) -> int:
     for c in changes:
         print(f"resolved change: {c}")
     if changes:
-        msg = (f"DEP_DRIFT: {len(changes)} resolved backend package version(s) differ from the committed snapshot "
-               "with no requirements change -- review, then refresh scripts/ci/policy/backend-resolved.txt")
+        msg = (f"DEP_DRIFT: {len(changes)} installed backend package version(s) differ from backend/constraints.txt "
+               "-- the lock must pin the whole tested set; update it deliberately in a PR (docs/CI_PIPELINE.md)")
         print(f"::{'error' if strict else 'warning'} title=Dependency drift::{msg}")
         return 1 if strict else 0
-    print(f"resolved backend dependencies match the snapshot ({len(now)} packages)")
+    print(f"installed backend dependencies match backend/constraints.txt ({len(now)} packages)")
     return 0
 
 

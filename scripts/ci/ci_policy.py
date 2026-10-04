@@ -471,8 +471,16 @@ def check_dependency_sources() -> None:
     for req in ("backend/requirements.txt", "ml/requirements.txt"):
         for n, line in enumerate((ROOT / req).read_text(encoding="utf-8").splitlines(), 1):
             spec = line.split("#", 1)[0].strip()
+            if req == "backend/requirements.txt" and spec == "-c constraints.txt":
+                continue  # the backend lock: it can only narrow versions, and is checked below
             if spec and (spec.startswith("-") or "://" in spec or " @ " in spec or spec.startswith(("git+", "."))):
                 fail("DEP_SOURCE", f"{req}:{n}: `{spec}` installs from outside PyPI (option, URL or path)")
+    # backend/constraints.txt (the tested set every backend install resolves to)
+    # holds exact PyPI pins only: no option, URL, path, range or extra.
+    for n, line in enumerate((ROOT / "backend/constraints.txt").read_text(encoding="utf-8").splitlines(), 1):
+        spec = line.split("#", 1)[0].strip()
+        if spec and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.+!_-]*", spec):
+            fail("DEP_SOURCE", f"backend/constraints.txt:{n}: `{spec}` is not an exact `name==version` PyPI pin")
     pub = yaml.safe_load((ROOT / "app" / "pubspec.lock").read_text(encoding="utf-8"))
     for name, pkg in (pub.get("packages") or {}).items():
         url = (pkg.get("description") or {}).get("url") if isinstance(pkg.get("description"), dict) else None

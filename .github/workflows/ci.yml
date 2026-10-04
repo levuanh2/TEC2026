@@ -244,8 +244,10 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Fresh venv, isolation + import boundary + declared deps, Render start, /health + /docs
         run: bash scripts/ci/backend_startup_smoke.sh
-      - name: Resolved dependency drift (warning on PRs; strict-ci fails)
-        run: python scripts/ci/dep_audit.py --drift backend-resolved.txt
+      # requirements.txt applies backend/constraints.txt, so upstream releases
+      # cannot move this set: any difference is a lock defect and fails here.
+      - name: Installed dependencies == backend/constraints.txt (fails)
+        run: python scripts/ci/dep_audit.py --drift backend-resolved.txt --strict
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
