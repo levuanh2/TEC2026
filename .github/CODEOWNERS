@@ -53,6 +53,7 @@
 /scripts/validate_supabase_schema.py @levuanh2
 /web-dashboard/package.json @levuanh2
 /backend/requirements.txt @levuanh2
+/backend/constraints.txt @levuanh2
 /ml/requirements.txt @levuanh2
 /web-dashboard/package-lock.json @levuanh2
 /app/pubspec.yaml @levuanh2

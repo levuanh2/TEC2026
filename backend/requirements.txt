@@ -1,3 +1,9 @@
+# Phien ban THAT duoc cai nam o constraints.txt: bo version CI da test, ghim
+# chinh xac ca dependency bac cau. Cac range ben duoi chi la y dinh; doi version
+# = sua constraints.txt trong mot PR rieng (docs/CI_PIPELINE.md, "Backend
+# dependency lock"). Day la dong option duy nhat ci_policy.py DEP_SOURCE cho phep.
+-c constraints.txt
+
 # Carbon Engine (backend/carbon) chi can pyyaml. Khong FastAPI, khong Supabase.
 pyyaml>=6.0
 
