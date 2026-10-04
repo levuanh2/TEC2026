@@ -116,6 +116,7 @@
     "backend/tests/test_round51_pg_carbon_repo.py": 3,
     "backend/tests/test_route_positive_auth.py": 4,
     "backend/tests/test_season_create.py": 3,
+    "backend/tests/test_staging_render_flow.py": 2,
     "backend/tests/test_straw_quickfix_persistence.py": 2,
     "backend/tests/test_write_response_atomicity.py": 2,
     "web-dashboard/tests/e2e/farmer-real-carbon-quickfix.spec.ts": 1,
