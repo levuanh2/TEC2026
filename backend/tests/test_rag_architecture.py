@@ -3,8 +3,13 @@
 AST-based, like test_recommendation_no_carbon_duplication.py: the RAG core may
 depend only on pydantic, the stdlib, `carbon`'s scenario vocabulary/error type
 and `recommendation.rules`; never on a vendor SDK, a vector store, a database
-client or the app layers; and the Core V1 recommendation package must not
-depend on RAG.
+client, factor configuration or the app layers; and the Core V1
+recommendation package must not depend on RAG.
+
+Numbers are protected behaviourally, not by guessing what a literal means:
+test_rag_facts.py / test_rag_orchestrator.py prove every authoritative value
+comes from an injected Core V1 service and that generated numbers need a
+FactRef.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ BACKEND = Path(__file__).resolve().parent.parent
 RAG_DIR = BACKEND / "recommendation" / "rag"
 RAG_MODULES = sorted(RAG_DIR.glob("*.py"))
 
-_ALLOWED_ROOTS = {"__future__", "collections", "dataclasses", "datetime", "enum", "typing", "uuid",
+_ALLOWED_ROOTS = {"__future__", "collections", "dataclasses", "datetime", "enum", "re", "typing", "uuid",
                   "pydantic", "carbon", "recommendation"}
 _ALLOWED_CARBON_NAMES = {"SCENARIOS", "CarbonEngineError"}
 _FORBIDDEN_ROOTS = {
@@ -33,6 +38,8 @@ _FORBIDDEN_ROOTS = {
     "supabase", "postgrest", "psycopg", "psycopg2", "sqlalchemy", "httpx", "requests", "fastapi",
     # app layers
     "infrastructure", "service", "api", "main", "schemas",
+    # configuration / file access (emission factors live in config/*.yaml)
+    "yaml", "os", "pathlib", "io", "importlib", "config",
 }
 
 
@@ -50,7 +57,7 @@ def _imports(path: Path) -> list[tuple[str, tuple[str, ...], int]]:
 def test_rag_package_exists_with_its_modules():
     names = {p.stem for p in RAG_MODULES}
     assert {"contracts", "models", "context", "citations", "grounding", "orchestrator", "errors",
-            "what_if", "retrieval", "intents", "answers"} <= names
+            "what_if", "retrieval", "intents", "answers", "facts", "claims"} <= names
 
 
 @pytest.mark.parametrize("path", RAG_MODULES, ids=lambda p: p.name)
@@ -72,11 +79,16 @@ def test_rag_modules_import_only_allowed_dependencies(path):
 
 
 @pytest.mark.parametrize("path", RAG_MODULES, ids=lambda p: p.name)
-def test_rag_modules_hold_no_numeric_factor_constants(path):
-    """A float literal in RAG code would be a copied factor/benchmark/GWP."""
-    floats = [node.value for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-              if isinstance(node, ast.Constant) and isinstance(node.value, float)]
-    assert not floats, f"{path.name} has float literals {floats}"
+def test_rag_modules_never_load_factor_configuration_or_files(path):
+    """Factors/GWP live in carbon/factors + config/*.yaml behind CarbonService.
+    RAG reaches neither: no file access and no reference to that config."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    calls = {node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    forbidden = calls & {"open", "exec", "eval", "__import__"}
+    assert not forbidden, f"{path.name} calls {sorted(forbidden)}"
+    strings = [node.value.lower() for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    for marker in ("emission_factors", ".yaml", "ef_config_path", "parameterset"):
+        assert not any(marker in text for text in strings), f"{path.name} references {marker}"
 
 
 def test_core_recommendation_does_not_depend_on_rag():

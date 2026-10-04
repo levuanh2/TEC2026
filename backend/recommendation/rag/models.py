@@ -2,25 +2,35 @@
 
 All are frozen pydantic models with `extra="forbid"`: a client cannot smuggle
 an organization/permission/filter field into a request, and a generator cannot
-add a Carbon number to its answer — an unknown field is a validation error.
+add a number, a URL or a fact value to its answer — an unknown field is a
+validation error.
+
+Two grounding channels, never mixed:
+  * SYSTEM FACTS — `GroundedFact`, built by trusted code from authoritative
+    AgriCarbon results, referenced by `FactRef(fact_id)`;
+  * KNOWLEDGE EVIDENCE — `EvidenceChunk`, retrieved approved documents,
+    referenced by `EvidenceRef(source_id, chunk_id)`.
 """
 
 from __future__ import annotations
 
 from datetime import date
+from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from carbon import SCENARIOS
 
 from .intents import AccessLevel, RagIntent, RagMode
 
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+FactId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:\-]+$", min_length=1, max_length=200)]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 Question = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 AnswerText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 HttpsUrl = Annotated[str, StringConstraints(pattern=r"^https://\S+$", max_length=2000)]
+Scalar = str | int | float | bool | None
 
 #: The season's recorded result; what-if compares every scenario against it.
 BASELINE_SCENARIO = "as_recorded"
@@ -31,7 +41,7 @@ Visibility = Literal["public", "tenant"]
 SourceType = Literal["guideline", "policy", "methodology", "research", "tenant_document"]
 Authority = Literal["official", "peer_reviewed", "extension", "internal"]
 Confidence = Literal["low", "medium", "high"]
-AnswerStatus = Literal["generated", "insufficient_evidence"]
+GeneratedStatus = Literal["generated", "insufficient_evidence"]
 
 
 class Contract(BaseModel):
@@ -41,12 +51,11 @@ class Contract(BaseModel):
 # -- authorization ----------------------------------------------------------
 
 class AuthorizedSeasonScope(Contract):
-    """What a `SeasonAccessGate` proved about the caller and one season.
-
-    Only a gate builds this, from the caller's JWT and RLS — never from
-    request fields. Everything tenant-scoped downstream (context reads, the
-    retrieval filter) is derived from it.
-    """
+    """What a `SeasonScopeResolver` proved about the caller and one season
+    (decision D3). Only a resolver builds this, from the caller's JWT through
+    Core V1 access checks — never from request fields. Everything
+    tenant-scoped downstream (context reads, facts, retrieval filters) is
+    derived from it."""
 
     actor_id: Identifier
     organization_id: Identifier
@@ -56,42 +65,43 @@ class AuthorizedSeasonScope(Contract):
     access: AccessLevel
 
 
-# -- request ----------------------------------------------------------------
+# -- what-if ----------------------------------------------------------------
+
+class WhatIfDimension(StrEnum):
+    WATER_REGIME = "water_regime"
+    FERTILIZER_AMOUNT = "fertilizer_amount"
+    STRAW_MANAGEMENT = "straw_management"
+    PESTICIDE = "pesticide"
+    SEED_RATE = "seed_rate"
+    OTHER_ACTIVITY = "other_activity"
+
+
+#: V1 scope: only what `CarbonService.calculate(scenario=..., persist=False)`
+#: can replay. Everything else needs a hypothetical-input API (decision D2).
+SUPPORTED_WHAT_IF_DIMENSIONS: frozenset[WhatIfDimension] = frozenset({WhatIfDimension.WATER_REGIME})
+
 
 class HypotheticalChange(Contract):
-    """An allow-listed what-if change. V1: the water regime scenario only,
-    because that is the only hypothetical input `CarbonService` accepts."""
+    """A what-if change. Unsupported dimensions are representable so they can
+    be refused with a typed error instead of being guessed or dropped."""
 
-    kind: Literal["water_regime_scenario"] = "water_regime_scenario"
-    scenario: str
-
-    @field_validator("scenario")
-    @classmethod
-    def _simulable(cls, value: str) -> str:
-        if value not in SIMULABLE_SCENARIOS:
-            raise ValueError(f"scenario must be one of {SIMULABLE_SCENARIOS}")
-        return value
-
-
-class RagQuestionRequest(Contract):
-    """A farmer's question about one crop season. Deliberately has no
-    organization, permission, filter or table field: scope comes from the
-    caller's JWT through the access gate."""
-
-    question: Question
-    crop_season_id: Identifier
-    intent: RagIntent | None = None
-    mode: RagMode = RagMode.ASK
-    hypothetical: HypotheticalChange | None = None
+    dimension: WhatIfDimension
+    #: Target water regime scenario; set exactly for WATER_REGIME.
+    scenario: str | None = None
 
     @model_validator(mode="after")
-    def _hypothetical_only_for_what_if(self) -> RagQuestionRequest:
-        if (self.intent is RagIntent.WHAT_IF) != (self.hypothetical is not None):
-            raise ValueError("`hypothetical` is required for intent 'what_if' and allowed only there")
+    def _scenario_matches_dimension(self) -> HypotheticalChange:
+        if self.dimension is WhatIfDimension.WATER_REGIME:
+            if self.scenario not in SIMULABLE_SCENARIOS:
+                raise ValueError(f"water_regime scenario must be one of {SIMULABLE_SCENARIOS}")
+        elif self.scenario is not None:
+            raise ValueError("scenario applies to the water_regime dimension only")
         return self
 
+    @property
+    def supported(self) -> bool:
+        return self.dimension in SUPPORTED_WHAT_IF_DIMENSIONS
 
-# -- what-if ----------------------------------------------------------------
 
 class WhatIfResult(Contract):
     """Two `CarbonService.calculate(persist=False)` runs. Every number here is
@@ -121,7 +131,70 @@ class WhatIfResult(Contract):
         return self
 
 
-# -- retrieval --------------------------------------------------------------
+# -- request ----------------------------------------------------------------
+
+class RagQuestionRequest(Contract):
+    """A farmer's question about one crop season. Deliberately has no
+    organization, permission, filter, table or persist field: scope comes
+    from the caller's JWT, and RAG V1 answers are ephemeral (decision D4)."""
+
+    question: Question
+    crop_season_id: Identifier
+    intent: RagIntent | None = None
+    mode: RagMode = RagMode.ASK
+    hypothetical: HypotheticalChange | None = None
+
+    @model_validator(mode="after")
+    def _hypothetical_only_for_what_if(self) -> RagQuestionRequest:
+        if (self.intent is RagIntent.WHAT_IF) != (self.hypothetical is not None):
+            raise ValueError("`hypothetical` is required for intent 'what_if' and allowed only there")
+        return self
+
+
+# -- system facts -----------------------------------------------------------
+
+class FactKind(StrEnum):
+    SEASON_ATTRIBUTE = "season_attribute"
+    RESOURCE_METRIC = "resource_metric"
+    CARBON_TOTAL = "carbon_total"
+    CARBON_INTENSITY = "carbon_intensity"
+    CARBON_BREAKDOWN = "carbon_breakdown"
+    DATA_COMPLETENESS = "data_completeness"
+    CARBON_READINESS = "carbon_readiness"
+    RULE_SIGNAL = "rule_signal"
+    CV_SIGNAL = "cv_signal"
+    BENCHMARK = "benchmark"
+    COMPARISON_SEASON = "comparison_season"
+    WHAT_IF = "what_if"
+
+
+class GroundedFact(Contract):
+    """One authoritative AgriCarbon value, built by trusted code
+    (`facts.build_fact_catalog`) — never by a generator. A None value is a
+    real fact ("not available"), never 0."""
+
+    fact_id: FactId
+    kind: FactKind
+    value: Scalar
+    unit: str | None = None
+    #: Which Core V1 service produced the value.
+    source: str
+    #: Which record (calculation id, input hash, rule version, benchmark source...).
+    provenance: dict[str, Scalar] = Field(default_factory=dict)
+    #: Scope the value belongs to; None = not season/tenant specific (public benchmark).
+    crop_season_id: Identifier | None = None
+    organization_id: Identifier | None = None
+    authoritative: Literal[True] = True
+
+
+class FactRef(Contract):
+    """A reference to a system fact. Only an id: a generator cannot state,
+    override or round the value."""
+
+    fact_id: FactId
+
+
+# -- knowledge evidence -----------------------------------------------------
 
 class TenantScope(Contract):
     organization_id: Identifier
@@ -141,7 +214,7 @@ class RetrievalQuery(Contract):
 
 
 class EvidenceRef(Contract):
-    """A citation: must name a chunk retrieved for this very request."""
+    """A document citation: must name a chunk retrieved for this very request."""
 
     source_id: Identifier
     chunk_id: Identifier
@@ -167,7 +240,7 @@ class EvidenceChunk(Contract):
     url: HttpsUrl | None = None
     authority: Authority | None = None
     published_at: date | None = None
-    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    metadata: dict[str, Scalar] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _tenant_fields_match_visibility(self) -> EvidenceChunk:
@@ -197,28 +270,32 @@ class CitedEvidence(Contract):
     published_at: date | None
 
 
-# -- generation -------------------------------------------------------------
+# -- generation (UNTRUSTED until grounded) -----------------------------------
 
 class AnswerRecommendation(Contract):
-    """An expert claim in a generated answer; grounding requires ≥1 citation.
-    `rule_code` may only name a deterministic signal the season really has."""
+    """An expert claim in a generated answer; grounding requires ≥1 document
+    citation. `rule_code` may only name a deterministic signal the season
+    really has. Quantities appear only as `{{fact:<fact_id>}}` placeholders."""
 
     title: ShortText
     actions: tuple[ShortText, ...] = ()
     evidence_refs: tuple[EvidenceRef, ...] = ()
+    fact_refs: tuple[FactRef, ...] = ()
     rule_code: Identifier | None = None
 
 
 class GeneratedAnswer(Contract):
-    """The ONLY shape a generator may return, validated with
-    `model_validate` (never parsed out of free text). It has no Carbon or
-    Resource Metric number field on purpose."""
+    """The ONLY shape a generator may return, validated with `model_validate`
+    (never parsed out of free text). No number, URL or fact-value field: a
+    quantity is a `{{fact:<fact_id>}}` placeholder backed by a `FactRef`, and
+    the trusted assembler supplies its value (claims.py)."""
 
-    status: AnswerStatus
+    status: GeneratedStatus
     answer: AnswerText
     rationale: AnswerText | None = None
     recommendations: tuple[AnswerRecommendation, ...] = ()
     evidence_refs: tuple[EvidenceRef, ...] = ()
+    fact_refs: tuple[FactRef, ...] = ()
     limitations: tuple[ShortText, ...] = ()
     confidence: Confidence | None = None
 
@@ -228,5 +305,17 @@ class GeneratedAnswer(Contract):
             raise ValueError("an insufficient-evidence answer cannot recommend")
         return self
 
-    def all_refs(self) -> tuple[EvidenceRef, ...]:
+    def all_evidence_refs(self) -> tuple[EvidenceRef, ...]:
         return self.evidence_refs + tuple(ref for rec in self.recommendations for ref in rec.evidence_refs)
+
+    def all_fact_refs(self) -> tuple[FactRef, ...]:
+        return self.fact_refs + tuple(ref for rec in self.recommendations for ref in rec.fact_refs)
+
+    def texts(self) -> tuple[str, ...]:
+        """Every free-text field, for the placeholder and quantity checks."""
+        out = [self.answer, *self.limitations]
+        if self.rationale:
+            out.append(self.rationale)
+        for rec in self.recommendations:
+            out.extend((rec.title, *rec.actions))
+        return tuple(out)

@@ -1,9 +1,11 @@
-"""SeasonRagContext — the season's authoritative facts, typed for RAG.
+"""SeasonRagContext — the season's authoritative data, typed for RAG.
 
 `build_season_context` only PICKS fields from rows that existing Core V1
 services already produced (Resource Metrics, CarbonService, the deterministic
-rules, CV). Allowed transforms: field selection, renaming, and type coercion
-(an ISO date string -> date, a numeric string -> float). Nothing is summed,
+rules, CV, benchmarks). Allowed transforms: field selection, renaming, type
+coercion (an ISO date string -> date, a numeric string -> float) and dropping
+rows that do not qualify (an unfinalized benchmark, the season itself among
+its comparison seasons). Nothing is summed,
 divided, defaulted or recomputed here: a missing value stays None, never 0.
 """
 
@@ -132,6 +134,35 @@ class CvSignal(Contract):
     created_at: datetime | None = None
 
 
+#: The only benchmark status COMPARE may use (decision: never an unfinalized,
+#: invented or "industry standard" value).
+FINALIZED_BENCHMARK = "finalized"
+
+
+class BenchmarkFacts(Contract):
+    """A source-backed reference value for one metric. Core V1 has none today;
+    the port returns an empty list and COMPARE says so."""
+
+    benchmark_id: Identifier
+    metric: str | None = None
+    value: float | None = None
+    unit: str | None = None
+    label: str | None = None
+    source_reference: str | None = None
+    organization_id: RowId | None = None
+    status: str | None = None
+
+
+class ComparisonSeasonFacts(Contract):
+    """Another season the caller may read, with its authoritative metrics."""
+
+    crop_season_id: RowId
+    organization_id: RowId
+    season_code: str | None = None
+    planting_date: date | None = None
+    metrics: ResourceMetricFacts
+
+
 class SeasonRagContext(Contract):
     organization_id: Identifier
     farm_id: Identifier
@@ -144,6 +175,8 @@ class SeasonRagContext(Contract):
     carbon_readiness: CarbonReadinessFacts | None
     signals: tuple[DeterministicSignal, ...]
     cv_signals: tuple[CvSignal, ...]
+    benchmarks: tuple[BenchmarkFacts, ...] = ()
+    comparison_seasons: tuple[ComparisonSeasonFacts, ...] = ()
 
     @property
     def signal_rule_codes(self) -> frozenset[str]:
@@ -179,6 +212,11 @@ def _metrics(row: Mapping[str, Any]) -> ResourceMetricFacts:
     })
 
 
+def _comparison(row: Mapping[str, Any]) -> ComparisonSeasonFacts:
+    scalars = {name: row.get(name) for name in ComparisonSeasonFacts.model_fields if name != "metrics"}
+    return ComparisonSeasonFacts.model_validate({**scalars, "metrics": _metrics(row.get("metrics") or {})})
+
+
 def build_season_context(
     scope: AuthorizedSeasonScope, facts: SeasonFactsSource, *, mode: RagMode,
 ) -> SeasonRagContext:
@@ -200,4 +238,12 @@ def build_season_context(
             for row in facts.recommendation_signals(sid, fresh=mode is RagMode.PREVIEW)
         ),
         cv_signals=tuple(_pick(CvSignal, row) for row in facts.cv_signals(sid)),
+        benchmarks=tuple(
+            benchmark for benchmark in (_pick(BenchmarkFacts, row) for row in facts.benchmarks(sid))
+            if benchmark.status == FINALIZED_BENCHMARK
+        ),
+        comparison_seasons=tuple(
+            season for season in (_comparison(row) for row in facts.comparison_seasons(sid))
+            if season.crop_season_id != sid
+        ),
     )

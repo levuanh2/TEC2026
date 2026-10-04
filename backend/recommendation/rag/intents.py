@@ -1,12 +1,14 @@
-"""RAG V1 vocabulary: intents, modes, access levels and the evidence policy.
+"""RAG V1 vocabulary and the per-intent policy table.
 
-The only place that decides which intents need external evidence and which
-access level a request needs — the route and the orchestrator never branch on
-an intent's name (docs/rag/RAG_V1_ARCHITECTURE.md §6, §11).
+The only place that decides, per intent, which Core V1 access level is needed,
+whether retrieved documents are required and whether the answer may contain
+recommendations. The route and the orchestrator never branch on an intent's
+name for policy (docs/rag/RAG_V1_ARCHITECTURE.md §6, §11).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -28,27 +30,41 @@ class RagMode(StrEnum):
 
 
 class AccessLevel(StrEnum):
+    #: Core V1 read scope of the season (RLS `user_can_read_crop`).
     READ = "read"
+    #: Core V1 recommendation/CV write authority: an active `farmer` membership
+    #: in the season's organization AND `private.user_can_write_crop`
+    #: (`infrastructure/crop_write_authz.py`).
     WRITE = "write"
 
 
-#: Intents whose answer is a claim beyond the season's own authoritative data,
-#: so it must cite retrieved evidence. COMPARE is here because no benchmark
-#: exists in the database (docs/modules/05-ai-recommendation.md, R2): a
-#: benchmark can only come from a cited source. UNKNOWN is treated
-#: conservatively.
-EVIDENCE_REQUIRED_INTENTS: frozenset[RagIntent] = frozenset({
-    RagIntent.COMPARE, RagIntent.RECOMMEND, RagIntent.EVIDENCE, RagIntent.UNKNOWN,
-})
+@dataclass(frozen=True)
+class IntentPolicy:
+    access: AccessLevel
+    #: An answer must cite at least one retrieved document.
+    needs_documents: bool
+    #: The answer may contain recommendations (action-producing intent).
+    may_recommend: bool
+
+
+#: Decision D1 (closed): action-producing intents keep Core V1 write
+#: semantics even though nothing is persisted — no new access for viewers,
+#: managers, former owners or other organizations. UNKNOWN never reaches
+#: generation (the orchestrator asks for clarification), so it is read-only.
+INTENT_POLICIES: dict[RagIntent, IntentPolicy] = {
+    RagIntent.EXPLAIN: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
+    RagIntent.COMPARE: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
+    RagIntent.EVIDENCE: IntentPolicy(AccessLevel.READ, needs_documents=True, may_recommend=False),
+    RagIntent.DATA_GAP: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
+    RagIntent.RECOMMEND: IntentPolicy(AccessLevel.WRITE, needs_documents=True, may_recommend=True),
+    RagIntent.WHAT_IF: IntentPolicy(AccessLevel.WRITE, needs_documents=False, may_recommend=True),
+    RagIntent.UNKNOWN: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
+}
 
 
 def required_access(intent: RagIntent, mode: RagMode) -> AccessLevel:
-    """Access level a question needs. Every V1 mode is read-only.
-
-    Open decision D1 (docs/rag/RAG_V1_ARCHITECTURE.md): Core V1 only runs
-    `persist=False` engine calls for farmers with write authority. If the
-    product owner keeps that rule for WHAT_IF/PREVIEW, this is the one line
-    to change.
-    """
-    del intent, mode
-    return AccessLevel.READ
+    """PREVIEW re-runs the deterministic rules, i.e. Carbon what-ifs, which
+    Core V1 only runs for writers (`RecommendationService.generate`)."""
+    if mode is RagMode.PREVIEW:
+        return AccessLevel.WRITE
+    return INTENT_POLICIES[intent].access

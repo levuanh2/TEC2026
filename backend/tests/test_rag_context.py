@@ -11,9 +11,12 @@ from tests.fixtures.rag_fakes import (
     AWD_RULE,
     FARM_ID,
     ORG_ID,
+    OTHER_SEASON_ID,
     PLOT_ID,
     SEASON_ID,
     FakeFactsSource,
+    benchmark_row,
+    comparison_row,
     scope,
     signal_row,
 )
@@ -126,5 +129,29 @@ def test_context_reads_only_through_the_port():
     build_season_context(scope(), source, mode=RagMode.ASK)
     assert sorted(source.reads) == sorted([
         "season", "activity_summary", "metrics", "carbon_actual", "carbon_readiness",
-        "recommendation_signals", "cv_signals",
+        "recommendation_signals", "cv_signals", "benchmarks", "comparison_seasons",
     ])
+
+
+def test_no_benchmark_source_gives_no_benchmarks():
+    context = build_season_context(scope(), _source(), mode=RagMode.ASK)
+    assert context.benchmarks == () and context.comparison_seasons == ()
+
+
+def test_only_finalized_benchmarks_are_kept_verbatim():
+    rows = [benchmark_row(), benchmark_row(benchmark_id="draft", status="draft"),
+            benchmark_row(benchmark_id="unknown-status", status=None)]
+    context = build_season_context(scope(), _source(benchmark_rows=rows), mode=RagMode.ASK)
+    assert [b.benchmark_id for b in context.benchmarks] == ["water-htx-2026"]
+    assert context.benchmarks[0].value == 1.8
+    assert context.benchmarks[0].source_reference == "htx-report-2026"
+
+
+def test_comparison_seasons_carry_their_own_authoritative_metrics():
+    rows = [comparison_row(), comparison_row(crop_season_id=SEASON_ID)]  # the season itself is dropped
+    context = build_season_context(scope(), _source(comparison_rows=rows), mode=RagMode.ASK)
+    assert [c.crop_season_id for c in context.comparison_seasons] == [OTHER_SEASON_ID]
+    other = context.comparison_seasons[0]
+    assert other.metrics.co2e_per_kg == 0.71
+    assert other.metrics.water_per_kg is None
+    assert other.organization_id == ORG_ID

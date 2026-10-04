@@ -84,19 +84,37 @@ def signal_row(rule_code: str = AWD_RULE, **overrides: Any) -> dict[str, Any]:
     }
 
 
+OTHER_SEASON_ID = "99999999-9999-9999-9999-999999999999"
+
+
 @dataclass
-class FakeAccessGate:
+class FakeScopeResolver:
+    """`granted` is what Core V1 would allow this caller: READ for a viewer,
+    manager, former owner or data-grant reader; WRITE for an active farmer
+    writer; None for an unknown/out-of-scope season."""
+
     calls: list[str]
-    deny: bool = False
+    granted: AccessLevel | None = AccessLevel.WRITE
     returned_season_id: str | None = None
     levels: list[AccessLevel] = field(default_factory=list)
 
-    def authorize(self, crop_season_id: str, level: AccessLevel) -> AuthorizedSeasonScope:
-        self.calls.append("authorize")
+    def resolve(self, crop_season_id: str, level: AccessLevel) -> AuthorizedSeasonScope:
+        self.calls.append("resolve")
         self.levels.append(level)
-        if self.deny:
+        if self.granted is None or (level is AccessLevel.WRITE and self.granted is not AccessLevel.WRITE):
             raise RagAccessDenied(crop_season_id)
         return scope(crop_season_id=self.returned_season_id or crop_season_id, access=level)
+
+
+def benchmark_row(**overrides: Any) -> dict[str, Any]:
+    return {"benchmark_id": "water-htx-2026", "metric": "water_per_kg", "value": 1.8, "unit": "m3/kg",
+            "label": "Trung bình HTX vụ Hè Thu 2026", "source_reference": "htx-report-2026",
+            "organization_id": ORG_ID, "status": "finalized", **overrides}
+
+
+def comparison_row(**overrides: Any) -> dict[str, Any]:
+    return {"crop_season_id": OTHER_SEASON_ID, "organization_id": ORG_ID, "season_code": "DX-2025",
+            "planting_date": "2025-12-01", "metrics": {**metrics_row(), "co2e_per_kg": 0.71}, **overrides}
 
 
 @dataclass
@@ -111,6 +129,8 @@ class FakeFactsSource:
     readiness: Mapping[str, Any] | None = None
     signals: Sequence[Mapping[str, Any]] = field(default_factory=lambda: [signal_row()])
     cv: Sequence[Mapping[str, Any]] = ()
+    benchmark_rows: Sequence[Mapping[str, Any]] = ()
+    comparison_rows: Sequence[Mapping[str, Any]] = ()
     reads: list[str] = field(default_factory=list)
     fresh_flags: list[bool] = field(default_factory=list)
 
@@ -147,6 +167,14 @@ class FakeFactsSource:
     def cv_signals(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
         self._log("cv_signals")
         return self.cv
+
+    def benchmarks(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
+        self._log("benchmarks")
+        return self.benchmark_rows
+
+    def comparison_seasons(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
+        self._log("comparison_seasons")
+        return self.comparison_rows
 
 
 @dataclass

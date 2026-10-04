@@ -1,10 +1,10 @@
 """Ports of the RAG core — structural Protocols, like `rules.CarbonCalculator`.
 
-Each one is a real boundary: the caller's authorization (`SeasonAccessGate`),
-existing Core V1 reads (`SeasonFactsSource`), a knowledge store
-(`KnowledgeRetriever`), a model provider (`AnswerGenerator`) and the Carbon
-service (`WhatIfSimulator`). Concrete adapters live outside this package
-(docs/rag/RAG_V1_ARCHITECTURE.md §4) and none exists in V1 except
+Each one is a real boundary: the caller's authorization and season lineage
+(`SeasonScopeResolver`), existing Core V1 reads (`SeasonFactsSource`), a
+knowledge store (`KnowledgeRetriever`), a model provider (`AnswerGenerator`)
+and the Carbon service (`WhatIfSimulator`). Concrete adapters live outside
+this package (docs/rag/RAG_V1_ARCHITECTURE.md §4); none exists in V1 except
 `what_if.CarbonScenarioWhatIf`, which only wraps an injected CarbonService.
 """
 
@@ -20,14 +20,19 @@ if TYPE_CHECKING:
     from .answers import GenerationInput
 
 
-class SeasonAccessGate(Protocol):
-    """Bound to one caller (like `SupabaseReadRepository` is bound to a JWT).
+class SeasonScopeResolver(Protocol):
+    """Decision D3: authorizes the caller AND resolves season -> plot -> farm
+    -> organization. Bound to one caller (like `SupabaseReadRepository` is
+    bound to a JWT); the RAG core never reads that lineage itself.
 
-    Must reuse Core V1 checks — RLS read for READ, `crop_write_authz` for
-    WRITE — and raise `RagAccessDenied` for an unknown or out-of-scope season.
+    An implementation must reuse Core V1 checks — RLS read for READ;
+    `crop_write_authz.assert_can_write_crop` (active farmer in the season's
+    organization AND `user_can_write_crop`) for WRITE — and raise
+    `RagAccessDenied` for an unknown season, an out-of-scope season, or a
+    caller below `level`. It never takes permissions from the request.
     """
 
-    def authorize(self, crop_season_id: str, level: AccessLevel) -> AuthorizedSeasonScope: ...
+    def resolve(self, crop_season_id: str, level: AccessLevel) -> AuthorizedSeasonScope: ...
 
 
 class SeasonFactsSource(Protocol):
@@ -50,6 +55,17 @@ class SeasonFactsSource(Protocol):
     def recommendation_signals(self, crop_season_id: str, *, fresh: bool) -> Sequence[Mapping[str, Any]]: ...
 
     def cv_signals(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]: ...
+
+    def benchmarks(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
+        """Finalized, source-backed benchmarks for this season's metrics.
+        Core V1 has no benchmark source: an adapter returns []."""
+        ...
+
+    def comparison_seasons(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
+        """Other seasons the CALLER may read (RLS), each with
+        `crop_season_id`, `organization_id`, `season_code`, `planting_date`
+        and its `metrics()` row."""
+        ...
 
 
 class KnowledgeRetriever(Protocol):

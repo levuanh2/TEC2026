@@ -2,9 +2,10 @@
 
 `CarbonScenarioWhatIf` wraps the same `CarbonCalculator` the AWD rule uses
 (i.e. `service.CarbonService`) and always calls it with `persist=False`: the
-real season is never written. The caller must already hold an
-`AuthorizedSeasonScope` — the Carbon service reads with the service role,
-exactly like `GET /v1/crop-seasons/{id}/carbon` after its access check.
+real season is never written. V1 replays the water regime only; any other
+dimension is refused before the calculator is touched (decision D2). The
+caller must already hold a WRITE `AuthorizedSeasonScope` — Core V1 runs
+`persist=False` engine calls for writers only (decision D1).
 """
 
 from __future__ import annotations
@@ -12,7 +13,15 @@ from __future__ import annotations
 from carbon import CarbonEngineError
 
 from ..rules import CarbonCalculator
+from .errors import UnsupportedWhatIfDimension
 from .models import BASELINE_SCENARIO, AuthorizedSeasonScope, HypotheticalChange, WhatIfResult
+
+
+def ensure_supported(change: HypotheticalChange) -> None:
+    if not change.supported:
+        raise UnsupportedWhatIfDimension(
+            f"what-if over '{change.dimension}' is not supported in RAG V1 (water regime only)"
+        )
 
 
 class CarbonScenarioWhatIf:
@@ -20,6 +29,8 @@ class CarbonScenarioWhatIf:
         self._carbon = carbon
 
     def simulate(self, scope: AuthorizedSeasonScope, change: HypotheticalChange) -> WhatIfResult:
+        ensure_supported(change)
+        assert change.scenario is not None  # guaranteed for WATER_REGIME by HypotheticalChange
         sid = scope.crop_season_id
         try:
             baseline = self._carbon.calculate(sid, BASELINE_SCENARIO, persist=False).result
