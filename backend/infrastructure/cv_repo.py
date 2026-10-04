@@ -3,7 +3,8 @@
 Same trust model as write_repo.py/recommendation_repo.py: read scope is
 established by the caller (via SupabaseReadRepository, RLS); WRITE authority
 is `private.user_can_write_crop` for the JWT-verified actor -- the helper of
-the `plant_images_insert` policy -- checked before the Storage upload and again
+the `plant_images_insert` policy -- plus an active farmer membership in the
+season's HTX (no HTX manager uploads), checked before the Storage upload and again
 inside each row-writing transaction (`crop_write_authz`). A farm viewer or a
 former member uploads nothing. `plant_images`/`cv_inferences`/`cv_model_versions`
 writes use a service-role psycopg connection; the image bytes go to the

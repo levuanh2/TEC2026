@@ -2,8 +2,9 @@
 
 Same trust model as `write_repo.py`: read scope is established by the caller
 (via `SupabaseReadRepository`, RLS); WRITE authority is decided here, inside
-each write's transaction, by `private.user_can_write_crop` for the JWT-verified
-actor (`crop_write_authz`) -- a farm viewer, a former member or a data-grant
+each write's transaction, by `private.user_can_write_crop` plus an active farmer
+membership in the season's HTX for the JWT-verified actor (`crop_write_authz`)
+-- an HTX manager, a farm viewer, a former member or a data-grant
 reader can read a season but writes nothing. The service-role connection
 bypasses RLS, so this check is the only one. It never accepts a
 farm/organization/actor from an HTTP payload.

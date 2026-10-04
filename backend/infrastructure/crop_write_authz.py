@@ -10,6 +10,13 @@ helper of the `plant_images_insert` policy (`season_recommendations` has no
 client write policy at all) -- is evaluated with `auth.uid()` = the user the
 Auth server verified for the JWT.
 The claim is transaction-local and cleared before any row is written.
+
+These are farmer actions (decision 2026-10-03), so the same statement also
+requires an ACTIVE `farmer` membership in the season's own cooperative. The
+helper alone lets an HTX manager write, and a farmer role held in ANOTHER
+cooperative must not count: a manager of this HTX who farms elsewhere stays
+refused. One role per (organization, user), so this excludes every manager of
+the season's HTX. Same active rule as the helpers: `ended_at` null or future.
 """
 from __future__ import annotations
 
@@ -27,8 +34,15 @@ def assert_can_write_crop(cur: Any, *, crop_season_id: str, actor_id: str) -> No
         [json.dumps({"sub": str(actor_id), "role": "authenticated"})],
     )
     cur.execute(
-        "select private.user_can_write_crop(cs.id) as allowed from public.crop_seasons cs where cs.id = %s::uuid",
-        [str(crop_season_id)],
+        "select private.user_can_write_crop(cs.id) and exists ("
+        " select 1 from public.plots p"
+        " join public.farms f on f.id = p.farm_id"
+        " join public.organization_memberships om on om.organization_id = f.cooperative_id"
+        " where p.id = cs.plot_id and om.user_id = %s::uuid"
+        " and om.role = 'farmer'::public.organization_role"
+        " and (om.ended_at is null or om.ended_at > now())"
+        ") as allowed from public.crop_seasons cs where cs.id = %s::uuid",
+        [str(actor_id), str(crop_season_id)],
     )
     row = cur.fetchone()
     cur.execute("select set_config('request.jwt.claims', '', true)")

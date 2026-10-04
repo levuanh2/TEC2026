@@ -48,6 +48,10 @@ PERSONAS = {  # name -> (organization, organization role, farm role, membership 
     "former_owner": ("coop", "farmer", "owner", True),
     "moved_owner": ("coop", "farmer", "owner", True),
     "outsider": ("other", "farmer", None, False),
+    # Manager of this HTX who is also a farmer of ANOTHER one (admin-seeded;
+    # provisioning cannot create it). The farmer role must be held in the
+    # season's own HTX, so this manager stays refused the farmer writes.
+    "cross_manager": ("coop", "cooperative_manager", None, False),
 }
 READERS = ["manager", "owner", "viewer", "former_owner", "moved_owner"]
 REFUSED = ["former_viewer", "former_editor", "outsider"]
@@ -126,6 +130,8 @@ def tenant():
                                  " where user_id = %s", (ids["users"][name],))
             conn.execute("insert into public.organization_memberships (organization_id, user_id, role, joined_at)"
                          " values (%s, %s, 'farmer', now() - interval '1 day')", (ids["other"], ids["users"]["moved_owner"]))
+            conn.execute("insert into public.organization_memberships (organization_id, user_id, role, joined_at)"
+                         " values (%s, %s, 'farmer', now() - interval '10 days')", (ids["other"], ids["users"]["cross_manager"]))
             conn.commit()
         yield TestClient(app, raise_server_exceptions=False), tokens, ids
     finally:
@@ -341,11 +347,13 @@ def test_the_active_owner_writes_through_the_same_routes(tenant):
 
 # -- Viewer is read-only (product decision 2026-10-03) -----------------------------
 # Recommendation and CV writes go through a service-role connection; write
-# authority is `private.user_can_write_crop` for the JWT-verified caller. The
-# farmer-role gate stays on top (an HTX manager is refused these farmer actions).
+# authority is `private.user_can_write_crop` for the JWT-verified caller AND an
+# active farmer membership in the season's own HTX: an HTX manager is refused
+# these farmer actions (decision 2026-10-03), even one who farms elsewhere.
 
 WRITERS = ["owner", "editor"]
-NOT_WRITERS = ["viewer", "former_owner", "moved_owner", "former_viewer", "former_editor", "outsider", "manager"]
+NOT_WRITERS = ["viewer", "former_owner", "moved_owner", "former_viewer", "former_editor", "outsider", "manager",
+               "cross_manager"]
 
 
 def _auth(tokens, who):
@@ -392,11 +400,11 @@ def test_owner_and_editor_generate_accept_and_dismiss(tenant, who):
 
 
 @pytest.mark.parametrize("who,allowed", [
-    ("owner", True), ("editor", True), ("manager", True),  # the DB helper; the service adds the farmer gate
+    ("owner", True), ("editor", True), ("manager", False), ("cross_manager", False),
     ("viewer", False), ("former_owner", False), ("moved_owner", False),
     ("former_viewer", False), ("former_editor", False), ("outsider", False),
 ])
-def test_cv_upload_write_authority_is_the_plant_images_insert_rule(tenant, who, allowed):
+def test_cv_upload_write_authority_is_crop_write_plus_farmer_of_the_htx(tenant, who, allowed):
     from infrastructure.crop_write_authz import CropWriteDeniedError
     from infrastructure.cv_repo import PostgresCvRepository
 

@@ -57,6 +57,13 @@ non-persisting flow; none exists.
   transaction (accept/dismiss on the row's own season, locked).
 - On top, recommendation and CV actions stay **farmer** actions, as on main: an
   HTX manager is refused them too (decision 2026-10-03, "keep managers out").
+  The farmer role must be an ACTIVE `farmer` membership in the season's own
+  HTX, checked in the same database statement as the helper
+  (`infrastructure/crop_write_authz.py`). A farmer role held in another HTX
+  does not count, so a manager of this HTX who also farms elsewhere stays
+  refused (review round 2 finding LOW-1, fixed; test persona `cross_manager`).
+  A manager flow (preview, or acting for a farmer) would be a separate endpoint
+  and product decision.
 - A refusal is the same 404 as an unknown id.
 
 ## 3D. A token minted with the temporary password stays refused
