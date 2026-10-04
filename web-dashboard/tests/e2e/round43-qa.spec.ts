@@ -38,6 +38,9 @@ for (const vw of [768, 430, 390]) {
       await expect(page.locator('.shell > .main')).toHaveAttribute('inert', '')
       expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe('hidden')
       await expect(page.locator(SIDE)).toHaveAttribute('role', 'dialog')
+      // Measure after the .2s slide-in: mid-transform the box reads sub-pixel
+      // short (43.99999 on the CI runner, run 37176239135).
+      await page.locator(SIDE).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
       const target = await page.getByRole('button', { name: 'Đóng menu' }).boundingBox()
       expect(target!.width).toBeGreaterThanOrEqual(44)
       expect(target!.height).toBeGreaterThanOrEqual(44)
