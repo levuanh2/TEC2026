@@ -384,3 +384,65 @@ def test_mode_preview_needs_write_and_asks_for_fresh_signals():
     h.ask(mode=RagMode.PREVIEW.value)
     assert h.resolver.levels == [WRITE]
     assert h.facts.fresh_flags == [True]
+
+
+# -- server-side trusted rendering ---------------------------------------------------------------
+
+def _texts(result) -> list[str]:
+    out = [result.answer or "", result.rationale or "", *result.limitations]
+    for rec in result.recommendations:
+        out.extend((rec.title, *rec.actions))
+    return out
+
+
+def test_answer_is_rendered_template_and_canonical_facts_are_kept():
+    output = {**GROUNDED,
+              "answer": "Cường độ {{fact:current.metrics.co2e_per_kg}}, nước/kg {{fact:current.metrics.water_per_kg}}.",
+              "fact_refs": [{"fact_id": "current.metrics.co2e_per_kg"}, {"fact_id": "current.metrics.water_per_kg"}],
+              "recommendations": [{**GROUNDED["recommendations"][0],
+                                   "actions": ["Mục tiêu dưới {{fact:current.signal.%s.co2e_total_kg_after}}" % AWD_RULE],
+                                   "fact_refs": [{"fact_id": "current.signal.%s.co2e_total_kg_after" % AWD_RULE}]}]}
+    result = Harness(output=output).ask()
+    assert result.answer == "Cường độ 0,58 kg CO2e/kg, nước/kg chưa có dữ liệu."
+    assert result.answer_template == output["answer"]
+    assert result.recommendations[0].actions == ("Mục tiêu dưới 2.300 kg CO2e",)
+    assert not any("{{fact:" in text for text in _texts(result))
+    values = {f.fact_id: f.value for f in result.facts}
+    assert values["current.metrics.co2e_per_kg"] == 0.58          # canonical, not the display string
+    assert values["current.metrics.water_per_kg"] is None
+
+
+def test_what_if_impact_is_rendered_from_the_carbon_service_value():
+    result = Harness(output=WHAT_IF_ANSWER).what_if()
+    assert result.answer == "AWD giảm 600 kg CO2e theo Carbon Engine."
+    assert result.answer_template == WHAT_IF_ANSWER["answer"]
+
+
+def test_declined_answer_is_rendered_too():
+    output = {"status": "insufficient_evidence", "fact_refs": [{"fact_id": "current.metrics.co2e_per_kg"}],
+              "answer": "Chỉ biết cường độ {{fact:current.metrics.co2e_per_kg}}, chưa có tài liệu."}
+    result = Harness(output=output).ask()
+    assert result.answer == "Chỉ biết cường độ 0,58 kg CO2e/kg, chưa có tài liệu."
+    assert result.answer_template == output["answer"]
+
+
+def test_trusted_states_have_no_template():
+    assert Harness(chunks=()).ask().answer_template is None
+    assert Harness().ask(intent=None).answer_template is None
+
+
+def test_fact_outside_the_authorized_scope_is_stopped_by_grounding_before_rendering():
+    other = f"season.{OTHER_SEASON_ID}.metrics.co2e_per_kg"   # no comparison season authorized
+    output = {**FACT_ONLY, "answer": "Vụ khác {{fact:%s}}." % other, "fact_refs": [{"fact_id": other}]}
+    with pytest.raises(FactReferenceMismatch, match="unknown fact"):
+        Harness(output=output).ask(intent="explain")
+
+
+@pytest.mark.parametrize("smuggled", [
+    {"answer_template": "x"},
+    {"rendered_answer": "Giảm 90%"},
+    {"facts": [{"fact_id": DELTA, "value": 2900.0}]},
+])
+def test_generator_cannot_supply_rendered_text_or_fact_values(smuggled):
+    with pytest.raises(InvalidGeneratedSchema):
+        Harness(output={**WHAT_IF_ANSWER, **smuggled}).what_if()

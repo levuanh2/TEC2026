@@ -6,7 +6,15 @@ scenario vocabulary/error type and `recommendation.rules.CarbonCalculator`;
 Core V1 `recommendation` never imports this package.
 """
 
-from .answers import AnswerBasis, GenerationInput, RagAnswerResult
+from .answers import (
+    MISSING_FACT_TEXT,
+    AnswerBasis,
+    GenerationInput,
+    RagAnswerResult,
+    format_fact,
+    render_answer,
+    render_facts,
+)
 from .citations import resolve_citations, validate_citations
 from .claims import placeholder_ids, unreferenced_quantities, validate_fact_refs, validate_quantitative_claims
 from .context import SeasonRagContext, build_season_context
@@ -50,6 +58,7 @@ from .what_if import CarbonScenarioWhatIf, ensure_supported
 
 __all__ = [
     "INTENT_POLICIES",
+    "MISSING_FACT_TEXT",
     "SUPPORTED_WHAT_IF_DIMENSIONS",
     "AccessLevel",
     "AnswerBasis",
@@ -97,8 +106,11 @@ __all__ = [
     "build_retrieval_query",
     "build_season_context",
     "ensure_supported",
+    "format_fact",
     "has_comparison_basis",
     "placeholder_ids",
+    "render_answer",
+    "render_facts",
     "required_access",
     "resolve_citations",
     "unreferenced_quantities",

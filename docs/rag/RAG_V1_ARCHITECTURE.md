@@ -268,8 +268,13 @@ POST /v1/crop-seasons/{id}/questions (future)  — Depends(_read_repo) caller JW
                      → document citations                     → CitationMismatch
                      → fact references + numeric claims       → FactReferenceMismatch / GroundingFailed
                      → intent policy                          → GroundingFailed
+                     → trusted fact rendering (render_answer)  → FactReferenceMismatch
                      → TRUSTED RagAnswerResult (assembled by the orchestrator)
 ```
+
+`GeneratedAnswer` is **untrusted structured output**; `RagAnswerResult` is **trusted assembled
+output**. The renderer never runs before grounding, and a generator can never supply the final
+`answer`, `answer_template` or a fact value (unknown fields are schema errors).
 
 ---
 
@@ -394,12 +399,41 @@ A fact id is never accepted as a document citation and vice versa (tested both w
    unit — `%`, `kg`, `tấn`, `CO2/CO2e`, `m3/m³`, `lít`, `đ/đồng/VND`, `triệu/nghìn` — fails
    grounding. Harmless numbers ("1 phải 5 giảm", "15 cm", "3 lần", a year) pass. Numbers spelled
    out in words are not detected; rule 1 plus the provider prompt cover them.
-5. The trusted result returns text with placeholders plus exactly the referenced `GroundedFact`s;
-   the client renders each value with its unit and locale (web `format.ts`, Flutter formatter).
-6. **Known V1 consequence (D6):** a quantity quoted from a cited document ("bón 100 kg N/ha")
+5. **Server-side trusted rendering (decided).** After grounding passes, `answers.render_answer`
+   replaces every placeholder in `answer`, `rationale`, recommendation titles/actions and
+   `limitations` with `format_fact(fact)`. The result keeps all three views:
+   - `answer` — rendered text; default Web/Flutter clients display it as-is and never need to
+     implement placeholder replacement;
+   - `answer_template` — the grounded text with `{{fact:<id>}}` kept (provenance, highlighting,
+     debugging);
+   - `facts` — the referenced `GroundedFact`s with canonical values, units and provenance.
+   Advanced clients may use `answer_template` + `facts` to highlight numbers or open provenance.
+6. **Renderer rules.** It only looks up an id in the validated catalog, formats it and substitutes
+   it. It never calculates, converts units, rounds, infers a missing value, queries a DB or calls
+   a provider.
+   - `None` → `chưa có dữ liệu` (never `0`); booleans → `có` / `không`; strings as stored.
+   - Numbers: the stored value's exact shortest representation, Vietnamese grouping
+     (`.` thousands, `,` decimals), only trailing fraction zeros dropped
+     (`2900.0 kg CO2e` → `2.900 kg CO2e`, `0.58` → `0,58`, `0.1+0.2` → `0,30000000000000004`).
+     No precision metadata exists on facts today, so none is invented; a display-precision field
+     would be a later, explicit contract change.
+   - Unit: the fact's own unit appended verbatim (`kg CO2e`, `m3`, `VND/kg`, …). The
+     dimensionless `fraction` is shown as the bare number — never ×100 into `%`, which would be
+     a unit conversion. A generator must not repeat the unit after a placeholder.
+   - Unknown id, malformed placeholder or non-finite value → `FactReferenceMismatch`
+     (fail closed); no raw `{{fact:...}}` ever reaches a client.
+7. **Known V1 consequence (D6):** a quantity quoted from a cited document ("bón 100 kg N/ha")
    is rejected too, because documents are not system facts. This fails closed and may reject
    many real-model RECOMMEND answers. Whether, and how, cited document quantities are allowed
    (e.g. verbatim-quote spans checked against chunk text) is decided before V1.4.
+   Server-side rendering does **not** change D6, nor the known gap that numbers spelled out in
+   words are not detected by the backstop (MEDIUM).
+8. **Known V1 consequence (D7):** string facts render exactly as stored, so a code such as
+   `irrigated_continuous_flooding` can appear inside a Vietnamese sentence, and `fraction` facts
+   (`co2e_percent_delta`) render as `0,2069`, not `20,69%`. No backend Vietnamese label exists for
+   IPCC water-regime codes today (`mrv/labels.py` covers other vocabularies). Options before the
+   Q&A screen: a trusted display label per fact built in `facts.py`, or a generator policy that
+   never places code/fraction facts in prose. Undecided; not changed by this round.
 
 **Other grounding rules:** document citations must be chunks retrieved for this request
 (unknown source/chunk, duplicates rejected); recommendations only for action-producing intents,
@@ -471,6 +505,7 @@ Never logged: JWT, passwords, service-role/provider keys, the full prompt, the f
 | One `rag_service.py` god service | `service.py` already shows the cost of that shape |
 | LLM computes impact / CO2e / benchmarks | violates the single Carbon/Metrics source of truth |
 | Model writes numbers, NLP checks them afterwards | unreliable; placeholders + facts prevent it structurally |
+| Client-side placeholder rendering only | every client (Web, Flutter) would need its own renderer; one miss shows raw `{{fact:...}}` to farmers |
 | Prompt-enforced tenant isolation | not a security control; filters must be in code/store |
 | Regex/JSON-in-text parsing of model output | brittle; `GeneratedAnswer.model_validate` instead |
 | Replace deterministic rules with RAG | rules are explainable, versioned and tested |
@@ -487,7 +522,7 @@ Never logged: JWT, passwords, service-role/provider keys, the full prompt, the f
 |---|---|---|
 | V1.3 Retrieval | ingestion CLI, `knowledge_repo.py` (pgvector or Postgres FTS), migration for knowledge documents/chunks with RLS, `rag_application.py` adapters (D3 resolver + facts source) | migration approval |
 | V1.4 Generation | one provider adapter behind `AnswerGenerator`, structured output, prompt policy, offline eval set | D5, D6 |
-| V1.5 API + UI | thin route, Farmer Web Q&A panel, placeholder rendering, observability | API catalog + OpenAPI update |
+| V1.5 API + UI | thin route, Farmer Web Q&A panel (displays `answer`), optional fact highlighting from `answer_template` + `facts`, observability | API catalog + OpenAPI update |
 | V1.6 What-if+ | hypothetical activity inputs in `CarbonService` | D2 |
 | later | Q&A history/audit | D4 reopened as its own phase |
 
@@ -507,4 +542,5 @@ Open (future, none blocks this skeleton):
   pesticide/seed-rate what-ifs — Carbon owner decision.
 - **D5** LLM provider, data residency and cost limits.
 - **D6** Quantities quoted from cited documents: allowed or not, and how they are verified.
+- **D7** Farmer-friendly display of code and fraction facts (labels / percent display).
 - Benchmark source: where finalized benchmarks come from (none exists; COMPARE-B stays empty).

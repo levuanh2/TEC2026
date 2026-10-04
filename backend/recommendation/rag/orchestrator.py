@@ -7,7 +7,8 @@ its own, no provider logic, no persistence (decision D4).
 
 Assembly boundary:
   UNTRUSTED generator output -> schema validation -> citation validation
-  -> fact-reference validation -> grounding -> TRUSTED RagAnswerResult
+  -> fact-reference validation -> grounding -> trusted fact rendering
+  -> TRUSTED RagAnswerResult
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from .answers import (
     GenerationInput,
     InsufficientReason,
     RagAnswerResult,
+    render_answer,
 )
 from .citations import resolve_citations
 from .context import SeasonRagContext, build_season_context
@@ -96,28 +98,32 @@ class RagOrchestrator:
         generated = validate_grounding(
             _parse(raw), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
         )
+        # Rendering only ever sees a grounded answer and the trusted catalog.
+        rendered = render_answer(generated, {fact.fact_id: fact for fact in catalog})
 
         if generated.status == "insufficient_evidence":
             return _insufficient(request, intent, context, what_if, "generator_declined",
-                                 answer=generated.answer, facts=_referenced(generated, catalog))
+                                 answer=rendered["answer"], answer_template=rendered["answer_template"],
+                                 facts=_referenced(generated, catalog))
         return RagAnswerResult(
             status="generated", intent=intent, mode=request.mode, crop_season_id=scope.crop_season_id,
-            answer=generated.answer, rationale=generated.rationale, recommendations=generated.recommendations,
-            evidence=resolve_citations(generated.all_evidence_refs(), evidence),
-            facts=_referenced(generated, catalog), limitations=generated.limitations,
-            confidence=generated.confidence, signals=context.signals, what_if=what_if, basis=_basis(context),
+            **rendered, evidence=resolve_citations(generated.all_evidence_refs(), evidence),
+            facts=_referenced(generated, catalog), confidence=generated.confidence,
+            signals=context.signals, what_if=what_if, basis=_basis(context),
         )
 
 
 def _insufficient(
     request: RagQuestionRequest, intent: RagIntent, context: SeasonRagContext, what_if: WhatIfResult | None,
-    reason: InsufficientReason, *, answer: str | None = None, facts: tuple[GroundedFact, ...] = (),
+    reason: InsufficientReason, *, answer: str | None = None, answer_template: str | None = None,
+    facts: tuple[GroundedFact, ...] = (),
 ) -> RagAnswerResult:
     # Deterministic facts stay valid without evidence: signals and the
     # engine's what-if numbers are still returned.
     return RagAnswerResult(
         status="insufficient_evidence", intent=intent, mode=request.mode, crop_season_id=context.crop_season_id,
-        answer=answer or INSUFFICIENT_MESSAGES[reason], insufficient_reason=reason, facts=facts,
+        answer=answer or INSUFFICIENT_MESSAGES[reason], answer_template=answer_template,
+        insufficient_reason=reason, facts=facts,
         signals=context.signals, what_if=what_if, basis=_basis(context),
     )
 

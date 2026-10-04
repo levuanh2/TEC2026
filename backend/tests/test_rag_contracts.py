@@ -267,3 +267,6 @@ def test_answer_result_state_is_consistent():
         RagAnswerResult(status="generated", insufficient_reason="generator_declined", **common)
     with pytest.raises(ValidationError):
         RagAnswerResult(status="needs_clarification", recommendations=[{"title": "t"}], **common)
+    with pytest.raises(ValidationError):  # a generated answer always keeps its unrendered template
+        RagAnswerResult(status="generated", **common)
+    assert RagAnswerResult(status="generated", answer_template="t", **common).answer_template == "t"

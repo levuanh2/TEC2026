@@ -130,23 +130,39 @@ generator sees. No raw context, no policy, no secrets.
 `evidence_refs[]`, `fact_refs[]`, `limitations[]`, `confidence?`.
 **No numeric field, no URL field, no fact value.** Quantities appear as `{{fact:<fact_id>}}`.
 
-Validation order: schema → document citations → fact references + numeric claims → intent policy.
+Validation order: schema → document citations → fact references + numeric claims → intent policy
+→ trusted fact rendering. `GeneratedAnswer` is **untrusted structured output**; it is never
+returned to a client.
 
-`RagAnswerResult` — assembled by the orchestrator only:
+`RagAnswerResult` — **trusted assembled output**, built by the orchestrator only:
 
 | Field | Origin |
 |---|---|
 | `status` | `generated \| insufficient_evidence \| needs_clarification` |
 | `intent`, `mode`, `crop_season_id` | request / authorized scope |
-| `answer`, `rationale`, `recommendations[]`, `limitations[]`, `confidence` | grounded `GeneratedAnswer` (may contain placeholders); trusted copy for non-generated states |
-| `facts[]` | exactly the referenced `GroundedFact`s, from the catalog — the client renders placeholders from these |
+| `answer` | grounded answer **rendered** by `render_answer` (no placeholder left); trusted copy for non-generated states |
+| `answer_template` | grounded answer with `{{fact:<id>}}` kept; set for `generated` and `generator_declined`, None for trusted-copy states |
+| `rationale`, `recommendations[]` (title, actions), `limitations[]` | grounded text, rendered |
+| `confidence` | grounded `GeneratedAnswer` |
+| `facts[]` | exactly the referenced `GroundedFact`s from the catalog, canonical values unchanged |
 | `evidence[]` (`CitedEvidence`) | `resolve_citations` from trusted chunk metadata |
 | `insufficient_reason` | `no_evidence_retrieved \| no_comparison_basis \| generator_declined`, set iff insufficient |
 | `signals[]` | copied from `SeasonRagContext.signals` |
 | `what_if` | `WhatIfResult` from the Carbon service, or None |
 | `basis` | `AnswerBasis(carbon_calculation_id, carbon_input_hash, ef_config_version, signal_rule_codes)`; None for `needs_clarification` |
 
-Only a `generated` result carries recommendations.
+Only a `generated` result carries recommendations; a `generated` result always has
+`answer_template`.
+
+**Client contract.** Default clients display `answer` (and the rendered rationale,
+recommendations, limitations) directly — no placeholder replacement needed. Advanced clients may
+use `answer_template` + `facts` to highlight numbers, show units/provenance or build a richer UI.
+
+**Rendering rules** (`answers.format_fact`): `None` → `chưa có dữ liệu` (never `0`); bool →
+`có`/`không`; string as stored; number → exact stored value with Vietnamese grouping (`.`
+thousands, `,` decimals, trailing fraction zeros dropped, no rounding) + the fact's own unit;
+`fraction` → bare number (no ×100). Unknown/malformed placeholder or non-finite value →
+`FactReferenceMismatch`.
 
 ## 8. Insufficient evidence and clarification
 
@@ -196,7 +212,7 @@ reach the answer only as `what_if.<scenario>.*` facts.
 | `what_if.*` | `CarbonService.calculate(id, scenario, persist=False)` ×2 | before − after (same as rule R1) | **NO** |
 | `GroundedFact` | the rows above | copy value, attach id/unit/provenance | **NO** |
 | `evidence[*]` display | `EvidenceChunk` trusted metadata | none | **NO** |
-| any number in an answer | a referenced `GroundedFact` | placeholder rendering by the client | **NO** — generator never supplies it |
+| any number in an answer | a referenced `GroundedFact` | server-side rendering: format value + own unit | **NO** — generator never supplies it; renderer never calculates |
 
 `SeasonFactsSource` methods map 1:1 to the "Source" column; a future adapter composes those
 calls and never queries a business table itself.
