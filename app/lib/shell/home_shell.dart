@@ -15,6 +15,12 @@ import 'tabs/sync_tab.dart';
 ///
 /// Android back: nếu đang ở tab khác 0 thì về tab "Trang chủ" trước; ở tab 0
 /// mới cho thoát app (hành vi mặc định).
+/// Hiện khi access token đã hết hạn mà chưa làm mới được (thường là đang
+/// offline): vẫn xem/ghi được trên máy, chỉ việc gửi phải chờ.
+const kOnlineSessionExpiredMessage =
+    'Phiên trực tuyến đã hết hạn — bạn vẫn có thể ghi offline. '
+    'Cần đăng nhập lại trước khi đồng bộ.';
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.services});
   final AppServices services;
@@ -73,13 +79,33 @@ class _HomeShellState extends State<HomeShell>
             SyncTab(
               coordinator: _s.syncCoordinator,
               onOpenSettings: _openSyncSettings,
+              onFixActivity: _fixActivity,
             ),
             AccountTab(services: _s),
           ],
         ),
-        bottomNavigationBar: AppBottomNavigation(
-          currentIndex: _index,
-          onSelect: _select,
+        bottomNavigationBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListenableBuilder(
+              listenable: _s.authController,
+              builder: (context, _) => _s.authController.onlineSessionExpired
+                  ? const Padding(
+                      padding: EdgeInsets.fromLTRB(
+                          AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.xs),
+                      child: OfflineBanner(
+                        key: Key('online-session-expired'),
+                        icon: Icons.lock_clock_outlined,
+                        message: kOnlineSessionExpiredMessage,
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            AppBottomNavigation(
+              currentIndex: _index,
+              onSelect: _select,
+            ),
+          ],
         ),
       ),
     );
@@ -165,6 +191,11 @@ class _HomeShellState extends State<HomeShell>
 
   @override
   void switchToSyncTab() => _select(2);
+
+  Future<void> _fixActivity(String clientEventId) async {
+    await AppRoutes.openActivityEdit(context, _s, clientEventId: clientEventId);
+    if (mounted) await _s.syncCoordinator.refresh();
+  }
 
   void _openSyncSettings() {
     AppRoutes.openSyncSettings(context, _s).then((_) {

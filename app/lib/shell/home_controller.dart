@@ -149,6 +149,11 @@ class HomeController extends ChangeNotifier {
   /// khi lượt hiện tại kết thúc (không bỏ sót vụ mới).
   bool _rerunAfterLoad = false;
 
+  /// Phần local (số bản ghi chờ gửi…) đổi TRONG lúc `_run` đang chạy — ví dụ
+  /// auto-sync xong khi Trang chủ đang gọi mạng. `_run` đã đếm từ trước, nên
+  /// phải đọc lại phần local ngay khi lượt đó kết thúc thay vì bỏ qua.
+  bool _recomputeAfterLoad = false;
+
   /// `_build` tự chọn Farm duy nhất → `_ctx` phát sự kiện, NHƯNG đây không phải
   /// "người dùng đổi ngữ cảnh": không tăng generation, không huỷ lượt đang chạy.
   bool _internalContextUpdate = false;
@@ -244,6 +249,11 @@ class HomeController extends ChangeNotifier {
       await _run(isRefresh: true);
     } else {
       _rerunAfterLoad = false;
+    }
+
+    if (_recomputeAfterLoad && !_loading) {
+      _recomputeAfterLoad = false;
+      await _recomputeLocalOnly();
     }
   }
 
@@ -458,6 +468,7 @@ class HomeController extends ChangeNotifier {
     // gọi DB đã đóng cho tới khi `load()` của user kế tiếp bật lại.
     _generation++;
     _rerunAfterLoad = false;
+    _recomputeAfterLoad = false;
     _suspended = true;
     _loadedOnce = false;
     _lastFetchedSeasonServerId = null;
@@ -498,7 +509,11 @@ class HomeController extends ChangeNotifier {
   /// Cập nhật lại phần local (Farm/Plot/Vụ, pending, carbon cache) mà KHÔNG gọi
   /// mạng — dùng khi ActiveContext hoặc kết nối đổi.
   Future<void> _recomputeLocalOnly() async {
-    if (_loading || _disposed || _suspended) return;
+    if (_disposed || _suspended) return;
+    if (_loading) {
+      _recomputeAfterLoad = true;
+      return;
+    }
     final farm = _ctx.farm;
     final season = _ctx.cropSeason;
     int plotCount = _snapshot.plotCount;

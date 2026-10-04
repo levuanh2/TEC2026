@@ -14,6 +14,7 @@ import copy
 import hashlib
 import io
 import json
+import re
 import math
 import sys
 import time
@@ -29,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import api  # noqa: E402
 from mrv import manifest as m  # noqa: E402
+from mrv import labels as L  # noqa: E402
 from mrv import workbook as wb  # noqa: E402
 from service import MrvExportService  # noqa: E402
 from tests.test_mrv_export import (  # noqa: E402
@@ -69,6 +71,19 @@ def header_row(ws, first_header: str, col: int = 1) -> int:
     row = find_row(ws, first_header, col)
     assert row, f"header {first_header!r} not found"
     return row
+
+
+def table(ws, first_header: str) -> list[dict]:
+    """The rows under a header row, as dicts, up to the first empty row."""
+    head = header_row(ws, first_header)
+    names = [ws.cell(row=head, column=c).value for c in range(1, ws.max_column + 1)]
+    out = []
+    for r in range(head + 1, ws.max_row + 1):
+        values = [ws.cell(row=r, column=c).value for c in range(1, ws.max_column + 1)]
+        if all(v is None for v in values):
+            break
+        out.append(dict(zip(names, values)))
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -130,7 +145,7 @@ def test_row_order_does_not_follow_manifest_list_order():
 def test_a_null_metric_is_a_blank_cell_not_zero():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Chỉ số tài nguyên"]
-    head = header_row(ws, "Mã vụ")
+    head = header_row(ws, "Vụ")
     labels = cells(ws, 2)
     values = cells(ws, 3)
     water_row = labels.index("Nước trên mỗi kg")
@@ -152,10 +167,10 @@ def test_no_cell_anywhere_says_null_or_none_or_na():
 def test_numbers_are_numeric_cells_with_precision_preserved():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Thu hoạch"]
-    head = header_row(ws, "Mã hoạt động")
+    head = header_row(ws, "Vụ")
     row = head + 1
-    yield_kg = ws.cell(row=row, column=4).value
-    area = ws.cell(row=row, column=5).value
+    yield_kg = ws.cell(row=row, column=3).value
+    area = ws.cell(row=row, column=4).value
     assert isinstance(yield_kg, (int, float)) and not isinstance(yield_kg, bool)
     assert yield_kg == 5200
     assert area == 1.5
@@ -164,7 +179,7 @@ def test_numbers_are_numeric_cells_with_precision_preserved():
 def test_datetimes_are_real_datetime_cells_in_utc():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Tổng quan"]
-    row = find_row(ws, "Thời điểm tạo (UTC)")
+    row = find_row(ws, "Thời điểm xuất (UTC)")
     value = ws.cell(row=row, column=2).value
     assert isinstance(value, datetime)
     assert value.tzinfo is None, "Excel cells carry no timezone"
@@ -203,8 +218,12 @@ def test_step_statuses_are_preserved_verbatim():
     ws = render(manifest)["Các bước MRV"]
     head = header_row(ws, "Thứ tự")
     statuses = [ws.cell(row=r, column=3).value for r in range(head + 1, ws.max_row + 1)]
-    assert statuses == [s["status"] for s in sorted(manifest["steps"], key=lambda x: x["step_no"])]
-    assert "failed" not in statuses
+    ordered = sorted(manifest["steps"], key=lambda x: x["step_no"])
+    # People read the label (Round 5.1); the code is kept verbatim in the audit sheet.
+    assert statuses == [L.STEP_STATUS.get(s["status"], s["status"]) for s in ordered]
+    assert L.STEP_STATUS["failed"] not in statuses
+    audit = table(render(manifest)[wb.AUDIT_SHEET], "step_no")
+    assert [r["status"] for r in audit] == [s["status"] for s in ordered]
 
 
 def test_evidence_is_metadata_only_and_says_so():
@@ -212,26 +231,28 @@ def test_evidence_is_metadata_only_and_says_so():
     ws = render(manifest)["Bằng chứng"]
     note = " ".join(str(v) for v in cells(ws, 1) if v)
     assert "KHÔNG kèm" in note
-    head = header_row(ws, "Mã bằng chứng")
-    included = ws.cell(row=head + 1, column=10).value
+    head = header_row(ws, "Bước")
+    included = ws.cell(row=head + 1, column=6).value
     assert included == "không"
 
 
 def test_carbon_unavailable_renders_a_status_not_a_zero():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Carbon"]
-    head = header_row(ws, "Mã vụ")
-    assert ws.cell(row=head + 1, column=2).value == "unavailable"
-    assert ws.cell(row=head + 1, column=3).value == "no_succeeded_calculation"
+    head = header_row(ws, "Vụ")
+    assert ws.cell(row=head + 1, column=2).value == L.CARBON_STATUS["unavailable"]
+    assert ws.cell(row=head + 1, column=3).value == L.CARBON_REASON["no_succeeded_calculation"]
     assert ws.cell(row=head + 1, column=7).value is None, "total CO2e must be blank, not 0"
+    audit = table(render(manifest)[wb.AUDIT_SHEET], "crop_season_id")
+    assert (audit[0]["status"], audit[0]["reason"]) == ("unavailable", "no_succeeded_calculation")
 
 
 def test_carbon_available_renders_values_and_breakdown():
     read = FakeRead(factor_sets=copy.deepcopy(FACTOR_SET_ROW))
     manifest, *_ = build_manifest(read=read, carbon=FakeCarbon(SUCCEEDED_CARBON))
     ws = render(manifest)["Carbon"]
-    head = header_row(ws, "Mã vụ")
-    assert ws.cell(row=head + 1, column=2).value == "succeeded"
+    head = header_row(ws, "Vụ")
+    assert ws.cell(row=head + 1, column=2).value == L.CARBON_STATUS["succeeded"]
     assert ws.cell(row=head + 1, column=7).value == 2920.8
     breakdown_head = header_row(ws, "Hạng mục", col=2)
     assert ws.cell(row=breakdown_head + 1, column=2).value == "methane"
@@ -242,7 +263,7 @@ def test_provenance_unavailable_is_shown_not_hidden():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Nguồn gốc hệ số"]
     flat = [str(v) for v in cells(ws, 1) if v]
-    assert "factor_provenance_unavailable" in flat
+    assert L.WARNING_CODE["factor_provenance_unavailable"] in flat
 
 
 def test_provenance_renders_real_sources_without_inventing_any():
@@ -252,30 +273,35 @@ def test_provenance_renders_real_sources_without_inventing_any():
     text = " ".join(str(v) for row in ws.iter_rows(values_only=True) for v in row if v)
     assert "IPCC 2019 Refinement" in text
     assert "Table 5.11" in text
-    assert "factor_provenance_unavailable" not in text
+    assert L.WARNING_CODE["factor_provenance_unavailable"] not in text
 
 
 def test_warnings_are_one_row_each_with_severity_unchanged():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Cảnh báo"]
-    head = header_row(ws, "Mã cảnh báo")
+    head = header_row(ws, "Loại cảnh báo")
     rendered = [
         (ws.cell(row=r, column=1).value, ws.cell(row=r, column=2).value)
         for r in range(head + 1, ws.max_row + 1)
     ]
     expected = sorted(
-        (w["code"], w["severity"]) for w in manifest["warnings"]
+        (L.WARNING_CODE.get(w["code"], w["code"]), L.SEVERITY[w["severity"]]) for w in manifest["warnings"]
     )
     assert sorted(rendered) == expected
-    assert all(sev in ("info", "warning") for _, sev in rendered)
+    # Codes and severities verbatim, one row each, in the audit sheet.
+    audit = table(render(manifest)[wb.AUDIT_SHEET], "code")
+    assert sorted((r["code"], r["severity"]) for r in audit) == sorted(
+        (w["code"], w["severity"]) for w in manifest["warnings"])
 
 
 def test_soft_deleted_activities_stay_out_and_the_sheet_says_so():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Hoạt động canh tác"]
-    head = header_row(ws, "Mã hoạt động")
-    ids = [ws.cell(row=r, column=1).value for r in range(head + 1, ws.max_row + 1)]
-    assert ids == ["a1"]
+    head = header_row(ws, "STT")
+    rows = [ws.cell(row=r, column=1).value for r in range(head + 1, ws.max_row + 1)]
+    assert rows == [1]
+    audit = table(render(manifest)[wb.AUDIT_SHEET], "STT")
+    assert [(r["STT"], r["activity_id"]) for r in audit] == [(1, "a1")]
     note = " ".join(str(v) for v in cells(ws, 1)[:head] if v)
     assert "KHÔNG được" in note
 
@@ -283,7 +309,7 @@ def test_soft_deleted_activities_stay_out_and_the_sheet_says_so():
 def test_activity_detail_columns_do_not_bleed_between_types():
     manifest, *_ = build_manifest()
     ws = render(manifest)["Hoạt động canh tác"]
-    head = header_row(ws, "Mã hoạt động")
+    head = header_row(ws, "STT")
     headers = [ws.cell(row=head, column=c).value for c in range(1, ws.max_column + 1)]
     row = head + 1  # the single harvest activity
     water_col = headers.index("Lượng nước (m³)") + 1
@@ -294,22 +320,24 @@ def test_activity_detail_columns_do_not_bleed_between_types():
 
 def test_manifest_sheet_carries_the_integrity_block():
     manifest, *_ = build_manifest()
-    ws = render(manifest)["Gói dữ liệu gốc"]
-    sha_row = find_row(ws, "Mã băm gói dữ liệu (manifest_sha256)")
+    ws = render(manifest)[wb.AUDIT_SHEET]
+    sha_row = find_row(ws, "manifest_sha256")
     assert ws.cell(row=sha_row, column=2).value == \
         manifest["package_integrity"]["manifest_sha256"]
-    assert ws.cell(row=find_row(ws, "Phạm vi băm"), column=2).value == \
+    assert ws.cell(row=find_row(ws, "canonical_over"), column=2).value == \
         "manifest-without-package_integrity"
-    assert ws.cell(row=find_row(ws, "Bảng tính kết xuất lúc (UTC)"), column=2).value == \
+    assert ws.cell(row=find_row(ws, "workbook rendered_at (UTC)"), column=2).value == \
         RENDERED_AT.replace(tzinfo=None)
 
 
 def test_no_certification_language_in_the_workbook():
     read = FakeRead(factor_sets=copy.deepcopy(FACTOR_SET_ROW))
     manifest, *_ = build_manifest(read=read, carbon=FakeCarbon(SUCCEEDED_CARBON))
+    # The data dictionary lists every possible case status (including
+    # "Đã thẩm định") as vocabulary, not as a claim about this package.
     text = " ".join(
         str(v).lower()
-        for ws in render(manifest).values()
+        for title, ws in render(manifest).items() if title != wb.DICTIONARY_SHEET
         for row in ws.iter_rows(values_only=True)
         for v in row if v
     )
@@ -390,17 +418,15 @@ def test_xlsx_renders_the_old_snapshot_after_source_data_changes():
 
     artifact_a = service.render(read_repository=repo, export_id=snapshot_a["export_id"])
     data, _, _ = service.download(read_repository=repo, export_id=artifact_a["export_id"])
-    ws = load_workbook(io.BytesIO(data))["Bằng chứng"]
-    head = header_row(ws, "Mã bằng chứng")
-    ids = [ws.cell(row=r, column=1).value for r in range(head + 1, ws.max_row + 1)]
+    ws = load_workbook(io.BytesIO(data))[wb.AUDIT_SHEET]
+    ids = [r["evidence_id"] for r in table(ws, "evidence_id")]
     assert ids == ["e1"], "the workbook must not contain evidence added after the snapshot"
 
     snapshot_b = service.create(read_repository=repo, mrv_case_id=CASE, fmt="json")
     artifact_b = service.render(read_repository=repo, export_id=snapshot_b["export_id"])
     data_b, _, _ = service.download(read_repository=repo, export_id=artifact_b["export_id"])
-    ws_b = load_workbook(io.BytesIO(data_b))["Bằng chứng"]
-    head_b = header_row(ws_b, "Mã bằng chứng")
-    ids_b = [ws_b.cell(row=r, column=1).value for r in range(head_b + 1, ws_b.max_row + 1)]
+    ws_b = load_workbook(io.BytesIO(data_b))[wb.AUDIT_SHEET]
+    ids_b = [r["evidence_id"] for r in table(ws_b, "evidence_id")]
     assert ids_b == ["e1", "e-late"]
 
 
@@ -578,9 +604,9 @@ def test_a_large_manifest_renders_in_reasonable_time_and_size():
 
     book = load_workbook(io.BytesIO(data))
     acts = book["Hoạt động canh tác"]
-    head = header_row(acts, "Mã hoạt động")
+    head = header_row(acts, "STT")
     assert acts.max_row - head == 1000
-    assert book["Bằng chứng"].max_row - header_row(book["Bằng chứng"], "Mã bằng chứng") == 100
+    assert book["Bằng chứng"].max_row - header_row(book["Bằng chứng"], "Bước") == 100
 
     # Generous: this guards against an accidental quadratic, not a few hundred ms.
     assert elapsed < 30, f"1000-activity render took {elapsed:.1f}s"
@@ -601,3 +627,66 @@ def test_numbers_keep_every_digit_excel_can_hold():
     assert len(cells) == 1 and isinstance(cells[0], float)
     assert cells[0] == float("%.16g" % float(raw))
     assert math.isclose(cells[0], float(raw), rel_tol=1e-15, abs_tol=0)
+
+
+# --------------------------------------------------------------------------
+# Round 5.1: people read labels; ids and codes live in ONE audit sheet
+# --------------------------------------------------------------------------
+
+_UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
+# A code whose label is the same word ("carbon" -> "Carbon", "web" -> "Web") is not a raw code.
+_CODES = {code for _, table in L.DICTIONARY for code in table if code.lower() != table[code].lower()}
+
+
+def _succeeded_manifest():
+    read = FakeRead(factor_sets=copy.deepcopy(FACTOR_SET_ROW))
+    manifest, *_ = build_manifest(read=read, carbon=FakeCarbon(SUCCEEDED_CARBON))
+    return manifest
+
+
+def test_business_sheets_carry_no_uuid_and_no_raw_code():
+    manifest = _succeeded_manifest()
+    sheets = render(manifest)
+    message_col = 3  # "Cảnh báo" column "Nội dung": free text from the engine
+    for title in wb.BUSINESS_SHEETS:
+        for row in sheets[title].iter_rows(values_only=True):
+            for col, value in enumerate(row, start=1):
+                if not isinstance(value, str):
+                    continue
+                assert not _UUID.search(value), (title, value)
+                if title == "Cảnh báo" and col == message_col:
+                    continue  # prose from the engine; ids in it are still checked above
+                for code in _CODES:
+                    assert not re.search(rf"(?<![\w-]){re.escape(code)}(?![\w-])", value), (title, code, value)
+
+
+def test_every_id_and_code_is_findable_in_the_audit_sheet():
+    manifest = _succeeded_manifest()
+    audit = " ".join(str(v) for row in render(manifest)[wb.AUDIT_SHEET].iter_rows(values_only=True)
+                     for v in row if v is not None)
+    ids = set(_UUID.findall(json.dumps(manifest)))
+    assert ids, "fixture must carry ids"
+    missing = sorted(i for i in ids if i not in audit)
+    assert not missing, f"ids only in the JSON, not in the audit sheet: {missing}"
+    assert manifest["package_integrity"]["manifest_sha256"] in audit
+
+
+def test_the_dictionary_explains_every_code_the_workbook_translates():
+    manifest = _succeeded_manifest()
+    ws = render(manifest)[wb.DICTIONARY_SHEET]
+    listed = {(r[1], r[2]) for r in ws.iter_rows(values_only=True) if r and r[1] and r[2]}
+    for _, table in L.DICTIONARY:
+        for code, meaning in table.items():
+            assert (code, meaning) in listed, code
+
+
+def test_version_result_type_and_export_time_are_in_the_workbook():
+    manifest = _succeeded_manifest()
+    sheets = render(manifest)
+    carbon = table(sheets["Carbon"], "Vụ")[0]
+    c = next(iter(manifest["carbon"]["per_crop_season"].values()))
+    assert carbon["Phiên bản bộ hệ số"] == c["ef_config_version"]
+    assert carbon["Loại kết quả"] == L.CALCULATION_KIND[c["calculation_kind"]]
+    summary = sheets["Tổng quan"]
+    assert summary.cell(row=find_row(summary, "Thời điểm xuất (UTC)"), column=2).value == \
+        datetime.fromisoformat(manifest["generated_at"].replace("Z", "+00:00")).replace(tzinfo=None)

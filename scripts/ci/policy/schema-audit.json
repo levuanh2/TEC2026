@@ -88,6 +88,27 @@
    ],
    "security_definer": false
   },
+  "private.enforce_harvest_area_within_plot()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.enforce_plot_area_covers_harvests()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.enforce_season_plot_covers_harvests()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.handle_new_user()": {
    "config": [
     "search_path=\"\""
@@ -95,6 +116,20 @@
    "execute": [
     "authenticated"
    ],
+   "security_definer": true
+  },
+  "private.max_live_harvested_area(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.password_change_pending()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": true
   },
   "private.pm_check_assignment_total()": {
@@ -155,6 +190,13 @@
     "anon",
     "authenticated"
    ],
+   "security_definer": false
+  },
+  "private.raise_harvest_area_exceeds_plot(numeric,numeric)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": false
   },
   "private.set_updated_at()": {
@@ -1445,6 +1487,7 @@
   "carbon_calculations.carbon_calculations_batch_scope_guard": "private.assert_calculation_batch_matches_season()",
   "crop_seasons.audit_change_trg": "audit.capture_change()",
   "crop_seasons.enforce_crop_season_lifecycle_trg": "private.enforce_crop_season_lifecycle()",
+  "crop_seasons.enforce_season_plot_covers_harvests_trg": "private.enforce_season_plot_covers_harvests()",
   "crop_seasons.set_updated_at_trg": "private.set_updated_at()",
   "cv_inferences.audit_change_trg": "audit.capture_change()",
   "cv_model_versions.audit_change_trg": "audit.capture_change()",
@@ -1471,6 +1514,7 @@
   "fuel_usages.set_updated_at_trg": "private.set_updated_at()",
   "harvest_events.audit_change_trg": "audit.capture_change()",
   "harvest_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
+  "harvest_events.enforce_harvest_area_within_plot_trg": "private.enforce_harvest_area_within_plot()",
   "harvest_events.harvest_type_trg": "private.enforce_activity_type()",
   "harvest_events.set_updated_at_trg": "private.set_updated_at()",
   "ingestion_batches.set_updated_at_trg": "private.set_updated_at()",
@@ -1507,6 +1551,7 @@
   "plant_images.set_updated_at_trg": "private.set_updated_at()",
   "plant_images.validate_plant_image_path_trg": "private.validate_plant_image_path()",
   "plots.audit_change_trg": "audit.capture_change()",
+  "plots.enforce_plot_area_covers_harvests_trg": "private.enforce_plot_area_covers_harvests()",
   "plots.set_updated_at_trg": "private.set_updated_at()",
   "production_batches.audit_change_trg": "audit.capture_change()",
   "production_batches.enforce_batch_season_open_trg": "private.enforce_batch_season_open()",

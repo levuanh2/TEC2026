@@ -1,5 +1,5 @@
 import { getOrganization, getOrganizationMetrics, getFarmPerformance } from '../api/organizations'
-import { perKg } from '../format'
+import { perKg, vndPerKg } from '../format'
 import { Async, EmptyState, PageHead, Section, useAsync } from '../ui'
 import { AggregateBasis, AggregateMetric } from '../components/AggregateMetric'
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
@@ -56,9 +56,9 @@ function PerformanceBody({ organizationId }: { organizationId: string }) {
               * one grid — and stack below the wide breakpoint. */}
             <div className="perf-pair">
               <Section title="Chi phí trực tiếp đã ghi" description="Chi phí do nông hộ nhập cùng hoạt động — không phải tổng chi phí sản xuất, không suy ra từ hệ số nào">
-                <AggregateMetric name="Chi phí / kg thóc" value={m.costPerKg == null ? null : perKg(m.costPerKg, '')} unit="₫/kg" formula="Tổng chi phí đã ghi ÷ tổng kg thóc" coverage={cov('cost')} {...shared} />
+                <AggregateMetric name="Chi phí / kg thóc" value={m.costPerKg == null ? null : vndPerKg(m.costPerKg)} unit="₫/kg" formula="Tổng chi phí đã ghi ÷ tổng kg thóc" coverage={cov('cost')} {...shared} />
               </Section>
-              <Section title="Carbon" description="Kết quả tính theo phương pháp MRV — phụ thuộc hệ số phát thải, không phải một khoản chi">
+              <Section title="Carbon" description="Ước tính theo phương pháp hiện tại — phụ thuộc hệ số phát thải, chưa phải kết quả MRV hay chứng nhận, không phải một khoản chi">
                 <AggregateMetric name="CO₂e / kg thóc" value={m.co2ePerKg == null ? null : perKg(m.co2ePerKg, '')} unit="kg CO₂e/kg" formula="Tổng CO₂e các kết quả đã lưu ÷ tổng kg thóc" coverage={cov('carbon')} {...shared} />
               </Section>
             </div>

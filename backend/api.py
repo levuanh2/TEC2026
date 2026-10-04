@@ -12,13 +12,16 @@ mọi request phải qua `CropAccessChecker` — replay JWT của người gọi
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import logging
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
@@ -32,22 +35,33 @@ from carbon.errors import (
     MissingEmissionFactorError,
 )
 import schemas
+from infrastructure import profiling
 from infrastructure.api_errors import error_detail
-from infrastructure.auth import CropAccessChecker, CropAccessError, MissingAuthError, extract_bearer_token
+from infrastructure.auth import (
+    CropAccessChecker, CropAccessError, InvalidTokenError, MissingAuthError, claims_for_denial_only,
+    extract_bearer_token, jwt_rejection_as_invalid_token,
+)
+from infrastructure.auth_admin import must_change_password
 from infrastructure.persist_access import CropPersistChecker
 from infrastructure.pagination import paginate
 from infrastructure.read_repo import ReadNotFoundError, SupabaseReadRepository
 from infrastructure.repository import CropNotFoundError, FactorSetNotFoundError
+from infrastructure.mapping import CALCULATION_KIND
 from service import (
     ActivityWriteAccessError,
     ActivityWriteService,
     CarbonService,
+    CurrentPasswordIncorrectError,
     CvAccessError,
     CvService,
+    HarvestAreaExceedsPlotError,
     InvalidCropSeasonStateError,
     InvalidImageError,
     MrvExportAccessError,
     MrvExportService,
+    PasswordChangeService,
+    PasswordChangeUnauthenticatedError,
+    PasswordPolicyError,
     RecommendationAccessError,
     ProvisioningFailedError,
     ProvisioningService,
@@ -68,7 +82,34 @@ from infrastructure.provisioning_repo import (
 )
 from infrastructure.write_repo import IdempotencyConflictError, SeasonNotOpenError
 
-router = APIRouter(prefix="/v1")
+# Forced first login: the only operations an account may use while it still has
+# the temporary password its manager handed over (POST /v1/me/password clears it).
+PASSWORD_CHANGE_ROUTES = frozenset({("GET", "/v1/me"), ("POST", "/v1/me/password")})
+
+
+def _password_change_guard(request: Request) -> None:
+    """403 `password_change_required` on every other /v1 operation while the
+    caller's token carries `app_metadata.must_change_password`.
+
+    This is the explicit API answer; the authority is the database, which reads
+    the live flag on auth.users (`private.password_change_pending`, migration
+    20261002100000) and refuses every business read/write on its own. Reading the
+    claim unverified is safe because it can only refuse (see
+    `claims_for_denial_only`). No/invalid header: the route's own auth answers.
+    """
+    route = request.scope.get("route")
+    if route is not None and (request.method, getattr(route, "path", None)) in PASSWORD_CHANGE_ROUTES:
+        return
+    scheme, _, token = (request.headers.get("authorization") or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return
+    if must_change_password(claims_for_denial_only(token).get("app_metadata")):
+        raise HTTPException(status_code=403, detail=error_detail(
+            "password_change_required",
+            "Tài khoản đang dùng mật khẩu tạm do HTX cấp. Hãy đổi mật khẩu trước khi tiếp tục."))
+
+
+router = APIRouter(prefix="/v1", dependencies=[Depends(_password_change_guard)])
 logger = logging.getLogger("agricarbon.api")
 
 Scenario = Literal["awd", "continuous_flooding", "as_recorded"]
@@ -182,7 +223,7 @@ def _require_caller(
 
 
 def _require_persist_authority(
-    authorization: str | None, checker: CropPersistChecker, crop_season_id: str
+    authorization: str | None, checker: CropPersistChecker, crop_season_id: str, **resolved: Any,
 ) -> None:
     """B4: persisting needs write authority on the crop, not just read access.
 
@@ -191,11 +232,50 @@ def _require_persist_authority(
     """
     token = extract_bearer_token(authorization)
     try:
-        checker.assert_can_persist(token, crop_season_id)
+        checker.assert_can_persist(token, crop_season_id, **resolved)
     except CropAccessError as exc:
         raise HTTPException(
             status_code=404, detail=error_detail("crop_not_found", str(exc))
         ) from exc
+
+
+def _require_caller_and_persist_authority(
+    authorization: str | None, access_checker: CropAccessChecker,
+    persist_checker: CropPersistChecker, crop_season_id: str,
+) -> None:
+    """Read scope, then write authority — with the identity lookup overlapped.
+
+    The write check needs the Auth server's answer to "who is this JWT"; that
+    round trip does not depend on the RLS read check, so it runs while the read
+    check is in flight (Round 5.1: every sequential trip here cost 250–300 ms
+    of each calculation). The write rule itself is still evaluated only after
+    the read check passed, so an out-of-scope caller never reaches it, and a
+    caller failing both still gets the read check's error.
+    """
+    resolve = getattr(persist_checker, "verified_user_id", None)
+    try:
+        token = extract_bearer_token(authorization)
+    except MissingAuthError:
+        resolve = None  # `_require_caller` below turns this into the 401
+    if resolve is None:
+        _require_caller(authorization, access_checker, crop_season_id)
+        _require_persist_authority(authorization, persist_checker, crop_season_id)
+        return
+
+    def timed_resolve(value: str) -> Any:
+        with profiling.phase("auth identity"):
+            return resolve(value)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        identity = pool.submit(contextvars.copy_context().run, timed_resolve, token)
+        try:
+            with profiling.phase("auth read check"):
+                _require_caller(authorization, access_checker, crop_season_id)
+        finally:
+            with profiling.phase("auth identity wait"):
+                identity.exception()  # always wait: nothing outlives the request
+    with profiling.phase("auth write check"):
+        _require_persist_authority(authorization, persist_checker, crop_season_id, user_id=identity.result())
 
 
 def _json_ready(body: dict[str, Any]) -> dict[str, Any]:
@@ -216,6 +296,7 @@ def _payload(result, calculation_id: str | None) -> dict[str, Any]:
     body["water_regime_scenario"] = body["scenario"]  # tên cũ trong SRS §4.2
     body["co2e_total_kg"] = body["total_co2e_kg"]
     body["calculation_id"] = calculation_id
+    body["calculation_kind"] = CALCULATION_KIND.get(body["scenario"], "scenario")
     return body
 
 
@@ -264,25 +345,66 @@ def calculate_carbon_endpoint(
     """
     request_id = str(uuid.uuid4())
     started = time.monotonic()
-    _require_caller(authorization, access_checker, payload.crop_season_id)
-    _require_persist_authority(authorization, persist_checker, payload.crop_season_id)
+    # One database connection for the write check, the read and the save
+    # (Round 5.1); a service without a session behaves exactly as before.
+    session = getattr(service, "session", None)
+    resolve = getattr(persist_checker, "verified_user_id", None)
+    authorize_in_read = resolve is not None and getattr(service, "can_authorize_reads", lambda: False)()
+    token: str | None = None
+    if authorize_in_read:
+        try:
+            token = extract_bearer_token(authorization)
+        except MissingAuthError:
+            _require_caller(authorization, access_checker, payload.crop_season_id)  # the standard 401
+            raise
+    with contextlib.ExitStack() as stack:
+        identity = None
+        if authorize_in_read:
+            # Round 5.1: ask Auth who the caller is while the pooled connection
+            # is being checked out; the read and write rules then run inside
+            # Postgres in the same round trip as the bundle read (see
+            # `PostgresCarbonRepository.get_crop_bundle_as`), instead of a
+            # PostgREST read check, a write check and a read in sequence.
+            pool = stack.enter_context(ThreadPoolExecutor(max_workers=1))
 
-    try:
-        # Serialized before `save_calculation` writes anything; only the new id
-        # is added afterwards, which cannot make valid JSON invalid.
-        outcome = service.calculate(
-            payload.crop_season_id, payload.water_regime_scenario,
-            prepare=lambda result: _json_ready(_payload(result, None)),
-        )
-    except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
-        logger.info(
-            "carbon_calculate_failed request_id=%s crop_season_id=%s scenario=%s "
-            "error=%s duration_ms=%d",
-            request_id, payload.crop_season_id, payload.water_regime_scenario,
-            type(exc).__name__, (time.monotonic() - started) * 1000,
-        )
-        _raise_http(exc, request_id)
-        raise
+            def timed_resolve(value: str) -> Any:
+                with profiling.phase("auth identity"):
+                    return resolve(value)
+
+            identity = pool.submit(contextvars.copy_context().run, timed_resolve, token)
+        stack.enter_context(session() if session is not None else contextlib.nullcontext())
+        caller: str | None = None
+        if identity is not None:
+            with profiling.phase("auth identity wait"):
+                caller = identity.result()  # InvalidTokenError -> the standard 401
+            if not caller:
+                raise HTTPException(status_code=404, detail=error_detail(
+                    "crop_not_found", f"'{payload.crop_season_id}' không tồn tại hoặc không thuộc phạm vi "
+                                      "truy cập của người dùng hiện tại."))
+        else:
+            _require_caller_and_persist_authority(authorization, access_checker, persist_checker, payload.crop_season_id)
+
+        try:
+            # Serialized before `save_calculation` writes anything; only the new id
+            # is added afterwards, which cannot make valid JSON invalid.
+            outcome = service.calculate(
+                payload.crop_season_id, payload.water_regime_scenario,
+                prepare=lambda result: _json_ready(_payload(result, None)),
+                **({"caller": caller} if caller is not None else {}),
+            )
+        except CropAccessError as exc:
+            # Same 404 as the separate read/write checks gave: a caller never
+            # learns which rule refused, or whether the season exists.
+            raise HTTPException(status_code=404, detail=error_detail("crop_not_found", str(exc))) from exc
+        except Exception as exc:  # noqa: BLE001 — chuyển thành HTTP có mã lỗi rõ ràng
+            logger.info(
+                "carbon_calculate_failed request_id=%s crop_season_id=%s scenario=%s "
+                "error=%s duration_ms=%d",
+                request_id, payload.crop_season_id, payload.water_regime_scenario,
+                type(exc).__name__, (time.monotonic() - started) * 1000,
+            )
+            _raise_http(exc, request_id)
+            raise
 
     logger.info(
         "carbon_calculate_ok request_id=%s crop_season_id=%s scenario=%s "
@@ -297,17 +419,23 @@ def calculate_carbon_endpoint(
 @router.get("/crop-seasons/{crop_season_id}/carbon", tags=['Carbon'], dependencies=[Depends(_require_bearer)])
 def get_crop_carbon(
     crop_season_id: str,
-    scenario: Scenario | None = None,
+    scenario: Scenario = "as_recorded",
     authorization: str | None = Header(default=None),
     service: CarbonService = Depends(_service),
     access_checker: CropAccessChecker = Depends(_access_checker),
 ) -> dict[str, Any]:
-    """Bản tính THÀNH CÔNG gần nhất của vụ. Không trả bản tính thất bại."""
+    """Bản tính THÀNH CÔNG gần nhất của vụ CHO ĐÚNG KỊCH BẢN. Không trả bản tính thất bại.
+
+    Mặc định `as_recorded` = kết quả vận hành chính thức của vụ. AWD và ngập liên
+    tục là kịch bản mô phỏng, chỉ trả khi hỏi đích danh (`?scenario=awd`) — tính
+    một kịch bản sau không bao giờ thay kết quả vận hành trong câu trả lời mặc định.
+    `calculation_kind` cho biết "actual" hay "scenario".
+    """
     request_id = str(uuid.uuid4())
     _require_caller(authorization, access_checker, crop_season_id)
 
     try:
-        row = service.latest(crop_season_id, scenario)
+        row = service.stored(crop_season_id, scenario)
     except Exception as exc:  # noqa: BLE001
         _raise_http(exc, request_id)
         raise
@@ -318,7 +446,7 @@ def get_crop_carbon(
             detail=error_detail(
                 "no_calculation",
                 f"Vụ '{crop_season_id}' chưa có bản tính thành công nào"
-                + (f" cho kịch bản '{scenario}'" if scenario else "")
+                + f" cho kịch bản '{scenario}'"
                 + ". Gọi POST /v1/carbon/calculate trước.",
             ),
         )
@@ -351,6 +479,61 @@ def get_crop_carbon_readiness(
         raise
 
 
+def _error_body(exc: Exception, request_id: str) -> dict[str, str]:
+    """The `{code, message}` the per-season route would have answered with."""
+    for exc_type, _status, code in _ERROR_STATUS:
+        if isinstance(exc, exc_type):
+            return {"code": code, "message": str(exc)}
+    logger.error("carbon_status_part_failed request_id=%s error=%s", request_id, type(exc).__name__,
+                 exc_info=(type(exc), exc, exc.__traceback__))
+    return {"code": "internal_error", "message": f"Lỗi hệ thống. (request_id={request_id})"}
+
+
+@router.get(
+    "/organizations/{organization_id}/carbon-status", tags=['Carbon'],
+    response_model=schemas.CarbonStatusBatchResponse,
+)
+def organization_carbon_status(
+    organization_id: str,
+    crop_season_id: list[str] | None = Query(default=None, description="Optional: only these seasons."),
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: CarbonService = Depends(_service),
+) -> dict[str, Any]:
+    """Carbon readiness and the actual result of every season of an organization, in one request.
+
+    Replaces one readiness + one result request PER SEASON on the Management
+    screens. Scope is decided by RLS with the caller's JWT, exactly like the
+    per-season routes: only seasons of this organization the caller can read
+    are listed, and asking for any other id simply leaves it out. A missing
+    token is the standard 401 `unauthenticated` (from `_read_repo`), not the
+    legacy Carbon `missing_authorization` (EXC-API-02 covers only the three
+    per-season Carbon routes Flutter maps). Each item
+    equals what the per-season endpoints return for that season; one season
+    failing never changes another's answer.
+    """
+    request_id = str(uuid.uuid4())
+    visible = _read_or_404(lambda: repo.organization_season_ids(organization_id))
+    if crop_season_id:
+        wanted = set(crop_season_id)
+        visible = [sid for sid in visible if sid in wanted]
+    status = service.status_many(visible)
+    items = []
+    for sid in visible:
+        part = status[sid]
+        item: dict[str, Any] = {"crop_season_id": sid}
+        readiness, actual = part.get("readiness"), part.get("actual")
+        if isinstance(readiness, Exception):
+            item["readiness_error"] = _error_body(readiness, request_id)
+        else:
+            item["readiness"] = readiness
+        if isinstance(actual, Exception):
+            item["actual_error"] = _error_body(actual, request_id)
+        else:
+            item["actual"] = _json_ready(actual) if actual is not None else None
+        items.append(item)
+    return {"organization_id": organization_id, "items": items}
+
+
 @router.get("/carbon/scenarios", tags=['Carbon'], response_model=schemas.CarbonScenarioResponse)
 def list_scenarios() -> dict[str, Any]:
     return {"scenarios": list(SCENARIOS)}
@@ -359,6 +542,40 @@ def list_scenarios() -> dict[str, Any]:
 @router.get("/me", tags=['Auth'], response_model=schemas.MeResponse)
 def get_me(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(repo.me)
+
+
+def _password_change_service() -> PasswordChangeService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "Password change is not configured."))
+
+
+def _bearer_token(authorization: str | None = Header(default=None)) -> str:
+    """The caller's token, or the standard 401 -- resolved before body validation."""
+    try:
+        return extract_bearer_token(authorization)
+    except MissingAuthError as exc:
+        raise HTTPException(status_code=401, detail=error_detail("unauthenticated", str(exc))) from exc
+
+
+@router.post("/me/password", tags=['Auth'], response_model=schemas.PasswordChangeResponse)
+def change_own_password(
+    response: Response,
+    token: str = Depends(_bearer_token),
+    payload: schemas.PasswordChangeRequest = Body(...),
+    service: PasswordChangeService = Depends(_password_change_service),
+) -> dict[str, Any]:
+    """Replace the caller's password. Requires the current one (checked with
+    Supabase Auth). Clears `must_change_password` -- the only way it is cleared --
+    so a provisioned farmer gets normal access after the next token refresh."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        with jwt_rejection_as_invalid_token():
+            return service.change(token, payload.current_password, payload.new_password)
+    except (InvalidTokenError, PasswordChangeUnauthenticatedError) as exc:
+        raise HTTPException(status_code=401, detail=error_detail("unauthenticated", "Token không hợp lệ hoặc đã hết hạn.")) from exc
+    except CurrentPasswordIncorrectError as exc:
+        raise HTTPException(status_code=422, detail=error_detail("current_password_incorrect", "Mật khẩu hiện tại không đúng.")) from exc
+    except PasswordPolicyError as exc:
+        raise HTTPException(status_code=422, detail=error_detail(exc.code, str(exc))) from exc
 
 
 @router.get("/farmer/scope", tags=['Farms'], response_model=schemas.FarmerScopeResponse)
@@ -450,6 +667,15 @@ def list_activities(
     return _read_or_404(lambda: paginate(repo.activities(crop_season_id), page, page_size))
 
 
+@router.get("/crop-seasons/{crop_season_id}/activity-summary", tags=['Activities'], response_model=schemas.ActivitySummaryResponse)
+def activity_summary(crop_season_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Whole-season journal facts (counts, recorded costs, harvested area,
+    first seeding / last harvest) in one small response, so the Farmer Home can
+    fetch only the few recent records it lists (Round 5.1). RLS decides scope,
+    as for `/activities`."""
+    return _read_or_404(lambda: repo.activity_summary(crop_season_id))
+
+
 @router.get("/activities/{activity_id}", tags=['Activities'], response_model=schemas.ActivityResponse)
 def get_activity(activity_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.activity(activity_id))
@@ -466,6 +692,10 @@ def _write_or_http(callback):
         raise HTTPException(status_code=422, detail=error_detail("invalid_crop_season_state", "Crop season is not open for journal writes.")) from exc
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=409, detail=error_detail("duplicate_event", "Idempotency key was already used with different activity data.")) from exc
+    except HarvestAreaExceedsPlotError as exc:
+        raise HTTPException(status_code=422, detail=error_detail(
+            "harvested_area_exceeds_plot", str(exc), field="harvested_area_ha", plot_area_ha=exc.plot_area_ha,
+        )) from exc
 
 
 @router.post("/crop-seasons/{crop_season_id}/activities", tags=['Activities'], status_code=201, response_model=schemas.ActivityWriteResponse)
@@ -652,6 +882,40 @@ def organization_summary(organization_id: str, repo: SupabaseReadRepository = De
 @router.get("/organizations/{organization_id}/metrics", tags=['Organizations'], response_model=schemas.MetricResponse)
 def get_organization_metrics(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
     return _read_or_404(lambda: repo.organization_metrics(organization_id))
+
+
+@router.get(
+    "/organizations/{organization_id}/plots-seasons", tags=['Organizations'],
+    response_model=schemas.OrganizationPlotsSeasonsResponse,
+)
+def organization_plots_seasons(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Plots and crop seasons of every farm of the organization, in one request.
+
+    Replaces `/farms/{id}/plots` + `/farms/{id}/crop-seasons` PER FARM on the
+    Management screens (Round 5.1). RLS decides scope, as for those routes; each
+    item is exactly what they return for that farm.
+    """
+    return _read_or_404(lambda: {
+        "organization_id": organization_id,
+        "items": repo.organization_plots_and_seasons(organization_id),
+    })
+
+
+@router.get(
+    "/organizations/{organization_id}/mrv-batches", tags=['MRV'],
+    response_model=schemas.OrganizationMrvBatchesResponse,
+)
+def organization_mrv_batches(organization_id: str, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    """Every MRV case of the organization with its batches, in one request.
+
+    Replaces `/mrv/cases` + `/mrv/cases/{id}/batches` PER CASE on the Management
+    screens (Round 5.1); the request count no longer grows with the number of
+    cases, and no case is lost past the first page. RLS decides scope.
+    """
+    return _read_or_404(lambda: {
+        "organization_id": organization_id,
+        "items": repo.organization_mrv_batches(organization_id),
+    })
 
 
 @router.get("/organizations/{organization_id}/farm-performance", tags=['Organizations'], response_model=schemas.ItemsResponse[schemas.FarmPerformanceResponse])

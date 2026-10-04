@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { CropSeason, Farm, Plot } from '../types'
 import { ApiError } from '../api/client'
+import { seasonStatus } from '../vocab'
 import { getFarmerScope, usingMockData, type FarmerScope } from '../api/farms'
-import { getActivities } from '../api/crops'
-import { getResourceMetrics } from '../api/metrics'
+import { getActivities, getActivitySummary, getRecentActivities } from '../api/crops'
+import { getResourceMetrics, type SeasonMetrics } from '../api/metrics'
 import { generateRecommendations, getRecommendations, type Recommendation } from '../api/recommendations'
 import { getCvInferences } from '../api/cv'
 import { getCarbon, getCarbonReadiness, type CarbonReadiness, type CarbonResult } from '../api/carbon'
@@ -13,11 +14,15 @@ export type SeasonCtx = { season: CropSeason; plot?: Plot; farm?: Farm }
 
 export const isActiveStatus = (status: string | null | undefined) => /(^active$|đang|canh tác)/i.test(status ?? '')
 
+/** Same words as Management (`vocab.seasonStatus`): a harvested season was
+ * "Đã kết thúc" here and "Đã thu hoạch" there for the same row (Round 5). */
 export function seasonStatusLabel(status: string | null | undefined): string {
   const s = (status ?? '').toLowerCase()
   if (isActiveStatus(s)) return 'Đang canh tác'
-  if (/harvest|complete|closed|done/.test(s)) return 'Đã kết thúc'
-  if (/plan|draft/.test(s)) return 'Kế hoạch'
+  if (['planned', 'harvested', 'closed', 'cancelled'].includes(s)) return seasonStatus(s)
+  if (/harvest/.test(s)) return seasonStatus('harvested')
+  if (/complete|closed|done/.test(s)) return seasonStatus('closed')
+  if (/plan|draft/.test(s)) return seasonStatus('planned')
   return status || 'Chưa rõ trạng thái'
 }
 
@@ -58,6 +63,11 @@ export const placeOf = (farm: Farm) => [farm.commune, farm.district, farm.provin
 export const useScope = () => useQuery(keys.scope, getFarmerScope, STABLE_MS)
 export const useMetrics = (id: string | null) => useQuery(id ? keys.metrics(id) : null, () => getResourceMetrics(id!))
 export const useActivities = (id: string | null) => useQuery(id ? keys.activities(id) : null, () => getActivities(id!))
+/** Home: only the newest records it lists, plus the server's whole-season summary. */
+export const HOME_RECENT = 5
+export const useRecentActivities = (id: string | null, limit = HOME_RECENT) =>
+  useQuery(id ? keys.recentActivities(id, limit) : null, () => getRecentActivities(id!, limit))
+export const useActivitySummary = (id: string | null) => useQuery(id ? keys.activitySummary(id) : null, () => getActivitySummary(id!))
 export const useCvHistory = (id: string | null) => useQuery(id ? keys.cv(id) : null, () => getCvInferences(id!))
 
 /* M05 generation is a deliberate non-blocker.
@@ -79,12 +89,27 @@ const RECS_DEFER_MS = 1_200
  *  the season's records changed in this session, nothing is stored yet, or what
  *  is stored has aged past `RECS_STALE_AFTER_MS`. Anything else renders as-is —
  *  a page load must not pay for generation just because it happened. */
-export function recommendationsOutOfDate(seasonId: string, items: Recommendation[]): boolean {
+export function recommendationsOutOfDate(seasonId: string, items: Recommendation[], metrics?: SeasonMetrics | null): boolean {
   if (seasonDataChanged(seasonId)) return true
   if (!items.length) return true
+  // A data task whose data has since been supplied (from any device or
+  // session) is out of date now, not after the age limit.
+  if (metrics && items.some((r) => r.status === 'generated' && dataTaskResolved(r, metrics))) return true
   const newest = items.reduce((max, r) => (r.generatedAt > max ? r.generatedAt : max), '')
   const at = Date.parse(newest)
   return Number.isNaN(at) || Date.now() - at > RECS_STALE_AFTER_MS
+}
+
+/** The metric a `data.completeness.<key>` task asks for, or null for other rules. */
+export const dataTaskKey = (r: Pick<Recommendation, 'ruleCode' | 'type'>): string | null =>
+  r.type === 'data_task' && r.ruleCode.startsWith('data.completeness.') ? r.ruleCode.slice('data.completeness.'.length) : null
+
+/** True when the season's current metrics already contain what the task asked for. */
+export function dataTaskResolved(r: Pick<Recommendation, 'ruleCode' | 'type'>, m: SeasonMetrics): boolean {
+  const key = dataTaskKey(r)
+  if (key === 'yield') return m.yieldKg != null
+  if (key === 'water' || key === 'fertilizer' || key === 'cost') return Boolean(m.completeness[key])
+  return false
 }
 
 export interface RecommendationsState extends QueryState<Recommendation[]> {
@@ -102,6 +127,7 @@ export interface RecommendationsState extends QueryState<Recommendation[]> {
 
 export function useRecommendations(id: string | null): RecommendationsState {
   const list = useQuery(id ? keys.recs(id) : null, () => getRecommendations(id!))
+  const metrics = useMetrics(id)
 
   const run = async () => {
     const items = await generateRecommendations(id!)
@@ -112,7 +138,7 @@ export function useRecommendations(id: string | null): RecommendationsState {
 
   // Armed only after the section has rendered its stored data and the deferral
   // has elapsed, so generation can never be part of first load.
-  const due = Boolean(id) && list.data !== undefined && recommendationsOutOfDate(id!, list.data ?? [])
+  const due = Boolean(id) && list.data !== undefined && recommendationsOutOfDate(id!, list.data ?? [], metrics.data)
   const [armed, setArmed] = useState(false)
   useEffect(() => {
     if (!due) { setArmed(false); return }
@@ -123,6 +149,8 @@ export function useRecommendations(id: string | null): RecommendationsState {
   const gen = useQuery(id ? keys.recsGen(id) : null, run, STABLE_MS, armed)
   return {
     ...list,
+    // Never show a task for data that is already there while the refresh runs.
+    data: list.data && metrics.data ? list.data.filter((r) => !(r.status === 'generated' && dataTaskResolved(r, metrics.data!))) : list.data,
     generating: Boolean(id) && (gen.loading || gen.refreshing),
     generateError: gen.error,
     lastGeneratedCount: gen.data,
@@ -176,7 +204,11 @@ export function prefetchNav(to: string): void {
   prefetchQuery(keys.scope, getFarmerScope, STABLE_MS)
   const season = primarySeason(peekQuery<FarmerScope>(keys.scope))?.season
   if (!season) return
-  if (to === '/farmer' || to === '/farmer/journal') prefetchQuery(keys.activities(season.id), () => getActivities(season.id))
+  if (to === '/farmer') {
+    prefetchQuery(keys.recentActivities(season.id, HOME_RECENT), () => getRecentActivities(season.id, HOME_RECENT))
+    prefetchQuery(keys.activitySummary(season.id), () => getActivitySummary(season.id))
+  }
+  if (to === '/farmer/journal') prefetchQuery(keys.activities(season.id), () => getActivities(season.id))
   if (to === '/farmer' || to === '/farmer/performance') prefetchQuery(keys.metrics(season.id), () => getResourceMetrics(season.id))
 }
 

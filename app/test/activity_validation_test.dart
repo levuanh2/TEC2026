@@ -264,4 +264,40 @@ void main() {
         ]));
     expect(irr.any((k) => k.contains('mm')), isFalse);
   });
+
+  group('Round 5.1: diện tích thu hoạch <= diện tích thửa 1,25 ha', () {
+    ActivityValidation harvest(ParsedField area, {double? plot = 1.25}) =>
+        validateActivity(
+          type: 'harvest',
+          parsed: {'yield_kg': _num(6000), 'harvested_area_ha': area},
+          occurredAt: _past,
+          now: _now,
+          plotAreaHa: plot,
+        );
+
+    test('1,24 ha: hợp lệ', () => expect(harvest(_num(1.24)).hasError, isFalse));
+    test('1,25 ha (bằng thửa): hợp lệ',
+        () => expect(harvest(_num(1.25)).hasError, isFalse));
+    test('1,251 ha: lỗi cạnh field, nêu diện tích thửa', () {
+      final v = harvest(_num(1.251));
+      expect(v.fieldErrors['harvested_area_ha'],
+          'Diện tích thu hoạch không được lớn hơn diện tích thửa (1,25 ha).');
+    });
+    test('giá trị âm: lỗi', () {
+      expect(harvest(_num(-1)).fieldErrors['harvested_area_ha'], isNotNull);
+    });
+    test('0: lỗi (phải lớn hơn 0, như ràng buộc DB)', () {
+      expect(harvest(_num(0)).fieldErrors['harvested_area_ha'], isNotNull);
+    });
+    test('để trống: hợp lệ (không bắt buộc, không đoán)',
+        () => expect(harvest(_empty).hasError, isFalse));
+    test('thửa chưa có diện tích: không áp giới hạn',
+        () => expect(harvest(_num(9), plot: null).hasError, isFalse));
+    test('harvestAreaError dùng chung cho hàng đợi', () {
+      expect(harvestAreaError(1.25, 1.25), isNull);
+      expect(harvestAreaError(1.251, 1.25), isNotNull);
+      expect(harvestAreaError(null, 1.25), isNull);
+      expect(harvestAreaError(2, null), isNull);
+    });
+  });
 }

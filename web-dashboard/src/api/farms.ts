@@ -13,7 +13,7 @@ export async function getPlotsForFarm(id: string): Promise<Plot[]> { return usin
 export async function getPlot(id: string): Promise<Plot | undefined> { return usingMockData ? plots.find((x) => x.id === id) : plot(await apiRequest<any>(`/v1/plots/${id}`)) }
 
 // --- Farm-level rollups (brief §7 "hiệu suất riêng 1 farm", §22 no client math) ---
-const farmSeason = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, status: x.status, ipccWaterRegime: x.ipcc_water_regime ?? null, preSeasonWaterRegime: x.pre_season_water_regime ?? null, cultivationDays: x.cultivation_days ?? null })
+const farmSeason = (x: any): CropSeason => ({ id: x.id, plotId: x.plot_id, name: x.season_code, variety: x.variety_name, plantingDate: x.planting_date, harvestDate: x.actual_harvest_date, expectedHarvestDate: x.expected_harvest_date ?? undefined, status: x.status, ipccWaterRegime: x.ipcc_water_regime ?? null, preSeasonWaterRegime: x.pre_season_water_regime ?? null, cultivationDays: x.cultivation_days ?? null })
 
 export interface FarmerScope { farms: Farm[]; plots: Plot[]; seasons: CropSeason[] }
 
@@ -28,6 +28,19 @@ export async function getFarmerScope(): Promise<FarmerScope> {
 export async function getFarmCropSeasons(farmId: string): Promise<CropSeason[]> {
   if (usingMockData) { const ids = plots.filter((p) => p.farmId === farmId).map((p) => p.id); return cropSeasons.filter((s) => ids.includes(s.plotId)) }
   return (await apiRequest<{ items: any[] }>(`/v1/farms/${farmId}/crop-seasons`)).items.map(farmSeason)
+}
+
+/** Plots and seasons of every farm of the organization in ONE request (Round
+ * 5.1) — per farm exactly what `getPlotsForFarm` / `getFarmCropSeasons` return. */
+export async function getOrganizationPlotsSeasons(organizationId: string): Promise<Map<string, { plots: Plot[]; seasons: CropSeason[] }>> {
+  if (usingMockData) {
+    return new Map(farms.map((f) => {
+      const own = plots.filter((p) => p.farmId === f.id)
+      return [f.id, { plots: own, seasons: cropSeasons.filter((s) => own.some((p) => p.id === s.plotId)) }]
+    }))
+  }
+  const body = await apiRequest<{ items: { farm_id: string; plots: any[]; crop_seasons: any[] }[] }>(`/v1/organizations/${organizationId}/plots-seasons`)
+  return new Map(body.items.map((i) => [i.farm_id, { plots: i.plots.map(plot), seasons: i.crop_seasons.map(farmSeason) }]))
 }
 
 export async function getFarmMetrics(farmId: string): Promise<SeasonMetrics | null> {

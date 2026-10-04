@@ -173,7 +173,7 @@ def test_recommendation_generation_rolls_back_the_whole_run_when_the_response_is
     proof = {}
     with pytest.raises(ResponseRejected):
         repo.save_generated(
-            crop_season_id=scope["season"], recs=[_rec("ATOMICITY_TEST_RULE")],
+            crop_season_id=scope["season"], recs=[_rec("ATOMICITY_TEST_RULE")], actor_id=scope["farmer"],
             prepare=_reject(proof, "ids", lambda rows: [r["id"] for r in rows]),
         )
     assert len(proof["ids"]) == 1
@@ -191,7 +191,7 @@ def test_recommendation_status_change_rolls_back_when_the_response_is_rejected(d
     repo = PostgresRecommendationRepository(settings=None, connect=_savepoint_factory(db))
     proof = {}
     with pytest.raises(ResponseRejected):
-        repo.set_status(rec_id, "accepted", prepare=_reject(proof, "row"))
+        repo.set_status(rec_id, "accepted", actor_id=scope["farmer"], prepare=_reject(proof, "row"))
     assert proof["row"]["status"] == "accepted"
     row = _one(db, "select status::text as status, accepted_at from public.season_recommendations where id = %s", (rec_id,))
     assert row == {"status": "generated", "accepted_at": None}
@@ -211,7 +211,7 @@ def test_cv_inference_rolls_back_when_the_response_is_rejected(db, scope):
     with pytest.raises(ResponseRejected):
         repo.create_inference(
             image_id=image, model_version_id=model["id"], predicted_label="healthy",
-            confidence=0.9, threshold_used=0.5, prepare=_reject(proof, "id", lambda row: row["id"]),
+            confidence=0.9, threshold_used=0.5, actor_id=scope["farmer"], prepare=_reject(proof, "id", lambda row: row["id"]),
         )
     assert _one(db, "select count(*) as n from public.cv_inferences where id = %s", (proof["id"],))["n"] == 0
 

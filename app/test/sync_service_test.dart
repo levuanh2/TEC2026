@@ -642,4 +642,95 @@ void main() {
       expect(seasonAcceptsActivities(CropSeasonStatus.cancelled), isFalse);
     });
   });
+
+  group('Round 5.1: diện tích thu hoạch không vượt diện tích thửa (1,25 ha)',
+      () {
+    Future<void> plotOf125() async {
+      final now = DateTime(2026, 3);
+      await _db.upsertPlot(Plot(
+        clientId: 'p1',
+        serverId: 'srv-p1',
+        farmId: 'f1',
+        plotCode: 'P',
+        name: 'P',
+        areaHa: 1.25,
+        syncState: SyncState.synced,
+        createdAt: now,
+        updatedAt: now,
+      ));
+    }
+
+    Activity harvest(String id, double? area) => _act(
+          id: id,
+          type: 'harvest',
+          payload: {
+            'yield_kg': 6000.0,
+            if (area != null) 'harvested_area_ha': area,
+          },
+        );
+
+    test('1,24 ha, 1,25 ha và để trống đều được gửi', () async {
+      await plotOf125();
+      await _db.saveActivity(harvest('h124', 1.24));
+      await _db.saveActivity(harvest('h125', 1.25));
+      await _db.saveActivity(harvest('hnull', null));
+      final s = await _sync.syncAll();
+      expect(s.activitiesSynced, 3);
+      expect(s.hasErrors, isFalse);
+      expect(_gw.activityUpserts.map((r) => r['client_event_id']),
+          containsAll(['h124', 'h125', 'hnull']));
+    });
+
+    test('1,251 ha: không gọi mạng, lỗi vĩnh viễn, không tự thử lại', () async {
+      await plotOf125();
+      await _db.saveActivity(harvest('h1251', 1.251));
+      final first = await _sync.syncAll();
+      expect(first.activitiesSynced, 0);
+      expect(first.failures.single.kind, SyncErrorKind.harvestAreaExceedsPlot);
+      expect(_gw.activityUpserts, isEmpty);
+      expect(_gw.detailUpserts, isEmpty);
+      final row = await _db.getActivity('h1251');
+      expect(row!.syncState, SyncState.failed);
+      expect(row.syncError, SyncErrorKind.harvestAreaExceedsPlot.name);
+
+      // Lượt sau KHÔNG chọn lại bản ghi này (lỗi vĩnh viễn) — không retry vô hạn.
+      final second = await _sync.syncAll();
+      expect(second.failures, isEmpty);
+      expect(_gw.activityUpserts, isEmpty);
+      expect((await _db.getActivity('h1251'))!.retryCount, 1);
+    });
+
+    test('sửa về 1,25 ha thì bản ghi quay lại hàng đợi và được gửi', () async {
+      await plotOf125();
+      await _db.saveActivity(harvest('hfix', 1.3));
+      await _sync.syncAll();
+      final bad = (await _db.getActivity('hfix'))!;
+      await _db.saveActivity(bad.editedWith(payload: {
+        'yield_kg': 6000.0,
+        'harvested_area_ha': 1.25,
+      }));
+      final s = await _sync.syncAll();
+      expect(s.activitiesSynced, 1);
+      expect(_gw.detailUpserts.single.row['harvested_area_ha'], 1.25);
+      expect((await _db.getActivity('hfix'))!.syncState, SyncState.synced);
+    });
+
+    test('máy chủ từ chối (trigger DB 23514) cũng là lỗi cần sửa, không retry',
+        () async {
+      await plotOf125();
+      await _db.saveActivity(harvest('hsrv', 1.2));
+      _gw.upsertThrows = const PostgrestException(
+        message: 'harvested_area_exceeds_plot: harvested area 1.2 ha is larger '
+            'than the plot area 1.1 ha',
+        code: '23514',
+      );
+      final s = await _sync.syncAll();
+      expect(s.failures.single.kind, SyncErrorKind.harvestAreaExceedsPlot);
+      expect(SyncErrorKind.harvestAreaExceedsPlot.isPermanent, isTrue);
+      _gw.upsertThrows = null;
+      final again = await _sync.syncAll();
+      expect(again.activitiesSynced, 0);
+      expect(_gw.activityUpserts, hasLength(1));
+    });
+  });
 }

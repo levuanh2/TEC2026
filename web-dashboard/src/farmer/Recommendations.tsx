@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { setRecommendationStatus, type Recommendation } from '../api/recommendations'
-import { date, num } from '../format'
+import { dateTime, num } from '../format'
 import { keys, setQueryData } from './data'
 import type { IconName } from './icons'
 import { Chip, Empty, ErrorPanel, IconTile, MoreLink, Refreshing, Section, Sk, SkBlock, type Tone } from './kit'
@@ -62,7 +62,7 @@ export function RecommendationsSection({ seasonId, limit, moreTo }: { seasonId: 
       title="Khuyến nghị"
       icon="recommendation"
       tone="leaf"
-      description="Chỉ hiển thị khi có đủ dữ liệu để ước tính tác động; không đoán."
+      description="Khuyến nghị dựa trên quy tắc và dữ liệu vụ. Tác động chỉ hiển thị khi ước tính được; không đoán."
       action={action}
     >
       {!seasonId ? (
@@ -113,7 +113,7 @@ function RecommendationCard({ item, busy, onAccept, onDismiss }: { item: Recomme
       <div className="fw-rec__body">
         <div className="fw-rec__top">
           <Chip tone={fam.tone}>{fam.badge}</Chip>
-          <time dateTime={item.generatedAt}>{date(item.generatedAt)}</time>
+          <time dateTime={item.generatedAt} title="Thời điểm tạo khuyến nghị">Tạo lúc {dateTime(item.generatedAt)}</time>
         </div>
         <h3>{item.title}</h3>
         <p className="fw-rec__reason">{item.reason}</p>
@@ -131,7 +131,17 @@ function RecommendationCard({ item, busy, onAccept, onDismiss }: { item: Recomme
             {item.impactStatus !== 'available' && item.impactUnavailableReason && <small>{item.impactUnavailableReason}</small>}
           </div>
         )}
-        {item.comparedTo && <p className="fw-rec__source">So sánh với: {item.comparedTo}</p>}
+        {item.type === 'optimization' && (
+          <p className="fw-rec__source">
+            {item.comparedTo
+              ? <>Ước tính theo kịch bản, so với: {item.comparedTo}. Không phải tác động được chứng nhận.</>
+              : 'Chưa có mốc so sánh được xác minh.'}
+          </p>
+        )}
+        <p className="fw-rec__source" data-testid="rec-basis">
+          Cơ sở: {item.type === 'data_task' ? 'quy tắc đủ dữ liệu' : 'quy tắc tối ưu hoá, tính bằng công cụ Carbon'} · phiên bản quy tắc {item.ruleVersion}
+          {item.engineVersion ? ` · công cụ tính ${item.engineVersion}` : ''}
+        </p>
         <div className="fw-rec__actions">
           <button type="button" className="fw-btn fw-btn--ghost fw-btn--sm" onClick={onDismiss} disabled={busy}>Bỏ qua</button>
           <button type="button" className="fw-btn fw-btn--sm" onClick={onAccept} disabled={busy}>Đã hiểu</button>

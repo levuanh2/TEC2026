@@ -18,10 +18,14 @@ import { ACTIVITY_ICON, FarmerConfirm, FarmerSheet, IconTile } from './kit'
 
 /* ---------------------------------------------------------------- shared */
 
-export interface SeasonContext { id: string; label: string }
+export interface SeasonContext {
+  id: string; label: string
+  /** The plot's area, so a harvest cannot claim more hectares than the plot has. */
+  plotAreaHa?: number | null
+}
 
 export function toSeasonContext(season: CropSeason, plot?: Plot | null): SeasonContext {
-  return { id: season.id, label: plot?.name ? `${season.name} · ${plot.name}` : season.name }
+  return { id: season.id, label: plot?.name ? `${season.name} · ${plot.name}` : season.name, plotAreaHa: plot?.areaHa ?? null }
 }
 
 export function isSupportedActivityType(type: string): type is SupportedActivityType {
@@ -407,7 +411,7 @@ export function ActivitySheetForm({ mode, activityType, season, activity, reveal
     errors = { ...validateIrrigation(draft), ...numberFormatErrors({ waterVolumeM3: iWater, durationMinutes: iDuration, waterLevelCm: iLevel, pumpEnergyKwh: iPump ? iPumpEnergy : '', totalCostVnd: iCost }, ['durationMinutes']) }
     input = { activityType: 'irrigation', data: { method: (draft.method || 'other') as IrrigationMethod, waterVolumeM3: draft.waterVolumeM3, durationMinutes: draft.durationMinutes, waterLevelCm: draft.waterLevelCm, pumpEnergyKwh: draft.pumpEnergyKwh, totalCostVnd: draft.totalCostVnd } }
   } else if (activityType === 'harvest') {
-    const draft = { yieldKg: blankToNumber(hYield), harvestedAreaHa: blankToNumber(hArea), moisturePercent: blankToNumber(hMoisture), totalCostVnd: blankToNumber(hCost) }
+    const draft = { yieldKg: blankToNumber(hYield), harvestedAreaHa: blankToNumber(hArea), moisturePercent: blankToNumber(hMoisture), totalCostVnd: blankToNumber(hCost), plotAreaHa: season.plotAreaHa ?? null }
     errors = { ...validateHarvest(draft), ...numberFormatErrors({ yieldKg: hYield, harvestedAreaHa: hArea, moisturePercent: hMoisture, totalCostVnd: hCost }) }
     input = { activityType: 'harvest', data: { yieldKg: draft.yieldKg ?? 0, harvestedAreaHa: draft.harvestedAreaHa, moisturePercent: draft.moisturePercent, totalCostVnd: draft.totalCostVnd } }
   } else if (activityType === 'seeding') {

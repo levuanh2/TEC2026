@@ -609,6 +609,56 @@ void main() {
     c.dispose();
   });
 
+  test(
+      'auto-sync xong TRONG lúc Trang chủ đang tải -> số chờ gửi cập nhật, '
+      'không phải đợi mở lại app', () async {
+    await _seedFarm();
+    await _seedActivePlotSeason(serverId: null); // vụ chờ gửi -> đếm 1
+    final gate = Completer<void>();
+    _me.gate = gate;
+
+    final c = _make(online: true)..attach();
+    final loading = c.load();
+    // Chờ lượt tải tới /v1/me: lúc này nó đã đếm 1 bản ghi chờ gửi.
+    while (_me.calls == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+
+    // Auto-sync đẩy xong vụ rồi báo Trang chủ, khi lượt tải còn treo.
+    await _db.markCropSeasonSynced('cs1', 'srv-cs1');
+    await c.markSynced();
+
+    gate.complete();
+    _me.gate = null;
+    await loading;
+    await c.debugSettle();
+
+    expect(c.snapshot.pendingCount, 0);
+    expect(c.snapshot.todo?.kind, isNot(HomeTodoKind.pushPending));
+    c.dispose();
+  });
+
+  test(
+      'Trang chủ đếm TRONG lúc đang gửi rồi lượt gửi hỏng -> vẫn đếm đúng '
+      '(bản ghi đang gửi chưa phải đã gửi)', () async {
+    await _seedFarm();
+    await _seedActivePlotSeason(serverId: null); // vụ chờ gửi -> đếm 1
+    // SyncService đánh dấu "đang gửi" trước khi gọi mạng.
+    await _db.markCropSeasonSyncing('cs1');
+
+    final c = _make(online: true)..attach();
+    await c.load();
+    await c.debugSettle();
+    expect(c.snapshot.pendingCount, 1);
+
+    // Lượt gửi hỏng, không tiến triển: không có onSynced/markSynced nào.
+    await _db.markCropSeasonSyncFailed('cs1', 'network');
+    expect(await _db.countAllPending(), 1);
+    expect(c.snapshot.pendingCount, 1);
+    expect(c.snapshot.todo?.kind, HomeTodoKind.pushPending);
+    c.dispose();
+  });
+
   group('race: response cũ KHÔNG được ghi đè sau khi ngữ cảnh đổi', () {
     Future<void> seedTwoSeasons() async {
       await _seedFarm();

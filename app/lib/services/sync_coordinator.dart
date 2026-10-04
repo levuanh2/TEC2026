@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../db/local_database.dart';
 import '../models/sync_queue_item.dart';
+import 'auth_service.dart' show SessionFreshness;
 import 'connectivity_service.dart';
 import 'sync_errors.dart';
 import 'sync_service.dart';
@@ -42,16 +43,23 @@ class SyncCoordinator extends ChangeNotifier {
     required SyncService sync,
     required LocalDatabase db,
     required ConnectivityService connectivity,
+    Future<SessionFreshness> Function()? ensureSession,
     Duration connectivityDebounce = const Duration(seconds: 2),
   })  : _sync = sync,
         _db = db,
         _conn = connectivity,
+        _ensureSession = ensureSession,
         _debounceFor = connectivityDebounce;
 
   final SyncService _sync;
   final LocalDatabase _db;
   final ConnectivityService _conn;
   final Duration _debounceFor;
+
+  /// Cổng phiên trước MỖI lượt gửi: phiên hết hạn phải được làm mới thành công
+  /// (máy chủ xác thực) rồi mới gửi. Không tới được máy chủ, hoặc bị từ chối →
+  /// KHÔNG gửi bản ghi nào, hàng đợi giữ nguyên.
+  final Future<SessionFreshness> Function()? _ensureSession;
 
   static const _kWifiOnlyKey = 'sync.wifi_only';
   static const _kLastSyncKey = 'sync.last_at';
@@ -205,6 +213,29 @@ class SyncCoordinator extends ChangeNotifier {
   }
 
   Future<SyncSummary?> _run() async {
+    final gate = _ensureSession;
+    if (gate != null) {
+      SessionFreshness freshness;
+      try {
+        freshness = await gate();
+      } catch (_) {
+        freshness = SessionFreshness.offline;
+      }
+      if (freshness != SessionFreshness.fresh) {
+        _inFlight = null;
+        await _reloadAfterRun();
+        // Bị từ chối → "Hết phiên" (phải đăng nhập lại). Chưa tới được máy chủ
+        // → trạng thái theo mạng; nút gửi vẫn bấm lại được khi có mạng thật.
+        if (freshness == SessionFreshness.rejected) {
+          _status = SyncStatus.authExpired;
+        } else {
+          _status = SyncStatus.idle;
+          _recomputeIdleStatus();
+        }
+        _notify();
+        return null;
+      }
+    }
     SyncSummary? summary;
     try {
       summary = await _sync.syncAll();

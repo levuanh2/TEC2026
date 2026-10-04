@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
+import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
@@ -18,6 +18,7 @@ import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
 import { AccountName, Sidebar } from './components/Sidebar'
 import { useMobileDrawer } from './components/useMobileDrawer'
 import { FarmerExperience } from './farmer/FarmerExperience'
+import { ForcedPasswordChange } from './components/ForcedPasswordChange'
 import { prefetchFarmerScope } from './farmer/scope'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -207,15 +208,15 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'plot':
       return <PlotPage id={id} role={viewer.role} />
     case 'season':
-      return <SeasonHub id={id} tab="overview" role={viewer.role} />
+      return <SeasonHub id={id} tab="overview" role={viewer.role} organizationId={viewer.organizationId} />
     case 'activities':
-      return <SeasonHub id={id} tab="activities" role={viewer.role} />
+      return <SeasonHub id={id} tab="activities" role={viewer.role} organizationId={viewer.organizationId} />
     case 'season-performance':
-      return <SeasonHub id={id} tab="performance" role={viewer.role} />
+      return <SeasonHub id={id} tab="performance" role={viewer.role} organizationId={viewer.organizationId} />
     case 'season-mrv':
-      return <SeasonHub id={id} tab="mrv" role={viewer.role} />
+      return <SeasonHub id={id} tab="mrv" role={viewer.role} organizationId={viewer.organizationId} />
     case 'carbon':
-      return <SeasonHub id={id} tab={'carbon' as SeasonTab} role={viewer.role} />
+      return <SeasonHub id={id} tab={'carbon' as SeasonTab} role={viewer.role} organizationId={viewer.organizationId} />
     case 'mrv':
       return <MrvPage role={viewer.role} />
     case 'notFound':
@@ -322,6 +323,12 @@ export default function App() {
     }
     let alive = true
     liveSession.current = session
+    // Still on the temporary password: every business read would be refused,
+    // so none is sent; the change form is all this session gets.
+    if (mustChangePassword(session)) {
+      setViewerReady(true)
+      return () => { alive = false }
+    }
     const current = () => alive && liveSession.current === session
     // A cached role hint for this same user lets a refresh/deep link paint
     // its shell immediately; /v1/me still revalidates below and its result
@@ -372,6 +379,15 @@ export default function App() {
   }, [])
 
   if (!ready) return <main className="login">Đang khôi phục phiên…</main>
+
+  // Before the /login check: a flagged sign-in stays on /login (the role
+  // redirect needs /v1/me, which is skipped while the flag is set).
+  if (session && (mustChangePassword(session) || viewer.mustChangePassword)) {
+    return <ForcedPasswordChange session={session} done={(s) => {
+      setViewer({ role: 'farmer', organizationId: null })
+      setSession(s)
+    }} />
+  }
 
   // Explicit mock mode is an isolated development/test path.  It must not
   // silently affect normal production mode, but it also must not be blocked by

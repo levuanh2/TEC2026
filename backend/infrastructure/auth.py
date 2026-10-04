@@ -138,3 +138,23 @@ def extract_bearer_token(authorization_header: str | None) -> str:
     if scheme.lower() != "bearer" or not token:
         raise MissingAuthError("Header Authorization phải dạng 'Bearer <token>'.")
     return token
+
+
+def claims_for_denial_only(token: str) -> dict[str, Any]:
+    """The JWT payload WITHOUT verifying the signature -- usable only to REFUSE.
+
+    FastAPI reads `app_metadata.must_change_password` here to answer 403
+    `password_change_required` before any work. That is safe only because the
+    answer can never widen access: a forged token that drops the flag is still
+    rejected by Supabase Auth/PostgREST, and the database checks the live flag
+    on auth.users (`private.password_change_pending`). Never use this to allow.
+    """
+    import base64
+    import json
+
+    try:
+        payload = token.split(".")[1]
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except (IndexError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}

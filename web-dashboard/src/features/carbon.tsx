@@ -2,14 +2,17 @@ import { Ico } from '../icons'
 import { useState } from 'react'
 import { ApiError } from '../api/client'
 import { calculateCarbon, getCarbon, type CarbonResult, type Scenario } from '../api/carbon'
-import { num, kg, perKg, dateTime } from '../format'
+import { num, perKg, dateTime, co2eKg } from '../format'
 import { Async, Badge, Link, Notice, Section, Segmented, useAsync, EmptyState } from '../ui'
 import { useCarbonView } from '../carbon/useCarbonView'
+import { carbonSourceLabel, cleanWarning, gasLabel, isSimulation, notCounted, resultKindLabel, simulationOutdated } from '../carbon/presentation'
 
+/* The actual result is the season's; the other two are simulations of the same
+ * data under an assumed water regime, and are labelled as such everywhere. */
 const SCENARIOS: { value: Scenario; label: string }[] = [
-  { value: 'as_recorded', label: 'Theo ghi nhận' },
-  { value: 'awd', label: 'AWD (rút nước)' },
-  { value: 'continuous_flooding', label: 'Ngập liên tục' },
+  { value: 'as_recorded', label: 'Kết quả vận hành' },
+  { value: 'awd', label: 'Mô phỏng: AWD' },
+  { value: 'continuous_flooding', label: 'Mô phỏng: Ngập liên tục' },
 ]
 
 const FACTOR_GAP_CODES = new Set(['missing_emission_factor', 'factor_set_not_imported'])
@@ -18,14 +21,6 @@ const FACTOR_GAP_CODES = new Set(['missing_emission_factor', 'factor_set_not_imp
 const toneClass = (tone: string) =>
   tone === 'methodology' ? 'methodology' : tone === 'attention' ? 'attention' : tone === 'positive' ? 'positive' : tone === 'info' ? 'water' : 'neutral'
 
-function sourceLabel(source: string): string {
-  const s = source.toLowerCase()
-  if (s.includes('ch4') || s.includes('methane') || s.includes('rice')) return 'CH₄ — ruộng lúa'
-  if (s.includes('n2o') || s.includes('fertil')) return 'N₂O — phân bón'
-  if (s.includes('straw') || s.includes('burn')) return 'Đốt rơm rạ'
-  if (s.includes('fuel') || s.includes('diesel') || s.includes('gasolin') || s.includes('lpg')) return 'Nhiên liệu'
-  return source
-}
 const gasClass = (gas?: string) => {
   const g = (gas ?? '').toUpperCase()
   return g.includes('CH4') ? 'gas-ch4' : g.includes('N2O') ? 'gas-n2o' : 'gas-co2'
@@ -34,6 +29,8 @@ const dict = (v: unknown): Record<string, unknown> =>
   v != null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 const statusClass = (v: unknown) =>
   v === 'VERIFIED' ? 'verified' : v === 'PENDING_VERIFICATION' ? 'pending' : 'test'
+const statusLabel = (v: unknown) =>
+  v === 'VERIFIED' ? 'Đã xác minh' : v === 'PENDING_VERIFICATION' ? 'Chờ xác minh' : 'Chưa xác minh'
 
 /**
  * Premium Carbon screen (brief §12): hero result emphasising CO₂e/kg, scenario
@@ -56,11 +53,14 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
    * only fail is not drawn at all (it used to be drawn disabled, while the copy
    * below still told the officer to press it). */
   const hasStored = Boolean(state.data) && !state.error
+  // A simulation older than the actual result ran on older data (see simulationOutdated).
+  const simOutdated = scenario !== 'as_recorded' && hasStored && Boolean(readiness.result) && simulationOutdated(state.data!, readiness.result!)
   const action: string | null = !canRecalculate || readiness.loading || state.loading || blocked
     ? null
     : view?.calculationStatus === 'stale' && scenario === 'as_recorded' ? 'Tính lại'
-      : !hasStored ? (scenario === 'as_recorded' ? 'Tính Carbon' : 'Tính theo kịch bản này')
-        : null
+      : !hasStored ? (scenario === 'as_recorded' ? 'Tính Carbon' : 'Tính kịch bản mô phỏng')
+        : simOutdated ? 'Tính lại kịch bản'
+          : null
   const activityGaps = view?.userFixableGaps.filter((g) => g.flow === 'activity') ?? []
   const methodologyGaps = view?.userFixableGaps.filter((g) => g.flow === 'carbon_methodology') ?? []
 
@@ -70,6 +70,9 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
       await calculateCarbon(id, scenario)
       setRecalc({ busy: false })
       state.reload()
+      // The stale/current decision reads the actual result: re-read it too, or
+      // "Tính lại" stays on screen after a successful recalculation.
+      if (scenario === 'as_recorded') readiness.reload()
     } catch (e) {
       const api = e as ApiError
       setRecalc({
@@ -125,6 +128,18 @@ export function CarbonPanel({ id, seasonLabel, canRecalculate = true }: { id: st
                 <ul>{view.methodologyLimitations.map((g) => <li key={g.code}><b>{g.label}</b> — {g.detail}</li>)}</ul>
               )}
             </div>
+          )}
+
+          {scenario !== 'as_recorded' && (
+            <Notice kind="info">
+              <Ico name="info" size={14} /> Kịch bản mô phỏng: tính lại cùng dữ liệu của vụ với chế độ nước giả định. Đây là ước tính
+              theo kịch bản, không phải kết quả đã ghi nhận và không thay kết quả vận hành của vụ.
+            </Notice>
+          )}
+          {simOutdated && (
+            <Notice kind="warning">
+              <Ico name="warning" size={14} /> <span data-testid="carbon-simulation-outdated">Kịch bản này được tính trên dữ liệu cũ hơn kết quả vận hành, nên chưa so sánh được với kết quả hiện tại.</span>
+            </Notice>
           )}
 
           {recalc.error && <Notice kind="warning">{recalc.error}</Notice>}
@@ -195,7 +210,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
   const perKgVal = r.co2e_per_kg
   const breakdown = (r.breakdown ?? []) as any[]
   const max = breakdown.reduce((m, b) => Math.max(m, Math.abs(b.co2e_kg ?? 0)), 0)
-  const scenarioName = (r.water_regime_scenario ?? r.scenario ?? '—') as string
+  const missing = notCounted(r)
 
   return (
     <div className="stack">
@@ -203,7 +218,7 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
       <div className="carbon-hero">
         <div className="carbon-hero__cell">
           <div className="carbon-hero__label">CO₂e tổng</div>
-          <div className={`carbon-hero__value${total == null ? ' is-empty' : ''}`}>{total == null ? 'Chưa đủ dữ liệu' : num(total, { max: 1 })}</div>
+          <div className={`carbon-hero__value${total == null ? ' is-empty' : ''}`}>{total == null ? 'Chưa đủ dữ liệu' : num(total, { max: 2 })}</div>
           <div className="carbon-hero__unit">kg CO₂e · toàn vụ</div>
         </div>
         <div className="carbon-hero__cell is-primary">
@@ -215,24 +230,19 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
         </div>
       </div>
 
-      <div className="page-head__meta" style={{ marginTop: 0 }}>
+      <div className="page-head__meta" style={{ marginTop: 0 }} data-testid="carbon-result-meta">
         <span>
-          Kịch bản: <b>{scenarioName}</b>
+          <b className={isSimulation(r) ? 'carbon-kind carbon-kind--sim' : 'carbon-kind'}>{resultKindLabel(r)}</b>
         </span>
         <span>
-          Bộ hệ số: <b>{(r.ef_config_version as string) ?? '—'}</b>
+          Bộ hệ số: <b>{r.ef_config_version || 'Không xác định được'}</b>
         </span>
         <span>
-          Engine: <b>{(r.engine_version as string) ?? '—'}</b>
+          Công cụ tính: <b>{r.engine_version || 'Không xác định được'}</b>
         </span>
         <span>Tính lúc: {dateTime((r.calculated_at as string) ?? null)}</span>
       </div>
-
-      {(r.warnings ?? []).map((w) => (
-        <Notice key={w} kind="warning">
-          <Ico name="warning" size={14} /> {w}
-        </Notice>
-      ))}
+      <p className="muted">Ước tính theo phương pháp hiện tại — không phải chứng nhận hay tín chỉ carbon.</p>
 
       {/* Breakdown */}
       {breakdown.length > 0 && (
@@ -243,24 +253,34 @@ function CarbonResultView({ r }: { r: CarbonResult }) {
               const v = b.co2e_kg ?? 0
               return (
                 <div className="share" key={`${b.source}-${i}`}>
-                  <span>
-                    {sourceLabel(String(b.source))} <span className="muted">· {b.gas ?? '—'}</span>
-                  </span>
+                  <span>{carbonSourceLabel(b)}</span>
                   <span className="share__track">
                     <span className={`share__fill ${gasClass(b.gas)}`} style={{ width: `${max > 0 ? (Math.abs(v) / max) * 100 : 0}%` }} />
                   </span>
-                  <span className="share__val">{kg(v)}</span>
+                  <span className="share__val">{co2eKg(v)}</span>
                 </div>
               )
             })}
           </div>
+          {missing.length > 0 && (
+            <div className="carbon-notcounted" data-testid="carbon-not-counted">
+              <b>Không có dòng số riêng trong bản tính</b>
+              <ul>{missing.map((m) => <li key={m.key}><b>{m.label}</b> — {m.reason}</li>)}</ul>
+            </div>
+          )}
         </div>
       )}
 
       {/* Provenance: the scientific detail, one click away rather than first. */}
       {breakdown.length > 0 && (
-        <details className="card card--pad tech-detail">
-          <summary>Số liệu này được tính thế nào? — công thức, hệ số, nguồn trích dẫn</summary>
+        <details className="card card--pad tech-detail" data-testid="carbon-methodology">
+          <summary>Phương pháp và hệ số sử dụng</summary>
+          {(r.warnings ?? []).length > 0 && (
+            <>
+              <h4>Cảnh báo phương pháp</h4>
+              <ul className="carbon-warnings">{(r.warnings ?? []).map((w) => <li key={w}>{cleanWarning(w)}</li>)}</ul>
+            </>
+          )}
           <div className="prov-chain">
             {['CO₂e/kg', 'Công thức', 'Hệ số', 'Nguồn trích dẫn', 'Phiên bản'].map((n, i) => (
               <span key={n} style={{ display: 'contents' }}>
@@ -287,7 +307,7 @@ function ProvenanceItem({ entry }: { entry: any }) {
     <div className="prov-item">
       <button className="prov-item__head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>
-          {sourceLabel(String(entry.source))} <span className="muted">· {kg(entry.co2e_kg)}</span>
+          {carbonSourceLabel(entry)} <span className="muted">· {co2eKg(entry.co2e_kg)}</span>
         </span>
         <span aria-hidden="true">{open ? '▲' : '▼'}</span>
       </button>
@@ -296,7 +316,7 @@ function ProvenanceItem({ entry }: { entry: any }) {
           <h4>Công thức</h4>
           <code className="prov-item__formula">{entry.formula || '—'}</code>
           <p className="muted" style={{ marginTop: 6 }}>
-            Giá trị hoạt động: {num(entry.activity_value, { max: 3 })} {entry.activity_unit} → {num(entry.gas_kg, { max: 4 })} kg {entry.gas}
+            Giá trị hoạt động: {num(entry.activity_value, { max: 3 })} {entry.activity_unit} → {num(entry.gas_kg, { max: 4 })} kg {gasLabel(entry.gas)}
           </p>
 
           <h4>Hệ số sử dụng</h4>
@@ -334,7 +354,7 @@ function ProvenanceItem({ entry }: { entry: any }) {
                 <span key={k} style={{ display: 'contents' }}>
                   <dt>{k}</dt>
                   <dd>
-                    <span className={`pstatus ${statusClass(v)}`}>{String(v)}</span>
+                    <span className={`pstatus ${statusClass(v)}`}>{statusLabel(v)}</span>
                   </dd>
                 </span>
               ))}

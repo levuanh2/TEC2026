@@ -13,7 +13,9 @@ bảng 1-n cùng lúc sẽ nhân bản hàng và làm phồng tổng sản lư�
 
 from __future__ import annotations
 
+import contextvars
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from carbon import SCENARIO_TO_DB
@@ -79,20 +81,39 @@ class SupabaseCarbonRepository:
                 self._client = None
         raise AssertionError("unreachable")  # pragma: no cover
 
+    @staticmethod
+    def _concurrent(*thunks: Callable[[], Any]) -> tuple[Any, ...]:
+        """Independent reads overlapped instead of one round trip at a time.
+
+        Same requests, same rows, same order of results — only the network
+        latency overlaps (Round 5: 16 sequential PostgREST calls made one
+        calculation take 3.5–9 s). Each thunk runs in its own copy of the
+        caller's context so the request profiler still attributes it.
+        """
+        if len(thunks) <= 1:
+            return tuple(t() for t in thunks)
+        with ThreadPoolExecutor(max_workers=len(thunks)) as pool:
+            futures = [pool.submit(contextvars.copy_context().run, t) for t in thunks]
+            return tuple(f.result() for f in futures)
+
     def get_crop_bundle(self, crop_season_id: str) -> RawCropBundle:
         crop = self._one("crop_seasons", {"id": crop_season_id})
         if crop is None or crop.get("deleted_at") is not None:
             raise CropNotFoundError(f"Không tìm thấy vụ canh tác '{crop_season_id}'.")
 
-        plot = self._one("plots", {"id": crop["plot_id"]}) or {}
-        farm = self._one("farms", {"id": plot["farm_id"]}) if plot.get("farm_id") else None
-
-        batches = self._many("production_batches", {"crop_season_id": crop_season_id})
+        # plot and batches depend only on the season; farm only on the plot,
+        # activities only on the batches.
+        plot, batches = self._concurrent(
+            lambda: self._one("plots", {"id": crop["plot_id"]}) or {},
+            lambda: self._many("production_batches", {"crop_season_id": crop_season_id}),
+        )
         batch_ids = [b["id"] for b in batches if b.get("deleted_at") is None]
 
-        activities: list[dict[str, Any]] = []
-        for batch_id in batch_ids:
-            activities.extend(self._many("activities", {"production_batch_id": batch_id}))
+        farm, *per_batch = self._concurrent(
+            lambda: self._one("farms", {"id": plot["farm_id"]}) if plot.get("farm_id") else None,
+            *[lambda b=batch_id: self._many("activities", {"production_batch_id": b}) for batch_id in batch_ids],
+        )
+        activities: list[dict[str, Any]] = [a for rows in per_batch for a in rows]
         activities = [a for a in activities if a.get("deleted_at") is None]
 
         self._attach_details(activities)
@@ -111,15 +132,16 @@ class SupabaseCarbonRepository:
         for activity in activities:
             by_type.setdefault(activity["activity_type"], []).append(activity["id"])
 
-        detail_by_activity: dict[str, dict[str, Any]] = {}
-        for activity_type, ids in by_type.items():
-            table = DETAIL_TABLES.get(activity_type)
-            if not table or not ids:
-                continue
+        def read_table(table: str, ids: list[str]) -> list[dict[str, Any]]:
             with profiling.observe(f"carbon select {table} in"):
-                rows = self._read(
-                    lambda c, t=table, i=ids: c.table(t).select("*").in_("activity_id", i).execute()
+                return self._read(
+                    lambda c: c.table(table).select("*").in_("activity_id", ids).execute()
                 ).data or []
+
+        wanted = [(DETAIL_TABLES[t], ids) for t, ids in by_type.items() if DETAIL_TABLES.get(t) and ids]
+        detail_by_activity: dict[str, dict[str, Any]] = {}
+        # One table per activity type, all independent: read them together.
+        for rows in self._concurrent(*[lambda t=t, i=i: read_table(t, i) for t, i in wanted]):
             for row in rows:
                 detail_by_activity[row["activity_id"]] = row
 
@@ -129,6 +151,15 @@ class SupabaseCarbonRepository:
     # -- bộ hệ số ----------------------------------------------------------
 
     def resolve_factor_set_id(self, version_code: str) -> str:
+        # A published factor set is immutable (status + version_code never
+        # change once published), so its id is cached per process.
+        cache = self.__dict__.setdefault("_factor_set_ids", {})
+        if version_code in cache:
+            return cache[version_code]
+        cache[version_code] = self._resolve_factor_set_id(version_code)
+        return cache[version_code]
+
+    def _resolve_factor_set_id(self, version_code: str) -> str:
         with profiling.observe("carbon select emission_factor_sets"):
             rows = self._read(
                 lambda c: c.table("emission_factor_sets").select("id,status")
@@ -145,12 +176,35 @@ class SupabaseCarbonRepository:
         return published[0]["id"]
 
     def factor_ids_by_code(self, factor_set_id: str) -> dict[str, str]:
+        cache = self.__dict__.setdefault("_factor_ids", {})
+        if factor_set_id not in cache:
+            cache[factor_set_id] = self._factor_ids_by_code(factor_set_id)
+        return dict(cache[factor_set_id])
+
+    def _factor_ids_by_code(self, factor_set_id: str) -> dict[str, str]:
         with profiling.observe("carbon select emission_factors"):
             rows = self._read(
                 lambda c: c.table("emission_factors").select("id,factor_code")
                 .eq("factor_set_id", factor_set_id).execute()
             ).data or []
         return {r["factor_code"]: r["id"] for r in rows}
+
+    def factor_set_version(self, factor_set_id: str) -> str | None:
+        """version_code của một bộ hệ số, để bản tính đã lưu nói được nó dùng bộ nào.
+
+        Bộ hệ số là bất biến sau khi publish, nên cache theo id trong tiến trình.
+        """
+        cache = self.__dict__.setdefault("_factor_set_versions", {})
+        if factor_set_id not in cache:
+            with profiling.observe("carbon select emission_factor_sets"):
+                rows = self._read(
+                    lambda c: c.table("emission_factor_sets").select("version_code")
+                    .eq("id", factor_set_id).limit(1).execute()
+                ).data or []
+            if not rows:
+                return None
+            cache[factor_set_id] = rows[0].get("version_code")
+        return cache[factor_set_id]
 
     # -- ghi ---------------------------------------------------------------
 

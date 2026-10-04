@@ -54,12 +54,21 @@ export interface HarvestDraft {
   harvestedAreaHa: number | null
   moisturePercent: number | null
   totalCostVnd: number | null
+  /** Area of the plot the season is on; absent when unknown (no bound applied). */
+  plotAreaHa?: number | null
 }
+
+const AREA_EPS = 1e-9
+const fmtHa = (v: number) => v.toLocaleString('vi-VN', { maximumFractionDigits: 4 })
 
 export function validateHarvest(draft: HarvestDraft): FieldErrors {
   const errors: FieldErrors = {}
   if (draft.yieldKg == null || draft.yieldKg <= 0) errors.yieldKg = 'Sản lượng thu hoạch phải lớn hơn 0.'
   if (draft.harvestedAreaHa != null && draft.harvestedAreaHa <= 0) errors.harvestedAreaHa = 'Diện tích thu hoạch phải lớn hơn 0.'
+  // Equal is allowed (the whole plot harvested); more is not. The API refuses it too.
+  else if (draft.harvestedAreaHa != null && draft.plotAreaHa != null && draft.harvestedAreaHa > draft.plotAreaHa + AREA_EPS) {
+    errors.harvestedAreaHa = `Diện tích thu hoạch không được lớn hơn diện tích thửa (${fmtHa(draft.plotAreaHa)} ha).`
+  }
   if (draft.moisturePercent != null && (draft.moisturePercent < 0 || draft.moisturePercent > 100)) errors.moisturePercent = 'Độ ẩm phải từ 0 đến 100%.'
   if (draft.totalCostVnd != null && draft.totalCostVnd < 0) errors.totalCostVnd = 'Chi phí không thể là số âm.'
   return errors

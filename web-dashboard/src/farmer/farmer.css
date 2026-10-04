@@ -644,7 +644,7 @@
 .fw-carbon-hero b.is-empty { font-family: var(--fw-body); font-size: var(--fw-text-md); color: var(--fw-muted); }
 .fw-carbon-hero span { font-size: var(--fw-text-sm); color: var(--fw-muted); }
 .fw-sources { display: grid; gap: var(--fw-space-12); }
-.fw-source { display: grid; grid-template-columns: minmax(110px, 200px) minmax(0, 1fr) auto; align-items: center; gap: var(--fw-space-12); font-size: 14px; }
+.fw-source { display: grid; grid-template-columns: minmax(140px, 280px) minmax(0, 1fr) auto; align-items: center; gap: var(--fw-space-12); font-size: 14px; }
 .fw-source__bar { height: 4px; background: var(--fw-paper-3); overflow: hidden; }
 .fw-source__bar i { display: block; height: 100%; background: var(--fw-accent); }
 .fw-source b { white-space: nowrap; }
@@ -1270,3 +1270,26 @@
 /* Tôi → Đổi mật khẩu */
 .fw-password { display: grid; gap: var(--fw-space-12); max-width: 420px; }
 .fw-password .form-field__error { display: flex; align-items: center; gap: 6px; margin: 0; }
+/* Round 5 — Carbon: categories without a numeric line, and simulations beside
+ * (never in place of) the actual result. */
+.fw-notcounted { margin-top: var(--fw-space-16); padding-top: var(--fw-space-12); border-top: 1px dashed var(--fw-rule); font-size: 14px; }
+.fw-notcounted ul { margin: var(--fw-space-8) 0 0; padding-left: var(--fw-space-20); display: grid; gap: var(--fw-space-8); color: var(--fw-muted); }
+.fw-notcounted li span { color: var(--fw-ink); font-weight: 650; }
+.fw-citations { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--fw-space-4); font-weight: 500; text-align: left; }
+.fw-scenario-note { margin: 0 0 var(--fw-space-12); font-size: var(--fw-text-sm); color: var(--fw-muted); }
+.fw-scenarios { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--fw-space-12); }
+.fw-scenario { display: grid; gap: var(--fw-space-4); align-content: start; padding: var(--fw-space-12); border: 1px dashed var(--fw-rule); border-radius: var(--fw-radius); }
+.fw-scenario--actual { border-style: solid; border-color: var(--fw-accent); }
+.fw-scenario small { font-size: var(--fw-text-xs); font-weight: 650; color: var(--fw-muted); }
+.fw-scenario b { font-size: 20px; }
+.fw-scenario b.is-empty { font-size: 16px; color: var(--fw-muted); }
+.fw-scenario span { font-size: var(--fw-text-sm); color: var(--fw-muted); }
+.fw-scenario .fw-btn { justify-self: start; min-height: 40px; }
+@media (max-width: 768px) { .fw-scenarios { grid-template-columns: 1fr; } }
+.fw-ctxbar__src { color: var(--fw-muted); font-size: var(--fw-text-xs); font-weight: 500; }
+/* Round 5 gate: four season tabs overflowed 390px by 8px (the Carbon tab sat
+ * partly off-screen). */
+@media (max-width: 420px) {
+  .fw-tabs { gap: var(--fw-space-12); }
+}
+.fw-scenario__old { color: var(--fw-ink); font-weight: 600; }

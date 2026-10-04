@@ -64,7 +64,7 @@ export interface CarbonViewInput {
   /** `null` while loading or when the read failed — the view says "đang kiểm tra". */
   readiness: CarbonReadiness | null | undefined
   /** The stored calculation, when the season has one. */
-  result?: Pick<CarbonResult, 'calculated_at' | 'ef_config_version'> | null
+  result?: Pick<CarbonResult, 'calculated_at' | 'ef_config_version' | 'input_hash'> | null
   /** For callers that know a result exists but not its record (a metrics
    *  rollup returns the figure, not the calculation). Staleness then stays
    *  unknown, which this module reports as "not stale" rather than guessing. */
@@ -87,12 +87,26 @@ const isLimitation = (m: CarbonMissingInput) => m.flow === 'factor_unavailable'
 
 /** Did the inputs or the factor set move on after this result was stored?
  *
- * Both signals are facts already on the wire — a recorded activity newer than
+ * Preferred signal: the server's fingerprint. Readiness carries the
+ * `input_hash` the engine would store for an actual calculation of the inputs
+ * as they are now; a stored result with a different hash is stale, the same
+ * hash is current. Only Carbon inputs are in that hash, so a cost or note edit
+ * never makes a result stale, and a recalculation that reuses the stored row
+ * (identical inputs) clears it — timestamps got both of those wrong.
+ *
+ * Fallback, for a server without the fingerprint: a recorded input newer than
  * the calculation, or a factor-set version that no longer matches the engine.
- * When neither is knowable the answer is "no": a false "cần tính lại" is a lie,
- * a missed one merely shows an older number with its own timestamp.
+ * When nothing is knowable the answer is "no": a false "cần tính lại" is a lie.
  */
 export function isResultStale(input: CarbonViewInput): boolean {
+  const live = input.liveEfConfigVersion ?? input.readiness?.ef_config_version ?? null
+  const used = input.result?.ef_config_version
+  const factorMoved = Boolean(live && used && live !== used)
+
+  const current = input.readiness?.input_hash
+  const stored = input.result?.input_hash
+  if (current && stored) return current !== stored || factorMoved
+
   const calculatedAt = input.result?.calculated_at
   if (!calculatedAt) return false
   const calculated = Date.parse(calculatedAt)
@@ -102,9 +116,7 @@ export function isResultStale(input: CarbonViewInput): boolean {
     const changed = Date.parse(input.latestInputAt)
     if (!Number.isNaN(changed) && changed > calculated) return true
   }
-  const live = input.liveEfConfigVersion
-  const used = input.result?.ef_config_version
-  return Boolean(live && used && live !== used)
+  return factorMoved
 }
 
 const NONE: CarbonNextAction = { kind: 'none', label: '', enabled: false }

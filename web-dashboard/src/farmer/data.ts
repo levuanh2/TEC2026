@@ -178,6 +178,10 @@ export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, stale
 export const keys = {
   scope: 'scope',
   activities: (seasonId: string) => `activities:${seasonId}`,
+  /* Under the `activities:` prefix, so every write that invalidates the
+   * season's activities invalidates these too. */
+  recentActivities: (seasonId: string, limit: number) => `activities:${seasonId}:recent:${limit}`,
+  activitySummary: (seasonId: string) => `activities:${seasonId}:summary`,
   metrics: (seasonId: string) => `metrics:${seasonId}`,
   recs: (seasonId: string) => `recs:${seasonId}`,
   /* Recommendation generation is an idempotent but expensive POST (rule

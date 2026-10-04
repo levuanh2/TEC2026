@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../utils/supabase'
-import { endSession, setAccessToken, setUnauthorizedHandler } from './client'
+import { apiRequest, endSession, setAccessToken, setUnauthorizedHandler } from './client'
 import { clearOrganizationCache } from './organizations'
 import { clearViewerHint } from './me'
 import { clearFarmerCache } from '../farmer/data'
@@ -131,4 +131,29 @@ export async function changePassword(email: string, current: string, next: strin
   setAccessToken(data.session?.access_token ?? null)
   const { error: updateError } = await client.auth.updateUser({ password: next })
   if (updateError) throw new Error(passwordChangeErrorMessage(updateError))
+}
+
+/** True while the account still has the temporary password its manager handed
+ *  over. The flag is Supabase Auth `app_metadata` -- set and cleared only by the
+ *  server; the browser can read it, never write it. Until it clears, FastAPI
+ *  answers 403 `password_change_required` and the database returns nothing, so
+ *  the shell shows only the change form. */
+export function mustChangePassword(session: Session | null): boolean {
+  return session?.user?.app_metadata?.must_change_password === true
+}
+
+/** Forced first login: the server checks the temporary password, sets the new
+ *  one and clears the flag in one step (`POST /v1/me/password`). Changing the
+ *  password revokes every refresh token of the account -- including any session
+ *  opened with the temporary password -- so the new session comes from signing
+ *  in with the new password, not from a refresh. */
+export async function replaceTemporaryPassword(email: string, current: string, next: string): Promise<Session> {
+  await apiRequest<{ must_change_password: boolean }>('/v1/me/password', {
+    method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }),
+  })
+  try {
+    const session = await signIn(email, next)
+    if (session) return session
+  } catch { /* fall through: the change itself succeeded */ }
+  throw new Error('Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.')
 }

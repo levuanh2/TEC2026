@@ -128,6 +128,27 @@ A repeated submit becomes `farmer_already_member`.
 | `history_only` | The same, plus the past journal, read-only |
 | `active_season` | The normal journal |
 
+### 5.1 Forced first-login password change (Core V1 closure, 2026-10-02)
+
+The manager has seen the temporary password, so the account cannot be used until
+the farmer replaces it.
+
+| Step | Where it is decided |
+|---|---|
+| Provisioning sets `app_metadata.must_change_password = true` | `SupabaseAuthAdmin.create_user` (service role, server only; users cannot write `app_metadata`) |
+| Temporary password signs in | Supabase Auth |
+| `/v1/me` reports `must_change_password: true` | live Auth user (`get_user`), not a token claim |
+| Every other `/v1` operation: 403 `password_change_required` | FastAPI router guard (refuses only) |
+| Every business read/write, any client | **database**: `private.password_change_pending()` reads the live flag on `auth.users`; the root helpers (`user_can_read_farm`, `user_can_write_farm`, `user_can_manage_farm_members`, `user_is_org_member`, `user_is_org_manager`, `user_can_read_organization`, other members' profiles) answer false — migration `20261002100000`. Covers Flutter (PostgREST) and FastAPI pooled paths alike |
+| `POST /v1/me/password {current_password, new_password}` | FastAPI verifies the current password with Supabase Auth, then ONE Auth Admin call sets the new password and clears the flag. The only way the flag is cleared. 422 `current_password_incorrect` / `password_too_weak` / `password_too_long` / `password_unchanged`; `Cache-Control: no-store` |
+| Normal access | the client signs in again with the new password (Web and Flutter do it automatically). The change revokes every refresh token of the account — any session opened with the temporary password, by anyone, is dead; an access token issued before the change still carries the old claim and is refused by the API |
+
+Still readable while the flag is set: the caller's own profile and membership rows,
+own devices, public reference data. Accounts without the flag (every account
+provisioned before this change, managers) are unaffected. Tests:
+`backend/tests/test_forced_password_change.py` (real stack),
+`test_password_change_unit.py` (no DB).
+
 ## 6. Canonical lifecycle
 
 HTX manager grants the farmer an account → assigns a farm and plot → the farmer signs in →
@@ -161,7 +182,7 @@ Hosted state verified 2026-09-26 after the dashboard switch: `verify_public_sign
 ## 9. Follow-ups (not in this sprint)
 
 P1
-* `FORCE_TEMP_PASSWORD_CHANGE_ON_FIRST_LOGIN` (the temporary password is shown once, never stored/logged, and the farmer can change it under Tôi; not a merge blocker for demo/staging)
+* ~~`FORCE_TEMP_PASSWORD_CHANGE_ON_FIRST_LOGIN`~~ — done, §5.1
 * reactivate an inactive membership
 * attach an existing farm to an existing account
 * crop-season close / harvest endpoint
@@ -173,7 +194,7 @@ P2
 
 ## 10. Known gaps (not changed in this sprint)
 
-* Nothing forces the farmer to change the temporary password.
+* ~~Nothing forces the farmer to change the temporary password.~~ — §5.1
 * A former member cannot be reactivated from the UI.
 * A farmer cannot be assigned to an *existing* farm from the UI.
 * There is no Web endpoint to move a season to `harvested`/`closed`.
