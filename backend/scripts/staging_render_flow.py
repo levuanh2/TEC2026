@@ -11,7 +11,11 @@ cooperative and its manager under a unique run tag; everything else goes
 through the Render API exactly as the web app does:
 
   manager: /v1/me -> provision a farmer with farm + plot (Auth Admin, server side)
-  farmer:  sign in with the temporary password -> /v1/farmer/scope
+  farmer:  sign in with the temporary password (TOKEN_OLD) -> /v1/me reports
+           must_change_password -> business API 403 password_change_required and
+           PostgREST rows hidden -> POST /v1/me/password -> TOKEN_OLD STILL refused
+           (API + PostgREST) -> sign in with the new password (TOKEN_NEW)
+           -> /v1/farmer/scope (TOKEN_NEW from here on)
            -> create season (+ default batch) -> irrigation activity: create,
            idempotent replay, edit, list -> Carbon readiness
            -> mark harvested -> a new write is refused (422)
@@ -75,9 +79,42 @@ def sign_in(email: str, password: str) -> str:
     return r.json()["access_token"]
 
 
+# The API under test. `None` = the deployed STAGING_API_URL; the DB test
+# (tests/test_staging_render_flow.py) passes the real app in-process instead.
+CLIENT: httpx.Client | None = None
+
+
 def api(token: str | None, method: str, path: str, json=None) -> httpx.Response:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if CLIENT is not None:
+        return CLIENT.request(method, path, headers=headers, json=json)
     return httpx.request(method, f"{API}{path}", headers=headers, json=json, timeout=90)
+
+
+def rest_ids(token: str, table: str, **filters: str) -> list[str] | int:
+    """PostgREST with the user's own JWT -- what Flutter does. Ids, or the status."""
+    r = httpx.get(f"{URL}/rest/v1/{table}", timeout=30,
+                  params={"select": "id", **{k: f"eq.{v}" for k, v in filters.items()}},
+                  headers={"apikey": PUBLISHABLE, "Authorization": f"Bearer {token}"})
+    return [row["id"] for row in r.json()] if r.status_code == 200 else r.status_code
+
+
+def error_code(r: httpx.Response) -> str | None:
+    try:
+        return r.json()["detail"]["error"]["code"]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def business_refused(token: str, prov: dict) -> tuple[bool, str]:
+    """No business access at all: API 403 password_change_required on the
+    farmer's own scope and farm, and their rows invisible through PostgREST."""
+    scope, farm = api(token, "GET", "/v1/farmer/scope"), api(token, "GET", f"/v1/farms/{prov['farm_id']}")
+    farms, plots = rest_ids(token, "farms", id=prov["farm_id"]), rest_ids(token, "plots", id=prov["plot_id"])
+    ok = (scope.status_code == 403 and error_code(scope) == "password_change_required"
+          and farm.status_code == 403 and error_code(farm) == "password_change_required"
+          and farms == [] and plots == [])
+    return ok, f"scope {scope.status_code}/{error_code(scope)} farm {farm.status_code}/{error_code(farm)} rest farms={farms} plots={plots}"
 
 
 def flow() -> None:
@@ -106,7 +143,36 @@ def flow() -> None:
         return
     prov = r.json()
     created.update(farmer_user=prov["user_id"], farm=prov["farm_id"], plot=prov["plot_id"])
-    ftok = sign_in(farmer_email, prov["temporary_password"])
+
+    # Core V1 forced first-login password change. The temporary password signs
+    # in, but grants no business access until the farmer sets their own; a
+    # token minted with it stays refused afterwards. Tokens/passwords live in
+    # memory only and are never printed.
+    token_old = sign_in(farmer_email, prov["temporary_password"])
+    r = api(token_old, "GET", "/v1/me")
+    check("temp_password_me_reports_must_change_password",
+          r.status_code == 200 and r.json().get("must_change_password") is True, f"{r.status_code}")
+    ok, detail = business_refused(token_old, prov)
+    if not check("temp_password_token_business_access_denied", ok, detail):
+        return
+    new_password = f"Ci-{uuid.uuid4().hex}!A1"
+    r = api(token_old, "POST", "/v1/me/password",
+            {"current_password": prov["temporary_password"], "new_password": new_password})
+    if not check("password_change_200", r.status_code == 200 and r.json().get("must_change_password") is False,
+                 f"{r.status_code} {error_code(r)}"):
+        return
+    ok, detail = business_refused(token_old, prov)
+    if not check("old_token_still_denied_after_password_change", ok, detail):
+        return
+    ftok = sign_in(farmer_email, new_password)
+    if not check("new_token_is_a_different_token", ftok != token_old):
+        return
+    del token_old  # nothing below may use it
+    r = api(ftok, "GET", "/v1/me")
+    check("new_token_me_reports_no_pending_change",
+          r.status_code == 200 and r.json().get("must_change_password") is False, f"{r.status_code}")
+    check("new_token_postgrest_sees_own_farm",
+          rest_ids(ftok, "farms", id=prov["farm_id"]) == [prov["farm_id"]])
 
     r = api(ftok, "GET", "/v1/farmer/scope")
     check("farmer_scope_has_provisioned_farm", r.status_code == 200 and prov["farm_id"] in r.text, f"{r.status_code}")
