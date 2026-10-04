@@ -7,6 +7,7 @@ imports this package.
 """
 
 from .answers import AnswerBasis, GenerationInput, RagAnswerResult
+from .citations import resolve_citations, validate_citations
 from .context import SeasonRagContext, build_season_context
 from .contracts import AnswerGenerator, KnowledgeRetriever, SeasonAccessGate, SeasonFactsSource, WhatIfSimulator
 from .errors import (
@@ -20,6 +21,7 @@ from .errors import (
     TenantIsolationViolation,
     UnsupportedHypothetical,
 )
+from .grounding import validate_grounding
 from .intents import EVIDENCE_REQUIRED_INTENTS, AccessLevel, RagIntent, RagMode, required_access
 from .models import (
     AnswerRecommendation,
@@ -34,6 +36,7 @@ from .models import (
     TenantScope,
     WhatIfResult,
 )
+from .orchestrator import RagOrchestrator
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import CarbonScenarioWhatIf
 
@@ -61,6 +64,7 @@ __all__ = [
     "RagError",
     "RagIntent",
     "RagMode",
+    "RagOrchestrator",
     "RagQuestionRequest",
     "RetrievalQuery",
     "RetrievalUnavailable",
@@ -76,4 +80,7 @@ __all__ = [
     "build_retrieval_query",
     "build_season_context",
     "required_access",
+    "resolve_citations",
+    "validate_citations",
+    "validate_grounding",
 ]
