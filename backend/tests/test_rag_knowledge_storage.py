@@ -5,6 +5,10 @@ Real Postgres, real RLS: client statements run as role `authenticated` with
 always rolled back; every row is created inside it. Knowledge rows are synthetic
 TEST FIXTURES — NOT REAL APPROVED SOURCES.
 
+Fixture documents follow the real ingestion order: inserted `review_required`, filled with
+chunks, then moved to their target status (`settle`) before the first client or operator
+statement -- an approved version never gains chunks.
+
 Covers the approval and tenant invariants, immutability, search normalization,
 RLS, privileges and the SECURITY INVOKER lexical RPC
 `public.match_knowledge_chunks_lexical`. No vector anything.
@@ -71,6 +75,7 @@ class Tx:
                          " where user_id = %s", (self.former,))
         self.cur.execute("insert into public.organization_data_grants (grantee_organization_id, source_organization_id)"
                          " values (%s, %s)", (self.org_e, self.org_a))
+        self.pending: dict = {}
         self.season_a = self.season(self.farm_a)
         self.season_a2 = self.season(self.farm_a2)
         self.season_b = self.season(self.farm_b)
@@ -110,16 +115,27 @@ class Tx:
 
     def document(self, source_id, *, status="approved", version="v1", document_id="doc",
                  license_basis="official_publication", reference=None):
-        approved = status in ("approved", "archived")
-        return self.one(
+        """Inserted `review_required` (open for chunks); `settle` moves it to `status`."""
+        doc = self.one(
             "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
             " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
-            " license_basis, license_reference, status, approved_by, approved_at, review_note)"
-            " values (%s, %s, %s, %s, 'vi', %s, %s, %s, 'p1', 'n1', 'c1', %s, %s, %s, %s, %s, %s) returning id",
+            " license_basis, license_reference)"
+            " values (%s, %s, %s, %s, 'vi', %s, %s, %s, 'p1', 'n1', 'c1', %s, %s) returning id",
             (source_id, document_id, version, FIXTURE + document_id, f"https://example.invalid/{source_id}/{document_id}",
-             _sha(source_id + version), _sha("n" + source_id + version), license_basis, reference, status,
-             self.approver if approved else None, NOW if approved else None,
-             "fixture" if approved else None))
+             _sha(source_id + version), _sha("n" + source_id + version), license_basis, reference))
+        if status != "review_required":
+            self.pending[doc] = status
+        return doc
+
+    def settle(self):
+        """Operator approval step: approve (then archive) or reject the filled fixture versions."""
+        pending, self.pending = self.pending, {}
+        for doc, status in pending.items():
+            if status in ("approved", "archived"):
+                self.cur.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
+                                 " approved_at = %s, review_note = 'fixture' where id = %s", (self.approver, NOW, doc))
+            if status != "approved":
+                self.cur.execute("update public.knowledge_documents set status = %s where id = %s", (status, doc))
 
     def chunk(self, document_pk, content, *, ordinal=0, section=None, extra=None):
         chunk_id = _sha(f"{document_pk}|{ordinal}|{content}")[:20]
@@ -140,6 +156,7 @@ class Tx:
 
     def as_user(self, user, sql, params=()):
         """('ok', rows) or ('err', sqlstate) -- savepoint-isolated, role authenticated."""
+        self.settle()
         self.cur.execute("savepoint s")
         try:
             self.cur.execute("set local role authenticated")
@@ -164,6 +181,7 @@ class Tx:
 
     def operator(self, sql, params=()):
         """('ok', None) or ('err', sqlstate) as the operator/table owner."""
+        self.settle()
         self.cur.execute("savepoint o")
         try:
             self.cur.execute(sql, params)
@@ -312,7 +330,8 @@ def test_document_identity_and_provenance_are_immutable(tx):
         assert tx.operator(f"update public.knowledge_documents set {column} = %s where id = %s",
                            (value, doc)) == ("err", CHECK_VIOLATION), column
     for column, value in (("title", "changed"), ("official_url", "https://example.invalid/other"),
-                          ("license_basis", "public_domain"), ("approved_by", tx.member)):
+                          ("license_basis", "public_domain"), ("approved_by", tx.member),
+                          ("review_note", "rewritten explanation"), ("review_note", None)):
         assert tx.operator(f"update public.knowledge_documents set {column} = %s where id = %s",
                            (value, doc)) == ("err", CHECK_VIOLATION), column
     assert tx.operator("update public.knowledge_documents set status = 'archived' where id = %s", (doc,)) == ("ok", None)
@@ -336,8 +355,40 @@ def test_chunks_are_never_edited_and_approved_ones_never_deleted(tx):
     assert tx.operator("delete from public.knowledge_chunks where document_pk = %s", (doc,)) == ("err", CHECK_VIOLATION)
 
 
-def test_duplicate_chunk_identity_or_ordinal_is_rejected(tx):
+@pytest.mark.parametrize("status", ["approved", "archived", "rejected"])
+def test_chunks_cannot_be_added_to_a_closed_version(tx, status):
+    doc = tx.document(tx.source(), status=status)
+    tx.chunk(doc, "original passage")
+    tx.settle()
+    assert tx.operator("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
+                       " values (%s, %s, 9, 'injected passage', %s)", (doc, "f" * 20, _sha("i"))) == ("err", CHECK_VIOLATION)
+
+
+def test_a_version_reopened_after_approval_still_accepts_no_chunks(tx):
     doc = tx.document(tx.source())
+    tx.chunk(doc, "original passage")
+    tx.settle()
+    assert tx.operator("update public.knowledge_documents set status = 'review_required' where id = %s",
+                       (doc,)) == ("ok", None)
+    assert tx.operator("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
+                       " values (%s, %s, 9, 'injected passage', %s)", (doc, "f" * 20, _sha("i"))) == ("err", CHECK_VIOLATION)
+
+
+def test_approved_source_provenance_is_frozen_but_can_be_archived(tx):
+    src = tx.source()
+    for column, value in (("title", "changed"), ("owner", "Other publisher"), ("source_type", "research"),
+                          ("authority", "internal"), ("approved_by", tx.member), ("review_note", "rewritten")):
+        assert tx.operator(f"update public.knowledge_sources set {column} = %s where source_id = %s",
+                           (value, src)) == ("err", CHECK_VIOLATION), column
+    assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
+                       (src,)) == ("ok", None)
+    pending = tx.source(status="review_required")
+    assert tx.operator("update public.knowledge_sources set owner = 'Corrected publisher' where source_id = %s",
+                       (pending,)) == ("ok", None)
+
+
+def test_duplicate_chunk_identity_or_ordinal_is_rejected(tx):
+    doc = tx.document(tx.source(), status="review_required")
     chunk = tx.chunk(doc, "awd")
     sql = ("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
            " values (%s, %s, %s, 'x', %s)")
@@ -458,6 +509,9 @@ def test_farm_moved_to_another_organization_makes_its_tenant_source_unretrievabl
             assert chunk not in tx.rpc_ids(getattr(tx, who), getattr(tx, season), "awd", 50), (who, season)
         status, rows = tx.as_user(getattr(tx, who), "select 1 from public.knowledge_chunks where chunk_id = %s", (chunk,))
         assert (status, rows) == ("ok", []), who
+    # the stale source can still be archived by the operator
+    assert tx.operator("update public.knowledge_sources set status = 'archived' where farm_id = %s",
+                       (tx.farm_a,)) == ("ok", None)
 
 
 # ------------------------------------------------------------------ privileges
@@ -559,6 +613,23 @@ def test_vietnamese_with_or_without_diacritics_finds_the_same_chunk(tx, lexical_
 @pytest.mark.parametrize(("query", "expected"), [("AWD", "awd"), ("awd", "awd"), ("1P5G", "1p5g"), ("rom ra", "straw")])
 def test_acronyms_and_terms_are_found(tx, lexical_corpus, query, expected):
     assert tx.rpc_ids(tx.member, tx.season_a, query)[0] == lexical_corpus[expected]
+
+
+@pytest.mark.parametrize("question", [
+    "AWD là gì và vì sao giảm phát thải mê-tan?",
+    "tuoi uot kho xen ke co tac dung gi",
+    "Chương trình một phải năm giảm áp dụng thế nào trong canh tác?",
+])
+def test_full_sentence_questions_find_the_relevant_chunk(tx, lexical_corpus, question):
+    ids = tx.rpc_ids(tx.member, tx.season_a, question)
+    expected = lexical_corpus["1p5g"] if "năm giảm" in question else lexical_corpus["awd"]
+    assert ids and ids[0] == expected
+
+
+def test_full_text_matches_any_query_lexeme_not_all(tx):
+    tx.cur.execute("select replace(plainto_tsquery('simple', private.knowledge_search_text(%s))::text, ' & ', ' | ')",
+                   ("AWD là gì?",))
+    assert tx.cur.fetchone()[0] == "'awd' | 'la' | 'gi'"
 
 
 def test_out_of_corpus_query_returns_no_candidate(tx, lexical_corpus):

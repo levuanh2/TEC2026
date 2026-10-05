@@ -179,24 +179,36 @@ create index knowledge_chunks_search_trgm_idx
 
 -- ----------------------------------------------------------- invariants
 
--- Tenant scope: a farm-scoped tenant source names a farm of ITS organization. Core V1 does
--- not freeze farms.cooperative_id, so the RLS policy and the RPC re-check the same relation
--- at read time: a farm moved to another organization makes the source unretrievable.
--- The scope of a source is fixed once created (re-scoping = a new source).
+-- Sources. Tenant scope: a farm-scoped tenant source is created for a farm of ITS
+-- organization. The scope is fixed once created (re-scoping = a new source), so the farm
+-- relation is checked at INSERT only: Core V1 does not freeze farms.cooperative_id, the RLS
+-- policy and the RPC re-check it at read time (a moved farm makes the source unretrievable),
+-- and an operator can still archive such a stale source. The publisher provenance and the
+-- approval record are fixed once the source has been approved; status may still move.
 create function private.enforce_knowledge_source_scope()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  if tg_op = 'UPDATE' and (new.source_id, new.visibility, new.organization_id, new.farm_id)
-      is distinct from (old.source_id, old.visibility, old.organization_id, old.farm_id) then
+  if tg_op = 'INSERT' then
+    if new.farm_id is not null and not exists (
+        select 1 from public.farms f where f.id = new.farm_id and f.cooperative_id = new.organization_id) then
+      raise exception 'knowledge source %: farm % does not belong to organization %',
+        new.source_id, new.farm_id, new.organization_id using errcode = '23514';
+    end if;
+    return new;
+  end if;
+  if (new.source_id, new.visibility, new.organization_id, new.farm_id, new.created_at)
+      is distinct from (old.source_id, old.visibility, old.organization_id, old.farm_id, old.created_at) then
     raise exception 'knowledge source % scope is immutable', old.source_id using errcode = '23514';
   end if;
-  if new.farm_id is not null and not exists (
-      select 1 from public.farms f where f.id = new.farm_id and f.cooperative_id = new.organization_id) then
-    raise exception 'knowledge source %: farm % does not belong to organization %',
-      new.source_id, new.farm_id, new.organization_id using errcode = '23514';
+  if old.approved_at is not null
+     and (new.title, new.owner, new.source_type, new.authority, new.approved_by, new.approved_at, new.review_note)
+         is distinct from
+         (old.title, old.owner, old.source_type, old.authority, old.approved_by, old.approved_at, old.review_note) then
+    raise exception 'knowledge source % was approved; its provenance and approval record are immutable',
+      old.source_id using errcode = '23514';
   end if;
   return new;
 end;
@@ -234,10 +246,10 @@ begin
   end if;
   if old.approved_at is not null
      and (new.title, new.language, new.official_url, new.artifact_ref, new.published_at, new.license_basis,
-          new.license_reference, new.approved_by, new.approved_at)
+          new.license_reference, new.approved_by, new.approved_at, new.review_note)
          is distinct from
          (old.title, old.language, old.official_url, old.artifact_ref, old.published_at, old.license_basis,
-          old.license_reference, old.approved_by, old.approved_at) then
+          old.license_reference, old.approved_by, old.approved_at, old.review_note) then
     raise exception 'knowledge document % % % was approved; its provenance and approval record are immutable',
       old.source_id, old.document_id, old.document_version using errcode = '23514';
   end if;
@@ -250,13 +262,25 @@ create trigger knowledge_documents_immutable
   before update or delete on public.knowledge_documents
   for each row execute function private.enforce_knowledge_document_immutability();
 
--- A chunk is never edited; it is deleted only while its version was never approved.
+-- Chunks belong to a version's content: they are added only while the version is still
+-- `review_required` and was never approved (ingest -> review -> approve; the parent row is
+-- share-locked so an approval cannot race an insert), never edited, and deleted only while
+-- the version was never approved.
 create function private.enforce_knowledge_chunk_immutability()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
+  if tg_op = 'INSERT' then
+    if not exists (select 1 from public.knowledge_documents d
+                   where d.id = new.document_pk and d.status = 'review_required' and d.approved_at is null
+                   for share) then
+      raise exception 'knowledge chunk %: its version is not open for ingestion (only a never-approved'
+        ' review_required version accepts chunks)', new.chunk_id using errcode = '23514';
+    end if;
+    return new;
+  end if;
   if tg_op = 'UPDATE' then
     raise exception 'knowledge chunk % is immutable', old.chunk_id using errcode = '23514';
   end if;
@@ -270,7 +294,7 @@ $$;
 revoke all on function private.enforce_knowledge_chunk_immutability() from public, anon, authenticated;
 
 create trigger knowledge_chunks_immutable
-  before update or delete on public.knowledge_chunks
+  before insert or update or delete on public.knowledge_chunks
   for each row execute function private.enforce_knowledge_chunk_immutability();
 
 -- ---------------------------------------------------------------------- RLS
@@ -323,9 +347,15 @@ create policy knowledge_chunks_select on public.knowledge_chunks
 
 -- -------------------------------------------------------------- lexical RPC
 
--- Candidates: full-text (`search_tsv @@ websearch_to_tsquery('simple', q)`, ranked by
--- ts_rank_cd) and trigram (`q <% search_text`, i.e. word_similarity >= the pg_trgm
--- default threshold, ranked by word_similarity), at most 50 each. The two rank lists are
+-- Candidates: full-text and trigram, at most 50 each.
+--   * Full-text matches ANY lexeme of the normalized question (an OR of plainto_tsquery's
+--     lexemes): a farmer asks a sentence ("AWD là gì và vì sao ...") and the 'simple' config
+--     has no stopwords, so requiring every word would find nothing. ts_rank_cd ranks passages
+--     covering more of the question higher. Postgres FTS has no IDF, so frequent function words
+--     also match; that is measured on the DEV split (a stopword list would be tuning).
+--   * Trigram (`q <% search_text`, i.e. word_similarity >= the pg_trgm default threshold,
+--     ranked by word_similarity) serves short queries, acronyms and misspellings.
+-- The two rank lists are
 -- fused by Reciprocal Rank Fusion, sum(1 / (60 + rank)) (k = 60, Cormack et al. 2009):
 -- ranks, not raw scores, so no tuned weight. Ties break on stable citation identity.
 -- `fused_score` is only comparable within this lexical method; a relevance cutoff is the
@@ -377,7 +407,8 @@ as $$
     select private.knowledge_search_text(left(p_query, 1000)) as text
   ),
   query as (
-    select q.text, websearch_to_tsquery('simple'::regconfig, q.text) as tsq from q where q.text <> ''
+    select q.text, replace(plainto_tsquery('simple'::regconfig, q.text)::text, ' & ', ' | ')::tsquery as tsq
+    from q where q.text <> ''
   ),
   eligible as (
     select c.id, c.chunk_id, c.ordinal, c.section_path, c.page_from, c.page_to, c.content, c.metadata,

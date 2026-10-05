@@ -176,8 +176,12 @@ and remains open.
 
 ## 6. Retrieval (V1.3: lexical only)
 
-- **Signals:** full-text `search_tsv @@ websearch_to_tsquery('simple', private.knowledge_search_text(q))`
-  and trigram `extensions.word_similarity(private.knowledge_search_text(q), search_text)` — the latter
+- **Signals:** full-text over the normalized question, matching **any** of its lexemes (an OR of
+  `plainto_tsquery('simple', …)`'s lexemes) — farmers ask sentences, and `simple` has no stopwords,
+  so an AND of every word ("AWD là gì và vì sao …") would match nothing; `ts_rank_cd` ranks
+  passages covering more of the question higher. Postgres FTS has no IDF, so frequent function
+  words also match; their effect is measured on DEV, and a stopword list would be DEV tuning, not
+  a default. Trigram `extensions.word_similarity(private.knowledge_search_text(q), search_text)`
   carries acronyms and no-diacritic/misspelled Vietnamese ("AWD", "1P5G", "tuoi ngap").
 - **Ranking inside the RPC (deterministic):** each signal ranks its own candidates (FTS by
   `ts_rank_cd`, trigram by `word_similarity`, each ≤ 50 candidates); the two rank lists are fused by
@@ -374,8 +378,8 @@ language sql stable security invoker set search_path = ''
   normalization; a blank or lexeme-free query → no rows. Query text is only ever a bound value
   (no dynamic SQL).
 - Trigram candidates use the `<%` operator, i.e. `word_similarity >=
-  pg_trgm.word_similarity_threshold` (extension default 0.6, not tuned); FTS candidates use
-  `websearch_to_tsquery('simple', …)`; at most 50 per signal before fusion.
+  pg_trgm.word_similarity_threshold` (extension default 0.6, not tuned); FTS candidates match
+  any lexeme of the question (OR); at most 50 per signal before fusion.
 - Deterministic ranking and tie-break as in §6.
 - `revoke all … from public, anon, authenticated; grant execute … to authenticated, service_role`.
 No `query_embedding` parameter; a vector RPC is additive in Migration B.

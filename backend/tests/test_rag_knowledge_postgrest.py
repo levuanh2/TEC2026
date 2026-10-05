@@ -93,17 +93,19 @@ def env():
                     " values (%s, %s, 'Test publisher', 'guideline', %s, %s, %s, %s, %s, %s)",
                     (source_id, FIXTURE + key, visibility, org, status, approver if approved else None,
                      now if approved else None, "fixture" if approved else None))
+                # ingestion order: insert the version open for review, add its chunk, then approve
                 doc = one(
                     "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
                     " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version,"
-                    " chunker_version, license_basis, status, approved_by, approved_at)"
-                    " values (%s, 'doc', 'v1', %s, 'vi', %s, %s, %s, 'p', 'n', 'c', 'official_publication', %s, %s, %s)"
-                    " returning id",
-                    (source_id, FIXTURE + key, f"https://example.invalid/{key}", _sha(key), _sha("n" + key), status,
-                     approver if approved else None, now if approved else None))
+                    " chunker_version, license_basis)"
+                    " values (%s, 'doc', 'v1', %s, 'vi', %s, %s, %s, 'p', 'n', 'c', 'official_publication') returning id",
+                    (source_id, FIXTURE + key, f"https://example.invalid/{key}", _sha(key), _sha("n" + key)))
                 chunk_id = _sha(source_id + content)[:20]
                 conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
                              " values (%s, %s, 0, %s, %s)", (doc, chunk_id, FIXTURE + content, _sha(content)))
+                if approved:
+                    conn.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
+                                 " approved_at = %s, review_note = 'fixture' where id = %s", (approver, now, doc))
                 ids[key] = chunk_id
 
             corpus("public", "public awd guidance")

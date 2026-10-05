@@ -5,6 +5,9 @@
 -- table, function or policy is touched. DESTROYS every knowledge source/document/chunk row.
 -- Not in migrations/: run by hand, in one transaction, only if the forward migration must
 -- be withdrawn. Afterwards `supabase migration repair --status reverted 20261005090000`.
+-- The forward migration is the first to install pg_trgm and unaccent (neither was installed on
+-- hosted, read-only check 2026-10-05). If anything else has started to depend on them, the
+-- DROP EXTENSION fails and the whole rollback transaction aborts; keep them in that case.
 begin;
 drop function if exists public.match_knowledge_chunks_lexical(uuid, text, integer);
 drop table if exists public.knowledge_chunks;
