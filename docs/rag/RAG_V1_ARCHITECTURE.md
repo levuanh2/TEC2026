@@ -350,6 +350,14 @@ Authorization runs **before** context loading, what-if, retrieval and generation
   reads that lineage itself. The V1.3 adapter (in `rag_application.py`) must reuse Core V1
   boundaries: the caller-bound `SupabaseReadRepository` (RLS) for READ and lineage, and
   `crop_write_authz.assert_can_write_crop` for WRITE. Additive read method only, no schema change.
+- The access level is enforced on **operations and structured outputs**, by declared intent
+  (§6): which scope and facts are loaded, any Carbon what-if call, structured recommendations
+  and rule codes, preview/fresh signals. It is not inferred from wording. A READ-tier intent
+  (EXPLAIN, …) runs no Carbon call, can return no structured recommendation (grounding rejects
+  it) and writes nothing, but its prose may still phrase general guidance ("nên rút nước định
+  kỳ"); prose cannot be classified as advice deterministically. Whether READ-tier answers may
+  contain advisory wording is a prompt-policy decision for V1.4 (with D5), not an
+  authorization rule.
 - Permissions never come from the request. A refusal at any level is `RagAccessDenied` → 404
   `not_found` (same as Recommendation/CV: neither scope nor the refusing rule can be probed).
 - The orchestrator rejects a scope whose `crop_season_id` differs from the request.
@@ -410,14 +418,23 @@ A fact id is never accepted as a document citation and vice versa (tested both w
      `N2O`) — the generator must write "khí mê-tan", "khí nhà kính", … or the allowlist must
      cover them. A unit appended by the trusted renderer ("kg CO2e") is not affected: the rule
      runs on the template, before rendering.
-   - **no link** — `scheme://`, `www.`, `mailto:`/`javascript:`/`data:`/`file:`/`tel:`, a
-     bare domain (`.com/.net/.org/.info/.io/.gov/.edu/.int/.vn`), a Markdown link `[..](..)`
-     or HTML (`<a`, `href`) → `GroundingFailed("link in generated text")`. A source URL reaches
+   - **no link** — on NFKC-normalized text (full-width `ｗｗｗ．` counts): `scheme://`, `www.`,
+     `mailto:`/`javascript:`/`data:`/`file:`/`tel:`, any dotted domain (a letter or digit, `.`,
+     then ≥2 letters — no TLD list, IDN included), a Markdown link `[..](..)` or HTML (`<a`,
+     `href`) → `GroundingFailed("link in generated text")`. Dotted abbreviations such as
+     "TP.HCM" are rejected too (known casualty; write "TP. HCM" or the full name). A source URL reaches
      a client only as trusted `CitedEvidence.url`, resolved from chunk metadata via `EvidenceRef`
      (which has no URL field).
    - **no brace** — the only reserved syntax is exactly `{{fact:<fact_id>}}` (`fact_id` =
      `[A-Za-z0-9_.:-]+`). `{{ fact:id }}`, `{{FACT:id}}`, `{{fact:}}`, `{fact:id}`, unbalanced
-     braces, … → `FactReferenceMismatch("malformed fact placeholder")`.
+     braces, full-width/small braces (`｛｛…｝｝`, NFKC) … → `FactReferenceMismatch("malformed
+     fact placeholder")`.
+   - **only allowlisted characters** — letters (`L*`), combining marks (`M*`), whitespace and
+     plain sentence punctuation `. , ; : ! ? ' " ( ) - – — / … “ ” ‘ ’ « »`. Any other character
+     (symbol numerals like `↊`, `%`, `$`, `@`, `#`, `=`, `&`, `*`, `[`, `<`, emoji, look-alike
+     braces `❴❵`, zero-width/format characters, …) → `GroundingFailed("unsupported character")`.
+     An allowlist, because a block-list of numerals, link punctuation and brace look-alikes is
+     never complete.
    Numbers spelled out in words are still not detected (known gap, MEDIUM); rule 1 plus the
    provider prompt cover them.
 5. **Server-side trusted rendering (decided).** After grounding passes, `answers.render_answer`

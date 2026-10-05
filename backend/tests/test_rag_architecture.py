@@ -25,7 +25,7 @@ BACKEND = Path(__file__).resolve().parent.parent
 RAG_DIR = BACKEND / "recommendation" / "rag"
 RAG_MODULES = sorted(RAG_DIR.glob("*.py"))
 
-_ALLOWED_ROOTS = {"__future__", "collections", "dataclasses", "datetime", "decimal", "enum", "math", "re", "typing", "uuid",
+_ALLOWED_ROOTS = {"__future__", "collections", "dataclasses", "datetime", "decimal", "enum", "math", "re", "typing", "unicodedata", "uuid",
                   "pydantic", "carbon", "recommendation"}
 _ALLOWED_CARBON_NAMES = {"SCENARIOS", "CarbonEngineError"}
 _FORBIDDEN_ROOTS = {

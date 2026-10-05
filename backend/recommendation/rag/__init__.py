@@ -58,6 +58,7 @@ from .prose import (
     validate_no_raw_links,
     validate_no_raw_numbers,
     validate_placeholder_syntax,
+    validate_supported_characters,
 )
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import CarbonScenarioWhatIf, ensure_supported
@@ -127,4 +128,5 @@ __all__ = [
     "validate_no_raw_numbers",
     "validate_placeholder_syntax",
     "validate_quantitative_claims",
+    "validate_supported_characters",
 ]

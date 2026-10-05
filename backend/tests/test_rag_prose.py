@@ -72,6 +72,9 @@ RAW_NUMBERS = [
     "Cường độ {{fact:%s}} kg CO2e/kg." % INTENSITY,   # the unit is the renderer's job
     "Giảm ２９００ trên mỗi vụ.",             # full-width digits
     "Giảm ½ lượng đạm.",                     # vulgar fraction
+    "Giảm ٣ lần.",                           # Arabic-Indic digit
+    "Chu kỳ Ⅻ tuần.",                        # Roman numeral letter
+    "Giảm 二 lần.",                          # CJK numeral
     "Theo nguồn [1].",                       # no inline citation markers in the schema
     # known V1 casualties: gas names carry digits (allowlist / wording decided before V1.4)
     "Giảm phát thải CH4.",
@@ -126,6 +129,12 @@ LINKS = [
     "Gửi tới mailto:a@b.c.",
     "Bấm javascript:alert().",
     "Tải ftp://files.example.org/guide.",
+    "Xem evil.ai/path.",                      # any dotted domain, no TLD list
+    "Xem evil.app.",
+    "Xem ví-dụ.việtnam.",
+    "Xem ｗｗｗ．example．com.",              # full-width, NFKC-normalized first
+    "Xem https：／／evil.example.",
+    "Văn phòng TP.HCM.",                      # known V1 casualty: dotted abbreviation reads as a domain
 ]
 
 
@@ -148,6 +157,38 @@ def test_source_url_reaches_the_client_only_from_trusted_chunk_metadata():
         EvidenceRef.model_validate({"source_id": "guide-awd", "chunk_id": "c1", "url": "https://evil.example"})
 
 
+# -- character allowlist ---------------------------------------------------------------
+
+UNSUPPORTED = [
+    "Giá trị ↊.",            # turned digit: a numeral that is not str.isnumeric
+    "Giá trị ↋.",
+    "Tăng ❴mạnh❵.",          # brace look-alikes outside NFKC
+    "Kết quả tốt 😀.",
+    "Chi phí $ cao.",
+    "Liên hệ @htx.",
+    "Ghi chú #quan-trọng.",
+    "Tổng = cao.",
+    "Đạm & lân.",
+    "Mức *cao*.",
+]
+
+
+@pytest.mark.parametrize("text", UNSUPPORTED)
+def test_character_outside_the_prose_allowlist_fails_grounding(text):
+    with pytest.raises(GroundingFailed, match="unsupported character"):
+        _ground(_answer(answer=text), RagIntent.EXPLAIN)
+
+
+def test_unsupported_character_is_rejected_in_every_prose_field():
+    for answer in _in_every_field("Giá trị ↊."):
+        with pytest.raises(GroundingFailed, match="unsupported character"):
+            _ground(answer)
+
+
+def test_plain_vietnamese_prose_with_sentence_punctuation_passes():
+    validate_generated_prose(['Nên rút nước định kỳ (theo hướng dẫn); lưu ý: "khô - ướt" xen kẽ… và/hoặc bón đạm!'])
+
+
 # -- placeholder grammar -----------------------------------------------------------------
 
 MALFORMED = [
@@ -162,6 +203,8 @@ MALFORMED = [
     "Cường độ {{fact:%s}." % INTENSITY,
     "Cường độ {{fact:%s}}}." % INTENSITY,
     "Cường độ {{fact:https://evil.example}}.",     # a URL cannot ride in a placeholder
+    "Cường độ ｛｛fact:%s｝｝." % INTENSITY,          # full-width braces
+    "Cường độ ﹛﹛fact:%s﹜﹜." % INTENSITY,          # small braces
 ]
 
 

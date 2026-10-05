@@ -129,9 +129,10 @@ generator sees. No raw context, no policy, no secrets.
 `recommendations[AnswerRecommendation(title, actions[], evidence_refs[], fact_refs[], rule_code?)]`,
 `evidence_refs[]`, `fact_refs[]`, `limitations[]`, `confidence?`.
 **No numeric field, no URL field, no fact value.** Quantities appear as `{{fact:<fact_id>}}`.
-Its prose fields may hold no numeric character, no link and no brace outside that exact
-placeholder grammar (`prose.py`, ARCHITECTURE §13 rule 4); "CO2e"/"CH4", years and "1 phải 5
-giảm" are rejected on purpose in V1.
+Its prose fields may hold no numeric character, no link, no brace outside that exact
+placeholder grammar and only letters, marks, whitespace and plain sentence punctuation
+(`prose.py`, ARCHITECTURE §13 rule 4); "CO2e"/"CH4", years, "1 phải 5 giảm" and "TP.HCM" are
+rejected on purpose in V1.
 
 Validation order: schema → document citations → generated-prose policy (placeholder grammar, no
 raw number, no link) → fact references → intent policy
