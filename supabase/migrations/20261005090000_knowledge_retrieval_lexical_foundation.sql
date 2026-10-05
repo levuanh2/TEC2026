@@ -284,7 +284,8 @@ create trigger knowledge_documents_immutable
 -- Chunks belong to a version's content: they are added only while the version is still
 -- `review_required` and was never approved (ingest -> review -> approve; the parent row is
 -- share-locked so an approval cannot race an insert), never edited, and deleted only while
--- the version was never approved.
+-- the version was never approved (share-locked the same way: a delete waits for an approval
+-- in flight and is then refused, so approved content is exactly what was reviewed).
 create function private.enforce_knowledge_chunk_immutability()
 returns trigger
 language plpgsql
@@ -303,7 +304,9 @@ begin
   if tg_op = 'UPDATE' then
     raise exception 'knowledge chunk % is immutable', old.chunk_id using errcode = '23514';
   end if;
-  if exists (select 1 from public.knowledge_documents d where d.id = old.document_pk and d.approved_at is not null) then
+  if not exists (select 1 from public.knowledge_documents d
+                 where d.id = old.document_pk and d.approved_at is null
+                 for share) then
     raise exception 'knowledge chunk % belongs to an approved version and cannot be deleted', old.chunk_id
       using errcode = '23514';
   end if;

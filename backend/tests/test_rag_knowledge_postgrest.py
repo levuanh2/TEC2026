@@ -229,6 +229,65 @@ def test_clients_cannot_write_knowledge(env):
         assert response.status_code in (401, 403), (response.request.method, response.status_code, response.text)
 
 
+def test_a_chunk_delete_cannot_race_an_approval():
+    """Two real sessions (READ COMMITTED): while one approves a version, another deletes one of
+    its chunks. The delete must wait for the approval and then be refused -- otherwise the
+    approved version would carry different content than was reviewed. Operator path (table
+    owner), committed rows, so local-only like the rest of this module."""
+    import threading
+    import time
+
+    import psycopg
+    from supabase import create_client
+
+    url, service = _SETTINGS.require_supabase()
+    admin = create_client(url, service)
+    ids: dict = {"users": {}, "run": f"{uuid.uuid4().hex[:8]}r", "sources": []}
+    try:
+        ids["users"]["approver"] = admin.auth.admin.create_user(
+            {"email": f"kn-{ids['run']}-approver@agricarbon-ci.invalid", "password": f"Kn-{uuid.uuid4().hex}!9",
+             "email_confirm": True}).user.id
+        with psycopg.connect(_DB_URL) as conn:
+            _knowledge(conn, ids, ids["users"]["approver"], "race", "race awd guidance", document_status="review_required")
+            conn.commit()
+        source_id = ids["sources"][0]
+        outcome: dict = {}
+
+        def delete_chunk():
+            try:
+                with psycopg.connect(_DB_URL) as conn:
+                    conn.execute("delete from public.knowledge_chunks where chunk_id = %s", (ids["race"],))
+                    conn.commit()
+                outcome["result"] = "deleted"
+            except psycopg.Error as exc:
+                outcome["result"] = exc.sqlstate
+
+        with psycopg.connect(_DB_URL) as approver, psycopg.connect(_DB_URL, autocommit=True) as watch:
+            approver.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
+                             " approved_at = now(), review_note = 'fixture' where source_id = %s",
+                             (ids["users"]["approver"], source_id))
+            deleter = threading.Thread(target=delete_chunk)
+            deleter.start()
+            deadline = time.monotonic() + 10
+            while deleter.is_alive() and time.monotonic() < deadline:
+                waiting = watch.execute(
+                    "select count(*) from pg_stat_activity where wait_event_type = 'Lock'"
+                    " and query like 'delete from public.knowledge_chunks%%'").fetchone()[0]
+                if waiting:
+                    break
+                time.sleep(0.05)
+            approver.commit()
+            deleter.join(timeout=30)
+        assert outcome.get("result") == "23514", outcome
+        with psycopg.connect(_DB_URL) as conn:
+            assert conn.execute("select count(*) from public.knowledge_chunks where chunk_id = %s",
+                                (ids["race"],)).fetchone()[0] == 1
+            assert conn.execute("select status from public.knowledge_documents where source_id = %s",
+                                (source_id,)).fetchone()[0] == "approved"
+    finally:
+        _cleanup(admin, ids)
+
+
 # ------------------------------------------------------- Core V1 forced password change
 
 # key: (source status, document status). Only approved + approved is ever retrievable.

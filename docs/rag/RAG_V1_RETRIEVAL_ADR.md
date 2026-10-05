@@ -321,7 +321,10 @@ create table public.knowledge_chunks (
   public.knowledge_documents (source_id, document_id) where status = 'approved'`.
 - **Immutable artifacts:** BEFORE UPDATE on `knowledge_documents` rejects changes to `source_id`,
   `document_id`, `document_version`, `file_sha256`, `normalized_sha256`; `knowledge_chunks` rows are
-  insert-only (search fields are set by the BEFORE INSERT trigger; UPDATE and DELETE are rejected).
+  never updated (search fields are set by the BEFORE INSERT trigger), are added only to a
+  never-approved `review_required` version, and are deleted only while their version was never
+  approved (draft cleanup). Both INSERT and DELETE share-lock the parent version, so neither can race
+  an approval: approved content is exactly the reviewed content.
 - **Archive is final (ST2):** a source or version that is `archived` can never move to another status
   (its preserved approval record would otherwise make withdrawn knowledge retrievable again without a
   new approval); a source or version that was ever approved is never deleted.
