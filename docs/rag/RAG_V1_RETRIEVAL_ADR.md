@@ -21,6 +21,7 @@ stays intact. Embedding is **not** a generation-LLM choice; D5 stays open.
 | C1 | Source policy approved; candidate corpus defined; **no document approved yet** | **decided (policy)** |
 | D3 | Real `SeasonScopeResolver` reusing Core V1 RLS reads + `crop_write_authz`; additive `season_lineage` read; no schema change | **approved** |
 | ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **open** — separate decision; V1.3 accepts official URL + SHA-256 (§4.4) |
+| ST2 | Approved knowledge deletion: the normal lifecycle is **archive-only** (no authenticated DELETE, no ordinary hard-delete workflow); a legal/copyright removal is a separate privileged **administrative purge** design (§9.8) | archive-only **decided**; purge **DEFERRED** — designed before real-corpus operationalization, if required; not implemented in Migration A |
 
 ---
 
@@ -401,6 +402,21 @@ No `query_embedding` parameter; a vector RPC is additive in Migration B.
 `embedding_model_id`, `model_revision`, `preprocessing_version`, `tokenizer_split_version`; a vector
 RPC (or a fused RPC) that compares only vectors of the configured model; an ANN index only if
 latency measurements require it.
+
+### 9.8 Approved knowledge deletion (ST2)
+- **Normal lifecycle: archive-only.** An approved source or version is withdrawn by setting it
+  `archived` (never retrievable again, kept for provenance and citation history). There is no
+  authenticated DELETE (privilege-level), and no ordinary hard-delete workflow: the database refuses
+  to delete a version that was ever approved, or its chunks (§9.3).
+- **Legal/copyright exception: DEFERRED** to a separate administrative purge design, to be decided
+  before real-corpus operationalization if it is required. Not implemented in Migration A. Any
+  future purge must:
+  - require an explicit privileged operator/admin action (never a client or request path);
+  - record the purge reason, `purged_at` and the acting operator;
+  - keep a minimal tombstone of identity/provenance: `source_id`, `document_id`,
+    `document_version`, `file_sha256` / `normalized_sha256`;
+  - remove or redact the retrievable copyrighted content (chunks, any stored artifact copy);
+  - never silently erase audit history.
 
 ---
 

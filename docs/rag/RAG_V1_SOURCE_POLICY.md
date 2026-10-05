@@ -105,6 +105,10 @@ Identity: document unique by `(source_id, document_id, document_version)`; citat
 - Approving the new version archives the previous approved one in the same transaction.
 - Identical bytes re-ingest as a no-op (same hashes, same chunk ids).
 - Withdrawing a source sets it `archived`; none of its versions are retrievable.
+- Approved knowledge is **archive-only** (decision ST2, ADR §9.8): no client deletes it and there is
+  no ordinary hard-delete workflow. Removal for legal/copyright reasons is a separate, deferred
+  administrative purge (privileged operator, recorded reason/time/actor, identity+hash tombstone,
+  content redacted, audit history kept); it is not part of V1.3.
 
 ## 8. Out of scope for V1.3
 
