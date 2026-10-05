@@ -94,11 +94,12 @@ create table public.knowledge_documents (
     file_sha256 ~ '^[0-9a-f]{64}$' and normalized_sha256 ~ '^[0-9a-f]{64}$'),
   constraint knowledge_documents_pipeline_chk check (
     btrim(parser_version) <> '' and btrim(normalizer_version) <> '' and btrim(chunker_version) <> ''),
-  -- Approval: named approver and time, a KNOWN license basis, and a reference for the
-  -- bases that need one. Unknown provenance can never be approved.
+  -- Approval: named approver and time, the reviewer's explanation, a KNOWN license basis,
+  -- and a reference for the bases that need one. Unknown provenance can never be approved.
   constraint knowledge_documents_approval_chk check (
     status <> 'approved'
-    or (approved_by is not null and approved_at is not null and license_basis <> 'unknown'
+    or (approved_by is not null and approved_at is not null and nullif(btrim(review_note), '') is not null
+        and license_basis <> 'unknown'
         and (license_basis not in ('open_license', 'written_permission')
              or nullif(btrim(license_reference), '') is not null)))
 );

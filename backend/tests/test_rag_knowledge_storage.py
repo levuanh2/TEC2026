@@ -237,27 +237,29 @@ def test_approved_source_needs_approver_time_and_review_note(tx):
     assert tx.operator(base, ("kn-s4", tx.approver, NOW, "verified")) == ("ok", None)
 
 
-@pytest.mark.parametrize(("license_basis", "reference", "approver", "approved_at", "expected"), [
-    ("unknown", None, True, True, CHECK_VIOLATION),
-    ("official_publication", None, False, True, CHECK_VIOLATION),
-    ("official_publication", None, True, False, CHECK_VIOLATION),
-    ("open_license", None, True, True, CHECK_VIOLATION),
-    ("written_permission", " ", True, True, CHECK_VIOLATION),
-    ("open_license", "CC BY 4.0", True, True, None),
-    ("official_publication", None, True, True, None),
-    ("public_domain", None, True, True, None),
+@pytest.mark.parametrize(("license_basis", "reference", "approver", "approved_at", "note", "expected"), [
+    ("unknown", None, True, True, "reviewed", CHECK_VIOLATION),
+    ("official_publication", None, False, True, "reviewed", CHECK_VIOLATION),
+    ("official_publication", None, True, False, "reviewed", CHECK_VIOLATION),
+    ("official_publication", None, True, True, None, CHECK_VIOLATION),
+    ("official_publication", None, True, True, "  ", CHECK_VIOLATION),
+    ("open_license", None, True, True, "reviewed", CHECK_VIOLATION),
+    ("written_permission", " ", True, True, "reviewed", CHECK_VIOLATION),
+    ("open_license", "CC BY 4.0", True, True, "reviewed", None),
+    ("official_publication", None, True, True, "reviewed", None),
+    ("public_domain", None, True, True, "reviewed", None),
 ])
-def test_approved_document_needs_approver_time_and_known_license(tx, license_basis, reference, approver,
-                                                                   approved_at, expected):
+def test_approved_document_needs_approver_time_note_and_known_license(tx, license_basis, reference, approver,
+                                                                        approved_at, note, expected):
     src = tx.source()
     result = tx.operator(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
         " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
-        " license_basis, license_reference, status, approved_by, approved_at)"
+        " license_basis, license_reference, status, approved_by, approved_at, review_note)"
         " values (%s, 'doc', 'v1', 't', 'vi', 'https://example.invalid/d', %s, %s, 'p', 'n', 'c', %s, %s,"
-        " 'approved', %s, %s)",
+        " 'approved', %s, %s, %s)",
         (src, _sha("a"), _sha("b"), license_basis, reference, tx.approver if approver else None,
-         NOW if approved_at else None))
+         NOW if approved_at else None, note))
     assert result == (("ok", None) if expected is None else ("err", expected))
 
 
@@ -278,9 +280,9 @@ def test_one_approved_version_per_document(tx):
     assert tx.operator(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
         " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
-        " license_basis, status, approved_by, approved_at)"
+        " license_basis, status, approved_by, approved_at, review_note)"
         " values (%s, 'doc', 'v2', 't', 'vi', 'https://example.invalid/v2', %s, %s, 'p', 'n', 'c',"
-        " 'official_publication', 'approved', %s, now())", (src, _sha("v2"), _sha("nv2"), tx.approver)
+        " 'official_publication', 'approved', %s, now(), 'reviewed')", (src, _sha("v2"), _sha("nv2"), tx.approver)
     ) == ("err", UNIQUE_VIOLATION)
     # a new review_required version coexists with the approved one
     tx.document(src, version="v2", status="review_required")
@@ -288,7 +290,7 @@ def test_one_approved_version_per_document(tx):
     assert tx.operator("update public.knowledge_documents set status = 'archived'"
                        " where source_id = %s and document_version = 'v1'", (src,)) == ("ok", None)
     assert tx.operator("update public.knowledge_documents set status = 'approved', approved_by = %s,"
-                       " approved_at = now(), license_basis = 'official_publication'"
+                       " approved_at = now(), license_basis = 'official_publication', review_note = 'reviewed'"
                        " where source_id = %s and document_version = 'v2'", (tx.approver, src)) == ("ok", None)
 
 

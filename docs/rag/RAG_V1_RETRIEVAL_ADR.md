@@ -286,6 +286,7 @@ create table public.knowledge_documents (               -- one immutable version
   constraint knowledge_document_artifact check (official_url is not null or artifact_ref is not null),
   constraint knowledge_document_approval check (
     status <> 'approved' or (approved_by is not null and approved_at is not null
+                             and nullif(btrim(review_note), '') is not null
                              and license_basis <> 'unknown'
                              and (license_basis not in ('open_license','written_permission')
                                   or nullif(btrim(license_reference), '') is not null)))
