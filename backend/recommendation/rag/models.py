@@ -284,20 +284,32 @@ class AnswerRecommendation(Contract):
     rule_code: Identifier | None = None
 
 
-class GeneratedAnswer(Contract):
-    """The ONLY shape a generator may return, validated with `model_validate`
-    (never parsed out of free text). No number, URL or fact-value field: a
-    quantity is a `{{fact:<fact_id>}}` placeholder backed by a `FactRef`, and
-    the trusted assembler supplies its value (claims.py)."""
+class _GeneratedOutput(Contract):
+    """Fields every generator output shares. No number, URL or fact-value
+    field: a quantity is a `{{fact:<fact_id>}}` placeholder backed by a
+    `FactRef`, and the trusted assembler supplies its value (claims.py)."""
 
     status: GeneratedStatus
     answer: AnswerText
     rationale: AnswerText | None = None
-    recommendations: tuple[AnswerRecommendation, ...] = ()
     evidence_refs: tuple[EvidenceRef, ...] = ()
     fact_refs: tuple[FactRef, ...] = ()
     limitations: tuple[ShortText, ...] = ()
     confidence: Confidence | None = None
+
+
+class InformationalAnswer(_GeneratedOutput):
+    """The ONLY shape an INFORMATIONAL (READ-tier) generation may return. It
+    has no recommendation or action slot: a generator that emits one fails
+    schema validation. Its free text can still phrase advice — D8."""
+
+
+class GeneratedAnswer(_GeneratedOutput):
+    """The full untrusted shape (ACTION_PRODUCING generation, and the uniform
+    form grounding works on), validated with `model_validate` — never parsed
+    out of free text."""
+
+    recommendations: tuple[AnswerRecommendation, ...] = ()
 
     @model_validator(mode="after")
     def _insufficient_has_no_recommendations(self) -> GeneratedAnswer:

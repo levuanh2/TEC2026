@@ -33,8 +33,8 @@ from .contracts import AnswerGenerator, KnowledgeRetriever, SeasonFactsSource, S
 from .errors import GenerationUnavailable, InvalidGeneratedSchema, RagAccessDenied, RagError, RetrievalUnavailable
 from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis
 from .grounding import validate_grounding
-from .intents import INTENT_POLICIES, RagIntent, required_access
-from .models import GeneratedAnswer, GroundedFact, RagQuestionRequest, WhatIfResult
+from .intents import INTENT_POLICIES, GenerationCapability, RagIntent, required_access
+from .models import GeneratedAnswer, GroundedFact, InformationalAnswer, RagQuestionRequest, WhatIfResult
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import ensure_supported
 
@@ -62,14 +62,16 @@ class RagOrchestrator:
         self, request: RagQuestionRequest, *, scope_resolver: SeasonScopeResolver, facts: SeasonFactsSource,
     ) -> RagAnswerResult:
         intent = request.intent or RagIntent.UNKNOWN
+        policy = INTENT_POLICIES[intent]
         # Authorization first: nothing is read, simulated, retrieved or
-        # generated for a caller below the intent's Core V1 access level.
+        # generated for a caller below the capability's Core V1 access level.
         scope = scope_resolver.resolve(request.crop_season_id, required_access(intent, request.mode))
         if scope.crop_season_id != request.crop_season_id:
             raise RagAccessDenied("scope resolver returned a different season")
 
-        if intent is RagIntent.UNKNOWN:
-            # Never a backdoor to RECOMMEND/WHAT_IF: no context, no model.
+        capability = policy.capability
+        if capability is None:
+            # UNKNOWN: never a backdoor to RECOMMEND/WHAT_IF — no context, no model.
             return RagAnswerResult(status="needs_clarification", intent=intent, mode=request.mode,
                                    crop_season_id=scope.crop_season_id, answer=NEEDS_CLARIFICATION_MESSAGE)
         if request.hypothetical is not None:
@@ -86,17 +88,17 @@ class RagOrchestrator:
         query = build_retrieval_query(request.question, intent, scope)
         evidence = tuple(_adapter_call(lambda: self._retriever.retrieve(query), RetrievalUnavailable))
         assert_tenant_isolation(evidence, scope)
-        if not evidence and INTENT_POLICIES[intent].needs_documents:
+        if not evidence and policy.needs_documents:
             return _insufficient(request, intent, context, what_if, "no_evidence_retrieved")
 
         raw = _adapter_call(
             lambda: self._generator.generate(GenerationInput(
-                question=request.question, intent=intent, facts=catalog, evidence=evidence,
+                question=request.question, intent=intent, capability=capability, facts=catalog, evidence=evidence,
             )),
             GenerationUnavailable,
         )
         generated = validate_grounding(
-            _parse(raw), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
+            _parse(raw, capability), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
         )
         # Rendering only ever sees a grounded answer and the trusted catalog.
         rendered = render_answer(generated, {fact.fact_id: fact for fact in catalog})
@@ -128,8 +130,13 @@ def _insufficient(
     )
 
 
-def _parse(raw: object) -> GeneratedAnswer:
+def _parse(raw: object, capability: GenerationCapability) -> GeneratedAnswer:
+    """Validate against the capability's own schema: INFORMATIONAL output has
+    no recommendation slot, so emitting one is a schema error. It is then
+    lifted to the uniform `GeneratedAnswer` (no recommendations) for grounding."""
     try:
+        if capability is GenerationCapability.INFORMATIONAL:
+            return GeneratedAnswer.model_validate(InformationalAnswer.model_validate(raw).model_dump())
         return GeneratedAnswer.model_validate(raw)
     except ValidationError as exc:
         raise InvalidGeneratedSchema(f"generator output failed schema validation ({exc.error_count()} errors)") from exc

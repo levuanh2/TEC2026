@@ -170,7 +170,7 @@ def test_generator_sees_facts_and_evidence_but_no_policy_raw_context_or_secrets(
     h = Harness()
     h.ask()
     sent = h.generator.inputs[0]
-    assert set(type(sent).model_fields) == {"question", "intent", "facts", "evidence"}
+    assert set(type(sent).model_fields) == {"question", "intent", "capability", "facts", "evidence"}
     assert {f.organization_id for f in sent.facts} == {ORG_ID}
     assert [c.chunk_id for c in sent.evidence] == ["c1"]
 

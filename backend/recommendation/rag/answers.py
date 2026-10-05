@@ -14,7 +14,7 @@ from pydantic import model_validator
 from .claims import FACT_PLACEHOLDER
 from .context import DeterministicSignal
 from .errors import FactReferenceMismatch
-from .intents import RagIntent, RagMode
+from .intents import INTENT_POLICIES, GenerationCapability, RagIntent, RagMode
 from .models import (
     AnswerRecommendation,
     CitedEvidence,
@@ -119,8 +119,18 @@ class GenerationInput(Contract):
 
     question: Question
     intent: RagIntent
+    #: What the generator may produce, from the trusted intent policy — never
+    #: chosen by the caller or the model. INFORMATIONAL output has no
+    #: recommendation slot (`InformationalAnswer`).
+    capability: GenerationCapability
     facts: tuple[GroundedFact, ...]
     evidence: tuple[EvidenceChunk, ...]
+
+    @model_validator(mode="after")
+    def _capability_is_the_intent_policy(self) -> GenerationInput:
+        if INTENT_POLICIES[self.intent].capability is not self.capability:
+            raise ValueError(f"capability {self.capability} is not the policy of intent {self.intent}")
+        return self
 
 
 class AnswerBasis(Contract):

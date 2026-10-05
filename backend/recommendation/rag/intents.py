@@ -1,9 +1,11 @@
 """RAG V1 vocabulary and the per-intent policy table.
 
-The only place that decides, per intent, which Core V1 access level is needed,
-whether retrieved documents are required and whether the answer may contain
-recommendations. The route and the orchestrator never branch on an intent's
-name for policy (docs/rag/RAG_V1_ARCHITECTURE.md §6, §11).
+The only place that decides, per intent, what a generator may produce (its
+`GenerationCapability`), which Core V1 access level that needs and whether
+retrieved documents are required. Access follows the capability, not the
+intent's name: READ buys informational answers only, never advice. The route
+and the orchestrator never branch on an intent's name for policy
+(docs/rag/RAG_V1_ARCHITECTURE.md §6, §11).
 """
 
 from __future__ import annotations
@@ -38,33 +40,63 @@ class AccessLevel(StrEnum):
     WRITE = "write"
 
 
+class GenerationCapability(StrEnum):
+    #: Describe, explain, compare or summarize authorized facts, evidence,
+    #: data gaps and provenance. Never recommend an action, give steps, say
+    #: what the farmer should do or propose a change: the output schema has
+    #: no recommendation slot (`InformationalAnswer`).
+    INFORMATIONAL = "informational"
+    #: May recommend actions (structured `recommendations`) and simulate an
+    #: intervention.
+    ACTION_PRODUCING = "action_producing"
+
+
+#: Decision D1 (closed): action-producing generation keeps Core V1 write
+#: semantics even though nothing is persisted — no new access for viewers,
+#: managers, former owners or other organizations. Free text of an
+#: INFORMATIONAL answer can still phrase advice; detecting that is D8, a
+#: required gate before any real generator serves READ-tier requests.
+CAPABILITY_ACCESS: dict[GenerationCapability, AccessLevel] = {
+    GenerationCapability.INFORMATIONAL: AccessLevel.READ,
+    GenerationCapability.ACTION_PRODUCING: AccessLevel.WRITE,
+}
+
+
 @dataclass(frozen=True)
 class IntentPolicy:
-    access: AccessLevel
+    #: What the generator may produce; None = no generation at all.
+    capability: GenerationCapability | None
     #: An answer must cite at least one retrieved document.
     needs_documents: bool
-    #: The answer may contain recommendations (action-producing intent).
-    may_recommend: bool
+
+    @property
+    def access(self) -> AccessLevel:
+        # No generation still reads the season (after a READ check).
+        return AccessLevel.READ if self.capability is None else CAPABILITY_ACCESS[self.capability]
+
+    @property
+    def may_recommend(self) -> bool:
+        return self.capability is GenerationCapability.ACTION_PRODUCING
 
 
-#: Decision D1 (closed): action-producing intents keep Core V1 write
-#: semantics even though nothing is persisted — no new access for viewers,
-#: managers, former owners or other organizations. UNKNOWN never reaches
-#: generation (the orchestrator asks for clarification), so it is read-only.
+_INFORMATIONAL, _ACTION = GenerationCapability.INFORMATIONAL, GenerationCapability.ACTION_PRODUCING
+
+#: UNKNOWN never reaches generation: the orchestrator asks for clarification.
 INTENT_POLICIES: dict[RagIntent, IntentPolicy] = {
-    RagIntent.EXPLAIN: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
-    RagIntent.COMPARE: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
-    RagIntent.EVIDENCE: IntentPolicy(AccessLevel.READ, needs_documents=True, may_recommend=False),
-    RagIntent.DATA_GAP: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
-    RagIntent.RECOMMEND: IntentPolicy(AccessLevel.WRITE, needs_documents=True, may_recommend=True),
-    RagIntent.WHAT_IF: IntentPolicy(AccessLevel.WRITE, needs_documents=False, may_recommend=True),
-    RagIntent.UNKNOWN: IntentPolicy(AccessLevel.READ, needs_documents=False, may_recommend=False),
+    RagIntent.EXPLAIN: IntentPolicy(_INFORMATIONAL, needs_documents=False),
+    RagIntent.COMPARE: IntentPolicy(_INFORMATIONAL, needs_documents=False),
+    RagIntent.EVIDENCE: IntentPolicy(_INFORMATIONAL, needs_documents=True),
+    RagIntent.DATA_GAP: IntentPolicy(_INFORMATIONAL, needs_documents=False),
+    RagIntent.RECOMMEND: IntentPolicy(_ACTION, needs_documents=True),
+    RagIntent.WHAT_IF: IntentPolicy(_ACTION, needs_documents=False),
+    RagIntent.UNKNOWN: IntentPolicy(None, needs_documents=False),
 }
 
 
 def required_access(intent: RagIntent, mode: RagMode) -> AccessLevel:
-    """PREVIEW re-runs the deterministic rules, i.e. Carbon what-ifs, which
-    Core V1 only runs for writers (`RecommendationService.generate`)."""
+    """The capability's access level. PREVIEW re-runs the deterministic
+    rules, i.e. Carbon what-ifs, which Core V1 only runs for writers
+    (`RecommendationService.generate`), so it needs WRITE whatever the intent."""
     if mode is RagMode.PREVIEW:
         return AccessLevel.WRITE
     return INTENT_POLICIES[intent].access

@@ -33,7 +33,16 @@ from .errors import (
 )
 from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis
 from .grounding import validate_grounding
-from .intents import INTENT_POLICIES, AccessLevel, IntentPolicy, RagIntent, RagMode, required_access
+from .intents import (
+    CAPABILITY_ACCESS,
+    INTENT_POLICIES,
+    AccessLevel,
+    GenerationCapability,
+    IntentPolicy,
+    RagIntent,
+    RagMode,
+    required_access,
+)
 from .models import (
     SUPPORTED_WHAT_IF_DIMENSIONS,
     AnswerRecommendation,
@@ -46,6 +55,7 @@ from .models import (
     GeneratedAnswer,
     GroundedFact,
     HypotheticalChange,
+    InformationalAnswer,
     RagQuestionRequest,
     RetrievalQuery,
     TenantScope,
@@ -64,6 +74,7 @@ from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import CarbonScenarioWhatIf, ensure_supported
 
 __all__ = [
+    "CAPABILITY_ACCESS",
     "INTENT_POLICIES",
     "MISSING_FACT_TEXT",
     "SUPPORTED_WHAT_IF_DIMENSIONS",
@@ -81,11 +92,13 @@ __all__ = [
     "FactRef",
     "FactReferenceMismatch",
     "GeneratedAnswer",
+    "GenerationCapability",
     "GenerationInput",
     "GenerationUnavailable",
     "GroundedFact",
     "GroundingFailed",
     "HypotheticalChange",
+    "InformationalAnswer",
     "IntentPolicy",
     "InvalidGeneratedSchema",
     "KnowledgeRetriever",

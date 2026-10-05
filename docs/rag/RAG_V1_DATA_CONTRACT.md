@@ -121,13 +121,26 @@ is never a valid `EvidenceRef` and a chunk id is never a valid `FactRef`.
 
 ## 7. `GeneratedAnswer` (UNTRUSTED) and `RagAnswerResult` (TRUSTED)
 
-`GenerationInput(question, intent, facts: GroundedFact[], evidence: EvidenceChunk[])` — what a
-generator sees. No raw context, no policy, no secrets.
+`GenerationInput(question, intent, capability, facts: GroundedFact[], evidence: EvidenceChunk[])` —
+what a generator sees. No raw context, no policy, no secrets. `capability`
+(`informational | action_producing`) comes from `INTENT_POLICIES[intent]` (validator-enforced);
+neither the caller nor the model chooses it.
 
-`GeneratedAnswer` — the only shape a generator may return (validated by `model_validate`):
+| Intent | Capability | Access |
+|---|---|---|
+| EXPLAIN / COMPARE / EVIDENCE / DATA_GAP | INFORMATIONAL | READ |
+| RECOMMEND / WHAT_IF | ACTION_PRODUCING | WRITE |
+| UNKNOWN | none — no generation | READ |
+
+`GeneratedAnswer` — the full untrusted shape (validated by `model_validate`):
 `status (generated | insufficient_evidence)`, `answer`, `rationale?`,
 `recommendations[AnswerRecommendation(title, actions[], evidence_refs[], fact_refs[], rule_code?)]`,
 `evidence_refs[]`, `fact_refs[]`, `limitations[]`, `confidence?`.
+**Per capability:** INFORMATIONAL generation (READ-tier intents) is parsed with `InformationalAnswer` —
+the same fields **without `recommendations`** (emitting it, even empty, is `InvalidGeneratedSchema`) —
+and then lifted to `GeneratedAnswer` with no recommendations for grounding. ACTION_PRODUCING
+generation uses `GeneratedAnswer`. Free text can still phrase advice: D8 (ARCHITECTURE §11).
+
 **No numeric field, no URL field, no fact value.** Quantities appear as `{{fact:<fact_id>}}`.
 Its prose fields may hold no numeric character, no link, no brace outside that exact
 placeholder grammar and only letters, marks, whitespace and plain sentence punctuation

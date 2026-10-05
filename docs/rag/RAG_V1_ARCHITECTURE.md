@@ -209,16 +209,35 @@ source) and that a generated number needs a `FactRef` (§13).
 
 Policy lives in one table, `intents.INTENT_POLICIES`; the route never branches on intent.
 
-| Intent | Required access (Core V1) | Persistence | Grounding | May recommend |
+**READ ≠ advice.** Access follows what a generator may *produce* — its `GenerationCapability` —
+not the intent's name (`intents.CAPABILITY_ACCESS`):
+
+| Capability | Access | May produce | Output schema |
+|---|---|---|---|
+| `INFORMATIONAL` | READ | describe current facts; explain available Carbon/metrics; compare authorized facts; summarize evidence; explain data gaps and provenance | `InformationalAnswer` — **no recommendation/action slot** |
+| `ACTION_PRODUCING` | **Core V1 WRITE** | the above, plus structured recommendations/actions and what-if interventions | `GeneratedAnswer` (with `recommendations`) |
+
+INFORMATIONAL output must never recommend an action, give action steps, say what the farmer
+should do, propose a farming change, invoke what-if or emit a recommendation candidate. Valid:
+"Vụ này đang ghi nhận tưới ngập liên tục." Invalid at READ: "Nên chuyển sang AWD.", "Bạn nên
+rút nước định kỳ.", "Giải pháp tốt nhất là…". The structural part is enforced (capability from
+the trusted policy, schema without an action slot); the free-text part is **D8** (§11).
+
+| Intent | Capability | Required access (Core V1) | Persistence | Grounding |
 |---|---|---|---|---|
-| `explain` | READ | none | system facts; documents optional | no |
-| `compare` | READ | none | ≥1 comparison fact (finalized benchmark or another authorized season) — else `insufficient_evidence / no_comparison_basis` | no |
-| `evidence` | READ | none | ≥1 retrieved document citation | no |
-| `data_gap` | READ | none | completeness / readiness / data-task facts | no |
-| `recommend` | **WRITE** | none | ≥1 document citation; every recommendation cited | yes |
-| `what_if` | **WRITE** | none (`persist=False`) | ≥1 what-if fact from `CarbonService` | yes |
-| `unknown` | READ | none | — returns `needs_clarification`, runs nothing else | no |
-| any intent, `mode=preview` | **WRITE** | none | fresh deterministic signals | per intent |
+| `explain` | INFORMATIONAL | READ | none | system facts; documents optional |
+| `compare` | INFORMATIONAL | READ | none | ≥1 comparison fact (finalized benchmark or another authorized season) — else `insufficient_evidence / no_comparison_basis` |
+| `evidence` | INFORMATIONAL | READ | none | ≥1 retrieved document citation |
+| `data_gap` | INFORMATIONAL | READ | none | completeness / readiness / data-task facts |
+| `recommend` | ACTION_PRODUCING | **WRITE** | none | ≥1 document citation; every recommendation cited |
+| `what_if` | ACTION_PRODUCING | **WRITE** | none (`persist=False`) | ≥1 what-if fact from `CarbonService` |
+| `unknown` | none (no generation) | READ | none | — returns `needs_clarification`, runs nothing else |
+| any intent, `mode=preview` | per intent | **WRITE** | none | fresh deterministic signals |
+
+The capability is never requested: `RagQuestionRequest` has no capability/access field (extra
+fields are rejected), the orchestrator takes it from `INTENT_POLICIES` and passes it to the
+generator in `GenerationInput.capability`, whose validator rejects any capability other than the
+intent's policy. `persist=False` never lowers an access level in V1.
 
 READ = Core V1 read scope (RLS `user_can_read_crop`).
 WRITE = Core V1 recommendation/CV write authority: **active `farmer` membership in the season's
@@ -350,14 +369,25 @@ Authorization runs **before** context loading, what-if, retrieval and generation
   reads that lineage itself. The V1.3 adapter (in `rag_application.py`) must reuse Core V1
   boundaries: the caller-bound `SupabaseReadRepository` (RLS) for READ and lineage, and
   `crop_write_authz.assert_can_write_crop` for WRITE. Additive read method only, no schema change.
-- The access level is enforced on **operations and structured outputs**, by declared intent
-  (§6): which scope and facts are loaded, any Carbon what-if call, structured recommendations
-  and rule codes, preview/fresh signals. It is not inferred from wording. A READ-tier intent
-  (EXPLAIN, …) runs no Carbon call, can return no structured recommendation (grounding rejects
-  it) and writes nothing, but its prose may still phrase general guidance ("nên rút nước định
-  kỳ"); prose cannot be classified as advice deterministically. Whether READ-tier answers may
-  contain advisory wording is a prompt-policy decision for V1.4 (with D5), not an
-  authorization rule.
+- **Capability boundary (structural, enforced).** The access level comes from the generation
+  capability (§6): INFORMATIONAL → READ, ACTION_PRODUCING → WRITE. A READ caller's generation is
+  INFORMATIONAL: the generator is told so (`GenerationInput.capability`), its output is parsed
+  with `InformationalAnswer`, which has no recommendation/action slot (emitting one, even empty,
+  is `InvalidGeneratedSchema`), grounding rejects recommendations again for non-action intents,
+  and it runs no Carbon call and writes nothing.
+- **D8 — READ-tier semantic advice gate (OPEN; MUST RESOLVE BEFORE ANY REAL LLM ROUTE).**
+  INFORMATIONAL *free text* can still phrase advice ("Bạn nên rút nước định kỳ."). V1 does not
+  detect that, and no keyword/regex list is used as a security boundary — an LLM can phrase an
+  action in unbounded ways. Before a real generator serves any READ-tier request, V1.4 must
+  choose and implement one strategy, with an evaluation set:
+  - A. constrained informational generation: provider structured output + prompt +
+    post-validation;
+  - B. server-generated informational templates for READ intents (no free-form LLM prose);
+  - C. a semantic policy classifier/guard with an explicit evaluation dataset.
+  Enforced gate today: `test_rag_architecture.py::test_no_answer_generator_is_wired_until_d8_is_closed`
+  fails if any production module uses the RAG core or the RAG core holds a concrete
+  `AnswerGenerator`. Lifting it is a deliberate change made together with closing D8. PR #6 has no
+  route, generator or provider, so D8 is not reachable at runtime.
 - Permissions never come from the request. A refusal at any level is `RagAccessDenied` → 404
   `not_found` (same as Recommendation/CV: neither scope nor the refusing rule can be probed).
 - The orchestrator rejects a scope whose `crop_season_id` differs from the request.
@@ -590,6 +620,9 @@ Closed:
   Q&A UI phase.
 
 Open (future, none blocks this skeleton):
+- **D8** READ-tier semantic advice gate: prevent semantic recommendation leakage through
+  INFORMATIONAL free-text generation before enabling a real LLM (§11). **Must be closed before
+  any real generator or route**; enforced by the D8 architecture test.
 - **D2** `CarbonService` hypothetical-input extension (no formula change) for fertilizer/straw/
   pesticide/seed-rate what-ifs — Carbon owner decision.
 - **D5** LLM provider, data residency and cost limits.
