@@ -164,6 +164,12 @@ thousands, `,` decimals, trailing fraction zeros dropped, no rounding) + the fac
 `fraction` → bare number (no ×100). Unknown/malformed placeholder or non-finite value →
 `FactReferenceMismatch`.
 
+**Canonical, not presentation (D7).** `GroundedFact.value` and `unit` are canonical and are never
+converted, localized or mutated for display (`0.2069` stays `0.2069 fraction`;
+`irrigated_continuous_flooding` stays the raw code). A later trusted presentation layer may
+derive `display_value` / `display_label` (e.g. `20,69%`, "Tưới ngập liên tục") from them;
+deferred to the presentation / Q&A UI phase.
+
 ## 8. Insufficient evidence and clarification
 
 Valid results, not exceptions:

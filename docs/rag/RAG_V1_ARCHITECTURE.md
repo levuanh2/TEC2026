@@ -428,12 +428,20 @@ A fact id is never accepted as a document citation and vice versa (tested both w
    (e.g. verbatim-quote spans checked against chunk text) is decided before V1.4.
    Server-side rendering does **not** change D6, nor the known gap that numbers spelled out in
    words are not detected by the backstop (MEDIUM).
-8. **Known V1 consequence (D7):** string facts render exactly as stored, so a code such as
-   `irrigated_continuous_flooding` can appear inside a Vietnamese sentence, and `fraction` facts
-   (`co2e_percent_delta`) render as `0,2069`, not `20,69%`. No backend Vietnamese label exists for
-   IPCC water-regime codes today (`mrv/labels.py` covers other vocabularies). Options before the
-   Q&A screen: a trusted display label per fact built in `facts.py`, or a generator policy that
-   never places code/fraction facts in prose. Undecided; not changed by this round.
+8. **Canonical facts are not presentation values (D7, decided; display deferred).** String facts
+   render exactly as stored, so a code such as `irrigated_continuous_flooding` can appear inside
+   a Vietnamese sentence, and `fraction` facts (`co2e_percent_delta`) render as `0,2069`, not
+   `20,69%`. This is accepted for V1:
+   - `GroundedFact.value` and `GroundedFact.unit` always hold the **canonical** value and unit.
+     The grounding core (`facts.py`, grounding, renderer) never converts a fraction to a
+     percentage, changes a unit, localizes an enum or replaces a code with a label, and never
+     mutates a fact to suit a UI.
+   - Farmer-friendly display (`0.2069 fraction` → `20,69%`, `irrigated_continuous_flooding` →
+     "Tưới ngập liên tục") belongs to a later trusted **presentation layer** (server or client)
+     that may derive `display_value` / `display_label` from the canonical fact without changing
+     it. No backend Vietnamese label exists for IPCC water-regime codes today (`mrv/labels.py`
+     covers other vocabularies).
+   - Deferred to the presentation / Q&A UI phase; not a blocker for this skeleton.
 
 **Other grounding rules:** document citations must be chunks retrieved for this request
 (unknown source/chunk, duplicates rejected); recommendations only for action-producing intents,
@@ -536,11 +544,14 @@ Closed:
 - **D4** RAG V1 is **ephemeral**: no question history, generated answer, retrieved evidence set
   or conversation is stored; no migration. Deterministic Recommendation persistence is
   unchanged. History/audit later = separate phase + migration + retention/privacy decision.
+- **D7** Canonical facts are not presentation values: `GroundedFact.value`/`unit` stay
+  canonical; a later presentation layer may add `display_value`/`display_label` (percent,
+  Vietnamese enum labels) without mutating them. Implementation deferred to the presentation /
+  Q&A UI phase.
 
 Open (future, none blocks this skeleton):
 - **D2** `CarbonService` hypothetical-input extension (no formula change) for fertilizer/straw/
   pesticide/seed-rate what-ifs — Carbon owner decision.
 - **D5** LLM provider, data residency and cost limits.
 - **D6** Quantities quoted from cited documents: allowed or not, and how they are verified.
-- **D7** Farmer-friendly display of code and fraction facts (labels / percent display).
 - Benchmark source: where finalized benchmarks come from (none exists; COMPARE-B stays empty).
