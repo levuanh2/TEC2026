@@ -328,6 +328,17 @@ create table public.knowledge_chunks (
 - **Archive is final (ST2):** a source or version that is `archived` can never move to another status
   (its preserved approval record would otherwise make withdrawn knowledge retrievable again without a
   new approval); a source or version that was ever approved is never deleted.
+- **Monotonic lifecycle (sources and versions):** `review_required` <-> `rejected` before the first
+  approval; `review_required`/`rejected` -> `approved` (the only approval); `approved` -> `archived`
+  only; `archived` terminal and reached only from `approved` (never inserted, never from a draft --
+  an unwanted draft stays `rejected`), so every archived row carries a real approval record. An
+  approved row never returns to `review_required`/`rejected`, so its approval record always describes
+  the one approval it received, and `approved_by`/`approved_at` are written only together with
+  status `approved` (no record written ahead of the decision).
+  Enforced in the source/document row triggers. A correction is a new `document_version` of the same
+  document (review -> approve, archiving the old one in the same transaction); the old version keeps
+  its citation identity, archived. A materially wrong approved source is archived and replaced by a
+  new source (ST2).
 
 ### 9.4 Search normalization (single source of truth)
 ```sql

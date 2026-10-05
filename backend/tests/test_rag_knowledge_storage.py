@@ -102,15 +102,18 @@ class Tx:
     # -- knowledge fixtures (operator path: table owner, no RLS) ------------------------------
 
     def source(self, *, visibility="public", org=None, farm=None, status="approved", source_id=None):
+        """`archived` is reached the legal way: approved, then archived."""
         source_id = source_id or f"kn-{uuid.uuid4().hex[:10]}"
         approved = status in ("approved", "archived")
         self.cur.execute(
             "insert into public.knowledge_sources (source_id, title, owner, source_type, authority, visibility,"
             " organization_id, farm_id, status, approved_by, approved_at, review_note)"
             " values (%s, %s, 'Test publisher', 'guideline', 'official', %s, %s, %s, %s, %s, %s, %s)",
-            (source_id, FIXTURE + source_id, visibility, org, farm, status,
+            (source_id, FIXTURE + source_id, visibility, org, farm, "approved" if approved else status,
              self.approver if approved else None, NOW if approved else None,
              "fixture: publisher verified" if approved else None))
+        if status == "archived":
+            self.cur.execute("update public.knowledge_sources set status = 'archived' where source_id = %s", (source_id,))
         return source_id
 
     def document(self, source_id, *, status="approved", version="v1", document_id="doc",
@@ -367,14 +370,120 @@ def test_chunks_cannot_be_added_to_a_closed_version(tx, status):
                        " values (%s, %s, 9, 'injected passage', %s)", (doc, "f" * 20, _sha("i"))) == ("err", CHECK_VIOLATION)
 
 
-def test_a_version_reopened_after_approval_still_accepts_no_chunks(tx):
+def test_an_approved_version_cannot_be_reopened_for_more_chunks(tx):
     doc = tx.document(tx.source())
     tx.chunk(doc, "original passage")
     tx.settle()
     assert tx.operator("update public.knowledge_documents set status = 'review_required' where id = %s",
-                       (doc,)) == ("ok", None)
+                       (doc,)) == ("err", CHECK_VIOLATION)
     assert tx.operator("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
                        " values (%s, %s, 9, 'injected passage', %s)", (doc, "f" * 20, _sha("i"))) == ("err", CHECK_VIOLATION)
+
+
+# ------------------------------------------------------------------ status lifecycle (monotonic once approved)
+
+LIFECYCLE = [
+    ("review_required", "rejected", True),
+    ("rejected", "review_required", True),
+    ("review_required", "approved", True),
+    ("rejected", "approved", True),
+    ("approved", "archived", True),
+    ("review_required", "archived", False),       # archived only ever follows an approval
+    ("rejected", "archived", False),
+    ("approved", "review_required", False),
+    ("approved", "rejected", False),
+    ("archived", "review_required", False),
+    ("archived", "rejected", False),
+    ("archived", "approved", False),
+]
+
+
+def _lifecycle_row(tx, kind, status):
+    """A source, or a version under an approved source, brought to `status` by the legal path."""
+    if kind == "source":
+        return "knowledge_sources", "source_id", tx.source(status=status)
+    doc = tx.document(tx.source(), status=status)
+    tx.settle()
+    return "knowledge_documents", "id", doc
+
+
+def _set_status(tx, table, key_column, key, target):
+    """The operator step to `target`; a first approval writes the approval record with it."""
+    if target == "approved":
+        return tx.operator(f"update public.{table} set status = 'approved', approved_by = coalesce(approved_by, %s),"
+                           f" approved_at = coalesce(approved_at, now()), review_note = coalesce(review_note, 'reviewed')"
+                           f" where {key_column} = %s", (tx.approver, key))
+    return tx.operator(f"update public.{table} set status = %s where {key_column} = %s", (target, key))
+
+
+@pytest.mark.parametrize("kind", ["source", "document"])
+@pytest.mark.parametrize(("current", "target", "allowed"), LIFECYCLE, ids=[f"{a}->{b}" for a, b, _ in LIFECYCLE])
+def test_status_lifecycle_is_monotonic_once_approved(tx, kind, current, target, allowed):
+    table, key_column, key = _lifecycle_row(tx, kind, current)
+    assert _set_status(tx, table, key_column, key, target) == (("ok", None) if allowed else ("err", CHECK_VIOLATION))
+    tx.cur.execute(f"select status::text from public.{table} where {key_column} = %s", (key,))
+    assert tx.cur.fetchone()[0] == (target if allowed else current)
+
+
+@pytest.mark.parametrize("kind", ["source", "document"])
+def test_approved_then_rejected_then_approved_stops_at_the_first_step(tx, kind):
+    """No stale approval record can stand for a later approval decision."""
+    table, key_column, key = _lifecycle_row(tx, kind, "approved")
+    tx.cur.execute(f"select approved_by, approved_at, review_note from public.{table} where {key_column} = %s", (key,))
+    record = tx.cur.fetchone()
+    for detour in ("rejected", "review_required"):
+        assert _set_status(tx, table, key_column, key, detour) == ("err", CHECK_VIOLATION)
+    tx.cur.execute(f"select status::text, approved_by, approved_at, review_note from public.{table}"
+                   f" where {key_column} = %s", (key,))
+    assert tx.cur.fetchone() == ("approved", *record)
+
+
+def test_no_approval_record_ahead_of_the_approval(tx):
+    """approved_by / approved_at only on an approved (or archived) row: a draft cannot carry a
+    pre-written record that a later status flip would turn into an approval."""
+    insert_source = ("insert into public.knowledge_sources (source_id, title, owner, source_type, visibility, status,"
+                     " approved_by, approved_at, review_note) values (%s, 't', 'o', 'guideline', 'public', %s, %s, %s, 'n')")
+    for status in ("review_required", "rejected", "archived"):
+        assert tx.operator(insert_source, (f"kn-pre-{status[:3]}", status, tx.approver, NOW)) == ("err", CHECK_VIOLATION)
+    # a draft cannot be archived either -- with or without a (partial) record
+    for record in ("approved_by = %s", "approved_by = %s, approved_at = now()"):
+        src = tx.source(status="review_required")
+        assert tx.operator(f"update public.knowledge_sources set status = 'archived', {record} where source_id = %s",
+                           (tx.approver, src)) == ("err", CHECK_VIOLATION)
+    src = tx.source(status="review_required")
+    assert tx.operator("update public.knowledge_sources set approved_by = %s, approved_at = now() where source_id = %s",
+                       (tx.approver, src)) == ("err", CHECK_VIOLATION)
+    doc = tx.document(tx.source(), status="review_required")
+    assert tx.operator("update public.knowledge_documents set approved_by = %s, approved_at = now() where id = %s",
+                       (tx.approver, doc)) == ("err", CHECK_VIOLATION)
+    assert tx.operator(
+        "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+        " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
+        " license_basis, status, approved_by, approved_at, review_note)"
+        " values (%s, 'pre', 'v1', 't', 'vi', 'https://example.invalid/pre', %s, %s, 'p', 'n', 'c',"
+        " 'official_publication', 'rejected', %s, now(), 'n')", (tx.source(), _sha("p"), _sha("np"), tx.approver)
+    ) == ("err", CHECK_VIOLATION)
+
+
+def test_a_correction_is_a_new_version_through_the_normal_flow(tx):
+    """An approved version is corrected by a NEW document_version of the same document: it is
+    ingested review_required, cannot be approved beside the current one, and approving it
+    archives v1 in the same transaction. v1 keeps its citation identity, archived."""
+    src = tx.source()
+    v1 = tx.document(src, version="v1")
+    old_chunk = tx.chunk(v1, "awd guidance first edition")
+    v2 = tx.document(src, version="v2", status="review_required")
+    new_chunk = tx.chunk(v2, "awd guidance corrected edition")
+    approve_v2 = ("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = now(),"
+                  " review_note = 'corrected edition reviewed' where id = %s")
+    assert tx.operator(approve_v2, (tx.approver, v2)) == ("err", UNIQUE_VIOLATION)
+    assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50) == [old_chunk]
+    assert tx.operator("update public.knowledge_documents set status = 'archived' where id = %s", (v1,)) == ("ok", None)
+    assert tx.operator(approve_v2, (tx.approver, v2)) == ("ok", None)
+    assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50) == [new_chunk]
+    tx.cur.execute("select d.document_version, d.status::text from public.knowledge_chunks c"
+                   " join public.knowledge_documents d on d.id = c.document_pk where c.chunk_id = %s", (old_chunk,))
+    assert tx.cur.fetchone() == ("v1", "archived")
 
 
 def test_approved_source_provenance_is_frozen_but_can_be_archived(tx):

@@ -57,8 +57,10 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
         "insert into public.knowledge_sources (source_id, title, owner, source_type, visibility,"
         " organization_id, status, approved_by, approved_at, review_note)"
         " values (%s, %s, 'Test publisher', 'guideline', %s, %s, %s, %s, %s, %s)",
-        (source_id, FIXTURE + key, visibility, org, source_status, approver if ever_approved else None,
-         now if ever_approved else None, "fixture" if ever_approved else None))
+        (source_id, FIXTURE + key, visibility, org, "approved" if ever_approved else source_status,
+         approver if ever_approved else None, now if ever_approved else None, "fixture" if ever_approved else None))
+    if source_status == "archived":           # archived only ever follows an approval
+        conn.execute("update public.knowledge_sources set status = 'archived' where source_id = %s", (source_id,))
     # ingestion order: insert the version open for review, add its chunk, then approve/reject/archive
     doc = conn.execute(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"

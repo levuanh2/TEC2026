@@ -49,6 +49,12 @@ verify, not approvals.
 Unknown status is not retrievable (fail closed). At most one approved version per
 `(source_id, document_id)` (DB partial unique index).
 
+Lifecycle (DB-enforced, sources and versions): `review_required` <-> `rejected` until the first
+approval; then `approved`; an approved row may only become `archived` (and only an approved row can
+be archived -- an unwanted draft stays `rejected`); `archived` is final. An
+approved version is never reopened: a correction is a new version through the normal review and
+approval (section 7).
+
 ## 4. Approval requirements
 
 ### 4.1 Source (publisher / series) — DB-enforced when `approved`

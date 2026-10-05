@@ -180,14 +180,28 @@ create index knowledge_chunks_search_trgm_idx
 
 -- ----------------------------------------------------------- invariants
 
+-- Status lifecycle (sources AND document versions), monotonic once approved:
+--   review_required <-> rejected          re-review before the first approval
+--   review_required | rejected -> approved   the (only) approval
+--   approved -> archived                   withdrawal / superseded by a new version
+--   archived                               terminal
+-- `archived` is reached only from `approved` (never inserted, never from a draft: a draft that
+-- is not wanted stays rejected), so every archived row carries the record of a real approval.
+-- An approved row never returns to review_required or rejected, so an approval record always
+-- describes the one approval decision that row received; a correction is a NEW version (or
+-- source) through the normal review -> approve flow. approved_by / approved_at may be written
+-- only together with status approved (then they freeze), never ahead of the decision.
+-- Enforced in the row triggers below: UPDATE row-locks the target and the trigger sees the
+-- committed row as OLD, so concurrent transitions are serialized.
+
 -- Sources. Tenant scope: a farm-scoped tenant source is created for a farm of ITS
 -- organization. The scope is fixed once created (re-scoping = a new source), so the farm
 -- relation is checked at INSERT only: Core V1 does not freeze farms.cooperative_id, the RLS
 -- policy and the RPC re-check it at read time (a moved farm makes the source unretrievable),
 -- and an operator can still archive such a stale source. The publisher provenance and the
--- approval record are fixed once the source has been approved; status may still move, but
--- `archived` is final (decision ST2: archive-only lifecycle -- re-publishing needs a new,
--- newly approved source) and a source that was ever approved is never deleted.
+-- approval record are fixed once the source has been approved; its status follows the
+-- lifecycle above (approved -> archived only; `archived` is final, decision ST2 -- re-publishing
+-- needs a new, newly approved source) and a source that was ever approved is never deleted.
 create function private.enforce_knowledge_source_scope()
 returns trigger
 language plpgsql
@@ -201,7 +215,15 @@ begin
     end if;
     return old;
   end if;
+  if new.status in ('review_required', 'rejected') and (new.approved_by is not null or new.approved_at is not null) then
+    raise exception 'knowledge source %: an approval record requires status approved', new.source_id
+      using errcode = '23514';
+  end if;
   if tg_op = 'INSERT' then
+    if new.status = 'archived' then
+      raise exception 'knowledge source %: only an approved source can be archived', new.source_id
+        using errcode = '23514';
+    end if;
     if new.farm_id is not null and not exists (
         select 1 from public.farms f where f.id = new.farm_id and f.cooperative_id = new.organization_id) then
       raise exception 'knowledge source %: farm % does not belong to organization %',
@@ -213,8 +235,11 @@ begin
       is distinct from (old.source_id, old.visibility, old.organization_id, old.farm_id, old.created_at) then
     raise exception 'knowledge source % scope is immutable', old.source_id using errcode = '23514';
   end if;
-  if old.status = 'archived' and new.status <> 'archived' then
-    raise exception 'knowledge source % is archived; archiving is final', old.source_id using errcode = '23514';
+  if new.status <> old.status
+     and not ((old.status in ('review_required', 'rejected') and new.status in ('review_required', 'rejected', 'approved'))
+              or (old.status = 'approved' and new.status = 'archived')) then
+    raise exception 'knowledge source %: status % -> % is not allowed (drafts -> approved; approved -> archived only; archived is final)',
+      old.source_id, old.status, new.status using errcode = '23514';
   end if;
   if old.approved_at is not null
      and (new.title, new.owner, new.source_type, new.authority, new.approved_by, new.approved_at, new.review_note)
@@ -234,10 +259,10 @@ create trigger knowledge_sources_scope
 
 -- Citation identity and provenance never change: identity, hashes and pipeline versions
 -- are fixed at insert; descriptive provenance, license and the approval record are fixed
--- once a version has been approved. Status may still move (approved -> archived), but
--- `archived` is final (ST2: a withdrawn version never becomes retrievable again; a new
--- version is ingested and approved instead). A version that was ever approved cannot be
--- deleted.
+-- once a version has been approved. Its status follows the lifecycle above (approved ->
+-- archived only; `archived` is final, ST2): a correction is a new document_version of the same
+-- document, approved through the normal flow, which archives this one. A version that was
+-- ever approved cannot be deleted.
 create function private.enforce_knowledge_document_immutability()
 returns trigger
 language plpgsql
@@ -251,6 +276,17 @@ begin
     end if;
     return old;
   end if;
+  if new.status in ('review_required', 'rejected') and (new.approved_by is not null or new.approved_at is not null) then
+    raise exception 'knowledge document % % %: an approval record requires status approved',
+      new.source_id, new.document_id, new.document_version using errcode = '23514';
+  end if;
+  if tg_op = 'INSERT' then
+    if new.status = 'archived' then
+      raise exception 'knowledge document % % %: only an approved version can be archived',
+        new.source_id, new.document_id, new.document_version using errcode = '23514';
+    end if;
+    return new;
+  end if;
   if (new.id, new.source_id, new.document_id, new.document_version, new.file_sha256, new.normalized_sha256,
       new.parser_version, new.normalizer_version, new.chunker_version, new.imported_at)
       is distinct from
@@ -259,9 +295,11 @@ begin
     raise exception 'knowledge document % % % identity/provenance is immutable',
       old.source_id, old.document_id, old.document_version using errcode = '23514';
   end if;
-  if old.status = 'archived' and new.status <> 'archived' then
-    raise exception 'knowledge document % % % is archived; archiving is final',
-      old.source_id, old.document_id, old.document_version using errcode = '23514';
+  if new.status <> old.status
+     and not ((old.status in ('review_required', 'rejected') and new.status in ('review_required', 'rejected', 'approved'))
+              or (old.status = 'approved' and new.status = 'archived')) then
+    raise exception 'knowledge document % % %: status % -> % is not allowed (drafts -> approved; approved -> archived only; archived is final)',
+      old.source_id, old.document_id, old.document_version, old.status, new.status using errcode = '23514';
   end if;
   if old.approved_at is not null
      and (new.title, new.language, new.official_url, new.artifact_ref, new.published_at, new.license_basis,
@@ -278,7 +316,7 @@ $$;
 revoke all on function private.enforce_knowledge_document_immutability() from public, anon, authenticated;
 
 create trigger knowledge_documents_immutable
-  before update or delete on public.knowledge_documents
+  before insert or update or delete on public.knowledge_documents
   for each row execute function private.enforce_knowledge_document_immutability();
 
 -- Chunks belong to a version's content: they are added only while the version is still
