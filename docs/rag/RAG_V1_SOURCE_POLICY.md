@@ -1,91 +1,112 @@
 # RAG V1 Knowledge Source Policy
 
-Status: **PROPOSED — awaiting approval** (V1.3-A). Applies to every document that may become an
-`EvidenceChunk`. Related: [RAG_V1_RETRIEVAL_ADR.md](RAG_V1_RETRIEVAL_ADR.md).
+Status: **APPROVED (C1 policy)** — candidate corpus defined; **no source or document is approved
+yet**. Applies to every document that may become an `EvidenceChunk`. Enforced in the database by
+Migration A ([RAG_V1_RETRIEVAL_ADR.md §9](RAG_V1_RETRIEVAL_ADR.md)), not only by operator code.
 
 ## 1. Principles
 
 1. **Approved ≠ trusted instructions.** An approved document may be cited as *evidence*; its text
-   is still **untrusted data**. It can never change system rules, permissions, retrieval filters,
+   is still **untrusted data**. It never changes system rules, permissions, retrieval filters,
    Carbon/metric values or the answer policy (prompt-injection boundary, ARCHITECTURE §14).
-2. **Nothing enters retrieval without provenance and an explicit approval.** No crawling, no
+2. **Nothing enters retrieval without provenance and explicit human approval.** No crawling, no
    arbitrary user uploads, no "every PDF is equal".
-3. **Never invent provenance.** Unknown publication date, version or URL stays empty (`null`); it
-   is not guessed from the file name or content.
-4. **History is kept.** A replaced document version is archived, not overwritten or deleted, so
-   past citations remain explainable.
+3. **Never invent provenance.** An unknown publication date, version, URL or license stays empty
+   (`null` / `unknown`); it is never guessed from a file name or the content.
+4. **History is kept.** A replaced version is archived, not overwritten or deleted.
 
-## 2. Knowledge classes
+## 2. Knowledge classes and candidate corpus
 
-| Class | Examples (conceptual) | Visibility | `organization_id` | V1.3 |
+| Class | Visibility | `organization_id` | `farm_id` | V1.3 |
 |---|---|---|---|---|
-| **Public** | official agronomy guidance (e.g. MARD/extension material on AWD, "1 phải 5 giảm"), methodology references (IPCC Guidelines), policy/regulation texts, peer-reviewed technical reports | `public` | `null` | **in scope** |
-| **Tenant private** | HTX operating procedures, farm-specific plans | `tenant` | required (`farm_id` optional) | **schema + isolation tests only; no ingestion, no upload flow** |
+| **Public** | `public` | must be `null` | must be `null` | in scope |
+| **Tenant private** (HTX procedures, farm plans) | `tenant` | required | optional; must belong to that organization | schema + isolation tests only; **no ingestion, no upload flow** |
 
-Candidate public sources already **referenced** in the repo (`backend/config/emission_factors.yaml`) —
-listed as candidates, **not approved**:
+**Candidate corpus (candidate ≠ approved):**
 
-- IPCC 2019 Refinement to the 2006 Guidelines, Vol.4 Ch.5 *Cropland* (rice CH4, water regimes);
-- IPCC 2019 Refinement, Vol.4 Ch.11 *N2O Emissions from Managed Soils*;
-- IPCC 2006 Guidelines, Vol.4 Ch.2 *Generic Methodologies*;
-- IPCC AR5 WG1 Ch.8 (GWP values) and UNFCCC decision 18/CMA.1 (reporting rules).
+| Tier | Candidate | Use |
+|---|---|---|
+| Core Vietnamese | official guidance on AWD (alternate wetting and drying) for rice | water-regime questions |
+| Core Vietnamese | official "1 phải 5 giảm" guidance | practice questions |
+| Core Vietnamese | QĐ 4801/QĐ-BNNMT (noted in the repo as **not yet obtained**) | national methodology/policy |
+| Methodology | IPCC 2019 Refinement, Vol.4 Ch.5 *Cropland* (rice CH4, water regimes) | mechanism / methodology |
+| Methodology | IPCC 2019 Refinement, Vol.4 Ch.11 *N2O Emissions from Managed Soils* | fertilizer / N2O |
+| Secondary — only if eval queries require | IPCC 2006 Vol.4 Ch.2; IPCC AR5 WG1 Ch.8; UNFCCC decision 18/CMA.1 | generic methodology, GWP, reporting |
 
-QĐ 4801/QĐ-BNNMT is noted in the repo as **not yet obtained**; Vietnamese agronomy guidance on AWD
-and 1P5G is not in the repo. Both must be supplied by the source owner (decision C1).
+The publisher, version and URL of the Vietnamese documents are **not known yet** and are not
+assumed. The IPCC/UNFCCC URLs already cited in `backend/config/emission_factors.yaml` are pointers to
+verify, not approvals.
 
-## 3. Trust status
+## 3. Trust status (sources **and** document versions)
 
 | Status | Meaning | Retrievable |
 |---|---|---|
 | `review_required` | registered/ingested, awaiting a human decision (default for every new source and version; also any PDF without a text layer) | **no** |
-| `approved` | an authorized approver accepted the source **and** this version | **yes** |
-| `rejected` | not acceptable (unverifiable origin, wrong scope, license not allowed, unreadable) | **no** |
-| `archived` | superseded by a newer approved version, or withdrawn | **no** (kept for provenance) |
+| `approved` | an authorized approver accepted it | **yes**, only if source **and** version are approved |
+| `rejected` | not acceptable (unverifiable origin, out of scope, license not allowed, unreadable) | **no** |
+| `archived` | superseded or withdrawn; kept for provenance | **no** |
 
-A chunk is retrievable only when **its source and its document version are both `approved`**.
-Unknown or missing status is treated as not retrievable (fail closed).
+Unknown status is not retrievable (fail closed). At most one approved version per
+`(source_id, document_id)` (DB partial unique index).
 
-### Approval requirements (all must hold)
+## 4. Approval requirements
 
-1. Origin verifiable: publisher/owner named by the document itself; official URL or a stored copy
-   whose SHA-256 is recorded.
-2. Relevance: rice cultivation, water/fertilizer/straw management, GHG methodology or applicable
-   policy for AgriCarbon's scope.
-3. License basis recorded (public-domain/official publication, open license, or written
-   permission) in `review_note`.
-4. Text layer extractable (no OCR in V1.3) and the language recorded (`vi`, `en`).
-5. Approver recorded (`approved_by`, `approved_at`). Proposed approver role: the AgriCarbon
-   methodology/product owner (C1 confirms who). Approval is an operator action, not an API.
+### 4.1 Source (publisher / series) — DB-enforced when `approved`
+- `approved_by` and `approved_at` set (named human);
+- `review_note` non-empty: how the publisher's identity was verified;
+- scope shape valid (public ⇒ no organization/farm; tenant ⇒ organization; farm ∈ organization).
 
-## 4. Required metadata
+### 4.2 Document version — DB-enforced when `approved`
+Every item below must exist for the **real artifact**; missing metadata is never fabricated.
 
-| Field | Level | Rule |
+| Requirement | Field(s) | Enforcement |
 |---|---|---|
-| `source_id` | source | stable slug, citation identity (e.g. `ipcc-2019-refinement`) |
-| `title`, `owner` (authority/publisher) | source | as stated by the publisher |
-| `source_type` | source | `guideline \| policy \| methodology \| research \| tenant_document` (existing contract) |
-| `authority` | source | `official \| peer_reviewed \| extension \| internal` |
-| `visibility`, `organization_id`, `farm_id` | source | `public` ⇔ `organization_id is null` |
-| `document_id`, `document_version` | document | stable slug + publisher version, or the file SHA-256 prefix when none is stated |
-| `title`, `language` | document | as published; language code |
-| `url` | document | `https://` only, official location; else `null` |
-| `published_at` | document | only if stated by the publisher; else `null` |
-| `imported_at` | document | set by the ingestion run |
-| `file_sha256`, `normalized_sha256` | document | original bytes / normalized text |
-| `parser_version`, `normalizer_version`, `chunker_version` | document | pipeline provenance |
-| `status`, `approved_by`, `approved_at`, `review_note` | source + document | §3 |
-| `chunk_id`, `ordinal`, `section_path`, `page_from/to`, `content_sha256` | chunk | ADR §4 |
+| verifiable publisher | via approved source | FK to an approved source at retrieval |
+| official URL **or** controlled stored copy | `official_url` (`https://`) / `artifact_ref` | CHECK: at least one |
+| integrity | `file_sha256`, `normalized_sha256` | NOT NULL, hex format, immutable |
+| real version | `document_version` | NOT NULL; publisher version, else `file_sha256` prefix (stated as such) |
+| language | `language` | NOT NULL, ISO 639-1 |
+| license basis | `license_basis` ≠ `unknown`; `license_reference` required for `open_license` / `written_permission` | CHECK |
+| human approver + time | `approved_by`, `approved_at` | CHECK |
+| reviewer explanation | `review_note` | human text, not a substitute for `license_basis` |
 
-## 5. Versioning
+`license_basis` values: `official_publication`, `public_domain`, `open_license`,
+`written_permission`, `tenant_owned`, and `unknown` (default, **cannot be approved**).
+`license_reference` holds the licence name, the terms URL or the permission reference. This is
+deliberately minimal — not a licensing subsystem.
 
-- A new file for an existing `document_id` creates a **new version** (`review_required`); it does
-  not touch the approved version until approved.
-- Approving the new version archives the previous approved version **in the same transaction**;
-  its rows stay for provenance and old citations.
-- Re-ingesting identical bytes is a no-op (same hashes, same chunk ids).
-- Withdrawing a source sets the source to `archived`; all its versions stop being retrievable.
+Approver role (proposed): the AgriCarbon methodology/product owner. Approval is an operator action
+(service role), never an API endpoint.
 
-## 6. Out of scope for V1.3
+## 5. Original artifact provenance
 
-User/HTX uploads, web crawling, OCR, DOCX/HTML/spreadsheets, automatic approval, and any source
-whose license basis is unknown.
+- Each version records `file_sha256` plus `official_url` and/or `artifact_ref`.
+- **V1.3 accepts `official_url` + `file_sha256`.** Limitation: if the publisher moves or changes the
+  file, the hash shows the drift but the original cannot be re-fetched, so re-ingestion is
+  reproducible only while the URL serves the same bytes.
+- A controlled immutable archived copy (`artifact_ref` → Supabase Storage object with retention and
+  access policy) is a **separate decision (ST1)**; no Storage subsystem is built in V1.3.
+
+## 6. Metadata summary
+
+| Level | Fields |
+|---|---|
+| Source | `source_id`, `title`, `owner`, `source_type`, `authority`, `visibility`, `organization_id`, `farm_id`, `status`, `approved_by`, `approved_at`, `review_note` |
+| Document version | `source_id`, `document_id`, `document_version`, `title`, `language`, `official_url`, `artifact_ref`, `file_sha256`, `normalized_sha256`, `published_at` (only if stated), `imported_at`, parser/normalizer/chunker versions, `license_basis`, `license_reference`, `status`, `approved_by`, `approved_at`, `review_note` |
+| Chunk | `chunk_id`, `ordinal`, `section_path`, `page_from/to`, `content`, `content_sha256`, `metadata` |
+
+Identity: document unique by `(source_id, document_id, document_version)`; citation =
+`source_id` + `document_id`/`document_version` + `chunk_id`.
+
+## 7. Versioning
+
+- A new file for an existing `(source_id, document_id)` is a **new version** (`review_required`); the
+  approved version is untouched until the new one is approved.
+- Approving the new version archives the previous approved one in the same transaction.
+- Identical bytes re-ingest as a no-op (same hashes, same chunk ids).
+- Withdrawing a source sets it `archived`; none of its versions are retrievable.
+
+## 8. Out of scope for V1.3
+
+User/HTX uploads, crawling, OCR, DOCX/HTML/spreadsheets, automatic approval, Storage archiving
+(ST1), and any source whose license basis is unknown.
