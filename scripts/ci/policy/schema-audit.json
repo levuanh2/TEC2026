@@ -1,5 +1,14 @@
 {
  "functions": {
+  "match_knowledge_chunks_lexical(uuid,text,integer)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": false
+  },
   "private.activity_batch_open(uuid)": {
    "config": [
     "search_path=\"\""
@@ -95,6 +104,27 @@
    "execute": [],
    "security_definer": true
   },
+  "private.enforce_knowledge_chunk_immutability()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.enforce_knowledge_document_immutability()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.enforce_knowledge_source_scope()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.enforce_plot_area_covers_harvests()": {
    "config": [
     "search_path=\"\""
@@ -117,6 +147,22 @@
     "authenticated"
    ],
    "security_definer": true
+  },
+  "private.knowledge_chunks_search_fields()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_search_text(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": false
   },
   "private.max_live_harvested_area(uuid)": {
    "config": [
@@ -839,6 +885,33 @@
    "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
    "with_check": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_write_activity_batch(a.production_batch_id))))"
   },
+  "knowledge_chunks.knowledge_chunks_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(EXISTS ( SELECT 1\n   FROM knowledge_documents d\n  WHERE (d.id = knowledge_chunks.document_pk)))",
+   "with_check": null
+  },
+  "knowledge_documents.knowledge_documents_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((status = 'approved'::knowledge_status) AND (EXISTS ( SELECT 1\n   FROM knowledge_sources s\n  WHERE (s.source_id = knowledge_documents.source_id))))",
+   "with_check": null
+  },
+  "knowledge_sources.knowledge_sources_select": {
+   "cmd": "SELECT",
+   "permissive": "PERMISSIVE",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((status = 'approved'::knowledge_status) AND ((visibility = 'public'::text) OR ((visibility = 'tenant'::text) AND private.user_is_org_member(organization_id) AND ((farm_id IS NULL) OR (private.user_can_read_farm(farm_id) AND (EXISTS ( SELECT 1\n   FROM farms f\n  WHERE ((f.id = knowledge_sources.farm_id) AND (f.cooperative_id = knowledge_sources.organization_id)))))))))",
+   "with_check": null
+  },
   "mrv_case_batches.mrv_case_batches_delete": {
    "cmd": "DELETE",
    "permissive": "PERMISSIVE",
@@ -1322,6 +1395,18 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_chunks": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_documents": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_sources": {
+   "enabled": true,
+   "forced": false
+  },
   "mrv_case_batches": {
    "enabled": true,
    "forced": false
@@ -1440,6 +1525,9 @@
    "fuel_usages": "INSERT,SELECT,UPDATE",
    "harvest_events": "INSERT,SELECT,UPDATE",
    "irrigation_events": "INSERT,SELECT,UPDATE",
+   "knowledge_chunks": "SELECT",
+   "knowledge_documents": "SELECT",
+   "knowledge_sources": "SELECT",
    "mrv_case_batches": "DELETE,INSERT,SELECT",
    "mrv_case_steps": "INSERT,SELECT,UPDATE",
    "mrv_cases": "INSERT,SELECT,UPDATE",
@@ -1522,6 +1610,10 @@
   "irrigation_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
   "irrigation_events.irrigation_type_trg": "private.enforce_activity_type()",
   "irrigation_events.set_updated_at_trg": "private.set_updated_at()",
+  "knowledge_chunks.knowledge_chunks_immutable": "private.enforce_knowledge_chunk_immutability()",
+  "knowledge_chunks.knowledge_chunks_search_fields": "private.knowledge_chunks_search_fields()",
+  "knowledge_documents.knowledge_documents_immutable": "private.enforce_knowledge_document_immutability()",
+  "knowledge_sources.knowledge_sources_scope": "private.enforce_knowledge_source_scope()",
   "mrv_case_batches.audit_change_trg": "audit.capture_change()",
   "mrv_case_batches.validate_mrv_case_batch_trg": "private.validate_mrv_case_batch()",
   "mrv_case_steps.audit_change_trg": "audit.capture_change()",
@@ -1607,6 +1699,13 @@
   "ingestion_batches_pkey": "CREATE UNIQUE INDEX ingestion_batches_pkey ON public.ingestion_batches USING btree (id)",
   "ingestion_source_sha256_uidx": "CREATE UNIQUE INDEX ingestion_source_sha256_uidx ON public.ingestion_batches USING btree (source_sha256) WHERE (source_sha256 IS NOT NULL)",
   "irrigation_events_pkey": "CREATE UNIQUE INDEX irrigation_events_pkey ON public.irrigation_events USING btree (activity_id)",
+  "knowledge_chunks_chunk_key": "CREATE UNIQUE INDEX knowledge_chunks_chunk_key ON public.knowledge_chunks USING btree (document_pk, chunk_id)",
+  "knowledge_chunks_ordinal_key": "CREATE UNIQUE INDEX knowledge_chunks_ordinal_key ON public.knowledge_chunks USING btree (document_pk, ordinal)",
+  "knowledge_chunks_pkey": "CREATE UNIQUE INDEX knowledge_chunks_pkey ON public.knowledge_chunks USING btree (id)",
+  "knowledge_documents_identity_key": "CREATE UNIQUE INDEX knowledge_documents_identity_key ON public.knowledge_documents USING btree (source_id, document_id, document_version)",
+  "knowledge_documents_one_approved": "CREATE UNIQUE INDEX knowledge_documents_one_approved ON public.knowledge_documents USING btree (source_id, document_id) WHERE (status = 'approved'::knowledge_status)",
+  "knowledge_documents_pkey": "CREATE UNIQUE INDEX knowledge_documents_pkey ON public.knowledge_documents USING btree (id)",
+  "knowledge_sources_pkey": "CREATE UNIQUE INDEX knowledge_sources_pkey ON public.knowledge_sources USING btree (source_id)",
   "mrv_case_batches_pkey": "CREATE UNIQUE INDEX mrv_case_batches_pkey ON public.mrv_case_batches USING btree (mrv_case_id, production_batch_id)",
   "mrv_case_steps_pkey": "CREATE UNIQUE INDEX mrv_case_steps_pkey ON public.mrv_case_steps USING btree (mrv_case_id, step_no)",
   "mrv_cases_organization_id_case_code_key": "CREATE UNIQUE INDEX mrv_cases_organization_id_case_code_key ON public.mrv_cases USING btree (organization_id, case_code)",
