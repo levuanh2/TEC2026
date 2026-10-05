@@ -155,6 +155,15 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_read_blocked()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.knowledge_search_text(text)": {
    "config": [
     "search_path=\"\""
@@ -891,7 +900,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM knowledge_documents d\n  WHERE (d.id = knowledge_chunks.document_pk)))",
+   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (EXISTS ( SELECT 1\n   FROM knowledge_documents d\n  WHERE (d.id = knowledge_chunks.document_pk))))",
    "with_check": null
   },
   "knowledge_documents.knowledge_documents_select": {
@@ -900,7 +909,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((status = 'approved'::knowledge_status) AND (EXISTS ( SELECT 1\n   FROM knowledge_sources s\n  WHERE (s.source_id = knowledge_documents.source_id))))",
+   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (status = 'approved'::knowledge_status) AND (EXISTS ( SELECT 1\n   FROM knowledge_sources s\n  WHERE (s.source_id = knowledge_documents.source_id))))",
    "with_check": null
   },
   "knowledge_sources.knowledge_sources_select": {
@@ -909,7 +918,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((status = 'approved'::knowledge_status) AND ((visibility = 'public'::text) OR ((visibility = 'tenant'::text) AND private.user_is_org_member(organization_id) AND ((farm_id IS NULL) OR (private.user_can_read_farm(farm_id) AND (EXISTS ( SELECT 1\n   FROM farms f\n  WHERE ((f.id = knowledge_sources.farm_id) AND (f.cooperative_id = knowledge_sources.organization_id)))))))))",
+   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (status = 'approved'::knowledge_status) AND ((visibility = 'public'::text) OR ((visibility = 'tenant'::text) AND private.user_is_org_member(organization_id) AND ((farm_id IS NULL) OR (private.user_can_read_farm(farm_id) AND (EXISTS ( SELECT 1\n   FROM farms f\n  WHERE ((f.id = knowledge_sources.farm_id) AND (f.cooperative_id = knowledge_sources.organization_id)))))))))",
    "with_check": null
   },
   "mrv_case_batches.mrv_case_batches_delete": {

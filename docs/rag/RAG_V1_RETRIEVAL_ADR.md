@@ -210,7 +210,8 @@ and remains open.
 
 Gates, independent of each other: (1) the RPC derives organization/farm from the season the caller
 can read (RLS on `crop_seasons`/`plots`/`farms`), never from a caller-supplied filter; (2) RLS on
-the knowledge tables; (3) the existing `assert_tenant_isolation` in the RAG core. V1.3 ingests no
+the knowledge tables, which also shows **nothing** -- public included -- while the caller's Core V1
+password change is pending (§9.5); (3) the existing `assert_tenant_isolation` in the RAG core. V1.3 ingests no
 tenant documents; the schema and tests cover tenant rows so isolation is proven first.
 
 ---
@@ -341,7 +342,9 @@ expression index depends on it — the GIN indexes are on the stored columns. Te
 no stemming.
 
 ### 9.5 RLS and privileges (as implemented)
-- RLS enabled on all three tables. Policies chain (SECURITY INVOKER, no new definer function):
+- RLS enabled on all three tables. Policies chain (SECURITY INVOKER; the only definer function is
+  the password-guard wrapper below), and each one starts with
+  `not (select private.knowledge_read_blocked())`:
   `knowledge_sources_select` — `status = 'approved'` and (public, or tenant with
   `private.user_is_org_member(organization_id)` and (`farm_id is null`, or
   `private.user_can_read_farm(farm_id)` and the farm still belongs to the organization));
@@ -354,11 +357,19 @@ no stemming.
   authenticated` on the three tables — client writes fail at the privilege level (42501), not
   only by RLS; `anon` has no access. No write policy exists; ingestion/approval are operator
   actions (table owner / service role).
-- Users with a pending forced password change: the retrieval RPC returns nothing (season scope
-  goes through `user_can_read_farm`, which already excludes them). Direct SELECT of approved
-  *public* reference rows is not additionally gated, because granting `authenticated` EXECUTE on
-  `private.password_change_pending()` would change a Core V1 privilege; tenant rows stay hidden
-  (`user_is_org_member` excludes them).
+- **Core V1 forced password change** (migrations `20261002100000` + `20261003090000`): a caller
+  whose change is pending sees **no** knowledge row — direct SELECT of all three tables and the RPC
+  return nothing, approved *public* rows included. "Public" means public to a valid business user,
+  not a bypass of the forced-password state. Pending is exactly Core V1's canonical
+  `private.password_change_pending()`: the live `auth.users` flag **or** a token minted with the
+  `must_change_password` claim, so an access token minted with the temporary password (TOKEN_OLD)
+  stays refused after the change, and a token minted after it (TOKEN_NEW) gets normal RLS.
+  The invoker policies reach it through `private.knowledge_read_blocked()`, a SECURITY DEFINER
+  wrapper (`set search_path = ''`, body `select private.password_change_pending();`, EXECUTE to
+  `authenticated` only) owned and dropped by Migration A. No forced-password logic is duplicated
+  and no Core V1 function, privilege or policy changes (`authenticated` still has no EXECUTE on
+  `private.password_change_pending()`). The RPC additionally gets no season for such a caller
+  (`user_can_read_farm` refuses it).
 
 ### 9.6 Lexical RPC
 ```sql

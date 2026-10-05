@@ -18,6 +18,7 @@ drop function if exists private.enforce_knowledge_document_immutability();
 drop function if exists private.enforce_knowledge_source_scope();
 drop function if exists private.knowledge_chunks_search_fields();
 drop function if exists private.knowledge_search_text(text);
+drop function if exists private.knowledge_read_blocked();
 drop type if exists public.knowledge_license_basis;
 drop type if exists public.knowledge_status;
 drop extension if exists unaccent;

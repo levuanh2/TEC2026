@@ -9,8 +9,8 @@
 --   knowledge_documents  one immutable version of one document (citation identity)
 --   knowledge_chunks     citable passages + DB-maintained search fields
 -- Ingestion and approval are operator actions (service role / database owner), never a
--- request path: `authenticated` gets SELECT only and RLS shows approved rows in scope;
--- `anon` gets nothing.
+-- request path: `authenticated` gets SELECT only and RLS shows approved rows in scope, and
+-- nothing at all while the caller's Core V1 password change is pending; `anon` gets nothing.
 --
 -- Retrieval is `public.match_knowledge_chunks_lexical`, SECURITY INVOKER: it runs as the
 -- caller (RLS active everywhere), derives organization/farm from the crop season the caller
@@ -309,15 +309,35 @@ revoke all on public.knowledge_sources, public.knowledge_documents, public.knowl
   from public, anon, authenticated;
 grant select on public.knowledge_sources, public.knowledge_documents, public.knowledge_chunks to authenticated;
 
--- An APPROVED source in scope: public reference knowledge for any signed-in user; tenant
--- knowledge only for an active member of its organization (existing Core V1 semantics: a
--- former member or a data-grant viewer of another organization is not a member), and for a
--- farm-scoped source only when the caller can read that farm AND the farm still belongs to
--- the source's organization.
+-- Core V1 forced password change (20261002100000 + 20261003090000): while a change is
+-- pending -- the live auth.users flag, or an access token minted with the claim (a stale
+-- TOKEN_OLD stays refused after the change) -- the caller sees NO knowledge row. "Public"
+-- means public to a valid business user, not a bypass of that state. The decision is
+-- private.password_change_pending() itself, unchanged; this definer wrapper only lets the
+-- invoker policies below consult it without granting `authenticated` EXECUTE on the Core V1
+-- helper.
+create function private.knowledge_read_blocked()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select private.password_change_pending();
+$$;
+revoke all on function private.knowledge_read_blocked() from public, anon, authenticated;
+grant execute on function private.knowledge_read_blocked() to authenticated;
+
+-- An APPROVED source in scope: public reference knowledge for any signed-in user without a
+-- pending password change; tenant knowledge only for an active member of its organization
+-- (existing Core V1 semantics: a former member or a data-grant viewer of another
+-- organization is not a member), and for a farm-scoped source only when the caller can read
+-- that farm AND the farm still belongs to the source's organization.
 create policy knowledge_sources_select on public.knowledge_sources
   for select to authenticated
   using (
-    status = 'approved'
+    not (select private.knowledge_read_blocked())
+    and status = 'approved'
     and (
       visibility = 'public'
       or (
@@ -333,18 +353,23 @@ create policy knowledge_sources_select on public.knowledge_sources
     )
   );
 
--- An APPROVED version of a source the caller may see (that source's own RLS applies).
+-- An APPROVED version of a source the caller may see (that source's own RLS applies). The
+-- password guard is repeated on each table so no read path depends on the chain alone.
 create policy knowledge_documents_select on public.knowledge_documents
   for select to authenticated
   using (
-    status = 'approved'
+    not (select private.knowledge_read_blocked())
+    and status = 'approved'
     and exists (select 1 from public.knowledge_sources s where s.source_id = knowledge_documents.source_id)
   );
 
 -- A chunk of a version the caller may see.
 create policy knowledge_chunks_select on public.knowledge_chunks
   for select to authenticated
-  using (exists (select 1 from public.knowledge_documents d where d.id = knowledge_chunks.document_pk));
+  using (
+    not (select private.knowledge_read_blocked())
+    and exists (select 1 from public.knowledge_documents d where d.id = knowledge_chunks.document_pk)
+  );
 
 -- -------------------------------------------------------------- lexical RPC
 
@@ -363,7 +388,9 @@ create policy knowledge_chunks_select on public.knowledge_chunks
 -- caller's, calibrated on the DEV evaluation split. An empty result is a valid answer.
 --
 -- Scope comes only from the crop season the caller can read (RLS on crop_seasons, plots,
--- farms): an unreadable or unknown season returns nothing, not even public chunks.
+-- farms): an unreadable or unknown season returns nothing, not even public chunks. A caller
+-- with a pending password change gets nothing twice over: no readable season, and no
+-- knowledge row under the knowledge RLS above.
 create function public.match_knowledge_chunks_lexical(
   p_crop_season_id uuid,
   p_query text,

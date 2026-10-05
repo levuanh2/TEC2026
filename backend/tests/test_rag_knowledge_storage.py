@@ -154,14 +154,15 @@ class Tx:
 
     # -- client path -----------------------------------------------------------------------
 
-    def as_user(self, user, sql, params=()):
-        """('ok', rows) or ('err', sqlstate) -- savepoint-isolated, role authenticated."""
+    def as_user(self, user, sql, params=(), claims=None):
+        """('ok', rows) or ('err', sqlstate) -- savepoint-isolated, role authenticated; `claims`
+        adds token claims (e.g. app_metadata) to {sub, role}."""
         self.settle()
         self.cur.execute("savepoint s")
         try:
             self.cur.execute("set local role authenticated")
             self.cur.execute("select set_config('request.jwt.claims', %s, true)",
-                             (json.dumps({"sub": str(user), "role": "authenticated"}),))
+                             (json.dumps({"sub": str(user), "role": "authenticated", **(claims or {})}),))
             self.cur.execute(sql, params)
             rows = self.cur.fetchall() if self.cur.description else self.cur.rowcount
             self.cur.execute("reset role")
@@ -171,13 +172,13 @@ class Tx:
             self.cur.execute("rollback to savepoint s")
             return ("err", exc.sqlstate)
 
-    def rpc(self, user, season, query, top_k=8):
-        status, rows = self.as_user(user, RPC, (season, query, top_k))
+    def rpc(self, user, season, query, top_k=8, claims=None):
+        status, rows = self.as_user(user, RPC, (season, query, top_k), claims)
         assert status == "ok", rows
         return rows
 
-    def rpc_ids(self, user, season, query, top_k=8):
-        return [row[3] for row in self.rpc(user, season, query, top_k)]
+    def rpc_ids(self, user, season, query, top_k=8, claims=None):
+        return [row[3] for row in self.rpc(user, season, query, top_k, claims)]
 
     def operator(self, sql, params=()):
         """('ok', None) or ('err', sqlstate) as the operator/table owner."""
@@ -490,6 +491,79 @@ def test_direct_select_is_limited_by_rls(tx, tenant_corpus, who, expected):
     assert {r[0] for r in rows} == {tenant_corpus[name] for name in expected}
 
 
+# ------------------------------------------------------------------ Core V1 forced password change
+
+STALE_TOKEN = {"app_metadata": {"must_change_password": True}}
+NOTHING = {"knowledge_sources": 0, "knowledge_documents": 0, "knowledge_chunks": 0, "rpc": set()}
+
+
+def _flag(tx, user, value):
+    tx.cur.execute("update auth.users set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)"
+                   " || jsonb_build_object('must_change_password', %s::boolean) where id = %s", (value, user))
+
+
+def _knowledge_rows(tx, user, corpus, claims=None):
+    """How many rows of `corpus` each knowledge table shows the caller, and its RPC chunks."""
+    ids = list(corpus.values())
+    seen = {}
+    for table, sql in (
+        ("knowledge_sources", "select s.source_id from public.knowledge_sources s where s.source_id in"
+                              " (select d.source_id from public.knowledge_documents d join public.knowledge_chunks c"
+                              " on c.document_pk = d.id where c.chunk_id = any(%s))"),
+        ("knowledge_documents", "select d.id from public.knowledge_documents d where d.id in"
+                                " (select c.document_pk from public.knowledge_chunks c where c.chunk_id = any(%s))"),
+        ("knowledge_chunks", "select chunk_id from public.knowledge_chunks where chunk_id = any(%s)"),
+    ):
+        status, rows = tx.as_user(user, sql, (ids,), claims)
+        assert status == "ok", rows
+        seen[table] = len(rows)
+    seen["rpc"] = set(tx.rpc_ids(user, tx.season_a, "awd", 50, claims)) & set(ids)
+    return seen
+
+
+def test_pending_password_change_hides_all_knowledge_including_public(tx, tenant_corpus):
+    """Live auth.users flag (FastAPI pooled paths; any token before the change)."""
+    expected = {tenant_corpus[k] for k in ("public", "org_a", "farm_a")}
+    assert _knowledge_rows(tx, tx.member, tenant_corpus)["rpc"] == expected
+    assert _knowledge_rows(tx, tx.manager, tenant_corpus)["knowledge_chunks"] == 4
+    for user in (tx.member, tx.manager):
+        _flag(tx, user, True)
+        assert _knowledge_rows(tx, user, tenant_corpus) == NOTHING
+
+
+def test_token_minted_while_pending_stays_refused_after_the_change(tx, tenant_corpus):
+    """Live flag cleared, the token's claim still true (TOKEN_OLD): nothing, public included."""
+    _flag(tx, tx.member, False)
+    assert _knowledge_rows(tx, tx.member, tenant_corpus, STALE_TOKEN) == NOTHING
+    after = _knowledge_rows(tx, tx.member, tenant_corpus, {"app_metadata": {"must_change_password": False}})
+    assert after == {"knowledge_sources": 3, "knowledge_documents": 3, "knowledge_chunks": 3,
+                     "rpc": {tenant_corpus[k] for k in ("public", "org_a", "farm_a")}}
+
+
+@pytest.mark.parametrize(("source_status", "document_status"), [
+    ("approved", "approved"), ("review_required", "approved"), ("approved", "review_required"),
+    ("rejected", "approved"), ("approved", "rejected"), ("archived", "approved"), ("approved", "archived"),
+])
+def test_pending_password_change_sees_no_status_combination(tx, source_status, document_status):
+    chunk = tx.chunk(tx.document(tx.source(status=source_status), status=document_status), "alternate wetting awd")
+    assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50, STALE_TOKEN) == []
+    assert tx.as_user(tx.member, "select chunk_id from public.knowledge_chunks where chunk_id = %s", (chunk,),
+                      STALE_TOKEN) == ("ok", [])
+
+
+def test_password_guard_is_core_v1s(tx):
+    """The policies consult private.password_change_pending() itself, through a definer wrapper
+    that only delegates: no forced-password logic is duplicated."""
+    tx.cur.execute("select prosrc, prosecdef, provolatile from pg_proc"
+                   " where oid = 'private.knowledge_read_blocked()'::regprocedure")
+    body, definer, volatility = tx.cur.fetchone()
+    assert " ".join(body.split()) == "select private.password_change_pending();" and definer and volatility == "s"
+    tx.cur.execute("select tablename, qual from pg_policies where schemaname = 'public' and tablename like 'knowledge%%'")
+    policies = dict(tx.cur.fetchall())
+    assert set(policies) == {"knowledge_sources", "knowledge_documents", "knowledge_chunks"}
+    assert all("knowledge_read_blocked()" in qual for qual in policies.values()), policies
+
+
 def test_review_rows_are_invisible_to_clients_even_in_scope(tx):
     src = tx.source(visibility="tenant", org=tx.org_a, status="review_required")
     doc = tx.document(src, status="review_required")
@@ -532,6 +606,10 @@ def test_clients_can_only_read_and_anon_gets_nothing(tx):
                    " 'EXECUTE'), has_function_privilege('anon', 'public.match_knowledge_chunks_lexical(uuid,text,integer)',"
                    " 'EXECUTE')")
     assert tx.cur.fetchone() == (True, False)
+    tx.cur.execute("select has_function_privilege('authenticated', 'private.knowledge_read_blocked()', 'EXECUTE'),"
+                   " has_function_privilege('anon', 'private.knowledge_read_blocked()', 'EXECUTE'),"
+                   " has_function_privilege('authenticated', 'private.password_change_pending()', 'EXECUTE')")
+    assert tx.cur.fetchone() == (True, False, False)         # Core V1 helper privilege unchanged
 
 
 def test_client_writes_are_denied(tx):
@@ -550,10 +628,13 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
     tx.cur.execute("select p.proname, p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%' order by 1")
     rows = tx.cur.fetchall()
-    assert {r[0] for r in rows} >= {"match_knowledge_chunks_lexical", "knowledge_search_text",
+    assert {r[0] for r in rows} == {"match_knowledge_chunks_lexical", "knowledge_search_text",
                                     "knowledge_chunks_search_fields", "enforce_knowledge_source_scope",
-                                    "enforce_knowledge_document_immutability", "enforce_knowledge_chunk_immutability"}
-    assert all(not r[1] and r[2] == ['search_path=""'] for r in rows), rows
+                                    "enforce_knowledge_document_immutability", "enforce_knowledge_chunk_immutability",
+                                    "knowledge_read_blocked"}
+    assert all(r[2] == ['search_path=""'] for r in rows), rows
+    # The only SECURITY DEFINER is the password-guard wrapper (test_password_guard_is_core_v1s).
+    assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked"}, rows
     tx.cur.execute("select prosrc from pg_proc where proname = 'match_knowledge_chunks_lexical'")
     assert "execute" not in tx.cur.fetchone()[0].lower()                     # no dynamic SQL
 
