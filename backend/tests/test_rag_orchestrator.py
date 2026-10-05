@@ -46,9 +46,9 @@ AWD = {"dimension": "water_regime", "scenario": "awd"}
 DELTA = "what_if.awd.delta_co2e_kg"
 GROUNDED = {
     "status": "generated",
-    "answer": "Ruộng đang ngập liên tục; AWD giảm CH4 theo hướng dẫn.",
+    "answer": "Ruộng đang ngập liên tục; AWD giảm khí mê-tan theo hướng dẫn.",
     "rationale": "Tín hiệu AWD của vụ và hướng dẫn tưới AWD.",
-    "recommendations": [{"title": "Tưới AWD", "actions": ["Rút nước khi mực nước xuống 15 cm"],
+    "recommendations": [{"title": "Tưới AWD", "actions": ["Rút nước khi mực nước xuống dưới mặt ruộng"],
                          "evidence_refs": [{"source_id": "guide-awd", "chunk_id": "c1"}], "rule_code": AWD_RULE}],
     "limitations": ["Chưa có dữ liệu lượng nước"],
     "confidence": "medium",

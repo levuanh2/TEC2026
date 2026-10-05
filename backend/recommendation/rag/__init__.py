@@ -16,7 +16,7 @@ from .answers import (
     render_facts,
 )
 from .citations import resolve_citations, validate_citations
-from .claims import placeholder_ids, unreferenced_quantities, validate_fact_refs, validate_quantitative_claims
+from .claims import placeholder_ids, validate_fact_refs, validate_quantitative_claims
 from .context import SeasonRagContext, build_season_context
 from .contracts import AnswerGenerator, KnowledgeRetriever, SeasonFactsSource, SeasonScopeResolver, WhatIfSimulator
 from .errors import (
@@ -53,6 +53,12 @@ from .models import (
     WhatIfResult,
 )
 from .orchestrator import RagOrchestrator
+from .prose import (
+    validate_generated_prose,
+    validate_no_raw_links,
+    validate_no_raw_numbers,
+    validate_placeholder_syntax,
+)
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import CarbonScenarioWhatIf, ensure_supported
 
@@ -113,9 +119,12 @@ __all__ = [
     "render_facts",
     "required_access",
     "resolve_citations",
-    "unreferenced_quantities",
     "validate_citations",
     "validate_fact_refs",
+    "validate_generated_prose",
     "validate_grounding",
+    "validate_no_raw_links",
+    "validate_no_raw_numbers",
+    "validate_placeholder_syntax",
     "validate_quantitative_claims",
 ]

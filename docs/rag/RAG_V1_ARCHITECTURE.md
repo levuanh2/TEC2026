@@ -143,7 +143,8 @@ backend/
       contracts.py       Protocols: SeasonScopeResolver, SeasonFactsSource, KnowledgeRetriever,
                          AnswerGenerator, WhatIfSimulator
       facts.py           build_fact_catalog(), assert_fact_scope(), has_comparison_basis()
-      claims.py          {{fact:id}} placeholders + business-number backstop
+      claims.py          {{fact:id}} placeholders → declared catalog facts
+      prose.py           generated-prose policy: placeholder grammar, no raw number, no link
       retrieval.py       build_retrieval_query(), assert_tenant_isolation()
       citations.py       validate_citations(), resolve_citations()
       grounding.py       validate_grounding()
@@ -395,10 +396,30 @@ A fact id is never accepted as a document citation and vice versa (tested both w
 2. `GeneratedAnswer` has no numeric, URL or fact-value field; `FactRef` is only an id.
 3. Every `fact_ref` and placeholder must exist in this request's catalog, and every placeholder
    must be declared in `fact_refs`.
-4. Backstop (narrow, not NLP): after removing placeholders, a digit run followed by a business
-   unit — `%`, `kg`, `tấn`, `CO2/CO2e`, `m3/m³`, `lít`, `đ/đồng/VND`, `triệu/nghìn` — fails
-   grounding. Harmless numbers ("1 phải 5 giảm", "15 cm", "3 lần", a year) pass. Numbers spelled
-   out in words are not detected; rule 1 plus the provider prompt cover them.
+4. **Generated prose policy (`prose.py`, fail closed, decided after PR #6 review).** It applies
+   to every generator-controlled text field (`GeneratedAnswer.texts()`: `answer`, `rationale`,
+   recommendation `title` and `actions`, `limitations`) and never to trusted data
+   (`GroundedFact` values, `EvidenceChunk` content, chunk metadata, Carbon/metrics/benchmark
+   results). Outside canonical placeholders the prose may contain:
+   - **no numeric character at all** (`str.isnumeric`: any script's digits, superscripts,
+     subscripts, fractions) → `GroundingFailed("number without a system fact")`. V1 does not
+     guess which numbers are harmless. Known casualties, rejected on purpose until an explicit
+     trusted allowlist or structured source exists (decided before V1.4 with D6): years
+     ("vụ 2026"), "1 phải 5 giảm", agronomic measures ("15 cm", "3 lần"), list/ordinal
+     numbering, inline markers like "[1]", and **gas names with digits** (`CO2`, `CO2e`, `CH4`,
+     `N2O`) — the generator must write "khí mê-tan", "khí nhà kính", … or the allowlist must
+     cover them. A unit appended by the trusted renderer ("kg CO2e") is not affected: the rule
+     runs on the template, before rendering.
+   - **no link** — `scheme://`, `www.`, `mailto:`/`javascript:`/`data:`/`file:`/`tel:`, a
+     bare domain (`.com/.net/.org/.info/.io/.gov/.edu/.int/.vn`), a Markdown link `[..](..)`
+     or HTML (`<a`, `href`) → `GroundingFailed("link in generated text")`. A source URL reaches
+     a client only as trusted `CitedEvidence.url`, resolved from chunk metadata via `EvidenceRef`
+     (which has no URL field).
+   - **no brace** — the only reserved syntax is exactly `{{fact:<fact_id>}}` (`fact_id` =
+     `[A-Za-z0-9_.:-]+`). `{{ fact:id }}`, `{{FACT:id}}`, `{{fact:}}`, `{fact:id}`, unbalanced
+     braces, … → `FactReferenceMismatch("malformed fact placeholder")`.
+   Numbers spelled out in words are still not detected (known gap, MEDIUM); rule 1 plus the
+   provider prompt cover them.
 5. **Server-side trusted rendering (decided).** After grounding passes, `answers.render_answer`
    replaces every placeholder in `answer`, `rationale`, recommendation titles/actions and
    `limitations` with `format_fact(fact)`. The result keeps all three views:
@@ -420,14 +441,16 @@ A fact id is never accepted as a document citation and vice versa (tested both w
    - Unit: the fact's own unit appended verbatim (`kg CO2e`, `m3`, `VND/kg`, …). The
      dimensionless `fraction` is shown as the bare number — never ×100 into `%`, which would be
      a unit conversion. A generator must not repeat the unit after a placeholder.
-   - Unknown id, malformed placeholder or non-finite value → `FactReferenceMismatch`
-     (fail closed); no raw `{{fact:...}}` ever reaches a client.
+   - Unknown id, malformed placeholder (the renderer re-applies the placeholder grammar of
+     rule 4 before substituting) or non-finite value → `FactReferenceMismatch` (fail closed);
+     no raw `{{...}}` ever reaches a client.
 7. **Known V1 consequence (D6):** a quantity quoted from a cited document ("bón 100 kg N/ha")
    is rejected too, because documents are not system facts. This fails closed and may reject
    many real-model RECOMMEND answers. Whether, and how, cited document quantities are allowed
    (e.g. verbatim-quote spans checked against chunk text) is decided before V1.4.
-   Server-side rendering does **not** change D6, nor the known gap that numbers spelled out in
-   words are not detected by the backstop (MEDIUM).
+   Server-side rendering and the prose policy do **not** change D6 (quoted document numbers are
+   rejected by the no-raw-number rule), nor the known gap that numbers spelled out in words are
+   not detected (MEDIUM).
 8. **Canonical facts are not presentation values (D7, decided; display deferred).** String facts
    render exactly as stored, so a code such as `irrigated_continuous_flooding` can appear inside
    a Vietnamese sentence, and `fraction` facts (`co2e_percent_delta`) render as `0,2069`, not

@@ -26,6 +26,7 @@ from .models import (
     Question,
     WhatIfResult,
 )
+from .prose import validate_placeholder_syntax
 
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
 InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "generator_declined"]
@@ -75,8 +76,10 @@ def format_fact(fact: GroundedFact) -> str:
 
 def render_facts(text: str, facts: Mapping[str, GroundedFact]) -> str:
     """Replace every `{{fact:<id>}}` with its formatted trusted value. Runs
-    only after grounding; still fails closed on an unknown id or a malformed
-    placeholder, so no raw placeholder ever reaches a client."""
+    only after grounding; still fails closed on a malformed placeholder (any
+    brace outside the canonical grammar) or an unknown id, so no raw
+    placeholder ever reaches a client."""
+    validate_placeholder_syntax(text)
 
     def replace(match: Any) -> str:
         fact = facts.get(match.group(1))
@@ -84,10 +87,7 @@ def render_facts(text: str, facts: Mapping[str, GroundedFact]) -> str:
             raise FactReferenceMismatch(f"cannot render unknown fact {match.group(1)}")
         return format_fact(fact)
 
-    rendered = FACT_PLACEHOLDER.sub(replace, text)
-    if "{{fact:" in rendered:
-        raise FactReferenceMismatch("malformed fact placeholder")
-    return rendered
+    return FACT_PLACEHOLDER.sub(replace, text)
 
 
 def render_answer(answer: GeneratedAnswer, facts: Mapping[str, GroundedFact]) -> dict[str, Any]:

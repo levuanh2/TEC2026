@@ -7,6 +7,7 @@ import pytest
 
 from recommendation.rag import (
     FactKind,
+    GroundingFailed,
     HypotheticalChange,
     RagMode,
     TenantIsolationViolation,
@@ -16,7 +17,7 @@ from recommendation.rag import (
     build_season_context,
     has_comparison_basis,
     placeholder_ids,
-    unreferenced_quantities,
+    validate_no_raw_numbers,
 )
 from tests.fixtures.rag_fakes import (
     AWD_RULE,
@@ -153,20 +154,24 @@ def test_placeholders_are_parsed():
     "Phát thải 2900 CO2e.",
     "Dùng 50 lít thuốc.",
     "Lợi nhuận 1,000,000 VND.",
-])
-def test_business_numbers_outside_placeholders_are_detected(text):
-    assert unreferenced_quantities(text)
-
-
-@pytest.mark.parametrize("text", [
+    # accepted by the former unit-based backstop; V1 no longer guesses "harmless"
     "Áp dụng nguyên tắc 1 phải 5 giảm.",
     "Rút nước khi mực nước xuống 15 cm dưới mặt đất.",
     "Bón phân 3 lần trong vụ 2026.",
-    "Giảm {{fact:what_if.awd.delta_co2e_kg}} so với vụ hiện tại.",
     "Cường độ {{fact:current.metrics.co2e_per_kg}} kg CO2e/kg lúa.",
 ])
-def test_harmless_numbers_and_placeholders_pass(text):
-    assert unreferenced_quantities(text) == []
+def test_any_number_outside_placeholders_is_rejected(text):
+    with pytest.raises(GroundingFailed, match="number without a system fact"):
+        validate_no_raw_numbers(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Giảm {{fact:what_if.awd.delta_co2e_kg}} so với vụ hiện tại.",
+    "Cường độ {{fact:current.metrics.co2e_per_kg}} trên mỗi kg lúa.",
+    "Nên rút nước định kỳ.",
+])
+def test_placeholders_and_plain_prose_pass(text):
+    validate_no_raw_numbers(text)
 
 
 def test_duplicate_fact_ids_fail_loudly_instead_of_shadowing():

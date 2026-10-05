@@ -43,10 +43,12 @@ _FORBIDDEN_ROOTS = {
 }
 
 
-def _imports(path: Path) -> list[tuple[str, tuple[str, ...], int]]:
-    """(absolute module, imported names, level) for each import statement."""
+def _imports(path: Path | str) -> list[tuple[str, tuple[str, ...], int]]:
+    """(absolute module, imported names, level) for each import statement of a
+    file, or of a source snippet."""
+    source = path.read_text(encoding="utf-8") if isinstance(path, Path) else path
     out: list[tuple[str, tuple[str, ...], int]] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             out.extend((alias.name, (), 0) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -57,25 +59,55 @@ def _imports(path: Path) -> list[tuple[str, tuple[str, ...], int]]:
 def test_rag_package_exists_with_its_modules():
     names = {p.stem for p in RAG_MODULES}
     assert {"contracts", "models", "context", "citations", "grounding", "orchestrator", "errors",
-            "what_if", "retrieval", "intents", "answers", "facts", "claims"} <= names
+            "what_if", "retrieval", "intents", "answers", "facts", "claims", "prose"} <= names
+
+
+def _import_violation(module: str, names: tuple[str, ...], level: int) -> str | None:
+    """Why one RAG import statement breaks the dependency contract, or None."""
+    if level:
+        # `..rules` is the only way up: RAG may reach the Core V1 rule
+        # contract, nothing else outside its package.
+        return None if level == 1 or (level == 2 and module == "rules") else f"from {'.' * level}{module}"
+    root = module.split(".")[0]
+    if root in _FORBIDDEN_ROOTS:
+        return f"imports forbidden {module}"
+    if root not in _ALLOWED_ROOTS:
+        return f"imports unexpected {module}"
+    if root == "carbon":
+        if module != "carbon":
+            return f"carbon internals ({module}) hold formulas/factors"
+        if not names:  # `import carbon` exposes every name through the module namespace
+            return "bare `import carbon`"
+        if not set(names) <= _ALLOWED_CARBON_NAMES:
+            return f"carbon {sorted(set(names) - _ALLOWED_CARBON_NAMES)}"
+    if root == "recommendation" and not (module == "recommendation.rules" and names == ("CarbonCalculator",)):
+        return module
+    return None
+
+
+def _wires_rag(module: str, names: tuple[str, ...]) -> bool:
+    return "rag" in module.split(".") or "rag" in names
 
 
 @pytest.mark.parametrize("path", RAG_MODULES, ids=lambda p: p.name)
 def test_rag_modules_import_only_allowed_dependencies(path):
-    for module, names, level in _imports(path):
-        if level:
-            # `..rules` is the only way up: RAG may reach the Core V1 rule
-            # contract, nothing else outside its package.
-            assert level == 1 or (level == 2 and module == "rules"), f"{path.name}: from {'.' * level}{module}"
-            continue
-        root = module.split(".")[0]
-        assert root not in _FORBIDDEN_ROOTS, f"{path.name} imports forbidden {module}"
-        assert root in _ALLOWED_ROOTS, f"{path.name} imports unexpected {module}"
-        if root == "carbon":
-            assert module == "carbon", f"{path.name}: carbon internals ({module}) hold formulas/factors"
-            assert set(names) <= _ALLOWED_CARBON_NAMES, f"{path.name}: carbon {sorted(set(names) - _ALLOWED_CARBON_NAMES)}"
-        if root == "recommendation":
-            assert module == "recommendation.rules" and names == ("CarbonCalculator",), f"{path.name}: {module}"
+    for statement in _imports(path):
+        violation = _import_violation(*statement)
+        assert violation is None, f"{path.name}: {violation}"
+
+
+@pytest.mark.parametrize("source", [
+    "import carbon",
+    "import carbon.engine",
+    "from carbon import ParameterSet",
+    "from carbon.engine import CarbonEngine",
+    "import recommendation.rules",
+    "from recommendation import service",
+    "from ... import service",
+    "import supabase",
+])
+def test_import_contract_rejects_evasive_forms(source):
+    assert any(_import_violation(*statement) for statement in _imports(source)), source
 
 
 @pytest.mark.parametrize("path", RAG_MODULES, ids=lambda p: p.name)
@@ -93,15 +125,28 @@ def test_rag_modules_never_load_factor_configuration_or_files(path):
 
 def test_core_recommendation_does_not_depend_on_rag():
     for path in (BACKEND / "recommendation").glob("*.py"):
-        for module, names, level in _imports(path):
-            assert "rag" not in module.split(".") and "rag" not in names, f"{path.name} imports RAG"
+        for module, names, _level in _imports(path):
+            assert not _wires_rag(module, names), f"{path.name} imports RAG"
 
 
 def test_app_layers_do_not_wire_rag_yet():
-    """V1 is contracts only: no route, service or adapter uses the RAG core."""
+    """V1 is contracts only: no route, service or adapter uses the RAG core —
+    neither by any import form nor by a dynamic module string."""
     for path in [BACKEND / "api.py", BACKEND / "main.py", BACKEND / "service.py",
                  *sorted((BACKEND / "infrastructure").glob("*.py"))]:
+        assert not any(_wires_rag(module, names) for module, names, _level in _imports(path)), path.name
         assert "recommendation.rag" not in path.read_text(encoding="utf-8"), path.name
+
+
+@pytest.mark.parametrize("source", [
+    "from recommendation import rag",
+    "import recommendation.rag",
+    "from recommendation.rag import RagOrchestrator",
+    "from recommendation.rag.orchestrator import RagOrchestrator",
+    "from .recommendation import rag",
+])
+def test_rag_wiring_is_detected_in_every_import_form(source):
+    assert any(_wires_rag(module, names) for module, names, _level in _imports(source)), source
 
 
 @pytest.mark.parametrize("path", RAG_MODULES, ids=lambda p: p.name)

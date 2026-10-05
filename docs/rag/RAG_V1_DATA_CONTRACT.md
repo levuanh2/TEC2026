@@ -129,8 +129,12 @@ generator sees. No raw context, no policy, no secrets.
 `recommendations[AnswerRecommendation(title, actions[], evidence_refs[], fact_refs[], rule_code?)]`,
 `evidence_refs[]`, `fact_refs[]`, `limitations[]`, `confidence?`.
 **No numeric field, no URL field, no fact value.** Quantities appear as `{{fact:<fact_id>}}`.
+Its prose fields may hold no numeric character, no link and no brace outside that exact
+placeholder grammar (`prose.py`, ARCHITECTURE §13 rule 4); "CO2e"/"CH4", years and "1 phải 5
+giảm" are rejected on purpose in V1.
 
-Validation order: schema → document citations → fact references + numeric claims → intent policy
+Validation order: schema → document citations → generated-prose policy (placeholder grammar, no
+raw number, no link) → fact references → intent policy
 → trusted fact rendering. `GeneratedAnswer` is **untrusted structured output**; it is never
 returned to a client.
 

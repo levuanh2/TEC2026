@@ -2,8 +2,9 @@
 
 A schema-valid `GeneratedAnswer` is accepted only if, in this order:
   1. every document citation names a chunk retrieved for this request;
-  2. every fact reference and `{{fact:..}}` placeholder names a system fact
-     of this request's catalog, and no business number appears without one;
+  2. its prose holds no raw number, link or malformed placeholder (prose.py),
+     and every fact reference and `{{fact:..}}` placeholder names a system
+     fact of this request's catalog;
   3. it obeys the intent policy: recommendations only for action-producing
      intents, each cited, none inventing a deterministic rule; documents
      cited when the intent needs them; COMPARE/WHAT_IF answers reference
@@ -21,6 +22,7 @@ from .errors import GroundingFailed
 from .facts import COMPARISON_KINDS
 from .intents import INTENT_POLICIES, RagIntent
 from .models import EvidenceChunk, FactKind, GeneratedAnswer, GroundedFact
+from .prose import validate_generated_prose
 
 #: Facts an answer of this intent must reference to be about the right thing.
 _REQUIRED_FACT_KINDS: dict[RagIntent, frozenset[FactKind]] = {
@@ -38,7 +40,8 @@ def validate_grounding(
     for rec in answer.recommendations:
         validate_citations(rec.evidence_refs, evidence)
 
-    # 2. system facts and numbers
+    # 2. generated prose, system facts and numbers
+    validate_generated_prose(answer.texts())
     catalog = {fact.fact_id: fact for fact in facts}
     validate_fact_refs(answer.fact_refs, catalog)
     for rec in answer.recommendations:
