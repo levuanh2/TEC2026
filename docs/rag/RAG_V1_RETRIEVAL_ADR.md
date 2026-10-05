@@ -322,6 +322,9 @@ create table public.knowledge_chunks (
 - **Immutable artifacts:** BEFORE UPDATE on `knowledge_documents` rejects changes to `source_id`,
   `document_id`, `document_version`, `file_sha256`, `normalized_sha256`; `knowledge_chunks` rows are
   insert-only (search fields are set by the BEFORE INSERT trigger; UPDATE and DELETE are rejected).
+- **Archive is final (ST2):** a source or version that is `archived` can never move to another status
+  (its preserved approval record would otherwise make withdrawn knowledge retrievable again without a
+  new approval); a source or version that was ever approved is never deleted.
 
 ### 9.4 Search normalization (single source of truth)
 ```sql
@@ -407,7 +410,8 @@ latency measurements require it.
 - **Normal lifecycle: archive-only.** An approved source or version is withdrawn by setting it
   `archived` (never retrievable again, kept for provenance and citation history). There is no
   authenticated DELETE (privilege-level), and no ordinary hard-delete workflow: the database refuses
-  to delete a version that was ever approved, or its chunks (§9.3).
+  to delete a source or version that was ever approved, or its chunks, and refuses to move an
+  `archived` source or version to any other status (§9.3).
 - **Legal/copyright exception: DEFERRED** to a separate administrative purge design, to be decided
   before real-corpus operationalization if it is required. Not implemented in Migration A. Any
   future purge must:

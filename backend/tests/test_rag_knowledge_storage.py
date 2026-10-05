@@ -390,6 +390,35 @@ def test_approved_source_provenance_is_frozen_but_can_be_archived(tx):
                        (pending,)) == ("ok", None)
 
 
+@pytest.mark.parametrize("target", ["approved", "review_required", "rejected"])
+def test_archiving_is_final(tx, target):
+    """ST2: an archived source or version is never reactivated; its approval record would
+    otherwise satisfy every check and make withdrawn knowledge retrievable again."""
+    src = tx.source()
+    doc = tx.document(src, status="archived")
+    chunk = tx.chunk(doc, "withdrawn awd guidance")
+    tx.settle()
+    assert tx.operator(f"update public.knowledge_documents set status = '{target}' where id = %s",
+                       (doc,)) == ("err", CHECK_VIOLATION)
+    assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
+                       (src,)) == ("ok", None)
+    assert tx.operator(f"update public.knowledge_sources set status = '{target}' where source_id = %s",
+                       (src,)) == ("err", CHECK_VIOLATION)
+    assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
+                       (src,)) == ("ok", None)                       # staying archived is fine
+    assert chunk not in tx.rpc_ids(tx.member, tx.season_a, "awd", 50)
+
+
+def test_an_approved_source_is_never_deleted_but_a_draft_one_may_be(tx):
+    for status in ("approved", "archived"):
+        src = tx.source(status=status)
+        assert tx.operator("delete from public.knowledge_sources where source_id = %s", (src,)) \
+            == ("err", CHECK_VIOLATION), status
+    for status in ("review_required", "rejected"):
+        src = tx.source(status=status)
+        assert tx.operator("delete from public.knowledge_sources where source_id = %s", (src,)) == ("ok", None), status
+
+
 def test_duplicate_chunk_identity_or_ordinal_is_rejected(tx):
     doc = tx.document(tx.source(), status="review_required")
     chunk = tx.chunk(doc, "awd")

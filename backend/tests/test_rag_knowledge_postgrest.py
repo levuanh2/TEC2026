@@ -7,7 +7,7 @@ client writes, no anonymous access, no extra scope parameter.
 
 Knowledge rows are synthetic TEST FIXTURES — NOT REAL APPROVED SOURCES. Creates users and a
 tenant, so it only runs against a LOCAL Supabase stack and deletes everything it created
-(approved knowledge is undeletable by design, so cleanup disables the two immutability
+(approved knowledge is undeletable by design, so cleanup disables the three immutability
 triggers inside its own transaction).
 """
 from __future__ import annotations
@@ -142,6 +142,7 @@ def _cleanup(admin, ids):
         # Approved knowledge is undeletable by design; the test owner lifts that only here.
         conn.execute("alter table public.knowledge_chunks disable trigger knowledge_chunks_immutable")
         conn.execute("alter table public.knowledge_documents disable trigger knowledge_documents_immutable")
+        conn.execute("alter table public.knowledge_sources disable trigger knowledge_sources_scope")
         params = {"s": ids["sources"], "o": orgs, "u": users}
         farms = "select id from public.farms where cooperative_id = any(%(o)s::uuid[])"
         plots = f"select id from public.plots where farm_id in ({farms})"
@@ -160,6 +161,7 @@ def _cleanup(admin, ids):
             "delete from public.organizations where id = any(%(o)s::uuid[])",
         ):
             conn.execute(statement, params)
+        conn.execute("alter table public.knowledge_sources enable trigger knowledge_sources_scope")
         conn.execute("alter table public.knowledge_documents enable trigger knowledge_documents_immutable")
         conn.execute("alter table public.knowledge_chunks enable trigger knowledge_chunks_immutable")
         conn.commit()

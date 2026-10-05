@@ -185,13 +185,22 @@ create index knowledge_chunks_search_trgm_idx
 -- relation is checked at INSERT only: Core V1 does not freeze farms.cooperative_id, the RLS
 -- policy and the RPC re-check it at read time (a moved farm makes the source unretrievable),
 -- and an operator can still archive such a stale source. The publisher provenance and the
--- approval record are fixed once the source has been approved; status may still move.
+-- approval record are fixed once the source has been approved; status may still move, but
+-- `archived` is final (decision ST2: archive-only lifecycle -- re-publishing needs a new,
+-- newly approved source) and a source that was ever approved is never deleted.
 create function private.enforce_knowledge_source_scope()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
+  if tg_op = 'DELETE' then
+    if old.approved_at is not null then
+      raise exception 'knowledge source % was approved and cannot be deleted (archive it)', old.source_id
+        using errcode = '23514';
+    end if;
+    return old;
+  end if;
   if tg_op = 'INSERT' then
     if new.farm_id is not null and not exists (
         select 1 from public.farms f where f.id = new.farm_id and f.cooperative_id = new.organization_id) then
@@ -203,6 +212,9 @@ begin
   if (new.source_id, new.visibility, new.organization_id, new.farm_id, new.created_at)
       is distinct from (old.source_id, old.visibility, old.organization_id, old.farm_id, old.created_at) then
     raise exception 'knowledge source % scope is immutable', old.source_id using errcode = '23514';
+  end if;
+  if old.status = 'archived' and new.status <> 'archived' then
+    raise exception 'knowledge source % is archived; archiving is final', old.source_id using errcode = '23514';
   end if;
   if old.approved_at is not null
      and (new.title, new.owner, new.source_type, new.authority, new.approved_by, new.approved_at, new.review_note)
@@ -217,13 +229,15 @@ $$;
 revoke all on function private.enforce_knowledge_source_scope() from public, anon, authenticated;
 
 create trigger knowledge_sources_scope
-  before insert or update on public.knowledge_sources
+  before insert or update or delete on public.knowledge_sources
   for each row execute function private.enforce_knowledge_source_scope();
 
 -- Citation identity and provenance never change: identity, hashes and pipeline versions
 -- are fixed at insert; descriptive provenance, license and the approval record are fixed
--- once a version has been approved. Status may still move (approved -> archived). A version
--- that was ever approved cannot be deleted.
+-- once a version has been approved. Status may still move (approved -> archived), but
+-- `archived` is final (ST2: a withdrawn version never becomes retrievable again; a new
+-- version is ingested and approved instead). A version that was ever approved cannot be
+-- deleted.
 create function private.enforce_knowledge_document_immutability()
 returns trigger
 language plpgsql
@@ -243,6 +257,10 @@ begin
      (old.id, old.source_id, old.document_id, old.document_version, old.file_sha256, old.normalized_sha256,
       old.parser_version, old.normalizer_version, old.chunker_version, old.imported_at) then
     raise exception 'knowledge document % % % identity/provenance is immutable',
+      old.source_id, old.document_id, old.document_version using errcode = '23514';
+  end if;
+  if old.status = 'archived' and new.status <> 'archived' then
+    raise exception 'knowledge document % % % is archived; archiving is final',
       old.source_id, old.document_id, old.document_version using errcode = '23514';
   end if;
   if old.approved_at is not null
