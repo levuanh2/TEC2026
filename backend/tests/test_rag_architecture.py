@@ -129,11 +129,40 @@ def test_core_recommendation_does_not_depend_on_rag():
             assert not _wires_rag(module, names), f"{path.name} imports RAG"
 
 
+def test_app_layers_do_not_wire_rag_yet():
+    """V1 is contracts only: no route, service or adapter in the app layers uses
+    the RAG core — neither by any import form nor by a dynamic module string."""
+    for path in [BACKEND / "api.py", BACKEND / "main.py", BACKEND / "service.py",
+                 *sorted((BACKEND / "infrastructure").glob("*.py"))]:
+        assert not any(_wires_rag(module, names) for module, names, _level in _imports(path)), path.name
+        assert "recommendation.rag" not in path.read_text(encoding="utf-8"), path.name
+
+
 _NOT_PRODUCTION = {"tests", "tests_strict", "__pycache__", ".venv", "venv"}
 PRODUCTION_MODULES = sorted(
     path for path in BACKEND.rglob("*.py")
     if not _NOT_PRODUCTION & set(path.relative_to(BACKEND).parts) and RAG_DIR not in path.parents
 )
+#: The generation path: a provider adapter implements `AnswerGenerator` over
+#: `GenerationInput` and returns a generated-answer shape; wiring one means
+#: constructing a `RagOrchestrator`.
+_GENERATION_NAMES = {"AnswerGenerator", "GenerationInput", "RagOrchestrator", "GeneratedAnswer", "InformationalAnswer"}
+
+
+def _generation_references(source: str) -> set[str]:
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom):
+            found |= {alias.name for alias in node.names} & _GENERATION_NAMES
+            if (node.module or "").split(".")[-1] == "orchestrator" and "rag" in (node.module or "").split("."):
+                found.add(node.module or "")
+        elif isinstance(node, ast.Import):
+            found |= {alias.name for alias in node.names if alias.name.startswith("recommendation.rag.orchestrator")}
+        elif isinstance(node, ast.Attribute) and node.attr in _GENERATION_NAMES:
+            found.add(node.attr)
+        elif isinstance(node, ast.Name) and node.id in _GENERATION_NAMES:
+            found.add(node.id)
+    return found
 
 
 def test_no_answer_generator_is_wired_until_d8_is_closed():
@@ -141,20 +170,44 @@ def test_no_answer_generator_is_wired_until_d8_is_closed():
 
     An INFORMATIONAL answer has no recommendation slot, but its free text can
     still phrase advice ("nên rút nước định kỳ"), and nothing in V1 detects
-    that. So no production module may use the RAG core — no route, service,
-    `rag_application.py` or provider adapter — and the RAG core holds no
-    concrete `AnswerGenerator`. A real generator lands only together with a
-    closed D8 strategy (docs/rag/RAG_V1_ARCHITECTURE.md §11) and a deliberate
-    change of this test, never by silently plugging into READ generation."""
+    that. So no production module may touch the GENERATION path — implement
+    `AnswerGenerator`, build a `GenerationInput`, wire a `RagOrchestrator` or
+    handle a generated answer — and the RAG core holds no concrete generator.
+    Retrieval and scope adapters (V1.3, `rag_application.py`) are not affected.
+    A real generator lands only together with a closed D8 strategy
+    (docs/rag/RAG_V1_ARCHITECTURE.md §11) and a deliberate change of this
+    test, never by silently plugging into READ generation."""
     assert PRODUCTION_MODULES and BACKEND / "api.py" in PRODUCTION_MODULES
     for path in PRODUCTION_MODULES:
-        assert not any(_wires_rag(module, names) for module, names, _level in _imports(path)), path
-        assert "recommendation.rag" not in path.read_text(encoding="utf-8"), path
+        found = _generation_references(path.read_text(encoding="utf-8"))
+        assert not found, f"{path}: generation path {sorted(found)} before D8"
     for path in RAG_MODULES:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.ClassDef) and not any(getattr(b, "id", None) == "Protocol" for b in node.bases):
                 methods = {item.name for item in node.body if isinstance(item, ast.FunctionDef)}
                 assert "generate" not in methods, f"{path.name}: concrete generator {node.name} before D8"
+
+
+@pytest.mark.parametrize("source", [
+    "from recommendation.rag import AnswerGenerator",
+    "from recommendation.rag.contracts import AnswerGenerator as Port",
+    "from recommendation.rag import GenerationInput",
+    "from recommendation import rag; rag.RagOrchestrator(retriever=r, generator=g, what_if=w)",
+    "import recommendation.rag.orchestrator",
+    "from recommendation.rag.orchestrator import _parse",
+    "from recommendation.rag import InformationalAnswer",
+])
+def test_d8_gate_detects_every_generation_reference(source):
+    assert _generation_references(source), source
+
+
+@pytest.mark.parametrize("source", [
+    "from recommendation.rag import KnowledgeRetriever, SeasonScopeResolver, build_retrieval_query",
+    "from recommendation.rag import RetrievalQuery, EvidenceChunk, assert_tenant_isolation",
+    "from recommendation.rag.contracts import SeasonFactsSource",
+])
+def test_d8_gate_leaves_v1_3_retrieval_and_scope_adapters_free(source):
+    assert not _generation_references(source), source
 
 
 @pytest.mark.parametrize("source", [

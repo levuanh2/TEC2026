@@ -385,9 +385,12 @@ Authorization runs **before** context loading, what-if, retrieval and generation
   - B. server-generated informational templates for READ intents (no free-form LLM prose);
   - C. a semantic policy classifier/guard with an explicit evaluation dataset.
   Enforced gate today: `test_rag_architecture.py::test_no_answer_generator_is_wired_until_d8_is_closed`
-  fails if any production module uses the RAG core or the RAG core holds a concrete
-  `AnswerGenerator`. Lifting it is a deliberate change made together with closing D8. PR #6 has no
-  route, generator or provider, so D8 is not reachable at runtime.
+  fails if any production module touches the **generation path** (`AnswerGenerator`,
+  `GenerationInput`, `RagOrchestrator`, `GeneratedAnswer`/`InformationalAnswer`, in any import or
+  attribute form) or the RAG core holds a concrete `AnswerGenerator`. V1.3 retrieval and scope
+  adapters (`rag_application.py`: `KnowledgeRetriever`, `SeasonScopeResolver`, …) are not
+  affected. Lifting it is a deliberate change made together with closing D8. PR #6 has no route,
+  generator or provider, so D8 is not reachable at runtime.
 - Permissions never come from the request. A refusal at any level is `RagAccessDenied` → 404
   `not_found` (same as Recommendation/CV: neither scope nor the refusing rule can be probed).
 - The orchestrator rejects a scope whose `crop_season_id` differs from the request.
