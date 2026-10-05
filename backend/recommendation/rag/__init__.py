@@ -31,19 +31,23 @@ from .errors import (
     TenantIsolationViolation,
     UnsupportedWhatIfDimension,
 )
-from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis
+from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis, usable_facts
 from .grounding import validate_grounding
 from .intents import (
     CAPABILITY_ACCESS,
+    CAPABILITY_FACT_USAGE,
     INTENT_POLICIES,
     AccessLevel,
+    FactUsage,
     GenerationCapability,
     IntentPolicy,
     RagIntent,
     RagMode,
+    allowed_fact_usage,
     required_access,
 )
 from .models import (
+    FACT_USAGE,
     SUPPORTED_WHAT_IF_DIMENSIONS,
     AnswerRecommendation,
     AuthorizedSeasonScope,
@@ -75,6 +79,8 @@ from .what_if import CarbonScenarioWhatIf, ensure_supported
 
 __all__ = [
     "CAPABILITY_ACCESS",
+    "CAPABILITY_FACT_USAGE",
+    "FACT_USAGE",
     "INTENT_POLICIES",
     "MISSING_FACT_TEXT",
     "SUPPORTED_WHAT_IF_DIMENSIONS",
@@ -91,6 +97,7 @@ __all__ = [
     "FactKind",
     "FactRef",
     "FactReferenceMismatch",
+    "FactUsage",
     "GeneratedAnswer",
     "GenerationCapability",
     "GenerationInput",
@@ -120,6 +127,7 @@ __all__ = [
     "WhatIfDimension",
     "WhatIfResult",
     "WhatIfSimulator",
+    "allowed_fact_usage",
     "assert_fact_scope",
     "assert_tenant_isolation",
     "build_fact_catalog",
@@ -133,6 +141,7 @@ __all__ = [
     "render_facts",
     "required_access",
     "resolve_citations",
+    "usable_facts",
     "validate_citations",
     "validate_fact_refs",
     "validate_generated_prose",

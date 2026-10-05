@@ -3,8 +3,10 @@
 A schema-valid `GeneratedAnswer` is accepted only if, in this order:
   1. every document citation names a chunk retrieved for this request;
   2. its prose holds no raw number, link or malformed placeholder (prose.py),
-     and every fact reference and `{{fact:..}}` placeholder names a system
-     fact of this request's catalog;
+     every fact reference and `{{fact:..}}` placeholder names a system fact
+     of this request's catalog, and every referenced fact's usage is allowed
+     for the intent's capability (no ACTION_CONTEXT in an INFORMATIONAL
+     answer);
   3. it obeys the intent policy: recommendations only for action-producing
      intents, each cited, none inventing a deterministic rule; documents
      cited when the intent needs them; COMPARE/WHAT_IF answers reference
@@ -18,9 +20,9 @@ from collections.abc import Sequence
 
 from .citations import validate_citations
 from .claims import validate_fact_refs, validate_quantitative_claims
-from .errors import GroundingFailed
+from .errors import FactReferenceMismatch, GroundingFailed
 from .facts import COMPARISON_KINDS
-from .intents import INTENT_POLICIES, RagIntent
+from .intents import INTENT_POLICIES, RagIntent, allowed_fact_usage
 from .models import EvidenceChunk, FactKind, GeneratedAnswer, GroundedFact
 from .prose import validate_generated_prose
 
@@ -48,9 +50,14 @@ def validate_grounding(
         validate_fact_refs(rec.fact_refs, catalog)
     declared = {ref.fact_id for ref in answer.all_fact_refs()}
     validate_quantitative_claims(answer.texts(), declared, catalog)
+    policy = INTENT_POLICIES[intent]
+    allowed = allowed_fact_usage(policy.capability)
+    for fact_id in sorted(declared):
+        if catalog[fact_id].usage not in allowed:
+            raise FactReferenceMismatch(
+                f"fact {fact_id} is {catalog[fact_id].usage}; a {policy.capability} answer may not use it")
 
     # 3. intent policy
-    policy = INTENT_POLICIES[intent]
     if answer.recommendations and not policy.may_recommend:
         raise GroundingFailed(f"intent '{intent}' cannot produce recommendations")
     for rec in answer.recommendations:

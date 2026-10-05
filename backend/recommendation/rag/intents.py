@@ -51,6 +51,21 @@ class GenerationCapability(StrEnum):
     ACTION_PRODUCING = "action_producing"
 
 
+class FactUsage(StrEnum):
+    """How a system fact may be used, fixed by its trusted source field
+    (`models.FACT_USAGE`), never by its text, the caller or the model."""
+
+    #: A measured/calculated or observed value: season attributes, Resource
+    #: Metrics, actual Carbon, completeness/readiness, CV observations,
+    #: finalized benchmarks, authorized comparison seasons.
+    INFORMATIONAL_SAFE = "informational_safe"
+    #: Recommendation/intervention semantics: every field of a stored
+    #: deterministic recommendation (title, reason, impact/delta, ...) and
+    #: what-if impacts. READ access to the Core V1 row does not make it
+    #: material for an informational answer.
+    ACTION_CONTEXT = "action_context"
+
+
 #: Decision D1 (closed): action-producing generation keeps Core V1 write
 #: semantics even though nothing is persisted — no new access for viewers,
 #: managers, former owners or other organizations. Free text of an
@@ -60,6 +75,18 @@ CAPABILITY_ACCESS: dict[GenerationCapability, AccessLevel] = {
     GenerationCapability.INFORMATIONAL: AccessLevel.READ,
     GenerationCapability.ACTION_PRODUCING: AccessLevel.WRITE,
 }
+
+
+#: Which facts each capability may reference, see and render.
+CAPABILITY_FACT_USAGE: dict[GenerationCapability, frozenset[FactUsage]] = {
+    GenerationCapability.INFORMATIONAL: frozenset({FactUsage.INFORMATIONAL_SAFE}),
+    GenerationCapability.ACTION_PRODUCING: frozenset({FactUsage.INFORMATIONAL_SAFE, FactUsage.ACTION_CONTEXT}),
+}
+
+
+def allowed_fact_usage(capability: GenerationCapability | None) -> frozenset[FactUsage]:
+    """No capability (no generation) may use no fact at all."""
+    return frozenset() if capability is None else CAPABILITY_FACT_USAGE[capability]
 
 
 @dataclass(frozen=True)

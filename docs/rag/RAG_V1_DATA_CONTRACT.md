@@ -83,6 +83,7 @@ callers. No permission ever comes from the request; the RAG core never queries t
 | `provenance` | flat map | calculation_id, input_hash, engine/ef versions, rule_code/version, benchmark source, … |
 | `crop_season_id`, `organization_id` | id \| None | scope; None only for a public benchmark |
 | `authoritative` | `Literal[True]` | |
+| `usage` | `FactUsage` (computed, read-only) | `informational_safe` \| `action_context`, derived from `kind` (`FACT_USAGE`): `rule_signal` and `what_if` are `action_context`, every other kind `informational_safe`; an unmapped kind is `action_context`. Cannot be supplied or changed. |
 
 Fact id convention: `current.metrics.<metric>`, `current.carbon.total_co2e_kg`,
 `current.carbon.breakdown.<i>`, `current.completeness.<group>`, `current.readiness.*`,
@@ -132,6 +133,10 @@ neither the caller nor the model chooses it.
 | RECOMMEND / WHAT_IF | ACTION_PRODUCING | WRITE |
 | UNKNOWN | none — no generation | READ |
 
+`GenerationInput.facts` holds only the facts the capability may use: INFORMATIONAL sees
+`informational_safe` facts only (validator-enforced); grounding then rejects any INFORMATIONAL
+`FactRef` to an `action_context` fact, and the renderer receives only usable facts.
+
 `GeneratedAnswer` — the full untrusted shape (validated by `model_validate`):
 `status (generated | insufficient_evidence)`, `answer`, `rationale?`,
 `recommendations[AnswerRecommendation(title, actions[], evidence_refs[], fact_refs[], rule_code?)]`,
@@ -165,7 +170,7 @@ returned to a client.
 | `facts[]` | exactly the referenced `GroundedFact`s from the catalog, canonical values unchanged |
 | `evidence[]` (`CitedEvidence`) | `resolve_citations` from trusted chunk metadata |
 | `insufficient_reason` | `no_evidence_retrieved \| no_comparison_basis \| generator_declined`, set iff insufficient |
-| `signals[]` | copied from `SeasonRagContext.signals` |
+| `signals[]` | copied from `SeasonRagContext.signals` for ACTION_PRODUCING only; `()` for INFORMATIONAL (stored recommendations are ACTION_CONTEXT) |
 | `what_if` | `WhatIfResult` from the Carbon service, or None |
 | `basis` | `AnswerBasis(carbon_calculation_id, carbon_input_hash, ef_config_version, signal_rule_codes)`; None for `needs_clarification` |
 
@@ -199,7 +204,8 @@ Valid results, not exceptions:
 | `insufficient_evidence / no_evidence_retrieved` | RECOMMEND/EVIDENCE with no retrieved document | no |
 | `insufficient_evidence / generator_declined` | generator returned `insufficient_evidence` (no recommendations allowed) | yes |
 
-Deterministic `signals` and `what_if` numbers are still returned when insufficient.
+Deterministic `signals` (ACTION_PRODUCING only) and `what_if` numbers are still returned when
+insufficient.
 
 ## 9. What-if (`models.py`, `what_if.py`)
 

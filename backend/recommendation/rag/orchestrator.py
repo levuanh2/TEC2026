@@ -28,12 +28,12 @@ from .answers import (
     render_answer,
 )
 from .citations import resolve_citations
-from .context import SeasonRagContext, build_season_context
+from .context import DeterministicSignal, SeasonRagContext, build_season_context
 from .contracts import AnswerGenerator, KnowledgeRetriever, SeasonFactsSource, SeasonScopeResolver, WhatIfSimulator
 from .errors import GenerationUnavailable, InvalidGeneratedSchema, RagAccessDenied, RagError, RetrievalUnavailable
-from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis
+from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis, usable_facts
 from .grounding import validate_grounding
-from .intents import INTENT_POLICIES, GenerationCapability, RagIntent, required_access
+from .intents import INTENT_POLICIES, FactUsage, GenerationCapability, RagIntent, allowed_fact_usage, required_access
 from .models import GeneratedAnswer, GroundedFact, InformationalAnswer, RagQuestionRequest, WhatIfResult
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import ensure_supported
@@ -81,52 +81,57 @@ class RagOrchestrator:
         what_if = self._what_if.simulate(scope, request.hypothetical) if request.hypothetical is not None else None
         catalog = build_fact_catalog(context, what_if)
         assert_fact_scope(catalog, scope, context)
+        # What this capability may see, reference and render; INFORMATIONAL
+        # never handles ACTION_CONTEXT (stored recommendations, what-if impact).
+        usable = usable_facts(catalog, capability)
+        signals = context.signals if FactUsage.ACTION_CONTEXT in allowed_fact_usage(capability) else ()
 
-        if intent is RagIntent.COMPARE and not has_comparison_basis(catalog):
-            return _insufficient(request, intent, context, what_if, "no_comparison_basis")
+        if intent is RagIntent.COMPARE and not has_comparison_basis(usable):
+            return _insufficient(request, intent, context, signals, what_if, "no_comparison_basis")
 
         query = build_retrieval_query(request.question, intent, scope)
         evidence = tuple(_adapter_call(lambda: self._retriever.retrieve(query), RetrievalUnavailable))
         assert_tenant_isolation(evidence, scope)
         if not evidence and policy.needs_documents:
-            return _insufficient(request, intent, context, what_if, "no_evidence_retrieved")
+            return _insufficient(request, intent, context, signals, what_if, "no_evidence_retrieved")
 
         raw = _adapter_call(
             lambda: self._generator.generate(GenerationInput(
-                question=request.question, intent=intent, capability=capability, facts=catalog, evidence=evidence,
+                question=request.question, intent=intent, capability=capability, facts=usable, evidence=evidence,
             )),
             GenerationUnavailable,
         )
         generated = validate_grounding(
             _parse(raw, capability), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
         )
-        # Rendering only ever sees a grounded answer and the trusted catalog.
-        rendered = render_answer(generated, {fact.fact_id: fact for fact in catalog})
+        # Rendering only ever sees a grounded answer and the facts this
+        # capability may use (grounding already rejected any other reference).
+        rendered = render_answer(generated, {fact.fact_id: fact for fact in usable})
 
         if generated.status == "insufficient_evidence":
-            return _insufficient(request, intent, context, what_if, "generator_declined",
+            return _insufficient(request, intent, context, signals, what_if, "generator_declined",
                                  answer=rendered["answer"], answer_template=rendered["answer_template"],
-                                 facts=_referenced(generated, catalog))
+                                 facts=_referenced(generated, usable))
         return RagAnswerResult(
             status="generated", intent=intent, mode=request.mode, crop_season_id=scope.crop_season_id,
             **rendered, evidence=resolve_citations(generated.all_evidence_refs(), evidence),
-            facts=_referenced(generated, catalog), confidence=generated.confidence,
-            signals=context.signals, what_if=what_if, basis=_basis(context),
+            facts=_referenced(generated, usable), confidence=generated.confidence,
+            signals=signals, what_if=what_if, basis=_basis(context, signals),
         )
 
 
 def _insufficient(
-    request: RagQuestionRequest, intent: RagIntent, context: SeasonRagContext, what_if: WhatIfResult | None,
-    reason: InsufficientReason, *, answer: str | None = None, answer_template: str | None = None,
-    facts: tuple[GroundedFact, ...] = (),
+    request: RagQuestionRequest, intent: RagIntent, context: SeasonRagContext,
+    signals: tuple[DeterministicSignal, ...], what_if: WhatIfResult | None, reason: InsufficientReason, *,
+    answer: str | None = None, answer_template: str | None = None, facts: tuple[GroundedFact, ...] = (),
 ) -> RagAnswerResult:
-    # Deterministic facts stay valid without evidence: signals and the
-    # engine's what-if numbers are still returned.
+    # Deterministic facts stay valid without evidence: the signals this
+    # capability may carry and the engine's what-if numbers are still returned.
     return RagAnswerResult(
         status="insufficient_evidence", intent=intent, mode=request.mode, crop_season_id=context.crop_season_id,
         answer=answer or INSUFFICIENT_MESSAGES[reason], answer_template=answer_template,
         insufficient_reason=reason, facts=facts,
-        signals=context.signals, what_if=what_if, basis=_basis(context),
+        signals=signals, what_if=what_if, basis=_basis(context, signals),
     )
 
 
@@ -148,11 +153,11 @@ def _referenced(answer: GeneratedAnswer, catalog: tuple[GroundedFact, ...]) -> t
     return tuple(fact for fact in catalog if fact.fact_id in ids)
 
 
-def _basis(context: SeasonRagContext) -> AnswerBasis:
+def _basis(context: SeasonRagContext, signals: tuple[DeterministicSignal, ...]) -> AnswerBasis:
     carbon = context.carbon
     return AnswerBasis(
         carbon_calculation_id=carbon.calculation_id if carbon else None,
         carbon_input_hash=carbon.input_hash if carbon else None,
         ef_config_version=carbon.ef_config_version if carbon else None,
-        signal_rule_codes=tuple(signal.rule_code for signal in context.signals),
+        signal_rule_codes=tuple(signal.rule_code for signal in signals),
     )

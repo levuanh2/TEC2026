@@ -18,11 +18,11 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, computed_field, model_validator
 
 from carbon import SCENARIOS
 
-from .intents import AccessLevel, RagIntent, RagMode
+from .intents import AccessLevel, FactUsage, RagIntent, RagMode
 
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 FactId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:\-]+$", min_length=1, max_length=200)]
@@ -168,6 +168,25 @@ class FactKind(StrEnum):
     WHAT_IF = "what_if"
 
 
+#: Usage by trusted source kind. Stored recommendation signals (title,
+#: reason, impact/delta, ...) and what-if impacts are ACTION_CONTEXT whatever
+#: their text says; an actual Carbon or metric value is INFORMATIONAL_SAFE.
+FACT_USAGE: dict[FactKind, FactUsage] = {
+    FactKind.SEASON_ATTRIBUTE: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.RESOURCE_METRIC: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.CARBON_TOTAL: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.CARBON_INTENSITY: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.CARBON_BREAKDOWN: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.DATA_COMPLETENESS: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.CARBON_READINESS: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.CV_SIGNAL: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.BENCHMARK: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.COMPARISON_SEASON: FactUsage.INFORMATIONAL_SAFE,
+    FactKind.RULE_SIGNAL: FactUsage.ACTION_CONTEXT,
+    FactKind.WHAT_IF: FactUsage.ACTION_CONTEXT,
+}
+
+
 class GroundedFact(Contract):
     """One authoritative AgriCarbon value, built by trusted code
     (`facts.build_fact_catalog`) — never by a generator. A None value is a
@@ -185,6 +204,13 @@ class GroundedFact(Contract):
     crop_season_id: Identifier | None = None
     organization_id: Identifier | None = None
     authoritative: Literal[True] = True
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def usage(self) -> FactUsage:
+        """Derived from the trusted `kind`, so it can be neither supplied nor
+        changed; a kind without an entry is ACTION_CONTEXT (fail closed)."""
+        return FACT_USAGE.get(self.kind, FactUsage.ACTION_CONTEXT)
 
 
 class FactRef(Contract):

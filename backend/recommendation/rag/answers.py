@@ -14,7 +14,7 @@ from pydantic import model_validator
 from .claims import FACT_PLACEHOLDER
 from .context import DeterministicSignal
 from .errors import FactReferenceMismatch
-from .intents import INTENT_POLICIES, GenerationCapability, RagIntent, RagMode
+from .intents import INTENT_POLICIES, GenerationCapability, RagIntent, RagMode, allowed_fact_usage
 from .models import (
     AnswerRecommendation,
     CitedEvidence,
@@ -130,6 +130,10 @@ class GenerationInput(Contract):
     def _capability_is_the_intent_policy(self) -> GenerationInput:
         if INTENT_POLICIES[self.intent].capability is not self.capability:
             raise ValueError(f"capability {self.capability} is not the policy of intent {self.intent}")
+        allowed = allowed_fact_usage(self.capability)
+        hidden = [fact.fact_id for fact in self.facts if fact.usage not in allowed]
+        if hidden:
+            raise ValueError(f"a {self.capability} generation may not see {hidden[0]}")
         return self
 
 

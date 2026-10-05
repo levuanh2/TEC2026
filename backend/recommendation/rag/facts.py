@@ -19,6 +19,7 @@ from collections.abc import Iterable
 
 from .context import ResourceMetricFacts, SeasonRagContext
 from .errors import TenantIsolationViolation
+from .intents import GenerationCapability, allowed_fact_usage
 from .models import AuthorizedSeasonScope, FactKind, GroundedFact, Scalar, WhatIfResult
 
 CURRENT = "current"
@@ -166,6 +167,13 @@ def assert_fact_scope(facts: Iterable[GroundedFact], scope: AuthorizedSeasonScop
     for fact in facts:
         if fact.organization_id not in (None, scope.organization_id) or fact.crop_season_id not in (None, *seasons):
             raise TenantIsolationViolation(f"system fact outside the caller's scope: {fact.fact_id}")
+
+
+def usable_facts(facts: Iterable[GroundedFact], capability: GenerationCapability) -> tuple[GroundedFact, ...]:
+    """The facts a capability may see, reference and render: an INFORMATIONAL
+    generation never even receives ACTION_CONTEXT facts."""
+    allowed = allowed_fact_usage(capability)
+    return tuple(fact for fact in facts if fact.usage in allowed)
 
 
 def has_comparison_basis(facts: Iterable[GroundedFact]) -> bool:

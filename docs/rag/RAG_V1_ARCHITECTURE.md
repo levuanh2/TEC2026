@@ -375,6 +375,29 @@ Authorization runs **before** context loading, what-if, retrieval and generation
   with `InformationalAnswer`, which has no recommendation/action slot (emitting one, even empty,
   is `InvalidGeneratedSchema`), grounding rejects recommendations again for non-action intents,
   and it runs no Carbon call and writes nothing.
+- **Fact usage (structural, enforced).** Every `GroundedFact` has a `usage` derived from its
+  trusted source kind (`models.FACT_USAGE`) — never from its text, the caller or the model:
+  - `INFORMATIONAL_SAFE` — actual/observed values: season attributes (e.g. the recorded water
+    regime), Resource Metrics, actual Carbon total/intensity/breakdown, completeness, readiness,
+    CV observations, finalized benchmarks, authorized comparison seasons;
+  - `ACTION_CONTEXT` — every field of a stored deterministic recommendation
+    (`current.signal.<rule>.*`: title, reason, compared_to, status, impact status,
+    before/after/delta/percent) and what-if impacts (`what_if.*`). "Cân nhắc tưới AWD" and its
+    600 kg CO2e impact are ACTION_CONTEXT because of the field they come from; the same 2900 kg
+    as `current.carbon.total_co2e_kg` is an actual value and INFORMATIONAL_SAFE.
+  A kind without an entry is ACTION_CONTEXT (fail closed). INFORMATIONAL may use
+  `INFORMATIONAL_SAFE` only; ACTION_PRODUCING may use both (`intents.CAPABILITY_FACT_USAGE`).
+  An INFORMATIONAL generation never *sees* ACTION_CONTEXT (`usable_facts`, and the
+  `GenerationInput` validator), grounding rejects any reference to it
+  (`FactReferenceMismatch`) before rendering, the renderer only receives the usable facts, and the
+  result carries no stored `signals` and no signal rule codes in `basis`.
+- **This is not an authorization change.** A viewer/manager keeps READ access to the underlying
+  Core V1 recommendation row (`GET /crop-seasons/{id}/recommendations`, caller RLS; unchanged).
+  RAG INFORMATIONAL generation deliberately exposes a narrower semantic subset, as
+  defense-in-depth: **READ access to data ≠ permission for AI to republish that data as
+  action-producing advice.** Explaining a stored recommendation to a READ caller ("giải thích
+  khuyến nghị đã lưu") would need its own structured read-only capability — deferred (D9), not
+  opened implicitly through EXPLAIN.
 - **D8 — READ-tier semantic advice gate (OPEN; MUST RESOLVE BEFORE ANY REAL LLM ROUTE).**
   INFORMATIONAL *free text* can still phrase advice ("Bạn nên rút nước định kỳ."). V1 does not
   detect that, and no keyword/regex list is used as a security boundary — an LLM can phrase an
@@ -623,6 +646,8 @@ Closed:
   Q&A UI phase.
 
 Open (future, none blocks this skeleton):
+- **D9** Whether READ callers may get an AI explanation of a stored recommendation; if so, a
+  separate structured read-only capability/intent — EXPLAIN never carries ACTION_CONTEXT.
 - **D8** READ-tier semantic advice gate: prevent semantic recommendation leakage through
   INFORMATIONAL free-text generation before enabling a real LLM (§11). **Must be closed before
   any real generator or route**; enforced by the D8 architecture test.
