@@ -1,7 +1,8 @@
 # ADR — RAG V1.3 Retrieval Storage and Pipeline
 
-Status: **DESIGN HARDENED (V1.3-A)** — direction approved; Migration A specified below, **not written
-or applied**; no code, no dependency, no ingestion.
+Status: **V1.3-B IMPLEMENTED LOCALLY** — Migration A is
+`supabase/migrations/20261005090000_knowledge_retrieval_lexical_foundation.sql` (+ rollback), validated
+on the local/CI stack only; **not applied to hosted**. No ingestion code, no dependency, no vector.
 Branch: `feature/rag-v1-retrieval` from `main @ 6c1dfe1` (PR #6 merged).
 Related: [RAG_V1_ARCHITECTURE.md](RAG_V1_ARCHITECTURE.md), [RAG_V1_DATA_CONTRACT.md](RAG_V1_DATA_CONTRACT.md),
 [RAG_V1_SOURCE_POLICY.md](RAG_V1_SOURCE_POLICY.md), [RAG_V1_RETRIEVAL_EVAL_PLAN.md](RAG_V1_RETRIEVAL_EVAL_PLAN.md).
@@ -224,7 +225,7 @@ tenant documents; the schema and tests cover tenant rows so isolation is proven 
 
 ---
 
-## 9. Migration A — Knowledge lexical foundation (specification; NOT written, NOT applied)
+## 9. Migration A — Knowledge lexical foundation (`20261005090000`, local/CI only; NOT applied to hosted)
 
 One migration file plus its rollback, applied local → CI → hosted, one at a time with approval.
 **No `vector` extension, no vector column, no vector index, no embedding parameter.**
@@ -317,32 +318,50 @@ create table public.knowledge_chunks (
 
 ### 9.4 Search normalization (single source of truth)
 ```sql
-create function private.knowledge_search_text(p text) returns text
+create function private.knowledge_search_text(p_text text) returns text
   language sql stable parallel safe set search_path = ''
-  as $$ select lower(extensions.unaccent('extensions.unaccent'::regdictionary, coalesce(p, ''))) $$;
--- BEFORE INSERT on knowledge_chunks:
---   new.search_text := private.knowledge_search_text(coalesce(new.section_path,'') || ' ' || new.content);
+  as $$ select btrim(regexp_replace(
+         lower(extensions.unaccent('extensions.unaccent'::regdictionary, normalize(coalesce(p_text, ''), nfc))),
+         '\s+', ' ', 'g')) $$;
+-- BEFORE INSERT on knowledge_chunks (private.knowledge_chunks_search_fields):
+--   new.search_text := private.knowledge_search_text(concat_ws(' ', new.section_path, new.content));
 --   new.search_tsv  := to_tsvector('simple'::regconfig, new.search_text);
-create index knowledge_chunks_tsv  on public.knowledge_chunks using gin (search_tsv);
-create index knowledge_chunks_trgm on public.knowledge_chunks using gin (search_text extensions.gin_trgm_ops);
+-- Supplied search_text/search_tsv values are overwritten; chunks are never updated (9.3).
+create index knowledge_chunks_search_tsv_idx  on public.knowledge_chunks using gin (search_tsv);
+create index knowledge_chunks_search_trgm_idx on public.knowledge_chunks using gin (search_text extensions.gin_trgm_ops);
 ```
 The trigger is the only writer of `search_text`/`search_tsv`; the RPC normalizes the query with the
 same function. The function is `stable` (unaccent with a dictionary argument is not immutable); no
-expression index depends on it — the GIN indexes are on the stored columns. The migration test asserts `đ→d` and tone-mark removal on sample Vietnamese.
+expression index depends on it — the GIN indexes are on the stored columns. Tests assert NFD = NFC, `đ→d`, tone-mark removal, case folding and whitespace collapse; there is
+no stemming.
 
-### 9.5 RLS
-RLS enabled on all three tables. `authenticated` gets SELECT only, through one policy per table
-equivalent to: the document's source **and** version are `approved` **and** (source public **or**
-`private.user_is_org_member(organization_id)` and (`farm_id is null` or
-`private.user_can_read_farm(farm_id)`)). No INSERT/UPDATE/DELETE policy for `authenticated`/`anon`;
-ingestion and approval are operator actions (service role, never a request path).
+### 9.5 RLS and privileges (as implemented)
+- RLS enabled on all three tables. Policies chain (SECURITY INVOKER, no new definer function):
+  `knowledge_sources_select` — `status = 'approved'` and (public, or tenant with
+  `private.user_is_org_member(organization_id)` and (`farm_id is null`, or
+  `private.user_can_read_farm(farm_id)` and the farm still belongs to the organization));
+  `knowledge_documents_select` — `status = 'approved'` and its source is visible;
+  `knowledge_chunks_select` — its document is visible.
+- Membership semantics are Core V1's: a former member (even a former farm owner who still reads
+  the farm) and a data-grant viewer of another organization are **not** members, so they see
+  public knowledge only.
+- Privileges: `revoke all … from public, anon, authenticated` then `grant select … to
+  authenticated` on the three tables — client writes fail at the privilege level (42501), not
+  only by RLS; `anon` has no access. No write policy exists; ingestion/approval are operator
+  actions (table owner / service role).
+- Users with a pending forced password change: the retrieval RPC returns nothing (season scope
+  goes through `user_can_read_farm`, which already excludes them). Direct SELECT of approved
+  *public* reference rows is not additionally gated, because granting `authenticated` EXECUTE on
+  `private.password_change_pending()` would change a Core V1 privilege; tenant rows stay hidden
+  (`user_is_org_member` excludes them).
 
 ### 9.6 Lexical RPC
 ```sql
 create function public.match_knowledge_chunks_lexical(
   p_crop_season_id uuid, p_query text, p_top_k int default 8)
 returns table (source_id text, document_id text, document_version text, chunk_id text,
-               title text, section_path text, content text, source_type text, visibility text,
+               ordinal int, title text, section_path text, page_from int, page_to int,
+               content text, metadata jsonb, source_type text, authority text, visibility text,
                organization_id uuid, farm_id uuid, official_url text, published_at date,
                fused_score double precision, fts_rank int, trgm_rank int)
 language sql stable security invoker set search_path = ''
@@ -351,9 +370,14 @@ language sql stable security invoker set search_path = ''
   unreadable season yields no rows. No organization/farm/visibility parameter exists.
 - Filters: source and version `approved`; public, or tenant with matching organization and the
   farm rule of §7 (including the query-time farm/organization re-check).
-- `p_top_k` clamped to `1..50`; `p_query` length-capped; empty normalized query → no rows.
+- `p_top_k` clamped to `1..50` (null → 8); `p_query` truncated to 1,000 characters before
+  normalization; a blank or lexeme-free query → no rows. Query text is only ever a bound value
+  (no dynamic SQL).
+- Trigram candidates use the `<%` operator, i.e. `word_similarity >=
+  pg_trgm.word_similarity_threshold` (extension default 0.6, not tuned); FTS candidates use
+  `websearch_to_tsquery('simple', …)`; at most 50 per signal before fusion.
 - Deterministic ranking and tie-break as in §6.
-- `revoke all … from public, anon; grant execute … to authenticated`.
+- `revoke all … from public, anon, authenticated; grant execute … to authenticated, service_role`.
 No `query_embedding` parameter; a vector RPC is additive in Migration B.
 
 ### 9.7 Migration B (future, only after the §5 gate)
