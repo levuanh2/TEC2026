@@ -284,7 +284,9 @@ def test_pdf_ingestion_records_pages(env):
     data = make_pdf([[FIXTURE, f"1.1 Mực nước {env['run']}", "Tưới ướt khô xen kẽ giúp giảm phát thải.",
                       "Thêm một dòng nội dung kiểm thử.", f"Trang {i}"] for i in range(1, 4)])
     s = _source(env)
-    p = plan(data=data, filename="awd.pdf", source=s,
+    from infrastructure.pdf_isolation import parse_pdf_isolated
+
+    p = plan(data=data, filename="awd.pdf", source=s, pdf_parser=parse_pdf_isolated,
              document=DocumentSpec(s.source_id, "awd-pdf", "v1", "TEST FIXTURE pdf", "vi"))
     assert _ingest(env, p, data).outcome == "created"
     cur = env["tx"].cur

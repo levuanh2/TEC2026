@@ -21,11 +21,13 @@ from __future__ import annotations
 import dataclasses
 import re
 from dataclasses import asdict
+from typing import Callable
 
 from knowledge.chunking import CHUNKER_VERSION, chunk
 from knowledge.ids import layout_entry, safe_artifact_name, sha256_hex
 from knowledge.models import (ArtifactIntegrityError, DocumentSpec, IngestionConflict, IngestionPlan, IngestionResult,
-                              KnowledgeIngestionError, MetadataError, ParseError, SourceSpec, StoredDocument, StoredSource,
+                              KnowledgeIngestionError, MetadataError, ParsedDocument, ParseError, SourceSpec,
+                              StoredDocument, StoredSource,
                               validate_document, validate_source)
 from knowledge.normalize import normalize
 from knowledge.parsers import detect, parser_for
@@ -43,7 +45,10 @@ _SOURCE_FIELDS = ("title", "owner", "source_type", "authority", "visibility", "o
 _DOCUMENT_FIELDS = ("title", "language", "official_url", "published_at", "license_basis", "license_reference")
 
 
-def plan(*, data: bytes, filename: str, source: SourceSpec, document: DocumentSpec) -> IngestionPlan:
+def plan(*, data: bytes, filename: str, source: SourceSpec, document: DocumentSpec,
+         pdf_parser: Callable[[bytes], ParsedDocument] | None = None) -> IngestionPlan:
+    """`pdf_parser` must be the process-isolated PDF parser (infrastructure.pdf_isolation.
+    parse_pdf_isolated); without it a PDF is refused rather than parsed in this process."""
     validate_source(source)
     warnings = validate_document(document)
     if document.source_id != source.source_id:
@@ -53,7 +58,13 @@ def plan(*, data: bytes, filename: str, source: SourceSpec, document: DocumentSp
     if len(data) > MAX_FILE_BYTES:
         raise ParseError(f"the file is {len(data)} bytes (limit {MAX_FILE_BYTES})", code="too_large")
     fmt = detect(filename, data)
-    parsed = parser_for(fmt)(data)
+    if fmt.name == "pdf":
+        if pdf_parser is None:
+            raise KnowledgeIngestionError("PDF parsing must run in the isolated worker (pdf_parser)",
+                                          code="pdf_requires_isolation")
+        parsed = pdf_parser(data)
+    else:
+        parsed = parser_for(fmt)(data)
     normalized = normalize(parsed)
     chunks = chunk(normalized, source_id=source.source_id, document_id=document.document_id,
                    document_version=document.document_version)

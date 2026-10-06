@@ -60,11 +60,22 @@ object (private, content-addressed, inert; a later run re-verifies it before any
 An `unchanged` re-run re-verifies the stored artifact: missing, tampered or absent (`artifact_ref`
 NULL) fails with `artifact_missing` / `artifact_integrity` and changes nothing.
 
-**Gap — the database does not yet enforce ST1.** Migration A accepts `official_url` OR
-`artifact_ref` (`knowledge_documents_artifact_chk`) and its approval CHECK does not require
-`artifact_ref`. The CLI always writes one, but approval is a manual SQL step today. Until a
-follow-up migration enforces it (recommended before the first real approval; it is a hosted
-migration gate of its own), the approval checklist (§5) is the control.
+**ST1-DB — REQUIRED FOLLOW-UP MIGRATION (decided 2026-10-06).** A real document version may not
+become `approved` unless it has a controlled immutable `artifact_ref`, its exact original
+`file_sha256`, human approval metadata and the required license provenance; `official_url` alone is
+insufficient. The V1.3-C CLI already stores the artifact before the row commits, but Migration A
+accepts `official_url` OR `artifact_ref` (`knowledge_documents_artifact_chk`) and its approval CHECK
+does not require `artifact_ref`. The database enforcement is therefore a separate follow-up
+migration, deliberately NOT part of the V1.3-C ingestion PR (ingestion code stays separate from
+persistent hosted schema evolution). **No real document may be approved before it is applied.**
+
+Contract of that migration (conceptual; not written yet):
+- tighten the `knowledge_documents` approval invariant: `status = 'approved'` additionally requires
+  `nullif(btrim(artifact_ref), '') is not null`, on top of the existing approver/time/review-note,
+  known `license_basis`, `license_reference` and hash requirements;
+- `review_required` / `rejected` drafts are unchanged (the CLI writes `artifact_ref` anyway);
+- its own migration file and rollback, local DB tests, PR, Normal CI, Strict CI, hosted read-only
+  preflight and explicit hosted apply gate; applied before the first real approval.
 
 ## 2. Formats and parsers
 
@@ -84,11 +95,25 @@ without spaces). Text is NFC-normalized before structure detection, so NFC/NFD i
 identically.
 Every refusal is explicit (`refused [<code>]`, exit 1) and happens **before** any upload or write.
 
-**PDF resource limits (accepted residual risk).** pypdf 6.19 caps every decompressed stream at
-75 MB (`ZLIB/LZW/FLATE…_MAX_OUTPUT_LENGTH`); the parser adds 50 MiB per file, 2000 pages and 20 M
-extracted characters. A pathological PDF can still spend CPU inside one `extract_text()` call; the
-CLI is offline and operator-run on reviewed official artifacts, so it is not sandboxed in a
-resource-limited subprocess. Run it on a workstation, never inside the API process.
+**PDF parsing is process-isolated** (`backend/infrastructure/pdf_isolation.py`). PDF bytes are
+never parsed in the ingestion process: `plan()` refuses a PDF unless the isolated parser is
+injected (`pdf_requires_isolation`), and only the worker imports `knowledge.parsers.pdf`
+(architecture test).
+
+| Aspect | Behaviour |
+|---|---|
+| process model | `subprocess` spawn of a fresh `python -I -B` running the worker file (no fork, no `multiprocessing`, no pickle); PDF bytes on stdin, one JSON result on stdout |
+| timeout | hard wall clock `PDF_PARSE_TIMEOUT_SECONDS = 120` (constant, not a CLI option); on expiry the child is killed |
+| cleanup | the child is always killed if still running and always reaped (`wait`), all three pipes closed; no temporary file is ever created; tested with repeated timeouts |
+| environment | the child gets only `SYSTEMROOT`/`WINDIR`/`LANG`/`LC_ALL` — no Supabase URL/key, no database URL |
+| IPC bounds | stdout read with a 96 MiB cap (the child is killed past it: `extraction_limit_exceeded`); stderr capped at 64 KiB, only its last line surfaced; the parser's own limits run in the child before serializing |
+| result validation | exact field set, `format`/`parser_version` equal to the parent's, page/level/kind/flag ranges, block count and total text re-checked; anything else is `parse_worker_protocol` |
+| POSIX (Linux CI/servers) | before importing pypdf the child caps itself with `resource`: address space 2 GiB, CPU seconds = the timeout, file size 0, 64 open files; a hit is `parse_resource_limit` |
+| Windows | **no hard per-child memory cap in V1.3-C** (it would need Job objects / pywin32, not added): the timeout, forced termination and the parser limits (50 MiB file, 2000 pages, pypdf's 75 MB per-stream cap, 20 M characters, 100 000 blocks) still apply |
+
+Outcomes: `parse_timeout`, `parse_resource_limit`, `parse_worker_crashed`, `parse_worker_protocol`,
+`extraction_limit_exceeded`, and the parser's `malformed`, `encrypted`, `no_text_layer`,
+`too_large`, `too_many_blocks`. Every one happens in `plan()`, before any Storage or database call.
 
 ## 3. Normalizer (`kn-normalize-1`) and chunker (`kn-chunk-1`)
 
@@ -176,6 +201,7 @@ decide the ST1 enforcement migration (§1) — both under their own explicit gat
 ## 8. First real corpus acceptance gate (future, mandatory)
 
 Before the first real source is approved/ingested on hosted:
+- the ST1-DB follow-up migration (§1) is merged and applied to hosted;
 - C1 source approval (exact artifact, publisher, official URL if available, license basis,
   SHA-256, human approver); ST1 artifact stored and verified (§5 checklist).
 
@@ -201,6 +227,7 @@ run the HTTP end-to-end test that V1.3-B could not run without leaving permanent
 | `tests/test_knowledge_ingest.py` | orchestration with in-memory ports, CLI (dry run, targets, no approval switch) |
 | `tests/test_knowledge_architecture.py` | purity, adapter writes, no app import |
 | `tests/test_knowledge_ingest_db.py` | real local stack: rows + Storage, RLS invisibility until approval, idempotency, conflicts, atomic rollback, archived/approved untouched, tenant farm scope, PDF pages — rolled back, Storage objects removed |
+| `tests/test_knowledge_pdf_isolation.py` | isolated worker: identical output, scans/encrypted/malformed refused, no inherited secret, timeout + repeated timeouts reaped, crash, flooding past the byte cap, malformed/inconsistent results, result validation; POSIX: installed limits and memory/CPU enforcement (a misbehaving stand-in, `fixtures/knowledge/fake_pdf_worker.py`; no real bomb) |
 
 Fixtures are synthetic (`TEST FIXTURE — NOT A REAL APPROVED SOURCE`); PDFs are generated at test
 time with reportlab and the bundled Be Vietnam Pro font. No real corpus is committed.

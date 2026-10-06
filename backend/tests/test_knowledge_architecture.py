@@ -18,6 +18,8 @@ import pytest
 BACKEND = Path(__file__).resolve().parent.parent
 KNOWLEDGE = sorted((BACKEND / "knowledge").rglob("*.py"))
 REPO = BACKEND / "infrastructure" / "knowledge_repo.py"
+ISOLATION = BACKEND / "infrastructure" / "pdf_isolation.py"
+CLI = BACKEND / "scripts" / "ingest_knowledge.py"
 
 _STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "json", "math", "re", "typing", "unicodedata",
            "collections", "knowledge"}
@@ -88,7 +90,7 @@ def test_ingestion_adapter_only_inserts_and_reads_and_never_approves():
 def test_no_app_layer_imports_the_ingestion_pipeline():
     production = [p for p in BACKEND.rglob("*.py")
                   if not {"tests", "scripts", "knowledge", ".venv", "venv"} & set(p.relative_to(BACKEND).parts)
-                  and p != REPO]
+                  and p not in (REPO, ISOLATION)]
     for path in production:
         roots = set()
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -98,3 +100,22 @@ def test_no_app_layer_imports_the_ingestion_pipeline():
                 roots |= {a.name for a in node.names}
         assert not {r for r in roots if r == "knowledge" or r.startswith("knowledge.")
                     or r.endswith("knowledge_repo")}, path.relative_to(BACKEND)
+
+
+def test_only_the_isolated_worker_imports_the_pdf_parser():
+    """No production module parses PDFs in-process: the in-process parser is imported only by the
+    worker side of infrastructure/pdf_isolation.py, and the CLI injects the isolated parser."""
+    importers = set()
+    for path in BACKEND.rglob("*.py"):
+        if {"tests", ".venv", "venv"} & set(path.relative_to(BACKEND).parts):
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and (
+                    node.module == "knowledge.parsers.pdf"
+                    or (node.module == "knowledge.parsers" and any(a.name == "pdf" for a in node.names))):
+                importers.add(path.relative_to(BACKEND).as_posix())
+    assert importers == {"infrastructure/pdf_isolation.py"}, importers
+    assert "pdf_parser=parse_pdf_isolated" in CLI.read_text(encoding="utf-8")
+    source = ISOLATION.read_text(encoding="utf-8")
+    assert "multiprocessing" not in source and "import pickle" not in source and "os.fork" not in source
+    assert '"-I", "-B"' in source

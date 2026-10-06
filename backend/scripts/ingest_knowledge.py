@@ -141,8 +141,10 @@ def main(argv: list[str] | None = None) -> int:
                         args.visibility, args.organization_id, args.farm_id)
     document = DocumentSpec(args.source_id, args.document_id, args.document_version, args.title, args.language,
                             args.official_url, args.published_at, args.license_basis, args.license_reference)
+    from infrastructure.pdf_isolation import parse_pdf_isolated
+
     try:
-        p = plan(data=data, filename=path.name, source=source, document=document)
+        p = plan(data=data, filename=path.name, source=source, document=document, pdf_parser=parse_pdf_isolated)
     except KnowledgeIngestionError as exc:
         print(f"refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1

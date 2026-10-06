@@ -602,7 +602,9 @@ def _pdf_plan():
     if "data" not in _PDF:
         _PDF["data"] = make_pdf([["Tưới ướt khô xen kẽ (AWD) kiểm thử.", "Dòng hai của trang kiểm thử.", f"Trang {i}"]
                                  for i in range(1, 4)])
-    return plan(data=_PDF["data"], filename="awd.pdf", source=SOURCE,
+    from infrastructure.pdf_isolation import parse_pdf_isolated
+
+    return plan(data=_PDF["data"], filename="awd.pdf", source=SOURCE, pdf_parser=parse_pdf_isolated,
                 document=DocumentSpec("test-fixture-src", "awd-pdf", "v1", "TEST FIXTURE pdf", "vi"))
 
 
@@ -702,3 +704,18 @@ def test_an_ambiguous_upload_is_owned_and_compensated_when_the_write_fails():
     with pytest.raises(RuntimeError):
         ingest(plan_of(), data=DATA, store=FakeStore(fail_on_chunks=True), artifacts=adapter)
     assert bucket.objects == {} and bucket.removed == [f"{sha}/awd_guide.md"]
+
+
+def test_cli_a_pdf_parse_failure_writes_nothing(monkeypatch, tmp_path, capsys):
+    """A worker that never answers stops the run in plan(): no database connection, no Storage call."""
+    from infrastructure import pdf_isolation as iso
+
+    monkeypatch.setattr(iso, "_worker_command",
+                        lambda timeout: [sys.executable, "-I", "-B", str(HERE / "fake_pdf_worker.py"), "sleep"])
+    monkeypatch.setattr(iso.parse_pdf_isolated, "__kwdefaults__", {"timeout": 1})
+    monkeypatch.setattr("psycopg.connect", lambda *a, **k: pytest.fail("connected after a parse failure"))
+    monkeypatch.setattr("supabase.create_client", lambda *a, **k: pytest.fail("Storage used after a parse failure"))
+    pdf_file = tmp_path / "x.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 hostile")
+    assert cli.main(["--file", str(pdf_file), "--target", "local", *ARGS]) == 1
+    assert "refused [parse_timeout]" in capsys.readouterr().err

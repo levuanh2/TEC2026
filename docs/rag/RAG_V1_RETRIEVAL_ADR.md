@@ -20,7 +20,7 @@ stays intact. Embedding is **not** a generation-LLM choice; D5 stays open.
 | E1 | **C — lexical-first** baseline for V1.3. No embedding model, dimension, runtime or pgvector yet | **decided** |
 | C1 | Source policy approved; candidate corpus defined; **no document approved yet** | **decided (policy)** |
 | D3 | Real `SeasonScopeResolver` reusing Core V1 RLS reads + `crop_write_authz`; additive `season_lineage` read; no schema change | **approved** |
-| ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **decided** (V1.3-C): an approved version needs a controlled immutable `artifact_ref` + `file_sha256`; `official_url` alone is not sufficient (§4.4, [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §1). DB enforcement is a pending follow-up migration |
+| ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **decided** (V1.3-C): an approved version needs a controlled immutable `artifact_ref` + `file_sha256`; `official_url` alone is not sufficient (§4.4, [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §1). **ST1-DB: required follow-up migration** (approval requires `artifact_ref`), separate PR + hosted gate, applied before the first real approval |
 | ST2 | Approved knowledge deletion: the normal lifecycle is **archive-only** (no authenticated DELETE, no ordinary hard-delete workflow); a legal/copyright removal is a separate privileged **administrative purge** design (§9.8) | archive-only **decided**; purge **DEFERRED** — designed before real-corpus operationalization, if required; not implemented in Migration A |
 
 ---

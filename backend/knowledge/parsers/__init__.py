@@ -43,11 +43,13 @@ def detect(filename: str, data: bytes) -> Format:
 
 
 def parser_for(fmt: Format) -> Callable[[bytes], ParsedDocument]:
-    # Imported lazily so the text formats never load pypdf.
+    """In-process parsers for the TEXT formats only. PDFs are never parsed in the calling
+    process: the caller injects an isolated parser (infrastructure/pdf_isolation.py) into
+    knowledge.ingest.plan; knowledge.parsers.pdf.parse runs inside that worker."""
     if fmt.name == "markdown":
         from knowledge.parsers.markdown import parse
     elif fmt.name == "text":
         from knowledge.parsers.text import parse
     else:
-        from knowledge.parsers.pdf import parse
+        raise ValueError("PDF parsing is process-isolated; pass pdf_parser to knowledge.ingest.plan")
     return parse

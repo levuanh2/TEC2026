@@ -16,10 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from knowledge.chunking import CHUNKER_VERSION, MAX_TOKENS, TARGET_TOKENS, chunk  # noqa: E402
 from knowledge.ids import artifact_key, chunk_id, safe_artifact_name, sha256_hex  # noqa: E402
 from knowledge.ingest import plan  # noqa: E402
-from knowledge.models import (Block, DocumentSpec, MetadataError, NormalizedDocument, ParseError,  # noqa: E402
+from knowledge.models import (Block, DocumentSpec, KnowledgeIngestionError, MetadataError,  # noqa: E402
+                              NormalizedDocument, ParseError,
                               SourceSpec, UnsupportedFormatError, validate_document, validate_source)
 from knowledge.normalize import NORMALIZER_VERSION, normalize, normalize_block  # noqa: E402
-from knowledge.parsers import detect  # noqa: E402
+from knowledge.parsers import detect, parser_for  # noqa: E402
 from knowledge.parsers import markdown, pdf, text  # noqa: E402
 from tests.fixtures.knowledge import FIXTURE, make_pdf, read  # noqa: E402
 
@@ -30,8 +31,16 @@ def doc(version="v1", **kw) -> DocumentSpec:
     return DocumentSpec("test-fixture-src", kw.pop("document_id", "awd-guide"), version, "TEST FIXTURE doc", "vi", **kw)
 
 
-def plan_of(data: bytes, filename="awd_guide.md", version="v1", **kw):
-    return plan(data=data, filename=filename, source=SOURCE, document=doc(version, **kw))
+def plan_of(data: bytes, filename="awd_guide.md", version="v1", pdf_parser=None, **kw):
+    return plan(data=data, filename=filename, source=SOURCE, document=doc(version, **kw), pdf_parser=pdf_parser)
+
+
+def test_a_pdf_is_never_parsed_in_process_by_default():
+    with pytest.raises(KnowledgeIngestionError) as err:
+        plan_of(make_pdf([["Nội dung kiểm thử đủ dài cho một trang."]]), filename="x.pdf")
+    assert err.value.code == "pdf_requires_isolation"
+    with pytest.raises(ValueError):
+        parser_for(detect("x.pdf", b"%PDF-1.4"))
 
 
 def _norm(blocks) -> NormalizedDocument:
@@ -375,7 +384,7 @@ def test_fragmented_input_stops_at_the_block_limit(monkeypatch, fmt):
     else:
         data = "\n\n".join(f"# Mục {i}" if fmt == "md" else f"Đoạn {i}." for i in range(20)).encode()
     with pytest.raises(ParseError) as err:
-        plan_of(data, filename=f"x.{fmt}")
+        plan_of(data, filename=f"x.{fmt}", pdf_parser=pdf.parse)     # the parser's own limit, in-process
     assert err.value.code == "too_many_blocks"
 
 
