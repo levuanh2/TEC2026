@@ -321,18 +321,22 @@ for name, attempt in (("psycopg", pg), ("socket", lambda: socket.create_connecti
         note(name, "connected")
     except Exception as exc:
         note(name, type(exc).__name__)
+if os.environ.get("GUARD_EARLY_STOP"):                # end the session before collection
+    import pytest
+    raise pytest.UsageError("early probe done")
 '''
 EARLY_LOADERS = ["entry-point", "PYTEST_PLUGINS", "command-line -p"]
 PURE_TEST = "tests/test_db_target_guard.py::test_a_no_db_url_is_the_ordinary_no_db_run"
 
 
-def _early_plugin_session(tmp_path, loader: str, env: dict[str, str], *extra: str):
+def _early_plugin_session(tmp_path, loader: str, env: dict[str, str], *extra: str, cwd: Path = BACKEND,
+                          test_path: str | None = PURE_TEST):
     spy_dir = tmp_path / "spy"
     spy_dir.mkdir()
     (spy_dir / "early_probe_plugin.py").write_text(EARLY_PLUGIN, encoding="utf-8")
     log = tmp_path / "early.jsonl"
     env = {**env, "GUARD_EARLY_LOG": str(log), "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""}
-    args = [*extra, PURE_TEST]
+    args = [*extra, *([test_path] if test_path else [])]
     if loader == "entry-point":                       # an installed distribution's pytest11 entry point
         dist = spy_dir / "early_probe-0.dist-info"
         dist.mkdir()
@@ -342,7 +346,7 @@ def _early_plugin_session(tmp_path, loader: str, env: dict[str, str], *extra: st
         env["PYTEST_PLUGINS"] = "early_probe_plugin"
     else:
         args = ["-p", "early_probe_plugin", *args]
-    proc, calls = _session(tmp_path, env, *args)
+    proc, calls = _session(tmp_path, env, *args, cwd=cwd)
     notes = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
     return proc, calls, notes
 
@@ -368,6 +372,22 @@ def test_a_hosted_target_refuses_the_session_before_an_early_plugin_loads(tmp_pa
     assert proc.returncode == 4 and REFUSAL in proc.stdout + proc.stderr, proc.stdout[-500:] + proc.stderr[-500:]
     assert "secret-pw" not in proc.stdout + proc.stderr
     assert notes == [] and calls == []
+
+
+def test_a_bare_pytest_from_the_repository_root_loads_the_guard_first(tmp_path):
+    """No test path: the root pytest.ini (not backend/pytest.ini) is the config; the guard still
+    loads before an early plugin. The probe ends the session before collecting the whole repo."""
+    proc, calls, notes = _early_plugin_session(tmp_path, "PYTEST_PLUGINS", {"GUARD_EARLY_STOP": "1"},
+                                               cwd=BACKEND.parent, test_path=None)
+    out = proc.stdout[-800:] + proc.stderr[-800:]
+    assert proc.returncode == 4 and "early probe done" in out, out
+    assert ["loaded"] in notes and ["psycopg", "RefusedTarget"] in notes and ["socket", "RefusedTarget"] in notes, notes
+    assert next(n for n in notes if n[0] == "settings-db")[1] in ("none", "local"), notes
+    assert [c for c in calls if c[0] != "create_connection"] == [], calls
+    (tmp_path / "hosted").mkdir()
+    proc, calls, notes = _early_plugin_session(tmp_path / "hosted", "PYTEST_PLUGINS", HOSTED_ENV,
+                                               cwd=BACKEND.parent, test_path=None)
+    assert proc.returncode == 4 and REFUSAL in proc.stdout + proc.stderr and notes == [] and calls == []
 
 
 def test_without_the_ini_plugin_the_early_probe_does_connect(tmp_path):

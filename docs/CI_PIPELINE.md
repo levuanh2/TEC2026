@@ -375,7 +375,8 @@ Run from the repository root unless noted. Backend commands run **from
 `backend/.env` holds the HOSTED project and `load_settings()` fills every *absent* variable from
 it (PowerShell `$env:X = ''` deletes X rather than emptying it). `backend/pytest.ini` loads the
 guard as the first pytest plugin (`-p tests._db_target`: before entry-point plugins,
-`PYTEST_PLUGINS`, command-line `-p` and every conftest). It classifies `SUPABASE_DB_URL` (by the host libpq would really reach,
+`PYTEST_PLUGINS`, command-line `-p` and every conftest); a run started from the repository root
+without a backend path reads the root `pytest.ini`, which does the same. It classifies `SUPABASE_DB_URL` (by the host libpq would really reach,
 including `?host=`, multi-host lists, `PGHOST`/`PGHOSTADDR`/`PGSERVICE`/`PGUSER`), `SUPABASE_URL` and
 `SUPABASE_JWKS_URL`. Local = `localhost`, a loopback IP or a Unix socket.
 - A non-local value from `backend/.env` is ignored for the session: every `SUPABASE_*` value
