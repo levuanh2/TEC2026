@@ -115,7 +115,7 @@ cut into 450-token windows. `section_path` = `A > B > C` (indexed by the databas
 | same bytes, pipeline versions, normalized hash, metadata, chunk set — any status | `unchanged` (no write; an archived version is never reactivated, an approved one never touched) |
 | different bytes | `content_changed` — refused; ingest as a NEW `document_version` |
 | different parser/normalizer/chunker version | `pipeline_changed` — refused; new `document_version` |
-| only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Any output difference stays `pipeline_changed` |
+| only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Only `kn-pdf-N+pypdf-<version>` qualifies; any other suffix family or any output difference stays `pipeline_changed` |
 | different title/language/url/date/license, or chunk set | `metadata_changed` — refused |
 | existing source with different metadata | `source_mismatch` — refused (ingestion never edits a source) |
 
@@ -161,7 +161,7 @@ never a user JWT, refuses a `--target` that does not match both URLs exactly (th
 project only by its pooler user `postgres.<ref>` or host `db.<ref>.supabase.co`, never a substring),
 and never prints a secret.
 Exit 0 created/unchanged/dry run, 1 refused, 2 usage/target mismatch. Storage is trusted to say
-"absent" only with its object-level `not_found`; authorization, timeout or server errors (and the
+"absent" only with its object-level answer (code `not_found` AND message "Object not found"); authorization, timeout or server errors (and the
 `Bucket not found` a wrong key produces) fail with `storage_error`, never as a missing object.
 
 **Run the dry run and the write in the pinned backend environment** (`backend/constraints.txt`):

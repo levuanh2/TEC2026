@@ -405,29 +405,31 @@ def test_cli_wrong_target_is_refused_before_any_write(monkeypatch, capsys):
 
 # ------------------------------------------------------------------ Storage adapter (in-memory client)
 
-class _StorageApiError(Exception):
-    def __init__(self, code, status):
-        super().__init__(code)
-        self.code, self.status = code, status
+from storage3.exceptions import StorageApiError  # noqa: E402 -- the real error shape (message, code, status)
+
+OBJECT_MISSING = StorageApiError("Object not found", "not_found", "404")
 
 
 class _Bucket:
-    def __init__(self, corrupt_download=False, fail_list=False, fail_download=False):
+    def __init__(self, corrupt_download=False, fail_list=False, download_error=None, fail_after_upload=False):
         self.objects: dict[str, bytes] = {}
         self.corrupt_download = corrupt_download
-        self.fail_list, self.fail_download = fail_list, fail_download
+        self.fail_list, self.download_error, self.fail_after_upload = fail_list, download_error, fail_after_upload
         self.removed: list[str] = []
+        self.uploaded = False
 
     def list(self, folder):
         if self.fail_list:
-            raise _StorageApiError("Unauthorized", "403")
+            raise StorageApiError("Invalid Compact JWS", "Unauthorized", "403")
         return [{"name": k.split("/", 1)[1], "id": "x"} for k in sorted(self.objects) if k.startswith(f"{folder}/")]
 
     def download(self, key):
-        if self.fail_download:
-            raise _StorageApiError("Bucket not found", "404")        # what a wrong key returns
+        if self.download_error is not None:
+            raise self.download_error
+        if self.fail_after_upload and self.uploaded:
+            raise StorageApiError("timeout", "Gateway Timeout", "504")
         if key not in self.objects:
-            raise _StorageApiError("not_found", "404")
+            raise OBJECT_MISSING
         return b"corrupted" if self.corrupt_download else self.objects[key]
 
     def upload(self, key, data, options):
@@ -435,6 +437,7 @@ class _Bucket:
         if key in self.objects:
             raise RuntimeError("Duplicate")
         self.objects[key] = data
+        self.uploaded = True
 
     def remove(self, keys):
         for k in keys:
@@ -497,13 +500,46 @@ def test_storage_errors_are_never_read_as_absence():
     with pytest.raises(StorageError):
         store.put(sha, "a.md", DATA, "text/markdown")
     assert bucket.objects == {}                        # no second object uploaded after a failed lookup
-    store, bucket = _adapter(fail_download=True)
-    bucket.objects[f"{sha}/a.md"] = DATA
-    with pytest.raises(StorageError):
+    for error in (StorageApiError("Bucket not found", "Bucket not found", "404"),    # wrong key / missing bucket
+                  StorageApiError("Bucket not found", "not_found", "404"),           # same code, bucket-level
+                  StorageApiError("Invalid Compact JWS", "Unauthorized", "403")):
+        store, bucket = _adapter(download_error=error)
+        bucket.objects[f"{sha}/a.md"] = DATA
+        with pytest.raises(StorageError):
+            store.verify(f"knowledge-artifacts/{sha}/a.md", sha)
+        with pytest.raises(StorageError):
+            store.put(sha, "b.md", DATA, "text/markdown")
+        assert list(bucket.objects) == [f"{sha}/a.md"]
+    store, bucket = _adapter(download_error=OBJECT_MISSING)
+    with pytest.raises(ArtifactIntegrityError) as err:            # the one true "absent"
         store.verify(f"knowledge-artifacts/{sha}/a.md", sha)
+    assert err.value.code == "artifact_missing"
+
+
+def test_a_storage_error_on_read_back_removes_the_new_object():
+    from knowledge.models import StorageError
+
+    store, bucket = _adapter(fail_after_upload=True)
     with pytest.raises(StorageError):
-        store.put(sha, "b.md", DATA, "text/markdown")
-    assert list(bucket.objects) == [f"{sha}/a.md"]
+        store.put(sha256_hex(DATA), "a.md", DATA, "text/markdown")
+    assert bucket.objects == {} and bucket.removed == [f"{sha256_hex(DATA)}/a.md"]
+
+
+def test_orphan_note_survives_the_identity_race_path():
+    class Broken(FakeArtifacts):
+        def discard(self, ref):
+            raise OSError("storage down")
+
+    p = plan_of()
+    template = FakeStore()
+    ingest(p, data=DATA, store=template, artifacts=FakeArtifacts())
+    (_, winner), = template.docs.items()
+    store = FakeStore()
+    store.race = dataclasses.replace(winner, file_sha256="1" * 64,          # other bytes won the identity
+                                     artifact_ref=f"knowledge-artifacts/{'1' * 64}/other.md")
+    with pytest.raises(IngestionConflict) as err:
+        ingest(p, data=DATA, store=store, artifacts=Broken())
+    assert any("orphaned object: knowledge-artifacts/" in n for n in err.value.__notes__)
 
 
 class _Cursor:
@@ -585,6 +621,8 @@ def test_a_pypdf_patch_with_identical_output_is_unchanged_with_a_note(ports):
 @pytest.mark.parametrize("change", [
     {"parser_version": "kn-pdf-1+pypdf-0.0.1", "normalized_sha256": "0" * 64},   # the patch changed the output
     {"parser_version": "kn-pdf-2+pypdf-0.0.1"},                                  # another parser
+    {"parser_version": "kn-pdf-1+pdfium-1.0"},                                   # another extraction engine
+    {"parser_version": "kn-pdf-1"},                                              # no build suffix
 ])
 def test_a_parser_change_with_different_output_or_family_is_refused(ports, change):
     store, artifacts = ports

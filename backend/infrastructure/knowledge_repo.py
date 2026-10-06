@@ -140,9 +140,11 @@ class SupabaseArtifactStore:
 
     @staticmethod
     def _not_found(exc: Exception) -> bool:
-        # Only Storage's object-level "not_found" means absent. Auth, timeout, server errors -- and
-        # "Bucket not found", which a wrong key also produces -- are failures, never absence.
-        return getattr(exc, "code", None) == "not_found"
+        # Only Storage's object-level answer (code `not_found`, message "Object not found") means
+        # absent. Auth, timeout, server errors -- and "Bucket not found", which a wrong key or a
+        # missing bucket produces, whatever its code -- are failures, never absence.
+        message = str(getattr(exc, "message", "") or "").lower()
+        return getattr(exc, "code", None) == "not_found" and "object not found" in message
 
     def _download(self, key: str) -> bytes | None:
         try:
@@ -186,7 +188,7 @@ class SupabaseArtifactStore:
         try:                                               # read-back: the reference must resolve to these bytes
             if not self._verified(key, file_sha256):
                 raise ArtifactIntegrityError(f"stored object {ARTIFACT_BUCKET}/{key} could not be read back")
-        except ArtifactIntegrityError as exc:
+        except (ArtifactIntegrityError, StorageError) as exc:
             if created:                                    # never leave an object that would poison reuse
                 try:
                     self._bucket.remove([key])

@@ -18,6 +18,8 @@ result re-verifies the stored artifact first: a missing, tampered or absent arti
 
 from __future__ import annotations
 
+import dataclasses
+import re
 from dataclasses import asdict
 
 from knowledge.chunking import CHUNKER_VERSION, chunk
@@ -36,6 +38,7 @@ MAX_FILE_BYTES = 50 * 1024 * 1024   # the Storage bucket limit
 MAX_CHUNK_CHARS = 20_000           # content + section_path: everything the database indexes per row
 MAX_SECTION_PATH_CHARS = 1_000      # a heading path is a label, repeated on every chunk of its section
 MAX_CHUNKS = 20_000                 # one document version is one transaction
+_PYPDF_BUILD = re.compile(r"^(kn-pdf-\d+)\+pypdf-[0-9][0-9A-Za-z.]*$")
 _SOURCE_FIELDS = ("title", "owner", "source_type", "authority", "visibility", "organization_id", "farm_id")
 _DOCUMENT_FIELDS = ("title", "language", "official_url", "published_at", "license_basis", "license_reference")
 
@@ -100,8 +103,9 @@ def document_differences(stored: StoredDocument, p: IngestionPlan) -> list[str]:
 def _same_extraction(stored: StoredDocument, p: IngestionPlan) -> bool:
     """Only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` vs `+pypdf-6.20.0`) AND the
     new run reproduces the stored output exactly: a library patch that changed nothing is not a new
-    pipeline. Any output difference stays `pipeline_changed`."""
-    return (stored.parser_version.split("+", 1)[0] == p.parser_version.split("+", 1)[0]
+    pipeline. Any output difference -- or any other suffix family -- stays `pipeline_changed`."""
+    a, b = _PYPDF_BUILD.match(stored.parser_version), _PYPDF_BUILD.match(p.parser_version)
+    return (a is not None and b is not None and a.group(1) == b.group(1)
             and stored.normalized_sha256 == p.normalized_sha256
             and stored.chunks == tuple((c.chunk_id, c.content_sha256) for c in p.chunks))
 
@@ -164,7 +168,14 @@ def ingest(p: IngestionPlan, *, data: bytes, store: KnowledgeStore, artifacts: A
             _compensate(ref, created, store, artifacts, exc)
             if stored is None:
                 raise
-            return _unchanged(stored, p, store, artifacts)
+            carried = tuple(getattr(exc, "__notes__", ()))     # e.g. an orphaned-artifact note
+            try:
+                result = _unchanged(stored, p, store, artifacts)
+            except KnowledgeIngestionError as outcome:
+                for note in carried:
+                    outcome.add_note(note)
+                raise
+            return dataclasses.replace(result, notes=result.notes + carried)
         except BaseException as exc:
             _compensate(ref, created, store, artifacts, exc)
             raise
