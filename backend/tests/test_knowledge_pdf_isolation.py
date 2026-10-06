@@ -253,6 +253,18 @@ def test_invalid_result_shapes_are_rejected(change):
     assert err.value.code == "parse_worker_protocol"
 
 
+@pytest.mark.parametrize("raw", [
+    _payload(blocks=[{"kind": "paragraph", "text": "a\ud800b", "level": 0, "page": 1, "flags": []}]),  # \ud800 escape
+    _payload().replace(b'"text": "b"', b'"text": "a\xed\xa0\x80b"'),                                # raw surrogate bytes
+    _payload(warnings=["w\udfff"]),
+    _payload().decode().encode("utf-16"),                                                             # not UTF-8
+], ids=["escaped-surrogate", "surrogate-bytes", "surrogate-warning", "utf16"])
+def test_results_that_are_not_strict_utf8_text_are_rejected(raw):
+    with pytest.raises(ParseError) as err:
+        iso._decode(0, raw, b"")
+    assert err.value.code == "parse_worker_protocol"
+
+
 def test_too_many_blocks_in_a_result_are_rejected(monkeypatch):
     import knowledge.models as models
 

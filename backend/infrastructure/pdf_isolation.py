@@ -243,8 +243,8 @@ def _interpret(returncode: int, raw: bytes):
     from knowledge.models import Block, ParsedDocument
     from knowledge.parsers import pdf
 
-    doc = json.loads(raw)                                          # bytes: UTF-8 checked, no extra copy
-    del raw
+    # Strict UTF-8 first: json.loads(bytes) would also accept UTF-16/32 and surrogate bytes.
+    doc = json.loads(raw.decode("utf-8"))
     if not isinstance(doc, dict) or not isinstance(doc.get("ok"), bool):
         raise _failure("parse_worker_protocol", "the PDF worker returned an unexpected result")
     if returncode == EXIT_PARSE_ERROR or not doc["ok"]:
@@ -254,6 +254,15 @@ def _interpret(returncode: int, raw: bytes):
             raise _failure("parse_worker_protocol", "the PDF worker returned an inconsistent error")
         raise _failure(code, message or code)
     return _validated(doc, Block, ParsedDocument, pdf)
+
+
+def _storable(text: str) -> bool:
+    """Defense in depth: a lone surrogate (e.g. a `\\ud800` JSON escape) is not storable text."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _validated(doc: dict, Block, ParsedDocument, pdf):
@@ -270,8 +279,8 @@ def _validated(doc: dict, Block, ParsedDocument, pdf):
     if not isinstance(pages, int) or isinstance(pages, bool) or not 1 <= pages <= pdf.MAX_PAGES:
         raise bad("page_count")
     warnings, blocks = doc["warnings"], doc["blocks"]
-    if not isinstance(warnings, list) or len(warnings) > pages or not all(isinstance(w, str) and len(w) < 200
-                                                                        for w in warnings):
+    if not isinstance(warnings, list) or len(warnings) > pages or not all(
+            isinstance(w, str) and len(w) < 200 and _storable(w) for w in warnings):
         raise bad("warnings")
     if not isinstance(blocks, list) or len(blocks) > MAX_BLOCKS:
         raise bad("blocks")
@@ -287,6 +296,8 @@ def _validated(doc: dict, Block, ParsedDocument, pdf):
             raise bad("block level")
         if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= pages:
             raise bad("block page")
+        if not _storable(text):
+            raise bad("block text is not valid Unicode")
         total += len(text)
         if total > pdf.MAX_TEXT_CHARS:
             raise _failure("extraction_limit_exceeded", "the PDF worker returned more text than the limit")
