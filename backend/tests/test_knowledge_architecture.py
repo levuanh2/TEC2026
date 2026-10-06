@@ -19,7 +19,7 @@ BACKEND = Path(__file__).resolve().parent.parent
 KNOWLEDGE = sorted((BACKEND / "knowledge").rglob("*.py"))
 REPO = BACKEND / "infrastructure" / "knowledge_repo.py"
 
-_STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "math", "re", "typing", "unicodedata",
+_STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "json", "math", "re", "typing", "unicodedata",
            "collections", "knowledge"}
 _PDF_ONLY = {"pypdf"}
 _FORBIDDEN = {

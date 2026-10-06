@@ -11,6 +11,7 @@ is only a human hint and never identity.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 
@@ -30,6 +31,13 @@ def chunk_id(*, source_id: str, document_id: str, document_version: str, section
              ordinal_in_section: int, content_sha256: str) -> str:
     parts = (source_id, document_id, document_version, section_path or "", str(ordinal_in_section), content_sha256)
     return sha256_hex("|".join(parts))[:20]
+
+
+def layout_entry(ordinal: int, section_path: str | None, page_from: int | None, page_to: int | None,
+                 metadata: dict) -> tuple:
+    """Every persisted chunk field the pipeline derives besides id and content hash. Two runs are
+    the same output only if these match too (e.g. a pypdf patch that moves page attribution)."""
+    return (ordinal, section_path, page_from, page_to, json.dumps(metadata, sort_keys=True, separators=(",", ":")))
 
 
 def safe_artifact_name(filename: str, extension: str) -> str:

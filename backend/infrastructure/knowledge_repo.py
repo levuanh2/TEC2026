@@ -21,7 +21,7 @@ import json
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from knowledge.ids import artifact_key, sha256_hex
+from knowledge.ids import artifact_key, layout_entry, sha256_hex
 from knowledge.models import (ArtifactIntegrityError, IngestionConflict, IngestionPlan, StorageError, StoredDocument,
                               StoredSource)
 from knowledge.ports import IdentityExists
@@ -59,10 +59,11 @@ class PsycopgKnowledgeStore:
             row = cur.fetchone()
             if not row:
                 return None
-            cur.execute("select chunk_id, content_sha256 from public.knowledge_chunks where document_pk = %s"
-                        " order by ordinal", (row[0],))
-            chunks = tuple((c, h) for c, h in cur.fetchall())
-        return StoredDocument(*row[1:], chunks=chunks)
+            cur.execute("select chunk_id, content_sha256, ordinal, section_path, page_from, page_to, metadata"
+                        " from public.knowledge_chunks where document_pk = %s order by ordinal", (row[0],))
+            rows = cur.fetchall()
+        return StoredDocument(*row[1:], chunks=tuple((r[0], r[1]) for r in rows),
+                              layout=tuple(layout_entry(*r[2:]) for r in rows))
 
     def artifact_in_use(self, artifact_ref: str) -> bool:
         with self._conn.cursor() as cur:

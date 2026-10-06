@@ -19,7 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from knowledge.ids import sha256_hex  # noqa: E402
-from knowledge.ingest import document_differences, ingest, plan  # noqa: E402
+from knowledge.ingest import document_differences, ingest, plan, plan_layout  # noqa: E402
 from knowledge.models import (ArtifactIntegrityError, DocumentSpec, IngestionConflict,  # noqa: E402
                               KnowledgeIngestionError, SourceSpec, StoredDocument, StoredSource)
 from knowledge.ports import IdentityExists  # noqa: E402
@@ -75,7 +75,7 @@ class FakeStore:
             d.source_id, d.document_id, d.document_version, d.title, d.language, d.official_url, artifact_ref,
             p.file_sha256, p.normalized_sha256, d.published_at, p.parser_version, p.normalizer_version,
             p.chunker_version, d.license_basis, d.license_reference, "review_required",
-            tuple((c.chunk_id, c.content_sha256) for c in p.chunks))
+            tuple((c.chunk_id, c.content_sha256) for c in p.chunks), plan_layout(p))
         self.writes += 1
         return self.sources[s.source_id]
 
@@ -623,14 +623,58 @@ def test_a_pypdf_patch_with_identical_output_is_unchanged_with_a_note(ports):
     {"parser_version": "kn-pdf-2+pypdf-0.0.1"},                                  # another parser
     {"parser_version": "kn-pdf-1+pdfium-1.0"},                                   # another extraction engine
     {"parser_version": "kn-pdf-1"},                                              # no build suffix
+    "moved_pages",                                                               # same ids/content, other pages
 ])
 def test_a_parser_change_with_different_output_or_family_is_refused(ports, change):
     store, artifacts = ports
     ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
+    if change == "moved_pages":
+        (_, d), = store.docs.items()
+        shifted = tuple((o, s, (pf or 0) + 1, (pt or 0) + 1, m) for o, s, pf, pt, m in d.layout)
+        change = {"parser_version": "kn-pdf-1+pypdf-0.0.1", "layout": shifted}
     _restamp(store, **change)
     with pytest.raises(IngestionConflict) as err:
         ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
     assert err.value.code == "pipeline_changed"
+
+
+def test_a_failing_reread_on_the_race_path_still_compensates():
+    class Store(FakeStore):
+        def find_document(self, *identity):
+            if self.race is not None and self.reads:
+                raise ConnectionError("connection lost")
+            self.reads += 1
+            return super().find_document(*identity)
+
+    store, artifacts = Store(), FakeArtifacts()
+    store.reads = 0
+    store.race = dataclasses.replace(_winner(), file_sha256="1" * 64, artifact_ref=f"knowledge-artifacts/{'1' * 64}/x.md")
+    with pytest.raises(ConnectionError):
+        ingest(plan_of(), data=DATA, store=store, artifacts=artifacts)
+    assert len(artifacts.discarded) == 1 and artifacts.objects == {}
+
+
+def test_notes_survive_any_error_on_the_race_outcome():
+    class Broken(FakeArtifacts):
+        def discard(self, ref):
+            raise OSError("storage down")
+
+        def verify(self, ref, sha):
+            raise TimeoutError("verify timed out")      # not a KnowledgeIngestionError
+
+    store = FakeStore()
+    store.race = _winner()                               # identical bytes won -> _unchanged -> verify fails
+    store.race = dataclasses.replace(store.race, artifact_ref=f"knowledge-artifacts/{sha256_hex(DATA)}/winner.md")
+    with pytest.raises(TimeoutError) as err:
+        ingest(plan_of(), data=DATA, store=store, artifacts=Broken())
+    assert any("orphaned object: knowledge-artifacts/" in n for n in err.value.__notes__)
+
+
+def _winner():
+    template = FakeStore()
+    ingest(plan_of(), data=DATA, store=template, artifacts=FakeArtifacts())
+    (_, winner), = template.docs.items()
+    return winner
 
 
 def test_cli_warns_when_pypdf_is_not_the_pinned_version(monkeypatch):

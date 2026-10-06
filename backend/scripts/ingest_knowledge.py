@@ -176,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
     except psycopg.Error as exc:   # e.g. a Migration A trigger refusing the write: nothing committed
         print(f"refused [db {exc.sqlstate}]: {str(exc).splitlines()[0] if str(exc) else type(exc).__name__}",
               file=sys.stderr)
+        for note in getattr(exc, "__notes__", []):
+            print(f"note: {note}", file=sys.stderr)
         return 1
     print(summary(p, mode="write", target=actual, result=result))
     return 0

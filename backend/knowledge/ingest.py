@@ -23,7 +23,7 @@ import re
 from dataclasses import asdict
 
 from knowledge.chunking import CHUNKER_VERSION, chunk
-from knowledge.ids import safe_artifact_name, sha256_hex
+from knowledge.ids import layout_entry, safe_artifact_name, sha256_hex
 from knowledge.models import (ArtifactIntegrityError, DocumentSpec, IngestionConflict, IngestionPlan, IngestionResult,
                               KnowledgeIngestionError, MetadataError, ParseError, SourceSpec, StoredDocument, StoredSource,
                               validate_document, validate_source)
@@ -95,7 +95,7 @@ def document_differences(stored: StoredDocument, p: IngestionPlan) -> list[str]:
         return ["normalized_sha256"]
     doc = asdict(p.document)
     diffs = [f for f in _DOCUMENT_FIELDS if getattr(stored, f) != doc[f]]
-    if stored.chunks != tuple((c.chunk_id, c.content_sha256) for c in p.chunks):
+    if not _same_chunks(stored, p):
         diffs.append("chunks")
     return diffs
 
@@ -107,7 +107,17 @@ def _same_extraction(stored: StoredDocument, p: IngestionPlan) -> bool:
     a, b = _PYPDF_BUILD.match(stored.parser_version), _PYPDF_BUILD.match(p.parser_version)
     return (a is not None and b is not None and a.group(1) == b.group(1)
             and stored.normalized_sha256 == p.normalized_sha256
-            and stored.chunks == tuple((c.chunk_id, c.content_sha256) for c in p.chunks))
+            and _same_chunks(stored, p))
+
+
+def plan_layout(p: IngestionPlan) -> tuple[tuple, ...]:
+    return tuple(layout_entry(c.ordinal, c.section_path, c.page_from, c.page_to, c.metadata) for c in p.chunks)
+
+
+def _same_chunks(stored: StoredDocument, p: IngestionPlan) -> bool:
+    """Ids, content hashes AND every derived field (ordinal, section, pages, metadata)."""
+    return (stored.chunks == tuple((c.chunk_id, c.content_sha256) for c in p.chunks)
+            and stored.layout == plan_layout(p))
 
 
 def _conflict(stored: StoredDocument, p: IngestionPlan) -> IngestionConflict | None:
@@ -164,14 +174,18 @@ def ingest(p: IngestionPlan, *, data: bytes, store: KnowledgeStore, artifacts: A
         try:
             written = store.create_version(p, ref)
         except IdentityExists as exc:
-            stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
+            try:
+                stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
+            except BaseException as reread:                  # compensation must still run
+                _compensate(ref, created, store, artifacts, reread)
+                raise
             _compensate(ref, created, store, artifacts, exc)
             if stored is None:
                 raise
             carried = tuple(getattr(exc, "__notes__", ()))     # e.g. an orphaned-artifact note
             try:
                 result = _unchanged(stored, p, store, artifacts)
-            except KnowledgeIngestionError as outcome:
+            except BaseException as outcome:                  # whatever the outcome, keep the notes
                 for note in carried:
                     outcome.add_note(note)
                 raise

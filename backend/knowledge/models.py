@@ -257,6 +257,7 @@ class StoredDocument:
     license_reference: str | None
     status: str
     chunks: tuple[tuple[str, str], ...]   # (chunk_id, content_sha256) in ordinal order
+    layout: tuple[tuple, ...] = ()        # ids.layout_entry per chunk, in ordinal order
 
 
 @dataclass(frozen=True)
