@@ -170,6 +170,7 @@
     "scripts/ci/",
     ".gitleaks.toml",
     "backend/.coveragerc",
+    "pytest.ini",
     "backend/pytest.ini",
     "backend/tests/conftest.py",
     "backend/tests/_markers.py",

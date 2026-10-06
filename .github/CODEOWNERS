@@ -10,6 +10,7 @@
 /scripts/ci/ @levuanh2
 /.gitleaks.toml @levuanh2
 /backend/.coveragerc @levuanh2
+/pytest.ini @levuanh2
 /backend/pytest.ini @levuanh2
 /backend/tests/conftest.py @levuanh2
 /backend/tests/_markers.py @levuanh2
