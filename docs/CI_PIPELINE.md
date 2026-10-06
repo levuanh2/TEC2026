@@ -371,6 +371,26 @@ Run from the repository root unless noted. Backend commands run **from
 | workflow-lint | `actionlint` |
 | dependency-audit | `pip-audit -r backend/requirements.txt`, `cd web-dashboard && npm audit --audit-level=high`, `osv-scanner scan source --lockfile app/pubspec.lock` |
 
+**Ordinary tests never reach hosted (`backend/tests/conftest.py`, `tests/_db_target.py`).**
+`backend/.env` holds the HOSTED project and `load_settings()` fills every *absent* variable from
+it (PowerShell `$env:X = ''` deletes X rather than emptying it). Before any test module is
+imported, the guard classifies `SUPABASE_DB_URL` (by the host libpq would really reach,
+including `?host=`, multi-host lists, `PGHOST`/`PGSERVICE`), `SUPABASE_URL` and
+`SUPABASE_JWKS_URL`. Local = `localhost`, a loopback IP or a Unix socket.
+- A non-local value from `backend/.env` is ignored for the session: every `SUPABASE_*` value
+  from the file becomes `""`, i.e. the CI no-DB state. The DB tests skip and the session
+  header says so.
+- A non-local value set explicitly in the environment aborts the session (exit code 4) before
+  any connection is opened.
+- A deliberate hosted test run needs **both** `ALLOW_HOSTED_DB_TESTS=i-understand-this-touches-hosted`
+  and `AGRICARBON_HOSTED_TEST_PROJECT_REF=<ref>` in the environment (never from `.env`). Every
+  target must then be exactly that project's API host, pooler (`postgres.<ref>` on
+  `*.pooler.supabase.com`) or direct (`db.<ref>.supabase.co`) endpoint.
+
+Hosted operations are a separate path and never go through pytest:
+`backend/scripts/hosted_*.py`, `import_factor_set.py`, `ingest_knowledge.py --target <ref>` and
+the migration runbook (`docs/MIGRATION_HISTORY.md`).
+
 **Local Supabase notes.** Use `SUPABASE_PROJECT_ID=tec2026-ci` so the CI stack
 gets its own Docker volumes. Plain `supabase start` reuses an existing
 `TEC2026` volume ("Starting database from backup…") that may predate the latest
