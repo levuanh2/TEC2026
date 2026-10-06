@@ -13,6 +13,8 @@
 /pytest.ini @levuanh2
 /backend/pytest.ini @levuanh2
 /backend/tests/conftest.py @levuanh2
+/backend/tests/__init__.py @levuanh2
+/backend/tests/_db_target.py @levuanh2
 /backend/tests/_markers.py @levuanh2
 /web-dashboard/vite.config.ts @levuanh2
 /web-dashboard/playwright.config.ts @levuanh2

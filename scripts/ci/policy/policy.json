@@ -173,6 +173,8 @@
     "pytest.ini",
     "backend/pytest.ini",
     "backend/tests/conftest.py",
+    "backend/tests/__init__.py",
+    "backend/tests/_db_target.py",
     "backend/tests/_markers.py",
     "web-dashboard/vite.config.ts",
     "web-dashboard/playwright.config.ts",
