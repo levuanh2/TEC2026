@@ -112,6 +112,8 @@
     "backend/tests/test_p1_correctness_policies.py": 3,
     "backend/tests/test_pg_pool.py": 1,
     "backend/tests/test_pg_pool_health.py": 4,
+    "backend/tests/test_rag_knowledge_postgrest.py": 2,
+    "backend/tests/test_rag_knowledge_storage.py": 2,
     "backend/tests/test_round51_harvest_area_invariant.py": 2,
     "backend/tests/test_round51_pg_carbon_repo.py": 3,
     "backend/tests/test_route_positive_auth.py": 4,

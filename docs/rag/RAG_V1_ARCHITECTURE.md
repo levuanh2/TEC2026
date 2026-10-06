@@ -156,7 +156,7 @@ backend/
                                                  (composes SupabaseReadRepository, CarbonService,
                                                  CvService, crop_write_authz; NOT inside service.py)
   infrastructure/
-    knowledge_repo.py                         ⏳ KnowledgeRetriever (pgvector / FTS) — V1.3
+    knowledge_repo.py                         ⏳ KnowledgeRetriever (lexical FTS + trigram) — V1.3
     llm_generator.py                          ⏳ AnswerGenerator for one provider — V1.4
     knowledge_ingest/ (script/CLI, offline)   ⏳ parse → clean → chunk → embed → index
   api.py                                      ⏳ ONE thin route, POST /v1/crop-seasons/{id}/questions
@@ -302,7 +302,8 @@ output**. The renderer never runs before grounding, and a generator can never su
 
 **Ingestion (offline, never in a request):** document → parse → clean → chunk → metadata
 (`source_id`, `document_id`, `document_version`, `chunk_id`, visibility, organization) →
-embed → index. A CLI/job under `infrastructure/knowledge_ingest/` (V1.3+).
+index (embedding only after the vector gate). Pure pipeline in `backend/knowledge/`, operator CLI
+`backend/scripts/ingest_knowledge.py` (V1.3+; RAG_V1_RETRIEVAL_ADR.md §3).
 
 **Query (per request):** season context → facts → query builder → retrieve (filters first) →
 optional rerank → `EvidenceChunk`s → generation → grounding. Retriever never persists and
@@ -624,7 +625,7 @@ Never logged: JWT, passwords, service-role/provider keys, the full prompt, the f
 
 | Phase | Scope | Gate |
 |---|---|---|
-| V1.3 Retrieval | ingestion CLI, `knowledge_repo.py` (pgvector or Postgres FTS), migration for knowledge documents/chunks with RLS, `rag_application.py` adapters (D3 resolver + facts source) | migration approval |
+| V1.3 Retrieval | ingestion CLI, `knowledge_repo.py` (lexical-first: Postgres FTS + trigram; pgvector only via a later Migration B), knowledge lexical migration with RLS, `rag_application.py` adapters (D3 resolver + facts source) | migration approval |
 | V1.4 Generation | one provider adapter behind `AnswerGenerator`, structured output, prompt policy, offline eval set | D5, D6 |
 | V1.5 API + UI | thin route, Farmer Web Q&A panel (displays `answer`), optional fact highlighting from `answer_template` + `facts`, observability | API catalog + OpenAPI update |
 | V1.6 What-if+ | hypothetical activity inputs in `CarbonService` | D2 |
