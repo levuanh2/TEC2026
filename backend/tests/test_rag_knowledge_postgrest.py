@@ -64,10 +64,11 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     # ingestion order: insert the version open for review, add its chunk, then approve/reject/archive
     doc = conn.execute(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-        " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
         " chunker_version, license_basis)"
-        " values (%s, 'doc', 'v1', %s, 'vi', %s, %s, %s, 'p', 'n', 'c', 'official_publication') returning id",
-        (source_id, FIXTURE + key, f"https://example.invalid/{key}", _sha(source_id), _sha("n" + source_id))).fetchone()[0]
+        " values (%s, 'doc', 'v1', %s, 'vi', %s, %s, %s, %s, 'p', 'n', 'c', 'official_publication') returning id",
+        (source_id, FIXTURE + key, f"https://example.invalid/{key}", f"knowledge-artifacts/{_sha(source_id)}/doc.md",
+         _sha(source_id), _sha("n" + source_id))).fetchone()[0]
     chunk_id = _sha(source_id + content)[:20]
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
                  " values (%s, %s, 0, %s, %s)", (doc, chunk_id, FIXTURE + content, _sha(content)))
