@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from knowledge.models import Block, ParsedDocument, ParseError
+from knowledge.models import Block, ParsedDocument, ParseError, check_block_count
 
 PARSER_VERSION = "kn-text-1"
 
@@ -67,6 +67,7 @@ def segment_lines(lines: list[str], page: int | None = None) -> list[Block]:
         if buf:
             flags = ("table_uncertain",) if kind == "table" else ()
             blocks.append(Block(kind=kind or "paragraph", text="\n".join(buf), page=page, flags=flags))
+            check_block_count(len(blocks))
         buf, kind = [], None
 
     for raw in lines:
@@ -79,6 +80,7 @@ def segment_lines(lines: list[str], page: int | None = None) -> list[Block]:
         if level:
             flush()
             blocks.append(Block(kind="heading", text=stripped, level=level, page=page))
+            check_block_count(len(blocks))
         elif is_table_line(line):
             if kind != "table":
                 flush()

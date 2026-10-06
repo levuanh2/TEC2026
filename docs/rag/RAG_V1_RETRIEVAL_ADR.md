@@ -97,9 +97,10 @@ RUNTIME (V1.3 end state, no generation)
 
 ### 4.1 Formats
 Markdown (`.md`), plain text (`.txt`), PDF **with an extractable text layer** (`pypdf`, already
-pinned). A PDF whose extracted text falls below a per-page threshold is stored `review_required`
-with reason `no_text_layer` and never indexed as approved. DOCX, HTML, spreadsheets, scans/OCR:
-**unsupported** in V1.3.
+pinned). A PDF whose extracted text falls below the per-page threshold is **refused** with reason
+`no_text_layer` (V1.3-C decision): nothing is uploaded or stored, so no row exists for a scan. An
+artifact-only review record would need its own design; it is not part of V1.3. DOCX, HTML,
+spreadsheets, scans/OCR: **unsupported** in V1.3.
 
 ### 4.2 Normalization (two distinct steps, one owner each)
 - **Content normalization** (Python, `NORMALIZER_VERSION`): Unicode NFC (diacritics kept),

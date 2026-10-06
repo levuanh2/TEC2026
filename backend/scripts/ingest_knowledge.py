@@ -62,7 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
 def target_of(supabase_url: str, db_url: str) -> str | None:
     """`local`, the project ref both URLs name exactly, or None when they disagree.
     The DB URL names a project only through its pooler user `postgres.<ref>` or its direct host
-    `db.<ref>.supabase.co` -- never by a substring (a password may contain anything)."""
+    `db.<ref>.supabase.co` -- never by a substring (a password may contain anything) -- and a
+    pooler user is only accepted on a Supabase pooler host."""
     api = urlparse(supabase_url).hostname or ""
     db = urlparse(db_url)
     if api in _LOCAL and (db.hostname or "") in _LOCAL:
@@ -70,7 +71,30 @@ def target_of(supabase_url: str, db_url: str) -> str | None:
     if not api.endswith(".supabase.co") or api.count(".") != 2:
         return None
     ref = api.split(".")[0]
-    return ref if db.username == f"postgres.{ref}" or db.hostname == f"db.{ref}.supabase.co" else None
+    host = db.hostname or ""
+    pooler = db.username == f"postgres.{ref}" and (host == "pooler.supabase.com" or host.endswith(".pooler.supabase.com"))
+    direct = db.username == "postgres" and host == f"db.{ref}.supabase.co"
+    return ref if pooler or direct else None
+
+
+def pinned_pypdf() -> str | None:
+    """The pypdf version backend/constraints.txt pins (the tested extraction)."""
+    pins = Path(__file__).resolve().parent.parent / "constraints.txt"
+    for line in pins.read_text(encoding="utf-8").splitlines() if pins.is_file() else []:
+        if line.lower().startswith("pypdf=="):
+            return line.split("==", 1)[1].split()[0]
+    return None
+
+
+def environment_warnings(p) -> list[str]:
+    if p.format != "pdf":
+        return []
+    running = p.parser_version.rsplit("pypdf-", 1)[-1]
+    pin = pinned_pypdf()
+    if pin and running != pin:
+        return [f"pypdf {running} is not the pinned {pin}: run the dry run AND the write in the pinned backend "
+                "environment, or chunk ids will differ"]
+    return []
 
 
 def _read(path: Path) -> bytes:
@@ -97,11 +121,13 @@ def summary(p, *, mode: str, target: str | None = None, result=None) -> str:
     ]
     lines += [f"  {c.ordinal:>4}  {c.chunk_id}  {c.tokens:>4} tok  p{c.page_from or '-'}-{c.page_to or '-'}  "
               f"{c.section_path or '(no section)'}" for c in p.chunks]
-    lines += [f"warning            {w}" for w in p.warnings] or ["warnings           none"]
+    warnings = list(p.warnings) + environment_warnings(p)
+    lines += [f"warning            {w}" for w in warnings] or ["warnings           none"]
     if result is not None:
         lines += [f"outcome            {result.outcome}", f"document status    {result.status}",
                   f"source status      {result.source_status}",
                   f"artifact           {result.artifact_ref} ({'stored now' if result.artifact_created else 'already stored'})"]
+        lines += [f"note               {n}" for n in result.notes]
     if mode == "dry-run" or (result is not None and result.status == "review_required"):
         lines.append("approval           NOT approved -- review_required; approval is a separate operator action")
     return "\n".join(lines)

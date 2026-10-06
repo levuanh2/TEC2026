@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from knowledge.models import Block, ParsedDocument
+from knowledge.models import Block, ParsedDocument, check_block_count
 from knowledge.parsers.text import decode
 
 PARSER_VERSION = "kn-markdown-1"
@@ -47,6 +47,7 @@ def parse(data: bytes) -> ParsedDocument:
         if buf:
             blocks.append(Block(kind=kind or "paragraph", text="\n".join(buf)))
         buf, kind = [], None
+        check_block_count(len(blocks))
 
     for raw in lines:
         line = raw.rstrip()
@@ -79,6 +80,7 @@ def parse(data: bytes) -> ParsedDocument:
             title = re.sub(r"(?:^|\s)#+$", "", (m.group(2) or "").strip()).strip()
             if title:
                 blocks.append(Block(kind="heading", text=title, level=len(m.group(1))))
+                check_block_count(len(blocks))
             continue
         if _TABLE_ROW.match(line):
             if kind != "table":

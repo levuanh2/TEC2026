@@ -22,7 +22,8 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from knowledge.ids import artifact_key, sha256_hex
-from knowledge.models import ArtifactIntegrityError, IngestionConflict, IngestionPlan, StoredDocument, StoredSource
+from knowledge.models import (ArtifactIntegrityError, IngestionConflict, IngestionPlan, StorageError, StoredDocument,
+                              StoredSource)
 from knowledge.ports import IdentityExists
 
 ARTIFACT_BUCKET = "knowledge-artifacts"
@@ -78,9 +79,20 @@ class PsycopgKnowledgeStore:
             cur.execute("select pg_advisory_lock(%s)", (key,))
         try:
             yield
-        finally:
-            with self._conn.cursor() as cur:
-                cur.execute("select pg_advisory_unlock(%s)", (key,))
+        except BaseException as exc:
+            # Never let a failing unlock (e.g. a broken connection, which releases the lock
+            # anyway) replace the original error or its orphaned-artifact note.
+            try:
+                self._unlock(key)
+            except Exception as unlock:  # noqa: BLE001
+                exc.add_note(f"advisory unlock failed ({type(unlock).__name__}); the session end releases it")
+            raise
+        else:
+            self._unlock(key)
+
+    def _unlock(self, key: int) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute("select pg_advisory_unlock(%s)", (key,))
 
     def create_version(self, plan: IngestionPlan, artifact_ref: str) -> StoredSource:
         import psycopg
@@ -126,18 +138,26 @@ class SupabaseArtifactStore:
     def __init__(self, client: Any):
         self._bucket = client.storage.from_(ARTIFACT_BUCKET)
 
+    @staticmethod
+    def _not_found(exc: Exception) -> bool:
+        # Only Storage's object-level "not_found" means absent. Auth, timeout, server errors -- and
+        # "Bucket not found", which a wrong key also produces -- are failures, never absence.
+        return getattr(exc, "code", None) == "not_found"
+
     def _download(self, key: str) -> bytes | None:
         try:
             data = self._bucket.download(key)
-        except Exception:  # noqa: BLE001 -- the Storage client raises on a missing object
-            return None
+        except Exception as exc:  # noqa: BLE001
+            if self._not_found(exc):
+                return None
+            raise StorageError(f"Storage download failed ({type(exc).__name__} {getattr(exc, 'status', '')})") from exc
         return data or None
 
     def _existing_key(self, file_sha256: str) -> str | None:
         try:
-            items = self._bucket.list(file_sha256)
-        except Exception:  # noqa: BLE001
-            return None
+            items = self._bucket.list(file_sha256)          # an absent folder lists as []
+        except Exception as exc:  # noqa: BLE001
+            raise StorageError(f"Storage list failed ({type(exc).__name__} {getattr(exc, 'status', '')})") from exc
         names = sorted(i["name"] for i in items or [] if i.get("name") and i.get("id"))
         return f"{file_sha256}/{names[0]}" if names else None
 
@@ -159,9 +179,9 @@ class SupabaseArtifactStore:
         try:
             self._bucket.upload(key, data, {"content-type": content_type, "upsert": "false"})
             created = True
-        except Exception as exc:  # noqa: BLE001 -- a concurrent upload of the same bytes is fine if it verifies
+        except Exception as exc:  # noqa: BLE001 -- the same bytes already there (lost race) are fine if they verify
             if not self._verified(key, file_sha256):
-                raise ArtifactIntegrityError(f"artifact upload failed ({type(exc).__name__})") from exc
+                raise StorageError(f"artifact upload failed ({type(exc).__name__} {getattr(exc, 'status', '')})") from exc
             created = False
         try:                                               # read-back: the reference must resolve to these bytes
             if not self._verified(key, file_sha256):

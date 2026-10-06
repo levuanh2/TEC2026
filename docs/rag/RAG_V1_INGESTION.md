@@ -75,9 +75,13 @@ migration gate of its own), the approval checklist (§5) is the control.
 | `.pdf` | `kn-pdf-1+pypdf-<version>` | text layer only. `< 20` non-space chars = page without text; fewer than half the pages with text ⇒ `no_text_layer` (scans are refused — **never OCR**); encrypted/malformed/> 2000 pages refused |
 
 The extension selects the parser and the leading bytes must agree (a renamed DOCX/PDF/image is
-refused). DOCX, HTML, spreadsheets, OCR, crawling: unsupported. Files > 50 MiB are refused, and so is
-any chunk over 20 000 characters (`unsplittable_text`: one "token" can be a megabyte run without
-spaces). Text is NFC-normalized before structure detection, so NFC/NFD input classify identically.
+refused). DOCX, HTML, spreadsheets, OCR, crawling: unsupported. Size bounds, all checked before any
+upload or write: file <= 50 MiB; <= 100 000 structural blocks (parsing stops as soon as it is
+exceeded, `too_many_blocks`); <= 20 000 chunks per version (`too_many_chunks`); a heading path
+<= 1 000 characters (`heading_too_long`); content + heading path <= 20 000 characters per chunk --
+everything the database indexes for that row (`unsplittable_text`: one "token" can be a megabyte run
+without spaces). Text is NFC-normalized before structure detection, so NFC/NFD input classify
+identically.
 Every refusal is explicit (`refused [<code>]`, exit 1) and happens **before** any upload or write.
 
 **PDF resource limits (accepted residual risk).** pypdf 6.19 caps every decompressed stream at
@@ -111,6 +115,7 @@ cut into 450-token windows. `section_path` = `A > B > C` (indexed by the databas
 | same bytes, pipeline versions, normalized hash, metadata, chunk set — any status | `unchanged` (no write; an archived version is never reactivated, an approved one never touched) |
 | different bytes | `content_changed` — refused; ingest as a NEW `document_version` |
 | different parser/normalizer/chunker version | `pipeline_changed` — refused; new `document_version` |
+| only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Any output difference stays `pipeline_changed` |
 | different title/language/url/date/license, or chunk set | `metadata_changed` — refused |
 | existing source with different metadata | `source_mismatch` — refused (ingestion never edits a source) |
 
@@ -155,7 +160,14 @@ Write mode uses the backend settings' operator credentials (direct Postgres + se
 never a user JWT, refuses a `--target` that does not match both URLs exactly (the DB URL names a
 project only by its pooler user `postgres.<ref>` or host `db.<ref>.supabase.co`, never a substring),
 and never prints a secret.
-Exit 0 created/unchanged/dry run, 1 refused, 2 usage/target mismatch.
+Exit 0 created/unchanged/dry run, 1 refused, 2 usage/target mismatch. Storage is trusted to say
+"absent" only with its object-level `not_found`; authorization, timeout or server errors (and the
+`Bucket not found` a wrong key produces) fail with `storage_error`, never as a missing object.
+
+**Run the dry run and the write in the pinned backend environment** (`backend/constraints.txt`):
+PDF extraction depends on the pypdf build, and the CLI warns when the running pypdf is not the
+pinned one. A pypdf upgrade that changes the extracted text of an ingested PDF is a corpus decision:
+that PDF can only be re-ingested as a new `document_version` (new chunk ids, fresh approval).
 
 **Hosted prerequisites (not done in V1.3-C):** create the private `knowledge-artifacts` bucket on
 hosted (Storage API, MIME `text/markdown`/`text/plain`/`application/pdf`, 50 MiB, not public) and

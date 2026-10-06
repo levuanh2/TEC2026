@@ -378,6 +378,12 @@ def test_cli_write_mode_requires_an_explicit_target():
     ("https://abcdefgh.supabase.co", "postgresql://postgres.other:x@pooler.supabase.com:6543/postgres?app=abcdefgh", None),
     ("https://abcdefgh.supabase.co", "postgresql://postgres:x@db.abcdefgh.evil.example:5432/postgres", None),
     ("https://abcdefgh.supabase.co.evil.example", "postgresql://postgres.abcdefgh:x@pooler.supabase.com/postgres", None),
+    # a pooler user on a host that is not a Supabase pooler; a direct host with another user
+    ("https://abcdefgh.supabase.co", "postgresql://postgres.abcdefgh:x@evil.example:6543/postgres", None),
+    ("https://abcdefgh.supabase.co", "postgresql://postgres.abcdefgh:x@pooler.supabase.com.evil.example/postgres", None),
+    ("https://abcdefgh.supabase.co",
+     "postgresql://postgres.abcdefgh:x@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres", "abcdefgh"),
+    ("https://abcdefgh.supabase.co", "postgresql://someone:x@db.abcdefgh.supabase.co:5432/postgres", None),
 ])
 def test_cli_target_resolution(api, db, expected):
     assert cli.target_of(api, db) == expected
@@ -399,18 +405,29 @@ def test_cli_wrong_target_is_refused_before_any_write(monkeypatch, capsys):
 
 # ------------------------------------------------------------------ Storage adapter (in-memory client)
 
+class _StorageApiError(Exception):
+    def __init__(self, code, status):
+        super().__init__(code)
+        self.code, self.status = code, status
+
+
 class _Bucket:
-    def __init__(self, corrupt_download=False):
+    def __init__(self, corrupt_download=False, fail_list=False, fail_download=False):
         self.objects: dict[str, bytes] = {}
         self.corrupt_download = corrupt_download
+        self.fail_list, self.fail_download = fail_list, fail_download
         self.removed: list[str] = []
 
     def list(self, folder):
+        if self.fail_list:
+            raise _StorageApiError("Unauthorized", "403")
         return [{"name": k.split("/", 1)[1], "id": "x"} for k in sorted(self.objects) if k.startswith(f"{folder}/")]
 
     def download(self, key):
+        if self.fail_download:
+            raise _StorageApiError("Bucket not found", "404")        # what a wrong key returns
         if key not in self.objects:
-            raise RuntimeError("Object not found")
+            raise _StorageApiError("not_found", "404")
         return b"corrupted" if self.corrupt_download else self.objects[key]
 
     def upload(self, key, data, options):
@@ -470,3 +487,120 @@ def test_storage_adapter_discard_only_takes_its_own_references():
         store.discard("mrv-exports/" + ref.split("/", 1)[1])
     store.discard(ref)
     assert bucket.objects == {}
+
+
+def test_storage_errors_are_never_read_as_absence():
+    from knowledge.models import StorageError
+
+    sha = sha256_hex(DATA)
+    store, bucket = _adapter(fail_list=True)
+    with pytest.raises(StorageError):
+        store.put(sha, "a.md", DATA, "text/markdown")
+    assert bucket.objects == {}                        # no second object uploaded after a failed lookup
+    store, bucket = _adapter(fail_download=True)
+    bucket.objects[f"{sha}/a.md"] = DATA
+    with pytest.raises(StorageError):
+        store.verify(f"knowledge-artifacts/{sha}/a.md", sha)
+    with pytest.raises(StorageError):
+        store.put(sha, "b.md", DATA, "text/markdown")
+    assert list(bucket.objects) == [f"{sha}/a.md"]
+
+
+class _Cursor:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=()):
+        self.conn.calls.append(sql.split("(")[0])
+        if "unlock" in sql and self.conn.unlock_fails:
+            raise ConnectionError("connection lost")
+
+
+class _Conn:
+    def __init__(self, unlock_fails):
+        self.calls: list[str] = []
+        self.unlock_fails = unlock_fails
+
+    def cursor(self):
+        return _Cursor(self)
+
+
+def test_a_failing_unlock_never_masks_the_original_error():
+    from infrastructure.knowledge_repo import PsycopgKnowledgeStore
+
+    store = PsycopgKnowledgeStore(_Conn(unlock_fails=True))
+    with pytest.raises(RuntimeError) as err:
+        with store.artifact_lock("a" * 64):
+            boom = RuntimeError("write failed")
+            boom.add_note("artifact compensation failed; orphaned object: knowledge-artifacts/x")
+            raise boom
+    assert str(err.value) == "write failed"
+    assert [n.split(" (")[0] for n in err.value.__notes__] == [
+        "artifact compensation failed; orphaned object: knowledge-artifacts/x", "advisory unlock failed"]
+    with pytest.raises(ConnectionError):               # without an earlier error the unlock failure surfaces
+        with PsycopgKnowledgeStore(_Conn(unlock_fails=True)).artifact_lock("a" * 64):
+            pass
+    ok = _Conn(unlock_fails=False)
+    with PsycopgKnowledgeStore(ok).artifact_lock("a" * 64):
+        pass
+    assert ok.calls == ["select pg_advisory_lock", "select pg_advisory_unlock"]
+
+
+# ------------------------------------------------------------------ third-party parser build suffix
+
+_PDF: dict[str, bytes] = {}
+
+
+def _pdf_plan():
+    from tests.fixtures.knowledge import make_pdf
+
+    if "data" not in _PDF:
+        _PDF["data"] = make_pdf([["Tưới ướt khô xen kẽ (AWD) kiểm thử.", "Dòng hai của trang kiểm thử.", f"Trang {i}"]
+                                 for i in range(1, 4)])
+    return plan(data=_PDF["data"], filename="awd.pdf", source=SOURCE,
+                document=DocumentSpec("test-fixture-src", "awd-pdf", "v1", "TEST FIXTURE pdf", "vi"))
+
+
+def _restamp(store, **change):
+    (key, d), = store.docs.items()
+    store.docs[key] = dataclasses.replace(d, **change)
+
+
+def test_a_pypdf_patch_with_identical_output_is_unchanged_with_a_note(ports):
+    store, artifacts = ports
+    p = _pdf_plan()
+    ingest(p, data=_PDF["data"], store=store, artifacts=artifacts)
+    _restamp(store, parser_version="kn-pdf-1+pypdf-0.0.1")
+    result = ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
+    assert result.outcome == "unchanged" and "identical output" in result.notes[0]
+    assert store.find_document("test-fixture-src", "awd-pdf", "v1").parser_version == "kn-pdf-1+pypdf-0.0.1"
+
+
+@pytest.mark.parametrize("change", [
+    {"parser_version": "kn-pdf-1+pypdf-0.0.1", "normalized_sha256": "0" * 64},   # the patch changed the output
+    {"parser_version": "kn-pdf-2+pypdf-0.0.1"},                                  # another parser
+])
+def test_a_parser_change_with_different_output_or_family_is_refused(ports, change):
+    store, artifacts = ports
+    ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
+    _restamp(store, **change)
+    with pytest.raises(IngestionConflict) as err:
+        ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
+    assert err.value.code == "pipeline_changed"
+
+
+def test_cli_warns_when_pypdf_is_not_the_pinned_version(monkeypatch):
+    p = _pdf_plan()
+    monkeypatch.setattr(cli, "pinned_pypdf", lambda: "0.0.0")
+    assert "is not the pinned 0.0.0" in cli.summary(p, mode="dry-run")
+    monkeypatch.setattr(cli, "pinned_pypdf", lambda: p.parser_version.rsplit("pypdf-", 1)[-1])
+    assert "is not the pinned" not in cli.summary(p, mode="dry-run")
+    assert cli.environment_warnings(plan_of()) == []
+    monkeypatch.undo()
+    assert cli.pinned_pypdf() is not None             # backend/constraints.txt pins pypdf

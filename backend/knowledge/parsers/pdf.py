@@ -19,7 +19,7 @@ import unicodedata
 import pypdf
 from pypdf.errors import PyPdfError
 
-from knowledge.models import Block, ParsedDocument, ParseError
+from knowledge.models import Block, ParsedDocument, ParseError, check_block_count
 from knowledge.parsers.text import heading_level, segment_lines
 
 PARSER_VERSION = f"kn-pdf-1+pypdf-{pypdf.__version__}"
@@ -92,5 +92,6 @@ def parse(data: bytes) -> ParsedDocument:
     for number, text in enumerate(texts, start=1):
         if number in with_text:
             blocks.extend(_page_blocks(text, number))
+            check_block_count(len(blocks))
     return ParsedDocument(format="pdf", parser_version=PARSER_VERSION, blocks=tuple(blocks),
                           page_count=page_count, warnings=tuple(warnings))

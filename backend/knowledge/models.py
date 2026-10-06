@@ -66,6 +66,22 @@ class ArtifactIntegrityError(KnowledgeIngestionError):
     code = "artifact_integrity"
 
 
+class StorageError(KnowledgeIngestionError):
+    """Storage answered with something other than "not found" (auth, timeout, server error)."""
+
+    code = "storage_error"
+
+
+# Fail-fast structural bound shared by the parsers: a < 50 MiB file can still hold millions of
+# one-line blocks; parsing stops as soon as this many blocks exist.
+MAX_BLOCKS = 100_000
+
+
+def check_block_count(count: int) -> None:
+    if count > MAX_BLOCKS:
+        raise ParseError(f"more than {MAX_BLOCKS} structural blocks: split the artifact", code="too_many_blocks")
+
+
 # ------------------------------------------------------------------------------ pipeline values
 
 @dataclass(frozen=True)
@@ -250,3 +266,4 @@ class IngestionResult:
     artifact_ref: str | None
     artifact_created: bool
     source_status: str | None = None
+    notes: tuple[str, ...] = ()

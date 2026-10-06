@@ -347,6 +347,47 @@ def test_a_huge_run_without_spaces_is_refused_not_stored():
     assert err.value.code == "unsplittable_text"
 
 
+def test_indexed_size_counts_the_heading_path_with_exact_boundaries():
+    def md(heading_len, body_len):
+        return ("# " + "H" * heading_len + "\n\n" + "a" * body_len).encode()
+
+    plan_of(md(1000, 1), filename="x.md")
+    with pytest.raises(ParseError) as err:
+        plan_of(md(1001, 1), filename="x.md")
+    assert err.value.code == "heading_too_long"
+    plan_of(md(1000, 19_000), filename="x.md")                 # 1000 + 19000 = 20000 indexed characters
+    with pytest.raises(ParseError) as err:
+        plan_of(md(1000, 19_001), filename="x.md")
+    assert err.value.code == "unsplittable_text"
+    plan_of(("a" * 20_000).encode(), filename="x.txt")
+    with pytest.raises(ParseError):
+        plan_of(("a" * 20_001).encode(), filename="x.txt")
+
+
+@pytest.mark.parametrize("fmt", ["md", "txt", "pdf"])
+def test_fragmented_input_stops_at_the_block_limit(monkeypatch, fmt):
+    import knowledge.models as models
+
+    monkeypatch.setattr(models, "MAX_BLOCKS", 5)
+    if fmt == "pdf":
+        data = make_pdf([[f"1.{i} Mục {i}", f"Nội dung kiểm thử số {i} đủ dài.", "Dòng ba", "Dòng bốn"]
+                         for i in range(1, 5)])
+    else:
+        data = "\n\n".join(f"# Mục {i}" if fmt == "md" else f"Đoạn {i}." for i in range(20)).encode()
+    with pytest.raises(ParseError) as err:
+        plan_of(data, filename=f"x.{fmt}")
+    assert err.value.code == "too_many_blocks"
+
+
+def test_chunk_count_is_bounded(monkeypatch):
+    import knowledge.ingest as ingest_mod
+
+    monkeypatch.setattr(ingest_mod, "MAX_CHUNKS", 2)
+    with pytest.raises(ParseError) as err:
+        plan_of(read("awd_guide.md"))
+    assert err.value.code == "too_many_chunks"
+
+
 def test_plan_reports_everything_a_write_would_persist():
     p = plan_of(read("awd_guide.md"), filename="dir/AWD guide.md")
     assert p.format == "markdown" and p.content_type == "text/markdown" and p.artifact_name == "AWD-guide.md"

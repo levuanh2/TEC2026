@@ -33,7 +33,9 @@ MAX_FILE_BYTES = 50 * 1024 * 1024   # the Storage bucket limit
 # Guard, not a tuning knob: a chunk is <= 450 whitespace tokens, but one "token" can be an
 # arbitrarily long run without spaces (base64, a broken text layer). Such a chunk is refused
 # rather than silently stored as megabytes of unusable text.
-MAX_CHUNK_CHARS = 20_000
+MAX_CHUNK_CHARS = 20_000           # content + section_path: everything the database indexes per row
+MAX_SECTION_PATH_CHARS = 1_000      # a heading path is a label, repeated on every chunk of its section
+MAX_CHUNKS = 20_000                 # one document version is one transaction
 _SOURCE_FIELDS = ("title", "owner", "source_type", "authority", "visibility", "organization_id", "farm_id")
 _DOCUMENT_FIELDS = ("title", "language", "official_url", "published_at", "license_basis", "license_reference")
 
@@ -54,10 +56,17 @@ def plan(*, data: bytes, filename: str, source: SourceSpec, document: DocumentSp
                    document_version=document.document_version)
     if not chunks:
         raise ParseError("no indexable text after normalization", code="no_content")
-    oversized = [c.ordinal for c in chunks if len(c.content) > MAX_CHUNK_CHARS]
+    if len(chunks) > MAX_CHUNKS:
+        raise ParseError(f"{len(chunks)} chunks exceed the per-version limit {MAX_CHUNKS}: split the artifact",
+                         code="too_many_chunks")
+    long_paths = [c.ordinal for c in chunks if len(c.section_path or "") > MAX_SECTION_PATH_CHARS]
+    if long_paths:
+        raise ParseError(f"chunk(s) {long_paths[:5]} have a heading path over {MAX_SECTION_PATH_CHARS} characters: "
+                         "fix the artifact's headings; nothing was stored", code="heading_too_long")
+    oversized = [c.ordinal for c in chunks if len(c.content) + len(c.section_path or "") > MAX_CHUNK_CHARS]
     if oversized:
-        raise ParseError(f"chunk(s) {oversized[:5]} exceed {MAX_CHUNK_CHARS} characters (a run of text without "
-                         "spaces?): fix the artifact; nothing was stored", code="unsplittable_text")
+        raise ParseError(f"chunk(s) {oversized[:5]} exceed {MAX_CHUNK_CHARS} indexed characters (a run of text "
+                         "without spaces?): fix the artifact; nothing was stored", code="unsplittable_text")
     return IngestionPlan(
         source=source, document=document, format=fmt.name, size_bytes=len(data), file_sha256=sha256_hex(data),
         normalized_sha256=normalized.sha256, parser_version=parsed.parser_version,
@@ -74,7 +83,9 @@ def document_differences(stored: StoredDocument, p: IngestionPlan) -> list[str]:
     """Why `stored` is not this plan, most fundamental first; [] means identical."""
     if stored.file_sha256 != p.file_sha256:
         return ["file_sha256"]
-    diffs = [f for f in ("parser_version", "normalizer_version", "chunker_version") if getattr(stored, f) != getattr(p, f)]
+    diffs = [f for f in ("normalizer_version", "chunker_version") if getattr(stored, f) != getattr(p, f)]
+    if stored.parser_version != p.parser_version and not _same_extraction(stored, p):
+        diffs.insert(0, "parser_version")
     if diffs:
         return diffs
     if stored.normalized_sha256 != p.normalized_sha256:
@@ -84,6 +95,15 @@ def document_differences(stored: StoredDocument, p: IngestionPlan) -> list[str]:
     if stored.chunks != tuple((c.chunk_id, c.content_sha256) for c in p.chunks):
         diffs.append("chunks")
     return diffs
+
+
+def _same_extraction(stored: StoredDocument, p: IngestionPlan) -> bool:
+    """Only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` vs `+pypdf-6.20.0`) AND the
+    new run reproduces the stored output exactly: a library patch that changed nothing is not a new
+    pipeline. Any output difference stays `pipeline_changed`."""
+    return (stored.parser_version.split("+", 1)[0] == p.parser_version.split("+", 1)[0]
+            and stored.normalized_sha256 == p.normalized_sha256
+            and stored.chunks == tuple((c.chunk_id, c.content_sha256) for c in p.chunks))
 
 
 def _conflict(stored: StoredDocument, p: IngestionPlan) -> IngestionConflict | None:
@@ -119,8 +139,12 @@ def _unchanged(stored: StoredDocument, p: IngestionPlan, store: KnowledgeStore,
         raise ArtifactIntegrityError("the stored version has no controlled artifact (ST1); it was not created by "
                                      "this pipeline", code="artifact_missing")
     artifacts.verify(stored.artifact_ref, stored.file_sha256)
+    notes: tuple[str, ...] = ()
+    if stored.parser_version != p.parser_version:
+        notes = (f"stored with {stored.parser_version}, re-run with {p.parser_version}: identical output; the stored "
+                 "provenance is kept",)
     return IngestionResult(outcome="unchanged", status=stored.status, artifact_ref=stored.artifact_ref,
-                           artifact_created=False, source_status=src.status if src else None)
+                           artifact_created=False, source_status=src.status if src else None, notes=notes)
 
 
 def ingest(p: IngestionPlan, *, data: bytes, store: KnowledgeStore, artifacts: ArtifactStore) -> IngestionResult:
