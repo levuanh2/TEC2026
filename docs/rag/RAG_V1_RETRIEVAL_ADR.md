@@ -1,9 +1,9 @@
 # ADR — RAG V1.3 Retrieval Storage and Pipeline
 
-Status: **V1.3-B IMPLEMENTED LOCALLY** — Migration A is
-`supabase/migrations/20261005090000_knowledge_retrieval_lexical_foundation.sql` (+ rollback), validated
-on the local/CI stack only; **not applied to hosted**. No ingestion code, no dependency, no vector.
-Branch: `feature/rag-v1-retrieval` from `main @ 6c1dfe1` (PR #6 merged).
+Status: **V1.3-B APPLIED TO HOSTED** (Migration A,
+`supabase/migrations/20261005090000_knowledge_retrieval_lexical_foundation.sql`, 2026-10-06; schema only,
+no knowledge rows). **V1.3-C** (ingestion foundation) is implemented locally/CI —
+[RAG_V1_INGESTION.md](RAG_V1_INGESTION.md); nothing ingested anywhere. No dependency, no vector.
 Related: [RAG_V1_ARCHITECTURE.md](RAG_V1_ARCHITECTURE.md), [RAG_V1_DATA_CONTRACT.md](RAG_V1_DATA_CONTRACT.md),
 [RAG_V1_SOURCE_POLICY.md](RAG_V1_SOURCE_POLICY.md), [RAG_V1_RETRIEVAL_EVAL_PLAN.md](RAG_V1_RETRIEVAL_EVAL_PLAN.md).
 
@@ -20,7 +20,7 @@ stays intact. Embedding is **not** a generation-LLM choice; D5 stays open.
 | E1 | **C — lexical-first** baseline for V1.3. No embedding model, dimension, runtime or pgvector yet | **decided** |
 | C1 | Source policy approved; candidate corpus defined; **no document approved yet** | **decided (policy)** |
 | D3 | Real `SeasonScopeResolver` reusing Core V1 RLS reads + `crop_write_authz`; additive `season_lineage` read; no schema change | **approved** |
-| ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **open** — separate decision; V1.3 accepts official URL + SHA-256 (§4.4) |
+| ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **decided** (V1.3-C): an approved version needs a controlled immutable `artifact_ref` + `file_sha256`; `official_url` alone is not sufficient (§4.4, [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §1). DB enforcement is a pending follow-up migration |
 | ST2 | Approved knowledge deletion: the normal lifecycle is **archive-only** (no authenticated DELETE, no ordinary hard-delete workflow); a legal/copyright removal is a separate privileged **administrative purge** design (§9.8) | archive-only **decided**; purge **DEFERRED** — designed before real-corpus operationalization, if required; not implemented in Migration A |
 
 ---
@@ -130,11 +130,14 @@ Every document version records `file_sha256` and **at least one** of:
 - `official_url` (`https://`, the publisher's location), or
 - `artifact_ref` (a controlled, immutable reference to a stored copy).
 
-**V1.3 accepts `official_url` + `file_sha256`.** Limitation: the publisher may move, change or remove
-the file; the hash detects drift but cannot recover the original, so re-ingestion is reproducible
-only while the URL serves the same bytes. A controlled archived copy (Supabase Storage, retention,
-access policy) is decision **ST1**, a separate implementation; `artifact_ref` exists in the schema so
-it can be adopted without another identity change.
+**ST1 (decided in V1.3-C):** an APPROVED version must have `artifact_ref` — a controlled immutable
+copy in the private `knowledge-artifacts` Storage bucket, content-addressed `<sha256>/<safe-name>`,
+SHA-256 verified on every write and reuse — plus `file_sha256` and provenance. `official_url` stays
+useful provenance but is **not sufficient** for approval: the publisher may move, change or remove
+the file, and a hash detects drift without recovering the original. The ingestion CLI always stores
+the artifact. Migration A's CHECK still accepts URL-only rows and its approval CHECK does not require
+`artifact_ref`; until a follow-up migration enforces it, the approval checklist
+([RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5) is the control.
 
 ### 4.5 Identity and idempotency
 - `source_id` (slug, per publisher/series), `document_id` (slug, unique **within its source**),
