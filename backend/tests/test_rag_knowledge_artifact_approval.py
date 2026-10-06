@@ -101,10 +101,11 @@ def test_official_url_alone_never_satisfies_approval(tx):
 def test_approval_with_a_controlled_artifact_and_every_existing_requirement_is_allowed(tx):
     assert _insert(tx, artifact=VALID) == ("ok", None)                                  # what V1.3-C writes
     assert _insert(tx, artifact=VALID, url=None, document_id="doc-no-url") == ("ok", None)
-    # structural, not layout-bound: another bucket/path scheme stays possible without a migration
-    assert _insert(tx, artifact="other-bucket/opaque-ref-1", document_id="doc-opaque") == ("ok", None)
-    assert _insert(tx, artifact="ref1", document_id="doc-single") == ("ok", None)
-    assert _insert(tx, artifact="a" * 512, document_id="doc-512") == ("ok", None)
+    # ST1 itself is structural; binding the path to the row's own bytes (bucket + file_sha256) is
+    # ST1.1's job (test_rag_knowledge_artifact_sha_binding.py proves ST1 accepts e.g. `other-bucket/x`
+    # and `ref1` and only ST1.1 refuses them). ST1's 512 bound, on the row's own content address:
+    longest = f"knowledge-artifacts/{_sha('bytes')}/" + "a" * (512 - 85)
+    assert len(longest) == 512 and _insert(tx, artifact=longest, document_id="doc-512") == ("ok", None)
 
 
 def test_the_artifact_does_not_relax_the_existing_approval_rules(tx):
