@@ -68,7 +68,7 @@ Every item below must exist for the **real artifact**; missing metadata is never
 | Requirement | Field(s) | Enforcement |
 |---|---|---|
 | verifiable publisher | via approved source | FK to an approved source at retrieval |
-| official URL **or** controlled stored copy | `official_url` (`https://`) / `artifact_ref` | CHECK: at least one |
+| controlled stored copy (ST1) **and** official URL when the publisher has one | `artifact_ref` / `official_url` (`https://`) | CLI always stores `artifact_ref`; DB CHECK today: at least one (ST1 enforcement migration pending) |
 | integrity | `file_sha256`, `normalized_sha256` | NOT NULL, hex format, immutable |
 | real version | `document_version` | NOT NULL; publisher version, else `file_sha256` prefix (stated as such) |
 | language | `language` | NOT NULL, ISO 639-1 |
@@ -87,11 +87,12 @@ Approver role (proposed): the AgriCarbon methodology/product owner. Approval is 
 ## 5. Original artifact provenance
 
 - Each version records `file_sha256` plus `official_url` and/or `artifact_ref`.
-- **V1.3 accepts `official_url` + `file_sha256`.** Limitation: if the publisher moves or changes the
-  file, the hash shows the drift but the original cannot be re-fetched, so re-ingestion is
-  reproducible only while the URL serves the same bytes.
-- A controlled immutable archived copy (`artifact_ref` → Supabase Storage object with retention and
-  access policy) is a **separate decision (ST1)**; no Storage subsystem is built in V1.3.
+- **ST1 (decided, V1.3-C): an APPROVED version needs a controlled immutable stored copy**
+  (`artifact_ref` → private `knowledge-artifacts` Storage object, content-addressed by SHA-256,
+  verified) **and** its `file_sha256`. `official_url` alone is not sufficient: if the publisher moves
+  or changes the file, the hash shows the drift but the original cannot be re-fetched.
+- The ingestion CLI always stores the artifact; the approver re-verifies it (checklist in
+  [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5) until the database enforces it.
 
 ## 6. Metadata summary
 
@@ -118,5 +119,5 @@ Identity: document unique by `(source_id, document_id, document_version)`; citat
 
 ## 8. Out of scope for V1.3
 
-User/HTX uploads, crawling, OCR, DOCX/HTML/spreadsheets, automatic approval, Storage archiving
-(ST1), and any source whose license basis is unknown.
+User/HTX uploads, crawling, OCR, DOCX/HTML/spreadsheets, automatic approval, and any source whose
+license basis is unknown. (Storage archiving is no longer out of scope: ST1, V1.3-C.)

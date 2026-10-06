@@ -1,0 +1,219 @@
+"""Ingestion of ONE document version: plan (pure; also the dry run) then ingest (ports).
+
+Idempotency (ADR §4.5): the identity is (source_id, document_id, document_version).
+- Absent: store the artifact, then source + version + chunks in one transaction, `review_required`.
+- Present with the same file SHA-256, pipeline versions, normalized SHA-256, metadata and chunk ids:
+  a no-op (`unchanged`) whatever its status -- an approved/archived version is never touched and an
+  archived one is never reactivated.
+- Present with anything different: IngestionConflict (fail closed). New bytes or a new pipeline
+  need a new document_version; immutable provenance is never replaced.
+There is no approval and no republish path here (docs/rag/RAG_V1_INGESTION.md §6).
+
+Artifact handling (ST1): every run holds the store's per-SHA-256 lock from the first read to the
+last cleanup, so runs over the same bytes are serialized. The artifact is stored BEFORE the
+transaction (its reference must resolve when the row commits); if the transaction fails and this
+run created the object and no committed version references it, it is removed. An `unchanged`
+result re-verifies the stored artifact first: a missing, tampered or absent artifact fails.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import re
+from dataclasses import asdict
+from typing import Callable
+
+from knowledge.chunking import CHUNKER_VERSION, chunk
+from knowledge.ids import layout_entry, safe_artifact_name, sha256_hex
+from knowledge.models import (ArtifactIntegrityError, DocumentSpec, IngestionConflict, IngestionPlan, IngestionResult,
+                              KnowledgeIngestionError, MetadataError, ParsedDocument, ParseError, SourceSpec,
+                              StoredDocument, StoredSource,
+                              validate_document, validate_source)
+from knowledge.normalize import normalize
+from knowledge.parsers import detect, parser_for
+from knowledge.ports import ArtifactStore, IdentityExists, KnowledgeStore
+
+MAX_FILE_BYTES = 50 * 1024 * 1024   # the Storage bucket limit
+# Guard, not a tuning knob: a chunk is <= 450 whitespace tokens, but one "token" can be an
+# arbitrarily long run without spaces (base64, a broken text layer). Such a chunk is refused
+# rather than silently stored as megabytes of unusable text.
+MAX_CHUNK_CHARS = 20_000           # content + section_path: everything the database indexes per row
+MAX_SECTION_PATH_CHARS = 1_000      # a heading path is a label, repeated on every chunk of its section
+MAX_CHUNKS = 20_000                 # one document version is one transaction
+_PYPDF_BUILD = re.compile(r"^(kn-pdf-\d+)\+pypdf-[0-9][0-9A-Za-z.]*$")
+_SOURCE_FIELDS = ("title", "owner", "source_type", "authority", "visibility", "organization_id", "farm_id")
+_DOCUMENT_FIELDS = ("title", "language", "official_url", "published_at", "license_basis", "license_reference")
+
+
+def plan(*, data: bytes, filename: str, source: SourceSpec, document: DocumentSpec,
+         pdf_parser: Callable[[bytes], ParsedDocument] | None = None) -> IngestionPlan:
+    """`pdf_parser` must be the process-isolated PDF parser (infrastructure.pdf_isolation.
+    parse_pdf_isolated); without it a PDF is refused rather than parsed in this process."""
+    validate_source(source)
+    warnings = validate_document(document)
+    if document.source_id != source.source_id:
+        raise MetadataError("document.source_id must equal source.source_id")
+    if not data:
+        raise ParseError("the file is empty", code="empty")
+    if len(data) > MAX_FILE_BYTES:
+        raise ParseError(f"the file is {len(data)} bytes (limit {MAX_FILE_BYTES})", code="too_large")
+    fmt = detect(filename, data)
+    if fmt.name == "pdf":
+        if pdf_parser is None:
+            raise KnowledgeIngestionError("PDF parsing must run in the isolated worker (pdf_parser)",
+                                          code="pdf_requires_isolation")
+        parsed = pdf_parser(data)
+    else:
+        parsed = parser_for(fmt)(data)
+    normalized = normalize(parsed)
+    chunks = chunk(normalized, source_id=source.source_id, document_id=document.document_id,
+                   document_version=document.document_version)
+    if not chunks:
+        raise ParseError("no indexable text after normalization", code="no_content")
+    if len(chunks) > MAX_CHUNKS:
+        raise ParseError(f"{len(chunks)} chunks exceed the per-version limit {MAX_CHUNKS}: split the artifact",
+                         code="too_many_chunks")
+    long_paths = [c.ordinal for c in chunks if len(c.section_path or "") > MAX_SECTION_PATH_CHARS]
+    if long_paths:
+        raise ParseError(f"chunk(s) {long_paths[:5]} have a heading path over {MAX_SECTION_PATH_CHARS} characters: "
+                         "fix the artifact's headings; nothing was stored", code="heading_too_long")
+    oversized = [c.ordinal for c in chunks if len(c.content) + len(c.section_path or "") > MAX_CHUNK_CHARS]
+    if oversized:
+        raise ParseError(f"chunk(s) {oversized[:5]} exceed {MAX_CHUNK_CHARS} indexed characters (a run of text "
+                         "without spaces?): fix the artifact; nothing was stored", code="unsplittable_text")
+    return IngestionPlan(
+        source=source, document=document, format=fmt.name, size_bytes=len(data), file_sha256=sha256_hex(data),
+        normalized_sha256=normalized.sha256, parser_version=parsed.parser_version,
+        normalizer_version=normalized.normalizer_version, chunker_version=CHUNKER_VERSION,
+        artifact_name=safe_artifact_name(filename, fmt.extension), content_type=fmt.content_type, chunks=chunks,
+        warnings=tuple(warnings) + parsed.warnings + normalized.warnings)
+
+
+def source_differences(stored: StoredSource, spec: SourceSpec) -> list[str]:
+    return [f for f in _SOURCE_FIELDS if getattr(stored, f) != getattr(spec, f)]
+
+
+def document_differences(stored: StoredDocument, p: IngestionPlan) -> list[str]:
+    """Why `stored` is not this plan, most fundamental first; [] means identical."""
+    if stored.file_sha256 != p.file_sha256:
+        return ["file_sha256"]
+    diffs = [f for f in ("normalizer_version", "chunker_version") if getattr(stored, f) != getattr(p, f)]
+    if stored.parser_version != p.parser_version and not _same_extraction(stored, p):
+        diffs.insert(0, "parser_version")
+    if diffs:
+        return diffs
+    if stored.normalized_sha256 != p.normalized_sha256:
+        return ["normalized_sha256"]
+    doc = asdict(p.document)
+    diffs = [f for f in _DOCUMENT_FIELDS if getattr(stored, f) != doc[f]]
+    if not _same_chunks(stored, p):
+        diffs.append("chunks")
+    return diffs
+
+
+def _same_extraction(stored: StoredDocument, p: IngestionPlan) -> bool:
+    """Only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` vs `+pypdf-6.20.0`) AND the
+    new run reproduces the stored output exactly: a library patch that changed nothing is not a new
+    pipeline. Any output difference -- or any other suffix family -- stays `pipeline_changed`."""
+    a, b = _PYPDF_BUILD.match(stored.parser_version), _PYPDF_BUILD.match(p.parser_version)
+    return (a is not None and b is not None and a.group(1) == b.group(1)
+            and stored.normalized_sha256 == p.normalized_sha256
+            and _same_chunks(stored, p))
+
+
+def plan_layout(p: IngestionPlan) -> tuple[tuple, ...]:
+    return tuple(layout_entry(c.ordinal, c.section_path, c.page_from, c.page_to, c.metadata) for c in p.chunks)
+
+
+def _same_chunks(stored: StoredDocument, p: IngestionPlan) -> bool:
+    """Ids, content hashes AND every derived field (ordinal, section, pages, metadata)."""
+    return (stored.chunks == tuple((c.chunk_id, c.content_sha256) for c in p.chunks)
+            and stored.layout == plan_layout(p))
+
+
+def _conflict(stored: StoredDocument, p: IngestionPlan) -> IngestionConflict | None:
+    diffs = document_differences(stored, p)
+    if not diffs:
+        return None
+    ident = f"{p.document.source_id}/{p.document.document_id}@{p.document.document_version}"
+    if diffs == ["file_sha256"]:
+        return IngestionConflict(f"{ident} already exists with different bytes (stored {stored.file_sha256[:12]}…, "
+                                 f"new {p.file_sha256[:12]}…): ingest the new bytes as a NEW document_version",
+                                 code="content_changed")
+    if set(diffs) & {"parser_version", "normalizer_version", "chunker_version"}:
+        return IngestionConflict(f"{ident} was ingested with another pipeline ({', '.join(diffs)}): "
+                                 "re-ingest as a NEW document_version", code="pipeline_changed")
+    return IngestionConflict(f"{ident} already exists with different {', '.join(diffs)}: fail closed",
+                             code="metadata_changed")
+
+
+def _check_source(src: StoredSource | None, spec: SourceSpec) -> None:
+    if src is not None and source_differences(src, spec):
+        raise IngestionConflict(f"source {src.source_id} exists with different {', '.join(source_differences(src, spec))}"
+                                " (source metadata is not changed by ingestion)", code="source_mismatch")
+
+
+def _unchanged(stored: StoredDocument, p: IngestionPlan, store: KnowledgeStore,
+               artifacts: ArtifactStore) -> IngestionResult:
+    conflict = _conflict(stored, p)
+    if conflict:
+        raise conflict
+    src = store.find_source(p.source.source_id)
+    _check_source(src, p.source)
+    if not stored.artifact_ref:
+        raise ArtifactIntegrityError("the stored version has no controlled artifact (ST1); it was not created by "
+                                     "this pipeline", code="artifact_missing")
+    artifacts.verify(stored.artifact_ref, stored.file_sha256)
+    notes: tuple[str, ...] = ()
+    if stored.parser_version != p.parser_version:
+        notes = (f"stored with {stored.parser_version}, re-run with {p.parser_version}: identical output; the stored "
+                 "provenance is kept",)
+    return IngestionResult(outcome="unchanged", status=stored.status, artifact_ref=stored.artifact_ref,
+                           artifact_created=False, source_status=src.status if src else None, notes=notes)
+
+
+def ingest(p: IngestionPlan, *, data: bytes, store: KnowledgeStore, artifacts: ArtifactStore) -> IngestionResult:
+    if sha256_hex(data) != p.file_sha256:
+        raise KnowledgeIngestionError("the bytes changed after planning", code="artifact_integrity")
+    doc = p.document
+    with store.artifact_lock(p.file_sha256):
+        stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
+        if stored is not None:
+            return _unchanged(stored, p, store, artifacts)
+        _check_source(store.find_source(p.source.source_id), p.source)
+        ref, created = artifacts.put(p.file_sha256, p.artifact_name, data, p.content_type)
+        try:
+            written = store.create_version(p, ref)
+        except IdentityExists as exc:
+            try:
+                stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
+            except BaseException as reread:                  # compensation must still run
+                _compensate(ref, created, store, artifacts, reread)
+                raise
+            _compensate(ref, created, store, artifacts, exc)
+            if stored is None:
+                raise
+            carried = tuple(getattr(exc, "__notes__", ()))     # e.g. an orphaned-artifact note
+            try:
+                result = _unchanged(stored, p, store, artifacts)
+            except BaseException as outcome:                  # whatever the outcome, keep the notes
+                for note in carried:
+                    outcome.add_note(note)
+                raise
+            return dataclasses.replace(result, notes=result.notes + carried)
+        except BaseException as exc:
+            _compensate(ref, created, store, artifacts, exc)
+            raise
+    return IngestionResult(outcome="created", status="review_required", artifact_ref=ref,
+                           artifact_created=created, source_status=written.status)
+
+
+def _compensate(ref: str, created: bool, store: KnowledgeStore, artifacts: ArtifactStore, exc: BaseException) -> None:
+    """Best effort; a failure here never hides the original error -- it is attached to it."""
+    if not created:
+        return
+    try:
+        if not store.artifact_in_use(ref):
+            artifacts.discard(ref)
+    except Exception as cleanup:  # noqa: BLE001
+        exc.add_note(f"artifact compensation failed ({type(cleanup).__name__}); orphaned object: {ref}")

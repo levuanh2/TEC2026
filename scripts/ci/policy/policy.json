@@ -108,6 +108,8 @@
     "backend/tests/test_forced_password_change.py": 2,
     "backend/tests/test_former_member_api_reads.py": 2,
     "backend/tests/test_former_member_reads.py": 1,
+    "backend/tests/test_knowledge_ingest_db.py": 2,
+    "backend/tests/test_knowledge_pdf_isolation.py": 1,
     "backend/tests/test_p0_security_policies.py": 3,
     "backend/tests/test_p1_correctness_policies.py": 3,
     "backend/tests/test_pg_pool.py": 1,

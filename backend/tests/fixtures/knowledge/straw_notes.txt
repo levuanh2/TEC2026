@@ -1,0 +1,16 @@
+QUẢN LÝ RƠM RẠ SAU THU HOẠCH
+
+TEST FIXTURE — NOT A REAL APPROVED SOURCE. Văn bản giả lập chỉ dùng để kiểm thử.
+
+1.1 Thu gom rơm
+Rơm rạ nên được thu gom khỏi ruộng sau khi
+gặt. Đây là dữ liệu kiểm thử.
+
+1. Phơi khô rơm.
+2. Ủ rơm với chế phẩm vi sinh.
+
+Hạng mục    Đơn vị    Giá trị
+Rơm khô    tấn/ha    5
+
+Điều 2. Phạm vi áp dụng
+Áp dụng cho dữ liệu kiểm thử, không phải văn bản thật.

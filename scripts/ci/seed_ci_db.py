@@ -15,8 +15,9 @@ the project's own tools and documented steps only:
    hosted (the Carbon persist gate refuses to write without it)
 1. `backend/scripts/seed_demo_data.py`       -- DEMO-AGRICARBON-2026 tenant
 2. `backend/scripts/create_farmer_qa_identity.py` -- the scoped QA farmer
-3. the three PRIVATE Storage buckets the baseline migration says to create via
-   the Storage API (plant-images, mrv-evidence, mrv-exports)
+3. the PRIVATE Storage buckets the baseline migration says to create via the
+   Storage API (plant-images, mrv-evidence, mrv-exports), plus `knowledge-artifacts`
+   for RAG V1.3-C artifact copies (docs/rag/RAG_V1_INGESTION.md)
 4. one Auth user with no membership (hosted always has users outside the demo)
 5. one CV model version registered through the app's own repository call,
    labelled as a CI fixture (on hosted it is registered when the model loads)
@@ -48,6 +49,9 @@ BUCKETS = {
     "plant-images": {"public": False, "allowed_mime_types": ["image/jpeg", "image/png"], "file_size_limit": 10 * 1024 * 1024},
     "mrv-evidence": {"public": False, "file_size_limit": 50 * 1024 * 1024},
     "mrv-exports": {"public": False, "file_size_limit": 50 * 1024 * 1024},
+    # RAG V1.3-C controlled artifact copies (ST1): no storage.objects policy, service role only.
+    "knowledge-artifacts": {"public": False, "allowed_mime_types": ["text/markdown", "text/plain", "application/pdf"],
+                            "file_size_limit": 50 * 1024 * 1024},
 }
 
 
