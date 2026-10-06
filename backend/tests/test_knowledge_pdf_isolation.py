@@ -144,22 +144,43 @@ def test_parser_result_text_over_the_limit_is_rejected_by_the_parent(monkeypatch
 
 # ------------------------------------------------------------------ misbehaving worker
 
-def test_a_worker_that_never_finishes_is_terminated_and_reaped(monkeypatch, spawned):
-    fake(monkeypatch, "sleep")
+def _interpreter_pid(path: Path) -> int:
+    for _ in range(100):                                   # the worker writes it right after starting
+        if path.exists() and path.read_text():
+            return int(path.read_text())
+        time.sleep(0.05)
+    raise AssertionError("the worker never reported its pid")
+
+
+def test_a_worker_that_never_finishes_is_terminated_and_reaped(monkeypatch, spawned, tmp_path):
+    pid_file = tmp_path / "pid"
+    fake(monkeypatch, "sleep", str(pid_file))
     started = time.monotonic()
     with pytest.raises(ParseError) as err:
-        iso.parse_pdf_isolated(b"%PDF-1.4", timeout=2)
+        iso.parse_pdf_isolated(b"%PDF-1.4", timeout=3)
     assert err.value.code == "parse_timeout" and time.monotonic() - started < 15
     _all_reaped(spawned[0])
+    real = _interpreter_pid(pid_file)                       # the interpreter itself, not only a launcher
+    deadline = time.monotonic() + 5
+    while _alive(real) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not _alive(real)
 
 
-def test_repeated_timeouts_leak_no_process(monkeypatch, spawned):
-    fake(monkeypatch, "sleep")
-    for _ in range(3):
+def test_repeated_timeouts_leak_no_process(monkeypatch, spawned, tmp_path):
+    pids = []
+    for i in range(3):
+        pid_file = tmp_path / f"pid{i}"
+        fake(monkeypatch, "sleep", str(pid_file))
         with pytest.raises(ParseError):
-            iso.parse_pdf_isolated(b"%PDF-1.4", timeout=1)
+            iso.parse_pdf_isolated(b"%PDF-1.4", timeout=3)
+        pids.append(_interpreter_pid(pid_file))
     assert len(spawned[0]) == 3
     _all_reaped(spawned[0])
+    deadline = time.monotonic() + 5
+    while any(_alive(p) for p in pids) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not any(_alive(p) for p in pids)
 
 
 def test_a_crashing_worker_is_a_typed_failure(monkeypatch, spawned):

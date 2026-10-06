@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))      # backend/
 def main(mode: str, *args: str) -> int:
     sys.stdin.buffer.read()
     out = sys.stdout.buffer
-    if mode == "sleep":
+    if mode == "sleep":                                     # args[0] (optional): file to record the REAL pid in
+        if args:                                            # (a Windows venv python.exe is a launcher; this is
+            Path(args[0]).write_text(str(os.getpid()))      # the interpreter process that must die too)
         time.sleep(3600)
     elif mode == "crash":
         os._exit(70)
