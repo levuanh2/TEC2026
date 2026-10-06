@@ -20,8 +20,10 @@
 --
 -- Approval-time only, like ST1: drafts (review_required / rejected) are unchanged, may carry no
 -- artifact or a mismatched one, and can be corrected before approval (artifact_ref is mutable
--- until the first approval; file_sha256 is immutable from insert). An archived row was approved
--- under this rule and its artifact_ref is frozen by the immutability trigger.
+-- until the first approval; file_sha256 is immutable from insert). A row approved once this
+-- constraint exists and later archived was bound at approval, and its artifact_ref stays frozen by
+-- the immutability trigger. Rows already ARCHIVED before this migration are not validated by it
+-- (the check applies to status = 'approved' only); hosted had none.
 --
 -- Additive: one CHECK constraint. No table, column, RLS, grant, trigger, function, lifecycle,
 -- retrieval, Storage or Core V1 change. Hosted had 0 knowledge rows when this was written
