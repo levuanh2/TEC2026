@@ -1,8 +1,11 @@
 # RAG V1 Knowledge Source Policy
 
 Status: **APPROVED (C1 policy)** — candidate corpus defined; **no source or document is approved
-yet**. Applies to every document that may become an `EvidenceChunk`. Enforced in the database by
-Migration A ([RAG_V1_RETRIEVAL_ADR.md §9](RAG_V1_RETRIEVAL_ADR.md)), not only by operator code.
+yet**. Applies to every document that may become an `EvidenceChunk`. Enforced in the database, not
+only by operator code: Migration A ([RAG_V1_RETRIEVAL_ADR.md §9](RAG_V1_RETRIEVAL_ADR.md)) for the
+approval record, license, lifecycle and RLS, and migration `20261006120000` for the controlled
+artifact required to approve (ST1-DB). Migration A alone still permits URL-only approval: both must
+be applied before the first real approval.
 
 ## 1. Principles
 
