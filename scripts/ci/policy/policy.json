@@ -175,6 +175,7 @@
     "backend/tests/conftest.py",
     "backend/tests/__init__.py",
     "backend/tests/_db_target.py",
+    "backend/tests/test_db_target_guard.py",
     "backend/tests/_markers.py",
     "web-dashboard/vite.config.ts",
     "web-dashboard/playwright.config.ts",
