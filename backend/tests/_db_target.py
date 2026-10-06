@@ -77,10 +77,12 @@ def db_hosts(url: str, environ: Mapping[str, str]) -> tuple[list[str], str | Non
         params = conninfo_to_dict(url)
     except Exception:  # noqa: BLE001 -- unparsable: treat as unknown (= not local)
         return (["<unparsable>"], None, False)
-    hosts = [h for value in (params.get("host"), params.get("hostaddr")) if value for h in str(value).split(",")]
-    if not hosts:                                     # libpq falls back to the environment, then the socket
-        hosts = [h for k in ("PGHOST", "PGHOSTADDR") if environ.get(k) for h in environ[k].split(",")]
-    service = bool(params.get("service") or environ.get("PGSERVICE"))
+    # libpq resolves `host` and `hostaddr` INDEPENDENTLY: each comes from the conninfo or else
+    # from its own environment variable. `localhost` + PGHOSTADDR=<remote> connects remotely.
+    host = params.get("host") or environ.get("PGHOST")
+    hostaddr = params.get("hostaddr") or environ.get("PGHOSTADDR")
+    hosts = [h for value in (host, hostaddr) if value for h in str(value).split(",")]
+    service = bool(params.get("service") or environ.get("PGSERVICE") or environ.get("PGSERVICEFILE"))
     user = params.get("user")
     return (hosts or ["/"], str(user) if user else None, service)
 
@@ -169,6 +171,10 @@ def assess(environ: Mapping[str, str], dotenv: Mapping[str, str]) -> Decision:
                                    f"test session" for k, _, kind, _ in remote_dotenv], neutralize)
 
 
+class RefusedTarget(ConnectionRefusedError):
+    """Raised by the connection-boundary guards instead of opening a non-local connection."""
+
+
 def enforce(environ: MutableMapping[str, str] | None = None, dotenv_path: Path | None = None) -> Decision:
     """Apply the decision to `environ` (default os.environ). Raises RuntimeError on abort."""
     environ = os.environ if environ is None else environ
@@ -177,4 +183,72 @@ def enforce(environ: MutableMapping[str, str] | None = None, dotenv_path: Path |
         raise RuntimeError("refusing to run tests against a non-local target:\n  - " + "\n  - ".join(decision.reasons))
     for key in decision.neutralize:
         environ[key] = ""                             # load_settings' setdefault keeps "" -> None
+    return decision
+
+
+# ------------------------------------------------------------------ connection-boundary guards
+# Defence in depth for every path that skips conftest (--noconftest, --confcutdir, a test module
+# imported outside pytest): the effective target is re-checked at the moment a connection is
+# made. psycopg (libpq uses C sockets) is wrapped at Connection.connect, which psycopg.connect and
+# psycopg_pool use; every Python socket (Supabase/httpx clients, JWKS) is refused a non-loopback
+# TCP destination. Not installed for an explicit, validated hosted run.
+
+_INSTALLED: dict[str, object] = {}
+
+
+def _socket_destination_is_local(address) -> bool:
+    if not isinstance(address, tuple) or not address:
+        return True                                   # AF_UNIX path or exotic family: local by nature
+    return is_local_host(str(address[0]))
+
+
+def install_connect_guards() -> None:
+    if _INSTALLED:
+        return
+    import socket
+
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def check(self, address):
+        if self.family in (socket.AF_INET, socket.AF_INET6) and not _socket_destination_is_local(address):
+            raise RefusedTarget(f"refused by the test DB target guard: non-loopback destination {address[0]}")
+
+    def connect(self, address):
+        check(self, address)
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        check(self, address)
+        return real_connect_ex(self, address)
+
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    _INSTALLED["socket"] = (real_connect, real_connect_ex)
+    try:
+        import psycopg
+        from psycopg.conninfo import make_conninfo
+    except ImportError:
+        return
+    real = psycopg.Connection.connect.__func__
+
+    routing = ("host", "hostaddr", "port", "service", "user", "dbname")   # libpq params that pick the server
+
+    def guarded(cls, conninfo: str = "", **kwargs):
+        # psycopg's own keywords (autocommit, row_factory, prepare_threshold, ...) are not libpq params
+        target = make_conninfo(conninfo, **{k: v for k, v in kwargs.items() if k in routing and v is not None})
+        kind = classify_db(target, os.environ)
+        if kind != "local":
+            raise RefusedTarget(f"refused by the test DB target guard: non-local PostgreSQL target ({kind})")
+        return real(cls, conninfo, **kwargs)
+
+    psycopg.Connection.connect = classmethod(guarded)
+    psycopg.connect = psycopg.Connection.connect
+    _INSTALLED["psycopg"] = real
+
+
+def bootstrap() -> Decision:
+    """Called from tests/__init__.py (any `tests.*` import, with or without conftest) and from
+    tests/conftest.py. Idempotent."""
+    decision = enforce()
+    if decision.action != "allow-hosted":
+        install_connect_guards()
     return decision

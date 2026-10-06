@@ -387,6 +387,11 @@ including `?host=`, multi-host lists, `PGHOST`/`PGSERVICE`), `SUPABASE_URL` and
   target must then be exactly that project's API host, pooler (`postgres.<ref>` on
   `*.pooler.supabase.com`) or direct (`db.<ref>.supabase.co`) endpoint.
 
+Defence in depth: `tests/__init__.py` runs the same guard for any `tests.*` import (so `--noconftest`,
+`--confcutdir` and an import outside pytest are covered) and installs connection-boundary checks:
+`psycopg.Connection.connect` re-validates the effective target (libpq `host` and `hostaddr` resolve
+independently, e.g. `PGHOSTADDR`), and Python sockets refuse any non-loopback TCP destination.
+
 Hosted operations are a separate path and never go through pytest:
 `backend/scripts/hosted_*.py`, `import_factor_set.py`, `ingest_knowledge.py --target <ref>` and
 the migration runbook (`docs/MIGRATION_HISTORY.md`).

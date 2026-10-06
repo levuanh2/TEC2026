@@ -119,6 +119,51 @@ def test_libpq_environment_fallbacks_count(monkeypatch):
     assert guard.assess({"SUPABASE_DB_URL": hostless}, {}).action == "ok"                # Unix socket
     assert guard.assess({"SUPABASE_DB_URL": hostless, "PGHOST": "db.example.com"}, {}).action == "abort"
     assert guard.assess({"SUPABASE_DB_URL": hostless, "PGSERVICE": "prod"}, {}).action == "abort"
+    assert guard.assess({"SUPABASE_DB_URL": hostless, "PGSERVICEFILE": "/tmp/x"}, {}).action == "abort"
+
+
+@pytest.mark.parametrize("env", [
+    {"PGHOSTADDR": "203.0.113.7"},                        # libpq: host=localhost, hostaddr from the environment
+    {"PGHOSTADDR": "127.0.0.1,203.0.113.7"},
+    {"PGHOST": "db.example.com"},                         # host-less URL below
+], ids=["hostaddr", "hostaddr-list", "pghost"])
+def test_libpq_host_and_hostaddr_resolve_independently(env):
+    url = "postgresql://u@localhost/db" if "PGHOSTADDR" in env else "postgresql://u@/db"
+    assert guard.assess({"SUPABASE_DB_URL": url, **env}, {}).action == "abort"
+    assert guard.assess({"SUPABASE_DB_URL": "postgresql://u@localhost/db", "PGHOSTADDR": "127.0.0.1"}, {}).action == "ok"
+
+
+# ------------------------------------------------------------------ connection-boundary guards (this session)
+
+def test_this_session_refuses_a_non_local_psycopg_target_before_libpq(monkeypatch):
+    import psycopg
+
+    assert guard._INSTALLED, "tests/__init__.py installs the guards for every test session"
+    for target in ("postgresql://u:secret-pw@db.example.com/x", POOLER, "host=203.0.113.7 dbname=x"):
+        with pytest.raises(guard.RefusedTarget) as err:
+            psycopg.connect(target, connect_timeout=1)
+        assert "secret-pw" not in str(err.value)
+    monkeypatch.setenv("PGHOSTADDR", "203.0.113.7")         # the environment is re-read at connect time
+    with pytest.raises(guard.RefusedTarget):
+        psycopg.connect("postgresql://u@localhost/x", connect_timeout=1)
+    with pytest.raises(guard.RefusedTarget):
+        psycopg.Connection.connect("postgresql://u@db.example.com/x")
+    with pytest.raises(guard.RefusedTarget):                    # a keyword host overrides a local conninfo
+        psycopg.connect("postgresql://u@localhost/x", host="db.example.com", autocommit=True)
+
+
+def test_this_session_refuses_non_loopback_sockets_and_keeps_loopback():
+    import socket
+
+    with socket.socket() as s, pytest.raises(guard.RefusedTarget):
+        s.connect(("192.0.2.1", 9))
+    with socket.socket() as s, pytest.raises(guard.RefusedTarget):
+        s.connect_ex(("192.0.2.1", 9))
+    with pytest.raises(guard.RefusedTarget):
+        socket.create_connection(("192.0.2.1", 9), timeout=1)
+    with socket.socket() as s:
+        s.settimeout(1)
+        assert s.connect_ex(("127.0.0.1", 9)) != 0              # an ordinary refusal, not the guard
 
 
 @pytest.mark.parametrize("url", ["https://localhost@evil.example", "http://127.0.0.1.evil.example",
@@ -167,15 +212,15 @@ except ImportError:
 '''
 
 
-def _session(tmp_path, env_overrides: dict[str, str], *test_args: str):
+def _session(tmp_path, env_overrides: dict[str, str], *test_args: str, cwd: Path = BACKEND, command=None):
     spy_dir = tmp_path / "spy"
-    spy_dir.mkdir()
+    spy_dir.mkdir(exist_ok=True)
     (spy_dir / "sitecustomize.py").write_text(SPY, encoding="utf-8")
     log = tmp_path / "connects.jsonl"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("SUPABASE_", "PG", "ALLOW_HOSTED", "AGRICARBON_HOSTED"))}
     env.update({"PYTHONPATH": str(spy_dir), "GUARD_SPY_LOG": str(log), **env_overrides})
-    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:randomly", *test_args],
-                          cwd=BACKEND, env=env, capture_output=True, text=True, timeout=300)
+    command = command or [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:randomly", *test_args]
+    proc = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, timeout=300)
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
     return proc, calls
 
@@ -187,6 +232,34 @@ def test_a_hosted_target_in_the_environment_aborts_before_any_connect(tmp_path, 
     assert "refusing to run tests against a non-local target" in proc.stdout + proc.stderr
     assert "secret-pw" not in proc.stdout + proc.stderr
     assert calls == []                                   # psycopg.connect and socket connects: 0
+
+
+REFUSAL = "refusing to run tests against a non-local target"
+HOSTED_ENV = {"SUPABASE_DB_URL": POOLER}
+
+
+@pytest.mark.parametrize("extra", [["--noconftest"], ["--confcutdir", "tests/fixtures"]], ids=["noconftest", "confcutdir"])
+def test_conftest_bypasses_still_refuse_before_any_connect(tmp_path, extra):
+    proc, calls = _session(tmp_path, HOSTED_ENV, "tests/test_rag_knowledge_storage.py", *extra)
+    assert proc.returncode != 0 and REFUSAL in proc.stdout + proc.stderr
+    assert "secret-pw" not in proc.stdout + proc.stderr and calls == []
+
+
+def test_invocation_from_the_repository_root_refuses(tmp_path):
+    proc, calls = _session(tmp_path, HOSTED_ENV, "backend/tests/test_rag_knowledge_storage.py", cwd=BACKEND.parent)
+    assert proc.returncode != 0 and REFUSAL in proc.stdout + proc.stderr and calls == []
+
+
+def test_importing_a_test_module_outside_pytest_refuses(tmp_path):
+    proc, calls = _session(tmp_path, HOSTED_ENV,
+                           command=[sys.executable, "-c", "import tests.test_rag_knowledge_storage"])
+    assert proc.returncode != 0 and REFUSAL in proc.stderr and calls == []
+
+
+def test_a_local_url_with_a_remote_pghostaddr_refuses_before_any_connect(tmp_path):
+    proc, calls = _session(tmp_path, {"SUPABASE_DB_URL": LOCAL_DB.replace("127.0.0.1", "localhost"),
+                                      "PGHOSTADDR": "203.0.113.7"}, "tests/test_rag_knowledge_storage.py")
+    assert proc.returncode != 0 and REFUSAL in proc.stdout + proc.stderr and calls == []
 
 
 def test_opt_in_with_a_wrong_project_aborts_before_any_connect(tmp_path):
