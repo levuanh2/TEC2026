@@ -99,6 +99,12 @@ def test_text_structure_detection():
     assert table.flags == ("table_uncertain",)
 
 
+def test_text_structure_is_identical_for_nfc_and_nfd_input():
+    source = "\n".join(["Điều 2. Phạm vi áp dụng", "Nội dung.", "", "Chương II", "– mục danh sách", ""])
+    nfc, nfd = text.parse(source.encode()), text.parse(unicodedata.normalize("NFD", source).encode())
+    assert nfc.blocks == nfd.blocks and [b.kind for b in nfc.blocks] == ["heading", "paragraph", "heading", "list"]
+
+
 @pytest.mark.parametrize(("line", "level"), [
     ("1.2 Thu gom rơm", 2), ("1.2.3 Mực nước", 3), ("Chương II", 1), ("Mục 1. Phạm vi", 2), ("Điều 5. Đối tượng", 3),
     ("QUẢN LÝ RƠM RẠ", 1), ("1. Bước một", 0), ("Một câu văn bình thường.", 0), ("1.2 kết thúc bằng dấu chấm.", 0),
@@ -333,6 +339,12 @@ def test_plan_refuses_empty_oversized_mismatched_and_contentless_input(monkeypat
     with pytest.raises(ParseError) as err:
         plan_of(b"abcd", filename="x.txt")
     assert err.value.code == "too_large"
+
+
+def test_a_huge_run_without_spaces_is_refused_not_stored():
+    with pytest.raises(ParseError) as err:
+        plan_of(("Tiêu đề" + "\n\n" + "A" * 2_000_000).encode(), filename="x.txt")
+    assert err.value.code == "unsplittable_text"
 
 
 def test_plan_reports_everything_a_write_would_persist():

@@ -291,3 +291,26 @@ def test_pdf_ingestion_records_pages(env):
     cur.execute("select min(page_from), max(page_to) from public.knowledge_chunks c join public.knowledge_documents d"
                 " on d.id = c.document_pk where d.document_id = 'awd-pdf' and d.source_id = %s", (s.source_id,))
     assert cur.fetchone() == (1, 3)
+
+
+def test_the_content_address_lock_serializes_sessions(env):
+    import psycopg
+
+    data = _data(env, " lock")
+    sha = _plan(env, data).file_sha256
+    key = int(sha[:16], 16) - (1 << 63)
+    with psycopg.connect(_DB_URL, autocommit=True) as other:
+        with env["store"].artifact_lock(sha):
+            assert other.execute("select pg_try_advisory_lock(%s)", (key,)).fetchone()[0] is False
+        assert other.execute("select pg_try_advisory_lock(%s)", (key,)).fetchone()[0] is True
+        other.execute("select pg_advisory_unlock(%s)", (key,))
+
+
+def test_unchanged_fails_when_the_stored_artifact_is_gone(env):
+    data = _data(env, " gone")
+    p = _plan(env, data)
+    first = _ingest(env, p, data)
+    env["client"].storage.from_("knowledge-artifacts").remove([first.artifact_ref.split("/", 1)[1]])
+    with pytest.raises(ArtifactIntegrityError) as err:
+        _ingest(env, _plan(env, data), data)
+    assert err.value.code == "artifact_missing"

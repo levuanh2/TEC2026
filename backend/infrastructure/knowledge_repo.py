@@ -18,7 +18,8 @@ SHA-256 verified on every write and reuse, no signed or public URL anywhere. Con
 from __future__ import annotations
 
 import json
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from knowledge.ids import artifact_key, sha256_hex
 from knowledge.models import ArtifactIntegrityError, IngestionConflict, IngestionPlan, StoredDocument, StoredSource
@@ -66,6 +67,20 @@ class PsycopgKnowledgeStore:
         with self._conn.cursor() as cur:
             cur.execute("select exists (select 1 from public.knowledge_documents where artifact_ref = %s)", (artifact_ref,))
             return bool(cur.fetchone()[0])
+
+    @contextmanager
+    def artifact_lock(self, file_sha256: str) -> Iterator[None]:
+        """Session advisory lock on the content address (first 64 bits of the SHA-256), held
+        from the first read to the last compensation: concurrent runs over the same bytes are
+        serialized, so a failed run never deletes an object another run is about to commit."""
+        key = int(file_sha256[:16], 16) - (1 << 63)
+        with self._conn.cursor() as cur:
+            cur.execute("select pg_advisory_lock(%s)", (key,))
+        try:
+            yield
+        finally:
+            with self._conn.cursor() as cur:
+                cur.execute("select pg_advisory_unlock(%s)", (key,))
 
     def create_version(self, plan: IngestionPlan, artifact_ref: str) -> StoredSource:
         import psycopg
@@ -148,9 +163,25 @@ class SupabaseArtifactStore:
             if not self._verified(key, file_sha256):
                 raise ArtifactIntegrityError(f"artifact upload failed ({type(exc).__name__})") from exc
             created = False
-        if not self._verified(key, file_sha256):           # read-back: the reference must resolve to these bytes
-            raise ArtifactIntegrityError(f"stored object {ARTIFACT_BUCKET}/{key} could not be read back")
+        try:                                               # read-back: the reference must resolve to these bytes
+            if not self._verified(key, file_sha256):
+                raise ArtifactIntegrityError(f"stored object {ARTIFACT_BUCKET}/{key} could not be read back")
+        except ArtifactIntegrityError as exc:
+            if created:                                    # never leave an object that would poison reuse
+                try:
+                    self._bucket.remove([key])
+                except Exception as cleanup:  # noqa: BLE001
+                    exc.add_note(f"removing the unverified object failed ({type(cleanup).__name__}): {key}")
+            raise
         return f"{ARTIFACT_BUCKET}/{key}", created
+
+    def verify(self, artifact_ref: str, file_sha256: str) -> None:
+        prefix = f"{ARTIFACT_BUCKET}/{file_sha256}/"
+        if not artifact_ref.startswith(prefix):
+            raise ArtifactIntegrityError(f"artifact_ref {artifact_ref!r} is not the content address of {file_sha256}")
+        if not self._verified(artifact_ref[len(ARTIFACT_BUCKET) + 1:], file_sha256):
+            raise ArtifactIntegrityError(f"the stored artifact {artifact_ref} is missing or unreadable",
+                                         code="artifact_missing")
 
     def discard(self, artifact_ref: str) -> None:
         prefix = f"{ARTIFACT_BUCKET}/"

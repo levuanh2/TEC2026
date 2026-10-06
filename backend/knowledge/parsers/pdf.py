@@ -14,6 +14,7 @@ The pypdf version is part of PARSER_VERSION because extraction output may change
 from __future__ import annotations
 
 import io
+import unicodedata
 
 import pypdf
 from pypdf.errors import PyPdfError
@@ -71,7 +72,7 @@ def parse(data: bytes) -> ParsedDocument:
             raise ParseError(f"the PDF has {page_count} pages (limit {MAX_PAGES})", code="too_large")
         texts, total = [], 0
         for page in reader.pages:
-            text = page.extract_text() or ""
+            text = unicodedata.normalize("NFC", page.extract_text() or "")   # before structure rules
             total += len(text)
             if total > MAX_TEXT_CHARS:
                 raise ParseError(f"extracted text exceeds {MAX_TEXT_CHARS} characters", code="too_large")

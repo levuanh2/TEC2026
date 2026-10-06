@@ -8,6 +8,7 @@ stack in test_knowledge_ingest_db.py. No network, no database.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import re
 import sys
@@ -44,6 +45,7 @@ class FakeStore:
         self.fail_on_chunks = fail_on_chunks
         self.race: StoredDocument | None = None
         self.writes = 0
+        self.locked: list[str] = []
 
     def find_source(self, source_id):
         return self.sources.get(source_id)
@@ -53,6 +55,10 @@ class FakeStore:
 
     def artifact_in_use(self, ref):
         return any(d.artifact_ref == ref for d in self.docs.values())
+
+    def artifact_lock(self, sha):
+        self.locked.append(sha)
+        return contextlib.nullcontext()
 
     def create_version(self, p, artifact_ref):
         if self.race is not None:
@@ -89,6 +95,14 @@ class FakeArtifacts:
         self.objects[ref] = data
         self.uploads += 1
         return ref, True
+
+    def verify(self, ref, sha):
+        if not ref.startswith(f"knowledge-artifacts/{sha}/"):
+            raise ArtifactIntegrityError("not the content address")
+        if ref not in self.objects:
+            raise ArtifactIntegrityError("missing", code="artifact_missing")
+        if sha256_hex(self.objects[ref]) != sha:
+            raise ArtifactIntegrityError("tampered")
 
     def discard(self, ref):
         self.discarded.append(ref)
@@ -154,6 +168,36 @@ def test_new_document_version_coexists_with_new_chunk_ids(ports):
     v2 = store.find_document("test-fixture-src", "awd-guide", "v2")
     assert result.outcome == "created" and not {c for c, _ in v1.chunks} & {c for c, _ in v2.chunks}
     assert artifacts.uploads == 1 and v1.artifact_ref == v2.artifact_ref     # same bytes: one artifact
+
+
+def test_every_run_holds_the_content_address_lock(ports):
+    run(plan_of(), ports)
+    run(plan_of(), ports)
+    assert ports[0].locked == [sha256_hex(DATA)] * 2
+
+
+@pytest.mark.parametrize(("damage", "code"), [("delete", "artifact_missing"), ("tamper", "artifact_integrity"),
+                                              ("null_ref", "artifact_missing")])
+def test_unchanged_requires_a_verified_stored_artifact(ports, damage, code):
+    result = run(plan_of(), ports)
+    store, artifacts = ports
+    if damage == "delete":
+        artifacts.objects.clear()
+    elif damage == "tamper":
+        artifacts.objects[result.artifact_ref] = b"tampered"
+    else:
+        (key, d), = store.docs.items()
+        store.docs[key] = dataclasses.replace(d, artifact_ref=None)
+    with pytest.raises(ArtifactIntegrityError) as err:
+        run(plan_of(), ports)
+    assert err.value.code == code
+
+
+def test_same_version_with_a_conflicting_source_is_refused(ports):
+    run(plan_of(), ports)
+    with pytest.raises(IngestionConflict) as err:
+        run(plan_of(source=dataclasses.replace(SOURCE, owner="Someone else")), ports)
+    assert err.value.code == "source_mismatch"
 
 
 # ------------------------------------------------------------------ fail closed
@@ -328,6 +372,12 @@ def test_cli_write_mode_requires_an_explicit_target():
     ("https://abcdefgh.supabase.co", "postgresql://postgres.abcdefgh:x@pooler.supabase.com:6543/postgres", "abcdefgh"),
     ("https://abcdefgh.supabase.co", "postgresql://postgres.other:x@pooler.supabase.com:6543/postgres", None),
     ("http://127.0.0.1:54321", "postgresql://postgres.abcdefgh:x@pooler.supabase.com:6543/postgres", None),
+    ("https://abcdefgh.supabase.co", "postgresql://postgres:x@db.abcdefgh.supabase.co:5432/postgres", "abcdefgh"),
+    # the ref only inside the password / query / an unrelated host: another project
+    ("https://abcdefgh.supabase.co", "postgresql://postgres.other:abcdefgh@pooler.supabase.com:6543/postgres", None),
+    ("https://abcdefgh.supabase.co", "postgresql://postgres.other:x@pooler.supabase.com:6543/postgres?app=abcdefgh", None),
+    ("https://abcdefgh.supabase.co", "postgresql://postgres:x@db.abcdefgh.evil.example:5432/postgres", None),
+    ("https://abcdefgh.supabase.co.evil.example", "postgresql://postgres.abcdefgh:x@pooler.supabase.com/postgres", None),
 ])
 def test_cli_target_resolution(api, db, expected):
     assert cli.target_of(api, db) == expected
@@ -345,3 +395,78 @@ def test_cli_wrong_target_is_refused_before_any_write(monkeypatch, capsys):
     assert cli.main(["--file", str(HERE / "awd_guide.md"), "--target", "abcdefgh", *ARGS]) == 2
     err = capsys.readouterr().err
     assert "refused" in err and "pw-not-printed" not in err and "local-dev-key" not in err
+
+
+# ------------------------------------------------------------------ Storage adapter (in-memory client)
+
+class _Bucket:
+    def __init__(self, corrupt_download=False):
+        self.objects: dict[str, bytes] = {}
+        self.corrupt_download = corrupt_download
+        self.removed: list[str] = []
+
+    def list(self, folder):
+        return [{"name": k.split("/", 1)[1], "id": "x"} for k in sorted(self.objects) if k.startswith(f"{folder}/")]
+
+    def download(self, key):
+        if key not in self.objects:
+            raise RuntimeError("Object not found")
+        return b"corrupted" if self.corrupt_download else self.objects[key]
+
+    def upload(self, key, data, options):
+        assert options["upsert"] == "false"
+        if key in self.objects:
+            raise RuntimeError("Duplicate")
+        self.objects[key] = data
+
+    def remove(self, keys):
+        for k in keys:
+            self.removed.append(k)
+            self.objects.pop(k, None)
+
+
+class _Client:
+    def __init__(self, bucket):
+        self.storage = type("S", (), {"from_": lambda _self, name: bucket})()
+
+
+def _adapter(**kw):
+    from infrastructure.knowledge_repo import SupabaseArtifactStore
+
+    bucket = _Bucket(**kw)
+    return SupabaseArtifactStore(_Client(bucket)), bucket
+
+
+def test_storage_adapter_stores_reuses_and_verifies():
+    store, bucket = _adapter()
+    sha = sha256_hex(DATA)
+    assert store.put(sha, "a.md", DATA, "text/markdown") == (f"knowledge-artifacts/{sha}/a.md", True)
+    assert store.put(sha, "other-name.md", DATA, "text/markdown") == (f"knowledge-artifacts/{sha}/a.md", False)
+    store.verify(f"knowledge-artifacts/{sha}/a.md", sha)
+    with pytest.raises(ArtifactIntegrityError):
+        store.verify(f"knowledge-artifacts/{'0' * 64}/a.md", sha)
+    bucket.objects[f"{sha}/a.md"] = b"tampered"
+    with pytest.raises(ArtifactIntegrityError):
+        store.put(sha, "a.md", DATA, "text/markdown")
+    with pytest.raises(ArtifactIntegrityError):
+        store.verify(f"knowledge-artifacts/{sha}/a.md", sha)
+    with pytest.raises(ArtifactIntegrityError):
+        store.put(sha, "a.md", DATA + b"x", "text/markdown")
+
+
+def test_storage_adapter_removes_an_object_it_could_not_verify():
+    store, bucket = _adapter(corrupt_download=True)
+    sha = sha256_hex(DATA)
+    with pytest.raises(ArtifactIntegrityError):
+        store.put(sha, "a.md", DATA, "text/markdown")
+    assert bucket.objects == {} and bucket.removed == [f"{sha}/a.md"]
+
+
+def test_storage_adapter_discard_only_takes_its_own_references():
+    store, bucket = _adapter()
+    sha = sha256_hex(DATA)
+    ref, _ = store.put(sha, "a.md", DATA, "text/markdown")
+    with pytest.raises(ValueError):
+        store.discard("mrv-exports/" + ref.split("/", 1)[1])
+    store.discard(ref)
+    assert bucket.objects == {}

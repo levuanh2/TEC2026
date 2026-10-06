@@ -49,10 +49,16 @@ different bytes ⇒ a different address; nothing is ever overwritten (`upsert=fa
 read back and verified. A stored object that no longer hashes to its address raises
 `artifact_integrity` (tampering detected).
 
-**Orphan risk (accepted, documented).** The artifact is stored before the database transaction
-(the reference must resolve when the row commits). If the transaction fails, the object is removed
-when this run created it and no version references it; if that removal itself fails, the error
-carries a note naming the orphaned object. An orphan is private, content-addressed and inert.
+**Serialization and orphans.** Every run holds a Postgres session advisory lock on the content
+address (first 64 bits of the SHA-256) from its first read to its last cleanup, so two runs over the
+same bytes never overlap: a failed run cannot delete an object that a concurrent run has adopted but
+not yet committed. The artifact is stored before the database transaction (the reference must
+resolve when the row commits). If the transaction fails, the object is removed when this run
+created it and no committed version references it; an object whose read-back verification fails is
+removed by the adapter itself. If a removal fails, the error carries a note naming the orphaned
+object (private, content-addressed, inert; a later run re-verifies it before any reuse).
+An `unchanged` re-run re-verifies the stored artifact: missing, tampered or absent (`artifact_ref`
+NULL) fails with `artifact_missing` / `artifact_integrity` and changes nothing.
 
 **Gap — the database does not yet enforce ST1.** Migration A accepts `official_url` OR
 `artifact_ref` (`knowledge_documents_artifact_chk`) and its approval CHECK does not require
@@ -69,8 +75,16 @@ migration gate of its own), the approval checklist (§5) is the control.
 | `.pdf` | `kn-pdf-1+pypdf-<version>` | text layer only. `< 20` non-space chars = page without text; fewer than half the pages with text ⇒ `no_text_layer` (scans are refused — **never OCR**); encrypted/malformed/> 2000 pages refused |
 
 The extension selects the parser and the leading bytes must agree (a renamed DOCX/PDF/image is
-refused). DOCX, HTML, spreadsheets, OCR, crawling: unsupported. Files > 50 MiB are refused.
+refused). DOCX, HTML, spreadsheets, OCR, crawling: unsupported. Files > 50 MiB are refused, and so is
+any chunk over 20 000 characters (`unsplittable_text`: one "token" can be a megabyte run without
+spaces). Text is NFC-normalized before structure detection, so NFC/NFD input classify identically.
 Every refusal is explicit (`refused [<code>]`, exit 1) and happens **before** any upload or write.
+
+**PDF resource limits (accepted residual risk).** pypdf 6.19 caps every decompressed stream at
+75 MB (`ZLIB/LZW/FLATE…_MAX_OUTPUT_LENGTH`); the parser adds 50 MiB per file, 2000 pages and 20 M
+extracted characters. A pathological PDF can still spend CPU inside one `extract_text()` call; the
+CLI is offline and operator-run on reviewed official artifacts, so it is not sandboxed in a
+resource-limited subprocess. Run it on a workstation, never inside the API process.
 
 ## 3. Normalizer (`kn-normalize-1`) and chunker (`kn-chunk-1`)
 
@@ -138,7 +152,9 @@ python backend/scripts/ingest_knowledge.py --file <one file> --dry-run \
 ```
 
 Write mode uses the backend settings' operator credentials (direct Postgres + service-role Storage),
-never a user JWT, refuses a `--target` that does not match both URLs, and never prints a secret.
+never a user JWT, refuses a `--target` that does not match both URLs exactly (the DB URL names a
+project only by its pooler user `postgres.<ref>` or host `db.<ref>.supabase.co`, never a substring),
+and never prints a secret.
 Exit 0 created/unchanged/dry run, 1 refused, 2 usage/target mismatch.
 
 **Hosted prerequisites (not done in V1.3-C):** create the private `knowledge-artifacts` bucket on

@@ -9,9 +9,11 @@ Idempotency (ADR §4.5): the identity is (source_id, document_id, document_versi
   need a new document_version; immutable provenance is never replaced.
 There is no approval and no republish path here (docs/rag/RAG_V1_INGESTION.md §6).
 
-Artifact compensation: the artifact is stored BEFORE the transaction (its reference must resolve
-when the row commits). If the transaction fails and this run created the object and no document
-references it, it is removed; otherwise it is left (content-addressed, private, harmless).
+Artifact handling (ST1): every run holds the store's per-SHA-256 lock from the first read to the
+last cleanup, so runs over the same bytes are serialized. The artifact is stored BEFORE the
+transaction (its reference must resolve when the row commits); if the transaction fails and this
+run created the object and no committed version references it, it is removed. An `unchanged`
+result re-verifies the stored artifact first: a missing, tampered or absent artifact fails.
 """
 
 from __future__ import annotations
@@ -20,13 +22,18 @@ from dataclasses import asdict
 
 from knowledge.chunking import CHUNKER_VERSION, chunk
 from knowledge.ids import safe_artifact_name, sha256_hex
-from knowledge.models import (DocumentSpec, IngestionConflict, IngestionPlan, IngestionResult, KnowledgeIngestionError,
-                              MetadataError, ParseError, SourceSpec, StoredDocument, StoredSource, validate_document, validate_source)
+from knowledge.models import (ArtifactIntegrityError, DocumentSpec, IngestionConflict, IngestionPlan, IngestionResult,
+                              KnowledgeIngestionError, MetadataError, ParseError, SourceSpec, StoredDocument, StoredSource,
+                              validate_document, validate_source)
 from knowledge.normalize import normalize
 from knowledge.parsers import detect, parser_for
 from knowledge.ports import ArtifactStore, IdentityExists, KnowledgeStore
 
 MAX_FILE_BYTES = 50 * 1024 * 1024   # the Storage bucket limit
+# Guard, not a tuning knob: a chunk is <= 450 whitespace tokens, but one "token" can be an
+# arbitrarily long run without spaces (base64, a broken text layer). Such a chunk is refused
+# rather than silently stored as megabytes of unusable text.
+MAX_CHUNK_CHARS = 20_000
 _SOURCE_FIELDS = ("title", "owner", "source_type", "authority", "visibility", "organization_id", "farm_id")
 _DOCUMENT_FIELDS = ("title", "language", "official_url", "published_at", "license_basis", "license_reference")
 
@@ -47,6 +54,10 @@ def plan(*, data: bytes, filename: str, source: SourceSpec, document: DocumentSp
                    document_version=document.document_version)
     if not chunks:
         raise ParseError("no indexable text after normalization", code="no_content")
+    oversized = [c.ordinal for c in chunks if len(c.content) > MAX_CHUNK_CHARS]
+    if oversized:
+        raise ParseError(f"chunk(s) {oversized[:5]} exceed {MAX_CHUNK_CHARS} characters (a run of text without "
+                         "spaces?): fix the artifact; nothing was stored", code="unsplittable_text")
     return IngestionPlan(
         source=source, document=document, format=fmt.name, size_bytes=len(data), file_sha256=sha256_hex(data),
         normalized_sha256=normalized.sha256, parser_version=parsed.parser_version,
@@ -91,11 +102,23 @@ def _conflict(stored: StoredDocument, p: IngestionPlan) -> IngestionConflict | N
                              code="metadata_changed")
 
 
-def _unchanged(stored: StoredDocument, p: IngestionPlan, store: KnowledgeStore) -> IngestionResult:
+def _check_source(src: StoredSource | None, spec: SourceSpec) -> None:
+    if src is not None and source_differences(src, spec):
+        raise IngestionConflict(f"source {src.source_id} exists with different {', '.join(source_differences(src, spec))}"
+                                " (source metadata is not changed by ingestion)", code="source_mismatch")
+
+
+def _unchanged(stored: StoredDocument, p: IngestionPlan, store: KnowledgeStore,
+               artifacts: ArtifactStore) -> IngestionResult:
     conflict = _conflict(stored, p)
     if conflict:
         raise conflict
     src = store.find_source(p.source.source_id)
+    _check_source(src, p.source)
+    if not stored.artifact_ref:
+        raise ArtifactIntegrityError("the stored version has no controlled artifact (ST1); it was not created by "
+                                     "this pipeline", code="artifact_missing")
+    artifacts.verify(stored.artifact_ref, stored.file_sha256)
     return IngestionResult(outcome="unchanged", status=stored.status, artifact_ref=stored.artifact_ref,
                            artifact_created=False, source_status=src.status if src else None)
 
@@ -104,25 +127,23 @@ def ingest(p: IngestionPlan, *, data: bytes, store: KnowledgeStore, artifacts: A
     if sha256_hex(data) != p.file_sha256:
         raise KnowledgeIngestionError("the bytes changed after planning", code="artifact_integrity")
     doc = p.document
-    stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
-    if stored is not None:
-        return _unchanged(stored, p, store)
-    src = store.find_source(p.source.source_id)
-    if src is not None and source_differences(src, p.source):
-        raise IngestionConflict(f"source {src.source_id} exists with different {', '.join(source_differences(src, p.source))}"
-                                " (source metadata is not changed by ingestion)", code="source_mismatch")
-    ref, created = artifacts.put(p.file_sha256, p.artifact_name, data, p.content_type)
-    try:
-        written = store.create_version(p, ref)
-    except IdentityExists as exc:
+    with store.artifact_lock(p.file_sha256):
         stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
-        _compensate(ref, created, store, artifacts, exc)
-        if stored is None:
+        if stored is not None:
+            return _unchanged(stored, p, store, artifacts)
+        _check_source(store.find_source(p.source.source_id), p.source)
+        ref, created = artifacts.put(p.file_sha256, p.artifact_name, data, p.content_type)
+        try:
+            written = store.create_version(p, ref)
+        except IdentityExists as exc:
+            stored = store.find_document(doc.source_id, doc.document_id, doc.document_version)
+            _compensate(ref, created, store, artifacts, exc)
+            if stored is None:
+                raise
+            return _unchanged(stored, p, store, artifacts)
+        except BaseException as exc:
+            _compensate(ref, created, store, artifacts, exc)
             raise
-        return _unchanged(stored, p, store)
-    except BaseException as exc:
-        _compensate(ref, created, store, artifacts, exc)
-        raise
     return IngestionResult(outcome="created", status="review_required", artifact_ref=ref,
                            artifact_created=created, source_status=written.status)
 

@@ -60,12 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def target_of(supabase_url: str, db_url: str) -> str | None:
-    """`local`, the project ref both URLs share, or None when they disagree."""
-    api, db = urlparse(supabase_url).hostname or "", db_url
-    if api in _LOCAL and (urlparse(db_url).hostname or "") in _LOCAL:
+    """`local`, the project ref both URLs name exactly, or None when they disagree.
+    The DB URL names a project only through its pooler user `postgres.<ref>` or its direct host
+    `db.<ref>.supabase.co` -- never by a substring (a password may contain anything)."""
+    api = urlparse(supabase_url).hostname or ""
+    db = urlparse(db_url)
+    if api in _LOCAL and (db.hostname or "") in _LOCAL:
         return "local"
-    ref = api.split(".")[0] if api.endswith(".supabase.co") else ""
-    return ref if ref and ref in db else None
+    if not api.endswith(".supabase.co") or api.count(".") != 2:
+        return None
+    ref = api.split(".")[0]
+    return ref if db.username == f"postgres.{ref}" or db.hostname == f"db.{ref}.supabase.co" else None
 
 
 def _read(path: Path) -> bytes:

@@ -12,6 +12,7 @@ Blank lines end a paragraph. Single-level `1.` lines are list items, not heading
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from knowledge.models import Block, ParsedDocument, ParseError
 
@@ -29,7 +30,9 @@ def decode(data: bytes) -> str:
     if b"\x00" in data:
         raise ParseError("the file contains NUL bytes: not a text document", code="binary_content")
     try:
-        return data.decode("utf-8-sig")
+        # NFC before any structure rule: canonically equivalent input (NFD `Điều`) must classify
+        # identically, or section paths and chunk ids would differ.
+        return unicodedata.normalize("NFC", data.decode("utf-8-sig"))
     except UnicodeDecodeError as exc:
         raise ParseError(f"the file is not valid UTF-8 (byte {exc.start})", code="encoding") from exc
 
