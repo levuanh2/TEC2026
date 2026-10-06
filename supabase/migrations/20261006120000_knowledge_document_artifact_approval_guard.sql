@@ -12,8 +12,9 @@
 --       letter or digit and made only of [A-Za-z0-9._-]; at most 512 characters.
 --   A positive grammar, not a blacklist: no colon (so no URL scheme -- https:, data:, file:),
 --   no leading `/` or `//host`, no empty / `.` / `..` segment, no whitespace, control,
---   zero-width or other non-ASCII character. Bracket ranges compare code points, so the rule
---   does not depend on the database locale. Copying official_url into artifact_ref is refused.
+--   zero-width or other non-ASCII character. The operand is evaluated in the "C" collation, so
+--   the bracket ranges mean exactly ASCII whatever the database locale. Copying official_url
+--   into artifact_ref is refused.
 --   Refusals are SQLSTATE 23514.
 -- The database never calls Storage. That the reference resolves to the controlled immutable
 -- copy whose bytes hash to file_sha256 stays the ingestion/approver responsibility: the V1.3-C
@@ -35,7 +36,7 @@ alter table public.knowledge_documents
     status <> 'approved'
     or (artifact_ref is not null
         and length(artifact_ref) <= 512
-        and artifact_ref ~ '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$')
+        and (artifact_ref collate "C") ~ '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$')
   );
 
 comment on constraint knowledge_documents_artifact_approval_chk on public.knowledge_documents is

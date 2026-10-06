@@ -177,3 +177,4 @@ def test_the_constraint_is_the_migrations_and_nothing_else_changed(tx):
     definition = constraints["knowledge_documents_artifact_approval_chk"]
     assert "artifact_ref IS NOT NULL" in definition and "length(artifact_ref) <= 512" in definition
     assert "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$" in definition
+    assert 'COLLATE "C"' in definition                  # ASCII ranges independent of the database locale

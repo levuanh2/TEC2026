@@ -463,6 +463,6 @@ from the CI freeze (repo policy).
 | MEDIUM | `pypdf` structure detection is weak (headings, tables) | heuristics + `review_required`; prefer curated Markdown of official text where license allows |
 | MEDIUM | Vietnamese lexical recall without a stemmer | `simple` + `unaccent` + trigram; measured on DEV/HOLDOUT |
 | MEDIUM | Small HOLDOUT (24) → wide uncertainty on the done gate | report counts and per-query outcomes, not only rates |
-| MEDIUM | Official URL drift (ST1 open) | `file_sha256` drift detection; ST1 decision before relying on re-ingestion |
+| MEDIUM | Approving a version whose stored copy is missing or wrong (ST1 decided: controlled artifact required) | ingestion stores + verifies the artifact; migration `20261006120000` refuses approval without an `artifact_ref` — **inactive on hosted until applied (its own gate, before the first real approval)**; object existence and the SHA-256 match stay an approval-checklist duty |
 | LOW | `farms.cooperative_id` mutable in Core V1 | write trigger + query-time re-check (fail closed) |
 | LOW | Copyright/licensing | `license_basis` must be known to approve; `license_reference` for open/permission bases |
