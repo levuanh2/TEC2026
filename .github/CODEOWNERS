@@ -10,8 +10,12 @@
 /scripts/ci/ @levuanh2
 /.gitleaks.toml @levuanh2
 /backend/.coveragerc @levuanh2
+/pytest.ini @levuanh2
 /backend/pytest.ini @levuanh2
 /backend/tests/conftest.py @levuanh2
+/backend/tests/__init__.py @levuanh2
+/backend/tests/_db_target.py @levuanh2
+/backend/tests/test_db_target_guard.py @levuanh2
 /backend/tests/_markers.py @levuanh2
 /web-dashboard/vite.config.ts @levuanh2
 /web-dashboard/playwright.config.ts @levuanh2

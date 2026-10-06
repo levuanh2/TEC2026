@@ -47,6 +47,11 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def artifact_ref(file_sha256: str, name: str = "doc") -> str:
+    """The controlled content address ST1-DB requires for an approved version (20261006120000)."""
+    return f"knowledge-artifacts/{file_sha256}/{name}.md"
+
+
 class Tx:
     def __init__(self, conn):
         self.conn = conn
@@ -119,13 +124,14 @@ class Tx:
     def document(self, source_id, *, status="approved", version="v1", document_id="doc",
                  license_basis="official_publication", reference=None):
         """Inserted `review_required` (open for chunks); `settle` moves it to `status`."""
+        file_sha = _sha(source_id + version)
         doc = self.one(
             "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-            " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
-            " license_basis, license_reference)"
-            " values (%s, %s, %s, %s, 'vi', %s, %s, %s, 'p1', 'n1', 'c1', %s, %s) returning id",
+            " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+            " chunker_version, license_basis, license_reference)"
+            " values (%s, %s, %s, %s, 'vi', %s, %s, %s, %s, 'p1', 'n1', 'c1', %s, %s) returning id",
             (source_id, document_id, version, FIXTURE + document_id, f"https://example.invalid/{source_id}/{document_id}",
-             _sha(source_id + version), _sha("n" + source_id + version), license_basis, reference))
+             artifact_ref(file_sha, document_id), file_sha, _sha("n" + source_id + version), license_basis, reference))
         if status != "review_required":
             self.pending[doc] = status
         return doc
@@ -258,11 +264,11 @@ def test_approved_document_needs_approver_time_note_and_known_license(tx, licens
     src = tx.source()
     result = tx.operator(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-        " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
-        " license_basis, license_reference, status, approved_by, approved_at, review_note)"
-        " values (%s, 'doc', 'v1', 't', 'vi', 'https://example.invalid/d', %s, %s, 'p', 'n', 'c', %s, %s,"
+        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+        " chunker_version, license_basis, license_reference, status, approved_by, approved_at, review_note)"
+        " values (%s, 'doc', 'v1', 't', 'vi', 'https://example.invalid/d', %s, %s, %s, 'p', 'n', 'c', %s, %s,"
         " 'approved', %s, %s, %s)",
-        (src, _sha("a"), _sha("b"), license_basis, reference, tx.approver if approver else None,
+        (src, artifact_ref(_sha("a")), _sha("a"), _sha("b"), license_basis, reference, tx.approver if approver else None,
          NOW if approved_at else None, note))
     assert result == (("ok", None) if expected is None else ("err", expected))
 
@@ -283,10 +289,11 @@ def test_one_approved_version_per_document(tx):
     tx.document(src, version="v1")
     assert tx.operator(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-        " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
-        " license_basis, status, approved_by, approved_at, review_note)"
-        " values (%s, 'doc', 'v2', 't', 'vi', 'https://example.invalid/v2', %s, %s, 'p', 'n', 'c',"
-        " 'official_publication', 'approved', %s, now(), 'reviewed')", (src, _sha("v2"), _sha("nv2"), tx.approver)
+        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+        " chunker_version, license_basis, status, approved_by, approved_at, review_note)"
+        " values (%s, 'doc', 'v2', 't', 'vi', 'https://example.invalid/v2', %s, %s, %s, 'p', 'n', 'c',"
+        " 'official_publication', 'approved', %s, now(), 'reviewed')",
+        (src, artifact_ref(_sha("v2")), _sha("v2"), _sha("nv2"), tx.approver)
     ) == ("err", UNIQUE_VIOLATION)
     # a new review_required version coexists with the approved one
     tx.document(src, version="v2", status="review_required")

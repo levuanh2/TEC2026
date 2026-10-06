@@ -69,13 +69,19 @@ does not require `artifact_ref`. The database enforcement is therefore a separat
 migration, deliberately NOT part of the V1.3-C ingestion PR (ingestion code stays separate from
 persistent hosted schema evolution). **No real document may be approved before it is applied.**
 
-Contract of that migration (conceptual; not written yet):
-- tighten the `knowledge_documents` approval invariant: `status = 'approved'` additionally requires
-  `nullif(btrim(artifact_ref), '') is not null`, on top of the existing approver/time/review-note,
-  known `license_basis`, `license_reference` and hash requirements;
-- `review_required` / `rejected` drafts are unchanged (the CLI writes `artifact_ref` anyway);
-- its own migration file and rollback, local DB tests, PR, Normal CI, Strict CI, hosted read-only
-  preflight and explicit hosted apply gate; applied before the first real approval.
+Implemented as migration `20261006120000_knowledge_document_artifact_approval_guard`
+(+ rollback), its own PR — **not yet applied to hosted**; applying it is a separate explicit gate:
+- one CHECK `knowledge_documents_artifact_approval_chk`: `status = 'approved'` additionally requires
+  `artifact_ref` to be NOT NULL and an opaque ASCII storage path (`/`-separated segments of
+  `[A-Za-z0-9][A-Za-z0-9._-]*`, ≤ 512 characters: no scheme/colon, no `//`, no `.`/`..` segment, no
+  whitespace, control or non-ASCII character) —
+  on top of the existing approver/time/review-note, known `license_basis`, `license_reference` and
+  hash requirements (all unchanged);
+- minimal and structural by decision: the storage layout (bucket, path scheme) is not frozen into the
+  schema; that the reference is the content address `knowledge-artifacts/<file_sha256>/<name>` and
+  that the stored bytes hash to `file_sha256` stays the CLI's and the approver's check (§5);
+- `review_required` / `rejected` drafts are unchanged; lifecycle, RLS, retrieval untouched;
+- tests: `backend/tests/test_rag_knowledge_artifact_approval.py`.
 
 ## 2. Formats and parsers
 

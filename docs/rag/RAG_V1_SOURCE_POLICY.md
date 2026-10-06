@@ -1,8 +1,11 @@
 # RAG V1 Knowledge Source Policy
 
 Status: **APPROVED (C1 policy)** — candidate corpus defined; **no source or document is approved
-yet**. Applies to every document that may become an `EvidenceChunk`. Enforced in the database by
-Migration A ([RAG_V1_RETRIEVAL_ADR.md §9](RAG_V1_RETRIEVAL_ADR.md)), not only by operator code.
+yet**. Applies to every document that may become an `EvidenceChunk`. Enforced in the database, not
+only by operator code: Migration A ([RAG_V1_RETRIEVAL_ADR.md §9](RAG_V1_RETRIEVAL_ADR.md)) for the
+approval record, license, lifecycle and RLS, and migration `20261006120000` for the controlled
+artifact required to approve (ST1-DB). Migration A alone still permits URL-only approval: both must
+be applied before the first real approval.
 
 ## 1. Principles
 
@@ -68,7 +71,7 @@ Every item below must exist for the **real artifact**; missing metadata is never
 | Requirement | Field(s) | Enforcement |
 |---|---|---|
 | verifiable publisher | via approved source | FK to an approved source at retrieval |
-| controlled stored copy (ST1) **and** official URL when the publisher has one | `artifact_ref` / `official_url` (`https://`) | CLI always stores `artifact_ref`; DB CHECK today: at least one (ST1 enforcement migration pending) |
+| controlled stored copy (ST1) **and** official URL when the publisher has one | `artifact_ref` / `official_url` (`https://`) | CLI always stores `artifact_ref`; migration `20261006120000` (in the repository, **not yet applied to hosted**) refuses approval without an opaque ASCII storage-path `artifact_ref` — `official_url` alone never suffices |
 | integrity | `file_sha256`, `normalized_sha256` | NOT NULL, hex format, immutable |
 | real version | `document_version` | NOT NULL; publisher version, else `file_sha256` prefix (stated as such) |
 | language | `language` | NOT NULL, ISO 639-1 |
@@ -92,7 +95,9 @@ Approver role (proposed): the AgriCarbon methodology/product owner. Approval is 
   verified) **and** its `file_sha256`. `official_url` alone is not sufficient: if the publisher moves
   or changes the file, the hash shows the drift but the original cannot be re-fetched.
 - The ingestion CLI always stores the artifact; the approver re-verifies it (checklist in
-  [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5) until the database enforces it.
+  [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5). The database refuses approval without a
+  controlled `artifact_ref` once migration `20261006120000` is applied to hosted (its own gate,
+  before the first real approval); object existence and the SHA-256 match stay the approver's check.
 
 ## 6. Metadata summary
 
