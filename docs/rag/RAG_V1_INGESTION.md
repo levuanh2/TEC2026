@@ -72,7 +72,9 @@ persistent hosted schema evolution). **No real document may be approved before i
 Implemented as migration `20261006120000_knowledge_document_artifact_approval_guard`
 (+ rollback), its own PR — **not yet applied to hosted**; applying it is a separate explicit gate:
 - one CHECK `knowledge_documents_artifact_approval_chk`: `status = 'approved'` additionally requires
-  `artifact_ref` to be NOT NULL, to contain a non-whitespace character and to be no URL (no `://`) —
+  `artifact_ref` to be NOT NULL and an opaque ASCII storage path (`/`-separated segments of
+  `[A-Za-z0-9][A-Za-z0-9._-]*`, ≤ 512 characters: no scheme/colon, no `//`, no `.`/`..` segment, no
+  whitespace, control or non-ASCII character) —
   on top of the existing approver/time/review-note, known `license_basis`, `license_reference` and
   hash requirements (all unchanged);
 - minimal and structural by decision: the storage layout (bucket, path scheme) is not frozen into the

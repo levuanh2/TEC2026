@@ -5,12 +5,15 @@
 -- (knowledge_documents_artifact_chk) and its approval CHECK (knowledge_documents_approval_chk)
 -- does not look at artifact_ref, so a URL-only version could be approved by hand.
 --
--- Rule added -- minimal and structural, deliberately independent of the storage layout:
+-- Rule added -- structural, deterministic and deliberately independent of the storage layout:
 --   status = 'approved' requires artifact_ref to be
 --     * present (NOT NULL -- written out: a NULL comparison would make a CHECK pass),
---     * non-blank: at least one non-whitespace character (tabs/newlines count as blank --
---       btrim() alone would only strip spaces),
---     * not a URL (no `://`): copying official_url into artifact_ref is no stored copy.
+--     * an opaque ASCII storage path: one or more `/`-separated segments, each starting with a
+--       letter or digit and made only of [A-Za-z0-9._-]; at most 512 characters.
+--   A positive grammar, not a blacklist: no colon (so no URL scheme -- https:, data:, file:),
+--   no leading `/` or `//host`, no empty / `.` / `..` segment, no whitespace, control,
+--   zero-width or other non-ASCII character. Bracket ranges compare code points, so the rule
+--   does not depend on the database locale. Copying official_url into artifact_ref is refused.
 --   Refusals are SQLSTATE 23514.
 -- The database never calls Storage. That the reference resolves to the controlled immutable
 -- copy whose bytes hash to file_sha256 stays the ingestion/approver responsibility: the V1.3-C
@@ -31,10 +34,10 @@ alter table public.knowledge_documents
   add constraint knowledge_documents_artifact_approval_chk check (
     status <> 'approved'
     or (artifact_ref is not null
-        and artifact_ref ~ '[^[:space:]]'
-        and position('://' in artifact_ref) = 0)
+        and length(artifact_ref) <= 512
+        and artifact_ref ~ '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$')
   );
 
 comment on constraint knowledge_documents_artifact_approval_chk on public.knowledge_documents is
-  'ST1-DB: an approved version needs a non-blank, non-URL artifact_ref (the controlled stored copy); '
-  'official_url alone is never enough.';
+  'ST1-DB: an approved version needs artifact_ref = an opaque ASCII storage path (the controlled '
+  'stored copy, e.g. knowledge-artifacts/<file_sha256>/<name>); official_url alone is never enough.';

@@ -45,18 +45,51 @@ NOT_NULL_VIOLATION = "23502"
 
 # ------------------------------------------------------------------ approval requires the artifact
 
-@pytest.mark.parametrize(("label", "artifact"), [
+BYPASSES = [
     ("null", None),
     ("empty", ""),
     ("whitespace", "   "),
     ("tab-newline", "\t\n "),
+    ("control-char", "\x01"),
+    ("nbsp", " "),
+    ("em-space", " "),
+    ("narrow-nbsp", " "),
+    ("zero-width-space", "​"),
+    ("zero-width-inside", "knowledge-artifacts/​guide.md"),
     ("https-url", "https://example.invalid/doc.pdf"),
     ("http-url", "http://example.invalid/doc.pdf"),
     ("storage-url", "storage://knowledge-artifacts/x"),
-    ("url-inside", "knowledge-artifacts/see https://example.invalid"),
-])
+    ("https-one-slash", "https:/example.invalid/x"),
+    ("data-uri", "data:text/plain;base64,eA=="),
+    ("file-uri", "file:/tmp/x"),
+    ("network-path", "//host/x"),
+    ("absolute-path", "/knowledge-artifacts/x.md"),
+    ("dot-dot-segment", "knowledge-artifacts/../x.md"),
+    ("dot-segment", "knowledge-artifacts/./x.md"),
+    ("empty-segment", "knowledge-artifacts//x.md"),
+    ("trailing-slash", "knowledge-artifacts/x/"),
+    ("leading-space", " " + "knowledge-artifacts/x.md"),
+    ("inner-space", "knowledge-artifacts/a b.md"),
+    ("non-ascii-letter", "knowledge-artifacts/hướng-dẫn.md"),
+    ("backslash", "knowledge-artifacts\\x.md"),
+    ("too-long", "a" * 513),
+]
+
+
+@pytest.mark.parametrize(("label", "artifact"), BYPASSES, ids=[b[0] for b in BYPASSES])
 def test_approval_without_a_controlled_artifact_is_refused(tx, label, artifact):
     assert _insert(tx, artifact=artifact) == ("err", CHECK_VIOLATION), label
+
+
+@pytest.mark.parametrize(("label", "artifact"), BYPASSES, ids=[b[0] for b in BYPASSES])
+def test_a_draft_cannot_be_approved_with_a_bypass_reference(tx, label, artifact):
+    doc = tx.one(
+        "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+        " chunker_version, license_basis) values (%s, 'draft', 'v1', 't', 'vi', 'https://example.invalid/d', %s, %s,"
+        " %s, 'p', 'n', 'c', 'official_publication') returning id",
+        (tx.source(), artifact if artifact is not None else "https://example.invalid/d", _sha("bytes"), _sha("n")))
+    assert _approve(tx, doc, artifact_ref=artifact) == ("err", CHECK_VIOLATION), label
 
 
 def test_official_url_alone_never_satisfies_approval(tx):
@@ -68,8 +101,10 @@ def test_official_url_alone_never_satisfies_approval(tx):
 def test_approval_with_a_controlled_artifact_and_every_existing_requirement_is_allowed(tx):
     assert _insert(tx, artifact=VALID) == ("ok", None)                                  # what V1.3-C writes
     assert _insert(tx, artifact=VALID, url=None, document_id="doc-no-url") == ("ok", None)
-    # minimal by design: the storage layout is not frozen into the schema
+    # structural, not layout-bound: another bucket/path scheme stays possible without a migration
     assert _insert(tx, artifact="other-bucket/opaque-ref-1", document_id="doc-opaque") == ("ok", None)
+    assert _insert(tx, artifact="ref1", document_id="doc-single") == ("ok", None)
+    assert _insert(tx, artifact="a" * 512, document_id="doc-512") == ("ok", None)
 
 
 def test_the_artifact_does_not_relax_the_existing_approval_rules(tx):
@@ -140,4 +175,5 @@ def test_the_constraint_is_the_migrations_and_nothing_else_changed(tx):
     assert "knowledge_documents_artifact_approval_chk" in constraints
     assert "knowledge_documents_approval_chk" in constraints and "knowledge_documents_artifact_chk" in constraints
     definition = constraints["knowledge_documents_artifact_approval_chk"]
-    assert "artifact_ref IS NOT NULL" in definition and "[^[:space:]]" in definition and "://" in definition
+    assert "artifact_ref IS NOT NULL" in definition and "length(artifact_ref) <= 512" in definition
+    assert "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$" in definition
