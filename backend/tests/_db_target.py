@@ -5,16 +5,21 @@ ABSENT variable from it (os.environ.setdefault). Test modules call load_settings
 so a run whose SUPABASE_* variables were merely unset (e.g. PowerShell `$env:X = ''` deletes X)
 silently received the hosted database URL and connected to it.
 
-tests/conftest.py calls `enforce()` before any test module is imported:
+`bootstrap()` runs before anything else in a test session: backend/pytest.ini loads this module
+as the first pytest plugin (`-p tests._db_target`, ahead of entry-point plugins, PYTEST_PLUGINS
+and every conftest), and tests/__init__.py runs it again for any `tests.*` import (--noconftest,
+another ini, a test module imported outside pytest). It applies `enforce()` and then installs
+connection-boundary guards (below):
 - every target is classified by the host it would actually reach: SUPABASE_DB_URL through
   psycopg's own conninfo parser (multi-host lists, `?host=` / `hostaddr`, `service`, and the
-  PGHOST / PGHOSTADDR / PGSERVICE fallbacks libpq applies to a host-less URL); SUPABASE_URL and
-  SUPABASE_JWKS_URL through urllib. Local = the name `localhost`, a loopback IP (127.0.0.0/8,
-  ::1) or a Unix-socket directory. Nothing is matched by substring.
+  PGHOST / PGHOSTADDR / PGSERVICE / PGUSER fallbacks libpq applies independently); SUPABASE_URL
+  and SUPABASE_JWKS_URL through urllib. Local = the name `localhost`, a loopback IP (127.0.0.0/8,
+  ::1, ::ffff:127.x.x.x) or a Unix-socket directory. Nothing is matched by substring.
 - a non-local target that comes from backend/.env is NEUTRALIZED for the session: every
   SUPABASE_* value taken from the file is set to "" (load_settings keeps "" -> None), which is
   exactly the CI no-DB state; DB tests skip by their existing gates and a warning is printed.
-- a non-local target set explicitly in the process environment ABORTS the session.
+- a non-local target set explicitly in the process environment ABORTS the session (pytest prints
+  the reason and exits with code 4, also while plugins are still loading).
 - the only exception is an explicit, per-project opt-in from the process environment (never
   from .env): ALLOW_HOSTED_DB_TESTS=i-understand-this-touches-hosted AND
   AGRICARBON_HOSTED_TEST_PROJECT_REF=<20-char ref>, and then EVERY non-local target must be
@@ -33,6 +38,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, MutableMapping
 from urllib.parse import urlsplit
+
+from pytest import UsageError
 
 DB_KEY = "SUPABASE_DB_URL"
 HTTP_KEYS = ("SUPABASE_URL", "SUPABASE_JWKS_URL")
@@ -65,9 +72,11 @@ def is_local_host(host: str) -> bool:
     if host.lower() == "localhost":
         return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        address = ipaddress.ip_address(host)
     except ValueError:
         return False
+    mapped = getattr(address, "ipv4_mapped", None)    # ::ffff:127.0.0.1 is IPv4 loopback
+    return address.is_loopback or bool(mapped and mapped.is_loopback)
 
 
 def db_hosts(url: str, environ: Mapping[str, str]) -> tuple[list[str], str | None, bool]:
@@ -82,8 +91,9 @@ def db_hosts(url: str, environ: Mapping[str, str]) -> tuple[list[str], str | Non
     host = params.get("host") or environ.get("PGHOST")
     hostaddr = params.get("hostaddr") or environ.get("PGHOSTADDR")
     hosts = [h for value in (host, hostaddr) if value for h in str(value).split(",")]
-    service = bool(params.get("service") or environ.get("PGSERVICE") or environ.get("PGSERVICEFILE"))
-    user = params.get("user")
+    # Only a selected service is used; PGSERVICEFILE / PGSYSCONFDIR merely say where to find one.
+    service = bool(params.get("service") or environ.get("PGSERVICE"))
+    user = params.get("user") or environ.get("PGUSER")
     return (hosts or ["/"], str(user) if user else None, service)
 
 
@@ -175,12 +185,17 @@ class RefusedTarget(ConnectionRefusedError):
     """Raised by the connection-boundary guards instead of opening a non-local connection."""
 
 
+class RefusedSession(UsageError, RuntimeError):
+    """The session is refused. A UsageError so pytest reports it and exits 4 even when raised
+    while plugins load (backend/pytest.ini); a RuntimeError for every other importer."""
+
+
 def enforce(environ: MutableMapping[str, str] | None = None, dotenv_path: Path | None = None) -> Decision:
-    """Apply the decision to `environ` (default os.environ). Raises RuntimeError on abort."""
+    """Apply the decision to `environ` (default os.environ). Raises RefusedSession on abort."""
     environ = os.environ if environ is None else environ
     decision = assess(environ, read_dotenv(dotenv_path or BACKEND_DIR / ".env"))
     if decision.action == "abort":
-        raise RuntimeError("refusing to run tests against a non-local target:\n  - " + "\n  - ".join(decision.reasons))
+        raise RefusedSession("refusing to run tests against a non-local target:\n  - " + "\n  - ".join(decision.reasons))
     for key in decision.neutralize:
         environ[key] = ""                             # load_settings' setdefault keeps "" -> None
     return decision
@@ -246,8 +261,8 @@ def install_connect_guards() -> None:
 
 
 def bootstrap() -> Decision:
-    """Called from tests/__init__.py (any `tests.*` import, with or without conftest) and from
-    tests/conftest.py. Idempotent."""
+    """Called from tests/__init__.py, which every `tests.*` import runs first -- including this
+    module's own import as the first pytest plugin (backend/pytest.ini). Idempotent."""
     decision = enforce()
     if decision.action != "allow-hosted":
         install_connect_guards()

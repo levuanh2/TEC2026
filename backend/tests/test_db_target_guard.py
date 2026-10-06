@@ -119,7 +119,35 @@ def test_libpq_environment_fallbacks_count(monkeypatch):
     assert guard.assess({"SUPABASE_DB_URL": hostless}, {}).action == "ok"                # Unix socket
     assert guard.assess({"SUPABASE_DB_URL": hostless, "PGHOST": "db.example.com"}, {}).action == "abort"
     assert guard.assess({"SUPABASE_DB_URL": hostless, "PGSERVICE": "prod"}, {}).action == "abort"
-    assert guard.assess({"SUPABASE_DB_URL": hostless, "PGSERVICEFILE": "/tmp/x"}, {}).action == "abort"
+    assert guard.assess({"SUPABASE_DB_URL": hostless, "PGSERVICE": "prod", "PGSERVICEFILE": "/tmp/x"}, {}).action == "abort"
+    # PGSERVICEFILE only says where a service file is; without a selected service libpq ignores it
+    assert guard.assess({"SUPABASE_DB_URL": hostless, "PGSERVICEFILE": "/tmp/x"}, {}).action == "ok"
+    assert guard.assess({"SUPABASE_DB_URL": DIRECT, "PGSERVICEFILE": "/tmp/x", **OPT_IN}, {}).action == "allow-hosted"
+
+
+def test_hosted_identity_uses_the_libpq_pguser_fallback():
+    userless = POOLER.replace(f"postgres.{REF}:secret-pw@", "")
+    assert guard.assess({"SUPABASE_DB_URL": userless, "PGUSER": f"postgres.{REF}", **OPT_IN}, {}).action == "allow-hosted"
+    assert guard.assess({"SUPABASE_DB_URL": userless, "PGUSER": "postgres.zzzzzzzzzzzzzzzzzzzz", **OPT_IN}, {}).action == "abort"
+    assert guard.assess({"SUPABASE_DB_URL": userless, **OPT_IN}, {}).action == "abort"          # OS user: unknown
+    # an explicit user in the URL wins over PGUSER, as in libpq
+    assert guard.assess({"SUPABASE_DB_URL": POOLER.replace(f"postgres.{REF}", "someone"),
+                         "PGUSER": f"postgres.{REF}", **OPT_IN}, {}).action == "abort"
+
+
+def test_ipv4_mapped_loopback_is_local_and_other_mapped_addresses_are_not():
+    assert guard.is_local_host("::ffff:127.0.0.1") and guard.is_local_host("[::ffff:127.9.9.9]")
+    assert not guard.is_local_host("::ffff:203.0.113.7")
+    assert guard.assess({"SUPABASE_DB_URL": "postgresql://u@[::ffff:127.0.0.1]:5432/db",
+                         "SUPABASE_URL": "http://[::ffff:127.0.0.1]:54321"}, {}).action == "ok"
+    assert guard.assess({"SUPABASE_DB_URL": "postgresql://u@[::ffff:203.0.113.7]/db"}, {}).action == "abort"
+
+
+def test_a_refused_session_is_a_pytest_usage_error_and_a_runtime_error():
+    with pytest.raises(guard.RefusedSession) as err:
+        guard.enforce({"SUPABASE_DB_URL": POOLER}, Path("does-not-exist.env"))
+    assert isinstance(err.value, pytest.UsageError) and isinstance(err.value, RuntimeError)
+    assert "secret-pw" not in str(err.value)
 
 
 @pytest.mark.parametrize("env", [
@@ -266,6 +294,88 @@ def test_opt_in_with_a_wrong_project_aborts_before_any_connect(tmp_path):
     proc, calls = _session(tmp_path, {"SUPABASE_DB_URL": POOLER, guard.OPT_IN_KEY: guard.OPT_IN_VALUE,
                                       guard.PROJECT_KEY: "zzzzzzzzzzzzzzzzzzzz"}, "tests/test_rag_knowledge_storage.py")
     assert proc.returncode == 4 and calls == []
+
+
+# A plugin that loads before tests/ and tries to connect while pytest is still loading plugins.
+# It never imports `tests` (that would run the guard itself) and only targets TEST-NET addresses.
+EARLY_PLUGIN = '''
+import json, os, socket
+from urllib.parse import urlsplit
+def note(*item):
+    with open(os.environ["GUARD_EARLY_LOG"], "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(item) + "\\n")
+note("loaded")
+try:
+    from infrastructure.config import load_settings
+    url = load_settings().supabase_db_url
+    note("settings-db", "none" if not url else
+         "local" if urlsplit(url).hostname in ("127.0.0.1", "localhost") else "NON-LOCAL")
+except Exception as exc:
+    note("settings-db", type(exc).__name__)
+def pg():
+    import psycopg
+    psycopg.connect("postgresql://u:secret-pw@203.0.113.7:5432/x", connect_timeout=1)
+for name, attempt in (("psycopg", pg), ("socket", lambda: socket.create_connection(("192.0.2.1", 9), timeout=0.5))):
+    try:
+        attempt()
+        note(name, "connected")
+    except Exception as exc:
+        note(name, type(exc).__name__)
+'''
+EARLY_LOADERS = ["entry-point", "PYTEST_PLUGINS", "command-line -p"]
+PURE_TEST = "tests/test_db_target_guard.py::test_a_no_db_url_is_the_ordinary_no_db_run"
+
+
+def _early_plugin_session(tmp_path, loader: str, env: dict[str, str], *extra: str):
+    spy_dir = tmp_path / "spy"
+    spy_dir.mkdir()
+    (spy_dir / "early_probe_plugin.py").write_text(EARLY_PLUGIN, encoding="utf-8")
+    log = tmp_path / "early.jsonl"
+    env = {**env, "GUARD_EARLY_LOG": str(log), "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""}
+    args = [*extra, PURE_TEST]
+    if loader == "entry-point":                       # an installed distribution's pytest11 entry point
+        dist = spy_dir / "early_probe-0.dist-info"
+        dist.mkdir()
+        (dist / "METADATA").write_text("Metadata-Version: 2.1\nName: early-probe\nVersion: 0\n", encoding="utf-8")
+        (dist / "entry_points.txt").write_text("[pytest11]\nearly_probe = early_probe_plugin\n", encoding="utf-8")
+    elif loader == "PYTEST_PLUGINS":
+        env["PYTEST_PLUGINS"] = "early_probe_plugin"
+    else:
+        args = ["-p", "early_probe_plugin", *args]
+    proc, calls = _session(tmp_path, env, *args)
+    notes = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+    return proc, calls, notes
+
+
+@pytest.mark.parametrize("loader", EARLY_LOADERS)
+def test_a_plugin_loaded_before_the_tests_cannot_connect(tmp_path, loader):
+    """backend/pytest.ini loads the guard ahead of every other plugin: the early plugin's psycopg
+    and socket attempts are refused at the boundary, and load_settings() no longer sees the
+    hosted backend/.env (where one exists, it is already neutralized)."""
+    proc, calls, notes = _early_plugin_session(tmp_path, loader, {})
+    out = proc.stdout[-800:] + proc.stderr[-800:]
+    assert proc.returncode == 0, out
+    assert ["loaded"] in notes, out                       # the probe really ran as a plugin
+    assert ["psycopg", "RefusedTarget"] in notes and ["socket", "RefusedTarget"] in notes, notes
+    assert next(n for n in notes if n[0] == "settings-db")[1] in ("none", "local"), notes
+    # the spy logs create_connection when it is CALLED; the connects themselves never happened
+    assert [c for c in calls if c[0] != "create_connection"] == [], calls
+
+
+@pytest.mark.parametrize("loader", EARLY_LOADERS)
+def test_a_hosted_target_refuses_the_session_before_an_early_plugin_loads(tmp_path, loader):
+    proc, calls, notes = _early_plugin_session(tmp_path, loader, HOSTED_ENV)
+    assert proc.returncode == 4 and REFUSAL in proc.stdout + proc.stderr, proc.stdout[-500:] + proc.stderr[-500:]
+    assert "secret-pw" not in proc.stdout + proc.stderr
+    assert notes == [] and calls == []
+
+
+def test_without_the_ini_plugin_the_early_probe_does_connect(tmp_path):
+    """Control: with pytest.ini's `-p tests._db_target` overridden away, the same probe's attempts
+    reach the (never-routed TEST-NET) targets -- so the zero-connect results above mean something."""
+    proc, calls, notes = _early_plugin_session(tmp_path, "PYTEST_PLUGINS", {}, "-o", "addopts=")
+    assert ["loaded"] in notes and ["psycopg", "RefusedTarget"] not in notes, notes
+    assert ["psycopg.connect", "called"] in calls and ["socket", "192.0.2.1"] in calls, calls
 
 
 def test_the_spy_itself_sees_connects(tmp_path):

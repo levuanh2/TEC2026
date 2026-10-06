@@ -371,11 +371,12 @@ Run from the repository root unless noted. Backend commands run **from
 | workflow-lint | `actionlint` |
 | dependency-audit | `pip-audit -r backend/requirements.txt`, `cd web-dashboard && npm audit --audit-level=high`, `osv-scanner scan source --lockfile app/pubspec.lock` |
 
-**Ordinary tests never reach hosted (`backend/tests/conftest.py`, `tests/_db_target.py`).**
+**Ordinary tests never reach hosted (`backend/pytest.ini`, `tests/_db_target.py`).**
 `backend/.env` holds the HOSTED project and `load_settings()` fills every *absent* variable from
-it (PowerShell `$env:X = ''` deletes X rather than emptying it). Before any test module is
-imported, the guard classifies `SUPABASE_DB_URL` (by the host libpq would really reach,
-including `?host=`, multi-host lists, `PGHOST`/`PGSERVICE`), `SUPABASE_URL` and
+it (PowerShell `$env:X = ''` deletes X rather than emptying it). `backend/pytest.ini` loads the
+guard as the first pytest plugin (`-p tests._db_target`: before entry-point plugins,
+`PYTEST_PLUGINS`, command-line `-p` and every conftest). It classifies `SUPABASE_DB_URL` (by the host libpq would really reach,
+including `?host=`, multi-host lists, `PGHOST`/`PGHOSTADDR`/`PGSERVICE`/`PGUSER`), `SUPABASE_URL` and
 `SUPABASE_JWKS_URL`. Local = `localhost`, a loopback IP or a Unix socket.
 - A non-local value from `backend/.env` is ignored for the session: every `SUPABASE_*` value
   from the file becomes `""`, i.e. the CI no-DB state. The DB tests skip and the session
@@ -388,7 +389,7 @@ including `?host=`, multi-host lists, `PGHOST`/`PGSERVICE`), `SUPABASE_URL` and
   `*.pooler.supabase.com`) or direct (`db.<ref>.supabase.co`) endpoint.
 
 Defence in depth: `tests/__init__.py` runs the same guard for any `tests.*` import (so `--noconftest`,
-`--confcutdir` and an import outside pytest are covered) and installs connection-boundary checks:
+`--confcutdir`, a session without `pytest.ini` and an import outside pytest are covered) and installs connection-boundary checks:
 `psycopg.Connection.connect` re-validates the effective target (libpq `host` and `hostaddr` resolve
 independently, e.g. `PGHOSTADDR`), and Python sockets refuse any non-loopback TCP destination.
 
