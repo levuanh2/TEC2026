@@ -1,7 +1,9 @@
 # RAG V1.3-C — Knowledge ingestion foundation
 
-Status: **implemented locally/CI; nothing ingested anywhere.** Hosted holds the Migration A schema
-only — no source is approved, no corpus is ingested, the artifact bucket is not created on hosted.
+Status: **implemented locally/CI; nothing ingested anywhere.** Hosted holds Migration A and ST1
+(`20261006120000`, applied 2026-10-06) and the private `knowledge-artifacts` bucket (created
+2026-10-06); ST1.1 (`20261007090000`) is not applied to hosted. No source is approved, no corpus is
+ingested.
 Lexical only (E1 = C): no embeddings, no vector, no LLM (D5 open, D8 closed).
 
 ```
@@ -70,18 +72,44 @@ migration, deliberately NOT part of the V1.3-C ingestion PR (ingestion code stay
 persistent hosted schema evolution). **No real document may be approved before it is applied.**
 
 Implemented as migration `20261006120000_knowledge_document_artifact_approval_guard`
-(+ rollback), its own PR — **not yet applied to hosted**; applying it is a separate explicit gate:
+(+ rollback), its own PR; applied to hosted 2026-10-06 under its own explicit gate:
 - one CHECK `knowledge_documents_artifact_approval_chk`: `status = 'approved'` additionally requires
   `artifact_ref` to be NOT NULL and an opaque ASCII storage path (`/`-separated segments of
   `[A-Za-z0-9][A-Za-z0-9._-]*`, ≤ 512 characters: no scheme/colon, no `//`, no `.`/`..` segment, no
   whitespace, control or non-ASCII character) —
   on top of the existing approver/time/review-note, known `license_basis`, `license_reference` and
   hash requirements (all unchanged);
-- minimal and structural by decision: the storage layout (bucket, path scheme) is not frozen into the
-  schema; that the reference is the content address `knowledge-artifacts/<file_sha256>/<name>` and
-  that the stored bytes hash to `file_sha256` stays the CLI's and the approver's check (§5);
+- structural only: ST1 checks the *shape* of the reference; binding it to the row's own bytes is
+  ST1.1 (below), and the object's existence and byte hash stay outside the database (§5);
 - `review_required` / `rejected` drafts are unchanged; lifecycle, RLS, retrieval untouched;
 - tests: `backend/tests/test_rag_knowledge_artifact_approval.py`.
+
+**ST1.1 — SHA binding** (migration `20261007090000_knowledge_document_artifact_sha_binding`
+(+ rollback), its own PR; applying it to hosted is a separate explicit gate). Without it a version
+with `file_sha256 = <A>` could be approved pointing at `knowledge-artifacts/<B>/x.pdf` — another
+file's copy. One CHECK `knowledge_documents_artifact_sha_binding_chk`: `status = 'approved'`
+additionally requires `artifact_ref` to start with `knowledge-artifacts/<file_sha256>/` (exact, in
+the "C" collation, NULL-safe). `file_sha256` is already 64 lowercase hex, so the comparison is
+canonical with no normalisation: another SHA, a SHA prefix, extra characters before the `/`, a
+missing `/`, an upper-case SHA segment, another bucket or no bucket are all refused. The rest of the
+path stays ST1's grammar (not repeated). Approval-time only, like ST1: a draft may carry no artifact
+or a mismatched one and can be corrected before approval (`artifact_ref` is mutable until the first
+approval, `file_sha256` never is); the approval itself fails until it matches. The bucket name and
+path scheme are now part of the approval contract: they are what the V1.3-C CLI writes
+(`infrastructure/knowledge_repo.py`), and changing them needs a new migration. Tests:
+`backend/tests/test_rag_knowledge_artifact_sha_binding.py`, plus the end-to-end ingestion →
+approval case in `test_knowledge_ingest_db.py`.
+
+**Three separate provenance guarantees — only C proves the bytes.**
+
+| | Guarantee | Enforced by |
+|---|---|---|
+| A | `artifact_ref` is a controlled-looking opaque storage path (ST1 syntax) | database CHECK, every approval |
+| B | `artifact_ref` is `knowledge-artifacts/<file_sha256>/…` — the row's own content address (ST1.1) | database CHECK, every approval |
+| C | the object **exists** in the private bucket, a service-role download succeeds, and the downloaded bytes hash to `file_sha256` | **outside the database**: the CLI on every write and `unchanged` re-run, and the approver before approval (§5) |
+
+A and B never call Storage: a well-formed path to an object that does not exist, or whose bytes
+differ, passes both. Only C establishes that the artifact is real and is the reviewed file.
 
 ## 2. Formats and parsers
 
@@ -162,11 +190,36 @@ operation; the adapter only INSERTs/SELECTs and never names `status`, `approved_
 Approval remains a separate, explicit operator action (today: reviewed SQL by a named human, per
 the source policy). **Approval checklist for a real document version** — every item, recorded:
 1. C1 source approval: publisher verified, source metadata correct, human approver named.
-2. `artifact_ref` present and the stored object downloads and re-hashes to `file_sha256` (ST1).
+2. Guarantee C (§1) for this exact version, immediately before approving it: the pre-approval audit
+   below shows `own_content_address` and `object_exists` true, and re-running the same CLI write
+   command reports `unchanged` (it downloads the stored object and re-hashes it against
+   `file_sha256`; a missing or tampered object fails with `artifact_missing`/`artifact_integrity`).
 3. `official_url` recorded when the publisher has one; `license_basis` known; `license_reference`
    when the basis needs one.
 4. Dry-run output reviewed (chunks, sections, warnings such as `table_uncertain`, empty pages).
 5. Approving a new version archives the previously approved one in the same transaction.
+
+**Pre-approval audit** (operator connection; read-only). Scoped to the candidate being approved
+plus every already-approved version — a draft that has no artifact yet is legitimate and is not
+listed as corrupt:
+
+```sql
+select d.id, d.status::text, d.source_id, d.document_id, d.document_version,
+       coalesce((d.artifact_ref collate "C")
+                ~ ('^knowledge-artifacts/' || d.file_sha256 || '/[A-Za-z0-9][A-Za-z0-9._-]*$'), false)
+         as own_content_address,                     -- A + B, and exactly one name segment
+       exists (select 1 from storage.objects o
+               where o.bucket_id = 'knowledge-artifacts'
+                 and o.name = substr(d.artifact_ref, length('knowledge-artifacts/') + 1))
+         as object_exists                            -- C, existence part only
+from public.knowledge_documents d
+where d.id = :candidate_id or d.status = 'approved'
+order by d.status, d.source_id, d.document_id;
+```
+
+Approve only when every row shows `own_content_address` and `object_exists` true. The byte check
+(download + SHA-256 == `file_sha256`) cannot be done in SQL; it is the CLI's `unchanged` re-run in
+item 2.
 
 ## 6. Republish / archive recovery — deferred
 
@@ -200,16 +253,18 @@ PDF extraction depends on the pypdf build, and the CLI warns when the running py
 pinned one. A pypdf upgrade that changes the extracted text of an ingested PDF is a corpus decision:
 that PDF can only be re-ingested as a new `document_version` (new chunk ids, fresh approval).
 
-**Hosted prerequisites (not done in V1.3-C):** create the private `knowledge-artifacts` bucket on
-hosted (Storage API, MIME `text/markdown`/`text/plain`/`application/pdf`, 50 MiB, not public) and
-decide the ST1 enforcement migration (§1) — both under their own explicit gate.
+**Hosted prerequisites.** Done 2026-10-06, each under its own explicit gate: ST1 applied; the
+private `knowledge-artifacts` bucket created through the Storage API (not public, 50 MiB, MIME
+`text/markdown`/`text/plain`/`application/pdf`, no `storage.objects` policy; anon and authenticated
+access verified as denied). Pending: ST1.1 (§1), under its own gate.
 
 ## 8. First real corpus acceptance gate (future, mandatory)
 
 Before the first real source is approved/ingested on hosted:
-- the ST1-DB follow-up migration (§1) is merged and applied to hosted;
+- ST1 and ST1.1 (§1) are merged and applied to hosted;
 - C1 source approval (exact artifact, publisher, official URL if available, license basis,
-  SHA-256, human approver); ST1 artifact stored and verified (§5 checklist).
+  SHA-256, human approver); the artifact stored and guarantee C verified (§5 checklist and
+  pre-approval audit).
 
 Then, once the FIRST real approved document exists (it persists anyway — no artificial residue),
 run the HTTP end-to-end test that V1.3-B could not run without leaving permanent test knowledge:
@@ -232,7 +287,9 @@ run the HTTP end-to-end test that V1.3-B could not run without leaving permanent
 | `tests/test_knowledge_pipeline.py` | parsers, normalizer, chunker, ids, validation (no DB) |
 | `tests/test_knowledge_ingest.py` | orchestration with in-memory ports, CLI (dry run, targets, no approval switch) |
 | `tests/test_knowledge_architecture.py` | purity, adapter writes, no app import |
-| `tests/test_knowledge_ingest_db.py` | real local stack: rows + Storage, RLS invisibility until approval, idempotency, conflicts, atomic rollback, archived/approved untouched, tenant farm scope, PDF pages — rolled back, Storage objects removed |
+| `tests/test_knowledge_ingest_db.py` | real local stack: rows + Storage, RLS invisibility until approval, idempotency, conflicts, atomic rollback, archived/approved untouched, tenant farm scope, PDF pages, the ingested address passing ST1.1 on approval — rolled back, Storage objects removed |
+| `tests/test_rag_knowledge_artifact_approval.py` | ST1: approval needs a controlled artifact path (bypass shapes, drafts, lifecycle) |
+| `tests/test_rag_knowledge_artifact_sha_binding.py` | ST1.1: approval needs the row's own content address (wrong/prefix/extra/case/bucket), drafts and correction, migration on existing rows, rollback + replay |
 | `tests/test_knowledge_pdf_isolation.py` | isolated worker: identical output, scans/encrypted/malformed refused, no inherited secret, timeout + repeated timeouts reaped, crash, flooding past the byte cap, malformed/inconsistent results, result validation; POSIX: installed limits and memory/CPU enforcement (a misbehaving stand-in, `fixtures/knowledge/fake_pdf_worker.py`; no real bomb) |
 
 Fixtures are synthetic (`TEST FIXTURE — NOT A REAL APPROVED SOURCE`); PDFs are generated at test

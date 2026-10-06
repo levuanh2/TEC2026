@@ -143,6 +143,24 @@ def test_ingestion_writes_review_required_rows_and_a_verified_artifact(env):
     assert rows[2][2]["table"] is True
 
 
+def test_the_ingested_artifact_is_its_own_content_address_and_passes_st11_on_approval(env):
+    """ST1.1 (20261007090000): the CLI writes knowledge-artifacts/<file_sha256>/<safe-name> before
+    the review_required version exists, so the separate operator approval passes the SHA binding."""
+    data = _data(env)
+    p = _plan(env, data)
+    result = _ingest(env, p, data)
+    assert result.artifact_ref == f"knowledge-artifacts/{p.file_sha256}/{p.artifact_name}"
+    stored = env["store"].find_document(p.source.source_id, "awd-guide", "v1")
+    assert stored.status == "review_required" and stored.artifact_ref == result.artifact_ref    # never auto-approved
+    cur = env["tx"].cur
+    cur.execute("select count(*) from pg_constraint where conname = 'knowledge_documents_artifact_sha_binding_chk'")
+    assert cur.fetchone()[0] == 1                                                              # really enforced here
+    _approve(env, p)
+    cur.execute("select status::text, artifact_ref from public.knowledge_documents where source_id = %s",
+                (p.source.source_id,))
+    assert cur.fetchone() == ("approved", result.artifact_ref)
+
+
 def test_review_required_chunks_are_not_retrievable_until_an_operator_approves(env):
     tx = env["tx"]
     data = _data(env)

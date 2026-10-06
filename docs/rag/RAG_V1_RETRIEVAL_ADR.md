@@ -20,7 +20,7 @@ stays intact. Embedding is **not** a generation-LLM choice; D5 stays open.
 | E1 | **C — lexical-first** baseline for V1.3. No embedding model, dimension, runtime or pgvector yet | **decided** |
 | C1 | Source policy approved; candidate corpus defined; **no document approved yet** | **decided (policy)** |
 | D3 | Real `SeasonScopeResolver` reusing Core V1 RLS reads + `crop_write_authz`; additive `season_lineage` read; no schema change | **approved** |
-| ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **decided** (V1.3-C): an approved version needs a controlled immutable `artifact_ref` + `file_sha256`; `official_url` alone is not sufficient (§4.4, [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §1). **ST1-DB: migration `20261006120000`** (approval requires an opaque ASCII storage-path `artifact_ref`), separate PR + hosted gate, applied before the first real approval |
+| ST1 | Controlled archived copy of original artifacts (Supabase Storage) | **decided** (V1.3-C): an approved version needs a controlled immutable `artifact_ref` + `file_sha256`; `official_url` alone is not sufficient (§4.4, [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §1). **ST1-DB: migration `20261006120000`** (approval requires an opaque ASCII storage-path `artifact_ref`), separate PR + hosted gate, applied to hosted 2026-10-06. **ST1.1: migration `20261007090000`** (approval requires `artifact_ref` = `knowledge-artifacts/<file_sha256>/…`), separate PR + hosted gate, applied before the first real approval |
 | ST2 | Approved knowledge deletion: the normal lifecycle is **archive-only** (no authenticated DELETE, no ordinary hard-delete workflow); a legal/copyright removal is a separate privileged **administrative purge** design (§9.8) | archive-only **decided**; purge **DEFERRED** — designed before real-corpus operationalization, if required; not implemented in Migration A |
 
 ---
@@ -137,8 +137,10 @@ SHA-256 verified on every write and reuse — plus `file_sha256` and provenance.
 useful provenance but is **not sufficient** for approval: the publisher may move, change or remove
 the file, and a hash detects drift without recovering the original. The ingestion CLI always stores
 the artifact. Migration A's CHECK still accepts URL-only rows and its approval CHECK does not require
-`artifact_ref`; until a follow-up migration enforces it, the approval checklist
-([RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5) is the control.
+`artifact_ref`; ST1-DB (`20261006120000`) enforces the path shape at approval and ST1.1
+(`20261007090000`) binds it to the version's own `file_sha256`. Object existence and the byte hash
+are never checked by the database: the approval checklist
+([RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5) remains that control.
 
 ### 4.5 Identity and idempotency
 - `source_id` (slug, per publisher/series), `document_id` (slug, unique **within its source**),
@@ -463,6 +465,6 @@ from the CI freeze (repo policy).
 | MEDIUM | `pypdf` structure detection is weak (headings, tables) | heuristics + `review_required`; prefer curated Markdown of official text where license allows |
 | MEDIUM | Vietnamese lexical recall without a stemmer | `simple` + `unaccent` + trigram; measured on DEV/HOLDOUT |
 | MEDIUM | Small HOLDOUT (24) → wide uncertainty on the done gate | report counts and per-query outcomes, not only rates |
-| MEDIUM | Approving a version whose stored copy is missing or wrong (ST1 decided: controlled artifact required) | ingestion stores + verifies the artifact; migration `20261006120000` refuses approval without an `artifact_ref` — **inactive on hosted until applied (its own gate, before the first real approval)**; object existence and the SHA-256 match stay an approval-checklist duty |
+| MEDIUM | Approving a version whose stored copy is missing or wrong (ST1 decided: controlled artifact required) | ingestion stores + verifies the artifact; migration `20261006120000` refuses approval without an `artifact_ref` (applied to hosted 2026-10-06); migration `20261007090000` (ST1.1) refuses one that is not the version's own content address — **inactive on hosted until applied (its own gate, before the first real approval)**; object existence and the SHA-256 match stay an approval-checklist duty |
 | LOW | `farms.cooperative_id` mutable in Core V1 | write trigger + query-time re-check (fail closed) |
 | LOW | Copyright/licensing | `license_basis` must be known to approve; `license_reference` for open/permission bases |
