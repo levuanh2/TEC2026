@@ -182,10 +182,14 @@ class SupabaseArtifactStore:
         try:
             self._bucket.upload(key, data, {"content-type": content_type, "upsert": "false"})
             created = True
-        except Exception as exc:  # noqa: BLE001 -- the same bytes already there (lost race) are fine if they verify
+        except Exception as exc:  # noqa: BLE001 -- e.g. the response timed out after Storage stored the bytes
             if not self._verified(key, file_sha256):
                 raise StorageError(f"artifact upload failed ({type(exc).__name__} {getattr(exc, 'status', '')})") from exc
-            created = False
+            # The bytes are there although the upload reported an error. Under the caller's
+            # content-address lock, and with no object found for this SHA-256 just above, only
+            # this run can have stored them: count it as created, so a failed database write
+            # compensates (still guarded by artifact_in_use).
+            created = True
         try:                                               # read-back: the reference must resolve to these bytes
             if not self._verified(key, file_sha256):
                 raise ArtifactIntegrityError(f"stored object {ARTIFACT_BUCKET}/{key} could not be read back")

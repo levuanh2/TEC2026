@@ -417,6 +417,7 @@ class _Bucket:
         self.fail_list, self.download_error, self.fail_after_upload = fail_list, download_error, fail_after_upload
         self.removed: list[str] = []
         self.uploaded = False
+        self.ambiguous_upload = False
 
     def list(self, folder):
         if self.fail_list:
@@ -438,6 +439,8 @@ class _Bucket:
             raise RuntimeError("Duplicate")
         self.objects[key] = data
         self.uploaded = True
+        if self.ambiguous_upload:
+            raise StorageApiError("timeout", "Gateway Timeout", "504")   # stored, but the response failed
 
     def remove(self, keys):
         for k in keys:
@@ -686,3 +689,16 @@ def test_cli_warns_when_pypdf_is_not_the_pinned_version(monkeypatch):
     assert cli.environment_warnings(plan_of()) == []
     monkeypatch.undo()
     assert cli.pinned_pypdf() is not None             # backend/constraints.txt pins pypdf
+
+
+def test_an_ambiguous_upload_is_owned_and_compensated_when_the_write_fails():
+    store, bucket = _adapter()
+    bucket.ambiguous_upload = True
+    sha = sha256_hex(DATA)
+    assert store.put(sha, "a.md", DATA, "text/markdown") == (f"knowledge-artifacts/{sha}/a.md", True)
+
+    adapter, bucket = _adapter()
+    bucket.ambiguous_upload = True
+    with pytest.raises(RuntimeError):
+        ingest(plan_of(), data=DATA, store=FakeStore(fail_on_chunks=True), artifacts=adapter)
+    assert bucket.objects == {} and bucket.removed == [f"{sha}/awd_guide.md"]
