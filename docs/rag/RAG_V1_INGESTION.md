@@ -106,10 +106,10 @@ injected (`pdf_requires_isolation`), and only the worker imports `knowledge.pars
 | timeout | hard wall clock `PDF_PARSE_TIMEOUT_SECONDS = 120` (constant, not a CLI option); on expiry the child is killed |
 | cleanup | the child is always killed if still running and always reaped (`wait`), all three pipes closed; no temporary file is ever created; tested with repeated timeouts |
 | environment | the child gets only `SYSTEMROOT`/`WINDIR`/`LANG`/`LC_ALL` — no Supabase URL/key, no database URL |
-| IPC bounds | stdout read with a 96 MiB cap (the child is killed past it: `extraction_limit_exceeded`); stderr capped at 64 KiB, only its last line surfaced; the parser's own limits run in the child before serializing |
+| IPC bounds | stdout read with a 96 MiB cap (the child is killed past it: `extraction_limit_exceeded`); stderr drained to EOF with only a 4 KiB rolling tail kept (a chatty child never blocks), only its last line surfaced, and logging below ERROR disabled in the child; the parser's own limits run in the child before serializing |
 | result validation | exact field set, `format`/`parser_version` equal to the parent's, page/level/kind/flag ranges, block count and total text re-checked; anything else is `parse_worker_protocol` |
 | POSIX (Linux CI/servers) | before importing pypdf the child caps itself with `resource`: address space 2 GiB, CPU seconds = the timeout, file size 0, 64 open files; a hit is `parse_resource_limit` |
-| Windows | **no hard per-child memory cap in V1.3-C** (it would need Job objects / pywin32, not added): the timeout, forced termination and the parser limits (50 MiB file, 2000 pages, pypdf's 75 MB per-stream cap, 20 M characters, 100 000 blocks) still apply |
+| Windows | **no hard per-child memory cap in V1.3-C**. One is possible with a Job object through stdlib `ctypes` (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`), not built in this round; the timeout, forced termination and the parser limits (50 MiB file, 2000 pages, pypdf's 75 MB per-stream cap, 20 M characters, 100 000 blocks) still apply. **Ingest unreviewed PDFs on Linux**, where the POSIX limits apply |
 
 Outcomes: `parse_timeout`, `parse_resource_limit`, `parse_worker_crashed`, `parse_worker_protocol`,
 `extraction_limit_exceeded`, and the parser's `malformed`, `encrypted`, `no_text_layer`,

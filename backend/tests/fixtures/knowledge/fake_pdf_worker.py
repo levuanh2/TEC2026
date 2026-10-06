@@ -30,6 +30,24 @@ def main(mode: str, *args: str) -> int:
         while True:
             out.write(chunk)
             out.flush()
+    elif mode == "noisy":                                   # far more stderr than any cap, then a valid error
+        err = sys.stderr.buffer
+        for _ in range(64):
+            err.write(b"WARNING Ignoring wrong pointing object 1 0 (offset 0)\n" * 400)
+        err.write(b"last line of a long log\n")
+        err.flush()
+        out.write(b'{"ok": false, "code": "malformed", "message": "broken xref"}')
+        out.flush()
+        return 2
+    elif mode == "limits_low":                              # POSIX: inherited hard limits below the request
+        import resource
+
+        from infrastructure.pdf_isolation import apply_limits
+
+        resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
+        apply_limits(2 * 1024 ** 3, 5, 64)
+        out.write(json.dumps(resource.getrlimit(resource.RLIMIT_NOFILE)).encode())
+        return 0
     elif mode == "garbage":
         out.write(b"\x00\xffnot json")
     elif mode == "json":                                    # args[0]: a JSON payload, args[1]: exit code

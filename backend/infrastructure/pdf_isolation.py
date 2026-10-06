@@ -9,8 +9,9 @@ Parent (all platforms):
 - hard wall-clock timeout (PDF_PARSE_TIMEOUT_SECONDS); on timeout, crash, protocol error or an
   oversized result the child is killed and ALWAYS reaped (wait) and every pipe closed;
 - the child gets a minimal environment: no Supabase URL/key, no database URL, no user secrets;
-- stdout is read with a hard byte cap (MAX_RESULT_BYTES); stderr is read with a small cap and
-  only its last line is ever surfaced;
+- stdout is read with a hard byte cap (MAX_RESULT_BYTES); stderr is drained to EOF keeping only a
+  4 KiB rolling tail (so a chatty child can never block on a full pipe), and only its last line
+  is ever surfaced; the child also disables logging below ERROR (pypdf warns per broken object);
 - the result is JSON (never pickle) and validated field by field before a ParsedDocument is
   built; anything unexpected is `parse_worker_protocol`;
 - no temporary file is created: bytes travel over pipes.
@@ -18,9 +19,10 @@ Child:
 - POSIX: installs `resource` limits on itself BEFORE importing pypdf: address space
   (PDF_WORKER_MEMORY_BYTES), CPU seconds (the timeout), file size 0 (it never writes a file),
   open files; a limit hit is `parse_resource_limit`;
-- Windows: no hard per-child memory cap in V1.3-C (that needs Job objects / pywin32); the
-  wall-clock timeout, forced termination and the parser's own limits (50 MiB file, 2000 pages,
-  pypdf's 75 MB per-stream cap, 20 M extracted characters, 100 000 blocks) still apply;
+- Windows: no hard per-child memory cap in V1.3-C. One is possible with a Job object (stdlib
+  ctypes, JOB_OBJECT_LIMIT_PROCESS_MEMORY) but is not built here; the wall-clock timeout, forced
+  termination and the parser's own limits (50 MiB file, 2000 pages, pypdf's 75 MB per-stream cap,
+  20 M extracted characters, 100 000 blocks) still apply. Ingest unreviewed PDFs on Linux;
 - runs the existing knowledge.parsers.pdf.parse, whose limits are enforced before the result
   is serialized.
 Outcomes (ParseError.code): parse_timeout, parse_resource_limit, parse_worker_crashed,
@@ -42,8 +44,10 @@ PDF_PARSE_TIMEOUT_SECONDS = 120          # offline operator CLI; generous for 20
 PDF_WORKER_MEMORY_BYTES = 2 * 1024 ** 3  # POSIX address-space cap of the child
 PDF_WORKER_OPEN_FILES = 64
 MAX_RESULT_BYTES = 96 * 1024 * 1024      # 20 M characters of mostly 3-byte UTF-8 + JSON framing
-_STDERR_CAP = 64 * 1024
-EXIT_OK, EXIT_PARSE_ERROR, EXIT_RESOURCE = 0, 2, 3
+_STDERR_TAIL = 4 * 1024                  # stderr is drained to EOF; only this rolling tail is kept
+_MAX_MESSAGE = 500
+# 86, not a small number: a Windows CRT abort() exits 3, a crash must never read as a limit hit.
+EXIT_OK, EXIT_PARSE_ERROR, EXIT_RESOURCE = 0, 2, 86
 
 _BACKEND = Path(__file__).resolve().parent.parent
 _KINDS = frozenset({"heading", "paragraph", "list", "table", "code"})
@@ -59,10 +63,18 @@ def apply_limits(memory_bytes: int, cpu_seconds: int, open_files: int) -> bool:
         import resource
     except ImportError:          # Windows
         return False
-    resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (open_files, open_files))
+
+    def cap(limit, soft, hard):
+        # Never ask for more than the inherited hard limit (an operator's `ulimit` may be lower).
+        current_hard = resource.getrlimit(limit)[1]
+        if current_hard != resource.RLIM_INFINITY:
+            soft, hard = min(soft, current_hard), min(hard, current_hard)
+        resource.setrlimit(limit, (soft, hard))
+
+    cap(resource.RLIMIT_AS, memory_bytes, memory_bytes)
+    cap(resource.RLIMIT_CPU, cpu_seconds, cpu_seconds + 1)
+    cap(resource.RLIMIT_FSIZE, 0, 0)
+    cap(resource.RLIMIT_NOFILE, open_files, open_files)
     return True
 
 
@@ -71,23 +83,32 @@ def run_worker(data: bytes) -> tuple[int, bytes]:
     from knowledge.models import ParseError
     from knowledge.parsers import pdf
 
+    def error(code: str, message: str) -> tuple[int, bytes]:
+        return EXIT_PARSE_ERROR, json.dumps({"ok": False, "code": code, "message": message[:_MAX_MESSAGE]}).encode()
+
     try:
         parsed = pdf.parse(data)
     except ParseError as exc:
-        return EXIT_PARSE_ERROR, json.dumps({"ok": False, "code": exc.code, "message": str(exc)[:500]}).encode()
+        return error(exc.code, str(exc))
     except MemoryError:
         return EXIT_RESOURCE, b'{"ok": false, "code": "parse_resource_limit"}'
     payload = {"ok": True, "format": parsed.format, "parser_version": parsed.parser_version,
                "page_count": parsed.page_count, "warnings": list(parsed.warnings),
                "blocks": [{"kind": b.kind, "text": b.text, "level": b.level, "page": b.page, "flags": list(b.flags)}
                           for b in parsed.blocks]}
-    return EXIT_OK, json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    try:
+        return EXIT_OK, json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except UnicodeEncodeError:   # a crafted ToUnicode map can yield lone surrogates: not storable text
+        return error("malformed", "the PDF text layer contains invalid Unicode (lone surrogates)")
 
 
 def _child_main(argv: list[str]) -> int:
     memory_bytes, cpu_seconds, open_files = (int(a) for a in argv)
     apply_limits(memory_bytes, cpu_seconds, open_files)
     sys.path.insert(0, str(_BACKEND))
+    import logging
+
+    logging.disable(logging.WARNING)       # pypdf logs one warning per broken object; never flood stderr
     try:
         data = sys.stdin.buffer.read()
         code, payload = run_worker(data)
@@ -116,11 +137,13 @@ def _failure(code: str, message: str):
 
 
 class _Reader(threading.Thread):
-    """Drain one pipe up to `cap` bytes; past the cap, stop and remember the overflow."""
+    """Drain one pipe to EOF. `cap`: keep at most this many bytes and, past it, kill the child
+    (`on_overflow`) and remember the overflow. `tail`: keep only the last bytes and DISCARD the
+    rest while still reading, so the child can never block on a full pipe."""
 
-    def __init__(self, stream, cap: int, on_overflow=None):
+    def __init__(self, stream, *, cap: int | None = None, tail: int | None = None, on_overflow=None):
         super().__init__(daemon=True)
-        self.stream, self.cap, self.on_overflow = stream, cap, on_overflow
+        self.stream, self.cap, self.tail, self.on_overflow = stream, cap, tail, on_overflow
         self.chunks: list[bytes] = []
         self.size = 0
         self.overflow = False
@@ -128,11 +151,15 @@ class _Reader(threading.Thread):
     def run(self):
         try:
             while True:
-                chunk = self.stream.read(1 << 16)
+                chunk = self.stream.read1(1 << 16)
                 if not chunk:
                     return
+                if self.tail is not None:
+                    self.chunks = [(b"".join(self.chunks) + chunk)[-self.tail:]]
+                    continue
                 if self.size + len(chunk) > self.cap:
                     self.overflow = True
+                    self.chunks = []
                     if self.on_overflow:
                         self.on_overflow()
                     return
@@ -141,8 +168,9 @@ class _Reader(threading.Thread):
         except (OSError, ValueError):
             return
 
-    def data(self) -> bytes:
-        return b"".join(self.chunks)
+    def take(self) -> bytes:
+        data, self.chunks = b"".join(self.chunks), []
+        return data
 
 
 def _write_all(stream, data: bytes) -> None:
@@ -161,13 +189,15 @@ def parse_pdf_isolated(data: bytes, *, timeout: int = PDF_PARSE_TIMEOUT_SECONDS)
     """Parse a PDF in a separate, limited, always-reaped process. Returns a ParsedDocument."""
     proc = subprocess.Popen(_worker_command(timeout), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, env=_child_env(), cwd=str(_BACKEND), close_fds=True)
-    out = _Reader(proc.stdout, MAX_RESULT_BYTES, on_overflow=proc.kill)
-    err = _Reader(proc.stderr, _STDERR_CAP)
+    out = _Reader(proc.stdout, cap=MAX_RESULT_BYTES, on_overflow=proc.kill)
+    err = _Reader(proc.stderr, tail=_STDERR_TAIL)
     writer = threading.Thread(target=_write_all, args=(proc.stdin, data), daemon=True)
-    for t in (out, err, writer):
-        t.start()
+    started: list[threading.Thread] = []
     timed_out = False
     try:
+        for t in (out, err, writer):                  # inside the try: a failed start still reaps the child
+            t.start()
+            started.append(t)
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
@@ -175,7 +205,7 @@ def parse_pdf_isolated(data: bytes, *, timeout: int = PDF_PARSE_TIMEOUT_SECONDS)
         if proc.poll() is None:
             proc.kill()
         proc.wait()                                   # always reaped: no zombie, no orphan
-        for t in (writer, out, err):
+        for t in started:
             t.join(timeout=5)
         for stream in (proc.stdin, proc.stdout, proc.stderr):
             try:
@@ -188,28 +218,39 @@ def parse_pdf_isolated(data: bytes, *, timeout: int = PDF_PARSE_TIMEOUT_SECONDS)
     if out.overflow:
         raise _failure("extraction_limit_exceeded",
                        f"the PDF worker's result exceeded {MAX_RESULT_BYTES} bytes and was rejected")
-    return _decode(proc.returncode, out.data(), err.data())
+    return _decode(proc.returncode, out.take(), err.take())
+
+
+_KNOWN_ERRORS = frozenset({"malformed", "encrypted", "no_text_layer", "too_large", "too_many_blocks",
+                           "parse_resource_limit"})
 
 
 def _decode(returncode: int, raw: bytes, stderr: bytes):
-    from knowledge.models import Block, ParsedDocument
-    from knowledge.parsers import pdf
-
-    if returncode == EXIT_RESOURCE or returncode in (-9, -24, 137, 152):   # SIGKILL (AS/OOM), SIGXCPU
+    if returncode == EXIT_RESOURCE or returncode in (-9, -24):     # MemoryError, SIGKILL (AS/OOM), SIGXCPU
         raise _failure("parse_resource_limit", "the PDF worker hit its memory/CPU limit")
     if returncode not in (EXIT_OK, EXIT_PARSE_ERROR):
         tail = stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or [""]
         raise _failure("parse_worker_crashed", f"the PDF worker exited with {returncode} ({tail[0][:200]})")
     try:
-        doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+        return _interpret(returncode, raw)
+    except (TypeError, ValueError, RecursionError, KeyError, AttributeError):
+        # Whatever shape a broken/compromised worker sends (deep nesting, unhashable values,
+        # invalid UTF-8): a typed protocol error, never an unhandled exception.
         raise _failure("parse_worker_protocol", "the PDF worker returned malformed output") from None
+
+
+def _interpret(returncode: int, raw: bytes):
+    from knowledge.models import Block, ParsedDocument
+    from knowledge.parsers import pdf
+
+    doc = json.loads(raw)                                          # bytes: UTF-8 checked, no extra copy
+    del raw
     if not isinstance(doc, dict) or not isinstance(doc.get("ok"), bool):
         raise _failure("parse_worker_protocol", "the PDF worker returned an unexpected result")
     if returncode == EXIT_PARSE_ERROR or not doc["ok"]:
         code, message = doc.get("code"), doc.get("message", "")
-        known = {"malformed", "encrypted", "no_text_layer", "too_large", "too_many_blocks", "parse_resource_limit"}
-        if returncode != EXIT_PARSE_ERROR or doc["ok"] or code not in known or not isinstance(message, str):
+        if (returncode != EXIT_PARSE_ERROR or doc["ok"] or not isinstance(code, str) or code not in _KNOWN_ERRORS
+                or not isinstance(message, str) or len(message) > _MAX_MESSAGE):
             raise _failure("parse_worker_protocol", "the PDF worker returned an inconsistent error")
         raise _failure(code, message or code)
     return _validated(doc, Block, ParsedDocument, pdf)
@@ -239,7 +280,8 @@ def _validated(doc: dict, Block, ParsedDocument, pdf):
         if not isinstance(b, dict) or set(b) != {"kind", "text", "level", "page", "flags"}:
             raise bad("block fields")
         kind, text, level, page, flags = b["kind"], b["text"], b["level"], b["page"], b["flags"]
-        if kind not in _KINDS or not isinstance(text, str) or not isinstance(flags, list) or not set(flags) <= _FLAGS:
+        if (not isinstance(kind, str) or kind not in _KINDS or not isinstance(text, str) or not isinstance(flags, list)
+                or not all(isinstance(f, str) and f in _FLAGS for f in flags)):
             raise bad("block values")
         if not isinstance(level, int) or isinstance(level, bool) or not 0 <= level <= 6 or (level > 0) != (kind == "heading"):
             raise bad("block level")

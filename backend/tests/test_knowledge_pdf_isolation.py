@@ -261,9 +261,68 @@ def test_too_many_blocks_in_a_result_are_rejected(monkeypatch):
         iso._decode(0, _payload(), b"")
 
 
-@pytest.mark.parametrize(("code", "expected"), [(3, "parse_resource_limit"), (-9, "parse_resource_limit"),
-                                                (-24, "parse_resource_limit"), (1, "parse_worker_crashed"),
-                                                (-11, "parse_worker_crashed")])
+def test_a_chatty_worker_never_blocks_on_stderr(monkeypatch, spawned):
+    """pypdf warns once per broken object; ~1.4 MB of stderr must neither stall the worker until
+    the timeout nor hide the real (typed) outcome."""
+    fake(monkeypatch, "noisy")
+    started = time.monotonic()
+    with pytest.raises(ParseError) as err:
+        iso.parse_pdf_isolated(b"%PDF-1.4", timeout=60)
+    assert (err.value.code, str(err.value)) == ("malformed", "broken xref")
+    assert time.monotonic() - started < 30
+    _all_reaped(spawned[0])
+
+
+@pytest.mark.parametrize("raw", [
+    b"[" * 100_000,                                                                       # RecursionError
+    b'{"ok": false, "code": ["malformed"], "message": "x"}',                             # unhashable code
+    b'{"ok": false, "code": "malformed", "message": "' + b"x" * 501 + b'"}',              # message too long
+    b'{"ok": false, "code": "malformed", "message": 5}',
+    b"\xff\xfe not utf-8",
+], ids=["deep-nesting", "unhashable-code", "long-message", "message-not-str", "not-utf8"])
+def test_hostile_error_payloads_are_protocol_errors(raw):
+    with pytest.raises(ParseError) as err:
+        iso._decode(iso.EXIT_PARSE_ERROR, raw, b"")
+    assert err.value.code == "parse_worker_protocol"
+
+
+@pytest.mark.parametrize("block", [
+    {"kind": ["paragraph"], "text": "x", "level": 0, "page": 1, "flags": []},
+    {"kind": "paragraph", "text": "x", "level": 0, "page": 1, "flags": [[1]]},
+    {"kind": "paragraph", "text": "x", "level": 0, "page": 1, "flags": [1]},
+])
+def test_unhashable_or_mistyped_block_values_are_protocol_errors(block):
+    with pytest.raises(ParseError) as err:
+        iso._decode(0, _payload(blocks=[block]), b"")
+    assert err.value.code == "parse_worker_protocol"
+
+
+def test_lone_surrogates_in_extracted_text_are_malformed_not_a_crash(monkeypatch):
+    from knowledge.models import ParsedDocument
+
+    monkeypatch.setattr(pdf, "parse", lambda data: ParsedDocument(
+        format="pdf", parser_version=pdf.PARSER_VERSION, page_count=1,
+        blocks=(Block(kind="paragraph", text="ab\ud800cd", page=1),)))
+    code, payload = iso.run_worker(b"%PDF-1.4")
+    assert code == iso.EXIT_PARSE_ERROR and json.loads(payload)["code"] == "malformed"
+
+
+def test_a_thread_start_failure_still_reaps_the_worker(monkeypatch, spawned):
+    fake(monkeypatch, "sleep")
+
+    def fail(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(iso._Reader, "start", fail)
+    with pytest.raises(RuntimeError):
+        iso.parse_pdf_isolated(b"%PDF-1.4", timeout=30)
+    _all_reaped(spawned[0])
+
+
+@pytest.mark.parametrize(("code", "expected"), [(iso.EXIT_RESOURCE, "parse_resource_limit"),
+                                                (-9, "parse_resource_limit"), (-24, "parse_resource_limit"),
+                                                (3, "parse_worker_crashed"),          # a Windows CRT abort()
+                                                (1, "parse_worker_crashed"), (-11, "parse_worker_crashed")])
 def test_exit_statuses_map_to_typed_failures(code, expected):
     with pytest.raises(ParseError) as err:
         iso._decode(code, b"", b"Traceback\nSomeError: boom\n")
@@ -310,6 +369,14 @@ def test_the_child_installs_the_intended_limits():
     limits = json.loads(out.stdout)
     assert limits == {"RLIMIT_AS": [512 * 1024 ** 2] * 2, "RLIMIT_CPU": [7, 8], "RLIMIT_FSIZE": [0, 0],
                       "RLIMIT_NOFILE": [48, 48]}
+
+
+@posix_only
+def test_lower_inherited_hard_limits_are_respected_not_an_error():
+    out = subprocess.run([sys.executable, "-I", "-B", str(FAKE), "limits_low"], input=b"", capture_output=True,
+                         timeout=60, env=iso._child_env())
+    assert out.returncode == 0, out.stderr[-300:]
+    assert json.loads(out.stdout) == [32, 32]
 
 
 @posix_only

@@ -109,11 +109,15 @@ def test_only_the_isolated_worker_imports_the_pdf_parser():
     for path in BACKEND.rglob("*.py"):
         if {"tests", ".venv", "venv"} & set(path.relative_to(BACKEND).parts):
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom) and (
+        source = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if (isinstance(node, ast.ImportFrom) and (
                     node.module == "knowledge.parsers.pdf"
-                    or (node.module == "knowledge.parsers" and any(a.name == "pdf" for a in node.names))):
+                    or (node.module == "knowledge.parsers" and any(a.name == "pdf" for a in node.names)))) or (
+                    isinstance(node, ast.Import) and any(a.name == "knowledge.parsers.pdf" for a in node.names)):
                 importers.add(path.relative_to(BACKEND).as_posix())
+        if "knowledge.parsers.pdf" in source and "import_module" in source:     # dynamic import
+            importers.add(path.relative_to(BACKEND).as_posix())
     assert importers == {"infrastructure/pdf_isolation.py"}, importers
     assert "pdf_parser=parse_pdf_isolated" in CLI.read_text(encoding="utf-8")
     source = ISOLATION.read_text(encoding="utf-8")
