@@ -2,7 +2,7 @@
 
 Status: **implemented locally/CI; nothing ingested anywhere.** Hosted holds Migration A and ST1
 (`20261006120000`, applied 2026-10-06) and the private `knowledge-artifacts` bucket (created
-2026-10-06); ST1.1 (`20261007090000`) is not applied to hosted. No source is approved, no corpus is
+2026-10-06); ST1.1 (`20261007090000`) was applied to hosted 2026-10-06. No source is approved, no corpus is
 ingested.
 Lexical only (E1 = C): no embeddings, no vector, no LLM (D5 open, D8 closed).
 
@@ -85,7 +85,7 @@ Implemented as migration `20261006120000_knowledge_document_artifact_approval_gu
 - tests: `backend/tests/test_rag_knowledge_artifact_approval.py`.
 
 **ST1.1 — SHA binding** (migration `20261007090000_knowledge_document_artifact_sha_binding`
-(+ rollback), its own PR; applying it to hosted is a separate explicit gate). Without it a version
+(+ rollback), its own PR; applied to hosted 2026-10-06 under its own explicit gate). Without it a version
 with `file_sha256 = <A>` could be approved pointing at `knowledge-artifacts/<B>/x.pdf` — another
 file's copy. One CHECK `knowledge_documents_artifact_sha_binding_chk`: `status = 'approved'`
 additionally requires `artifact_ref` to start with `knowledge-artifacts/<file_sha256>/` (exact, in
@@ -262,12 +262,12 @@ that PDF can only be re-ingested as a new `document_version` (new chunk ids, fre
 **Hosted prerequisites.** Done 2026-10-06, each under its own explicit gate: ST1 applied; the
 private `knowledge-artifacts` bucket created through the Storage API (not public, 50 MiB, MIME
 `text/markdown`/`text/plain`/`application/pdf`, no `storage.objects` policy; anon and authenticated
-access verified as denied). Pending: ST1.1 (§1), under its own gate.
+access verified as denied); ST1.1 (§1) applied 2026-10-06 18:35 UTC, under its own gate.
 
 ## 8. First real corpus acceptance gate (future, mandatory)
 
 Before the first real source is approved/ingested on hosted:
-- ST1 and ST1.1 (§1) are merged and applied to hosted;
+- ST1 and ST1.1 (§1) are merged and applied to hosted (done 2026-10-06);
 - C1 source approval (exact artifact, publisher, official URL if available, license basis,
   SHA-256, human approver); the artifact stored and guarantee C verified (§5 checklist and
   pre-approval audit).
