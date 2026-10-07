@@ -117,7 +117,13 @@ differ, passes both. Only C establishes that the artifact is real and is the rev
 |---|---|---|
 | `.md` | `kn-markdown-1` | ATX/setext headings, fenced code, pipe tables (alignment rows dropped), lists, quotes; YAML front matter ignored (warning) |
 | `.txt` | `kn-text-1` | strict UTF-8 (BOM ok); headings = multi-level numbering, `Chương/Mục/Điều/Phần/Phụ lục`, short ALL-CAPS lines; tables marked `table_uncertain` |
-| `.pdf` | `kn-pdf-1+pypdf-<version>` | text layer only. `< 20` non-space chars = page without text; fewer than half the pages with text ⇒ `no_text_layer` (scans are refused — **never OCR**); encrypted/malformed/> 2000 pages refused |
+| `.pdf` | `kn-pdf-2+pypdf-<version>` | text layer only. `< 20` non-space chars = page without text; fewer than half the pages with text ⇒ `no_text_layer` (scans are refused — **never OCR**); encrypted/malformed/> 2000 pages refused. Lines go through the `.txt` classifier, then (kn-pdf-2) a top-level `N. Title` line becomes a heading only with document context: title shape (upper-case start, ≥ 2 words, ≤ 100 chars, no `:`/`;`/terminal punctuation), the `1.` → `2.` → `3.` sequence across pages (a non-running level-1 heading restarts it), no list numbering continuing through it (`N-1.` before / `N+1.` after), not a wrapped sentence; it nests under an open level-1 heading together with its own `N.x` subsections (rules in `knowledge/parsers/pdf.py`) |
+
+`kn-pdf-1` → `kn-pdf-2` (V1.3-C): `kn-pdf-1` kept every single-level `2. Title` line a list item, so a
+document's top-level sections (`2. Harvest`, `3. Straw`) were swallowed by the previous subsection
+(`1.6 Pests`) in `section_path`. Only the PDF parser changed: `.txt` (`kn-text-1`), Markdown, the
+normalizer and the chunker are unchanged. Versions stored with `kn-pdf-1` are `pipeline_changed`
+under `kn-pdf-2` (another `kn-pdf-N` family, §4): re-ingest as a new `document_version`.
 
 The extension selects the parser and the leading bytes must agree (a renamed DOCX/PDF/image is
 refused). DOCX, HTML, spreadsheets, OCR, crawling: unsupported. Size bounds, all checked before any
@@ -174,7 +180,7 @@ cut into 450-token windows. `section_path` = `A > B > C` (indexed by the databas
 | same bytes, pipeline versions, normalized hash, metadata, chunk set — any status | `unchanged` (no write; an archived version is never reactivated, an approved one never touched) |
 | different bytes | `content_changed` — refused; ingest as a NEW `document_version` |
 | different parser/normalizer/chunker version | `pipeline_changed` — refused; new `document_version` |
-| only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Only `kn-pdf-N+pypdf-<version>` qualifies; any other suffix family or any output difference stays `pipeline_changed` |
+| only the third-party build suffix differs (`kn-pdf-2+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Only `kn-pdf-N+pypdf-<version>` qualifies; any other suffix family or any output difference stays `pipeline_changed` |
 | different title/language/url/date/license, or chunk set | `metadata_changed` — refused |
 | existing source with different metadata | `source_mismatch` — refused (ingestion never edits a source) |
 

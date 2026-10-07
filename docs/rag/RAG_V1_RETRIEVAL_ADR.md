@@ -112,7 +112,8 @@ spreadsheets, scans/OCR: **unsupported** in V1.3.
 
 ### 4.3 Chunking (structure-aware lexical baseline)
 - Split on structure first: Markdown headings; PDF page + detected headings (numbered `1.2.3`,
-  ALL-CAPS lines) → `section_path`; then paragraphs; lists and table-like blocks stay whole when
+  ALL-CAPS lines; since `kn-pdf-2` also top-level `2. Title` sections confirmed by document context,
+  see RAG_V1_INGESTION.md §2) → `section_path`; then paragraphs; lists and table-like blocks stay whole when
   they fit.
 - **Initial heuristic: target ≈ 300, hard max 450 whitespace-delimited tokens.** This is a lexical
   baseline chosen to keep chunks section-sized and citable; it is **not** a model-token budget and

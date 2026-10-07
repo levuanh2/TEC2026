@@ -131,7 +131,7 @@ PDF_PAGES = [["BÁO CÁO KIỂM THỬ", FIXTURE, "1.2 Mực nước", "Tưới �
 
 def test_pdf_text_layer_pages_headings_and_tables():
     parsed = pdf.parse(make_pdf(PDF_PAGES))
-    assert parsed.page_count == 4 and parsed.parser_version.startswith("kn-pdf-1+pypdf-")
+    assert parsed.page_count == 4 and parsed.parser_version.startswith("kn-pdf-2+pypdf-")
     assert {b.page for b in parsed.blocks} == {1, 2, 3, 4}
     assert parsed.blocks[0].kind == "heading" and parsed.blocks[0].flags == ("page_first",)
     assert any(b.kind == "heading" and b.text == "1.2 Mực nước" for b in parsed.blocks)
