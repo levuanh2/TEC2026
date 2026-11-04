@@ -110,3 +110,95 @@ def test_the_set_function_is_not_callable_by_anon(rx):
     rx.cur.execute("select has_function_privilege('anon', 'private.readable_batch_ids()', 'execute'),"
                    " has_function_privilege('authenticated', 'private.readable_batch_ids()', 'execute')")
     assert rx.cur.fetchone() == (False, True)
+
+
+# --------------------------------------------------------------- guards kept
+# readable_batch_ids() reaches every guard through private.user_can_read_farm.
+# These pin that the guards still bite through the new policies, and that they
+# bite per STATEMENT: a change made earlier in the same transaction (a
+# revocation, a flag) is seen by the next read, nothing is cached across them.
+
+def _visible(rx, user):
+    acts = rx.ids_as(user, "select id from public.activities where id = any(%s)", (rx.all_acts,))
+    details = {t: rx.ids_as(user, f"select activity_id from public.{t} where activity_id = any(%s)", (rx.all_acts,))
+               for t in DETAIL_TABLES}
+    return acts, details
+
+
+@pytest.mark.parametrize("who", ("owner", "viewer", "manager"))
+def test_a_pending_password_change_hides_every_row(rx, who):
+    user = getattr(rx, who)
+    assert rx.ids_as(user, "select id from public.activities where id = any(%s)", (rx.all_acts,)), who  # not vacuous
+    rx.cur.execute("update auth.users set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)"
+                   " || '{\"must_change_password\": true}'::jsonb where id = %s", (user,))
+    acts, details = _visible(rx, user)
+    assert acts == set() == rx.expected_activities(user), who
+    assert all(v == set() for v in details.values()), (who, details)
+    assert rx.ids_as(user, "select id::text from private.readable_batch_ids()") == set(), who
+
+
+def test_removing_the_farm_role_revokes_reads_in_the_next_statement(rx):
+    assert rx.ids_as(rx.viewer, "select id from public.activities where id = any(%s)", (rx.all_acts,))
+    rx.cur.execute("delete from public.farm_members where farm_id = %s and user_id = %s", (rx.farm, rx.viewer))
+    acts, details = _visible(rx, rx.viewer)
+    assert acts == set() == rx.expected_activities(rx.viewer)
+    assert all(v == set() for v in details.values()), details
+
+
+def test_ending_the_manager_membership_revokes_reads_in_the_next_statement(rx):
+    assert rx.ids_as(rx.manager, "select id from public.activities where id = any(%s)", (rx.all_acts,))
+    rx.cur.execute("update public.organization_memberships set ended_at = now() - interval '1 second'"
+                   " where user_id = %s and organization_id = %s", (rx.manager, rx.coop))
+    acts, details = _visible(rx, rx.manager)
+    assert acts == rx.expected_activities(rx.manager) == set()
+    assert all(v == set() for v in details.values()), details
+
+
+def test_anon_reads_nothing(rx):
+    for table in ("activities", *DETAIL_TABLES):
+        rx.cur.execute("savepoint a")
+        try:
+            rx.cur.execute("set local role anon")
+            rx.cur.execute("select set_config('request.jwt.claims', '{\"role\":\"anon\"}', true)")
+            rx.cur.execute(f"select count(*) from public.{table}")
+            assert rx.cur.fetchone()[0] == 0, table
+        except psycopg.errors.InsufficientPrivilege:
+            pass  # no grant at all is also "nothing"
+        finally:
+            rx.cur.execute("rollback to savepoint a")
+
+
+# --------------------------------------------------------------- rollback
+from pathlib import Path  # noqa: E402
+
+_REPO = Path(__file__).resolve().parents[2]
+_UP = _REPO / "supabase/migrations/20261104090000_set_based_activity_read_policies.sql"
+_DOWN = _REPO / "supabase/rollbacks/20261104090000_set_based_activity_read_policies.down.sql"
+
+
+def _snapshot(rx):
+    return {who: _visible(rx, getattr(rx, who)) for who in READERS}
+
+
+def _select_quals(rx):
+    rx.cur.execute("select tablename, qual from pg_policies where schemaname = 'public' and cmd = 'SELECT'"
+                   " and tablename = any(%s)", (["activities", *DETAIL_TABLES],))
+    return dict(rx.cur.fetchall())
+
+
+def test_rollback_restores_the_per_row_policies_with_the_same_access_and_reapplies(rx):
+    """down.sql then the migration again, inside the (rolled back) test transaction."""
+    with_set = _snapshot(rx)
+
+    rx.cur.execute(_DOWN.read_text(encoding="utf-8"))
+    quals = _select_quals(rx)
+    assert set(quals) == {"activities", *DETAIL_TABLES}
+    assert all("user_can_read_batch" in q and "readable_batch_ids" not in q for q in quals.values()), quals
+    rx.cur.execute("select to_regprocedure('private.readable_batch_ids()')")
+    assert rx.cur.fetchone()[0] is None
+    assert _snapshot(rx) == with_set
+
+    rx.cur.execute(_UP.read_text(encoding="utf-8"))
+    quals = _select_quals(rx)
+    assert all("readable_batch_ids" in q and "user_can_read_batch" not in q for q in quals.values()), quals
+    assert _snapshot(rx) == with_set
