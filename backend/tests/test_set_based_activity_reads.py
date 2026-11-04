@@ -134,7 +134,7 @@ def test_a_pending_password_change_hides_every_row(rx, who):
     acts, details = _visible(rx, user)
     assert acts == set() == rx.expected_activities(user), who
     assert all(v == set() for v in details.values()), (who, details)
-    assert rx.ids_as(user, "select id::text from private.readable_batch_ids()") == set(), who
+    assert rx.ids_as(user, "select b::text from private.readable_batch_ids() as b") == set(), who
 
 
 def test_removing_the_farm_role_revokes_reads_in_the_next_statement(rx):
