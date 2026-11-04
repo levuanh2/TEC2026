@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ApiError } from '../api/client'
-import { clearQueryCache, keys, MAX_RETRIES, queryClient, retryDelay, scope, setQueryUser, shouldRetry } from './client'
+import { clearQueryCache, invalidateOrganizationData, keys, MAX_RETRIES, queryClient, retryDelay, scope, setQueryUser, shouldRetry } from './client'
 
 describe('retry policy', () => {
   it('retries a transient read failure at most twice', () => {
@@ -52,5 +52,20 @@ describe('cache scope', () => {
     clearQueryCache()
     expect(queryClient.getQueryCache().getAll()).toHaveLength(0)
     expect(scope()).toEqual(['u', 'anonymous'])
+  })
+})
+
+describe('invalidation after a write', () => {
+  afterEach(() => clearQueryCache())
+  it('marks organisation, farm-list and per-farm entries stale; leaves the engine alone', async () => {
+    setQueryUser('manager')
+    queryClient.setQueryData(keys.org('org-1', 'carbon-status'), 1)
+    queryClient.setQueryData(keys.farms(), 2)
+    queryClient.setQueryData(keys.farm('farm-1', 'plots'), 3)
+    queryClient.setQueryData(keys.engine(), 4)
+    await invalidateOrganizationData()
+    const stale = (k: readonly unknown[]) => queryClient.getQueryState(k)?.isInvalidated
+    expect([keys.org('org-1', 'carbon-status'), keys.farms(), keys.farm('farm-1', 'plots')].map(stale)).toEqual([true, true, true])
+    expect(stale(keys.engine())).toBe(false)
   })
 })
