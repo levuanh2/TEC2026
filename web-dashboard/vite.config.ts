@@ -24,6 +24,10 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), 'VITE_'), ...process.env }
   return {
     plugins: [react(), preconnect([env.VITE_API_BASE_URL, env.VITE_SUPABASE_URL])],
+    // Route chunks are lazy (src/routeChunks.ts). The dev server would compile
+    // each on its first visit; warm them at start-up so a first navigation in
+    // development (and the Playwright suite) does not wait on the transform.
+    server: { warmup: { clientFiles: ['./src/farmer/FarmerExperience.tsx', './src/pages/*.tsx'] } },
     // The default environment stays node: every test here is a pure function
     // except the few `*.dom.test.tsx` ones that must actually render, and those
     // opt in with a `@vitest-environment jsdom` docblock.
