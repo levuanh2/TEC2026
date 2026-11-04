@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { withQuery } from '../test/withQuery'
 
 /* Round 4.3 gate — Management Performance must not fan out per season. It
  * reads exactly three organisation endpoints; coverage comes from the
@@ -37,7 +38,7 @@ afterEach(cleanup)
 
 describe('Management Performance request budget', () => {
   it('reads three org endpoints once each and no per-season /metrics', async () => {
-    render(<PerformancePage organizationId="o" />)
+    render(withQuery(<PerformancePage organizationId="o" />))
     await waitFor(() => expect(screen.getAllByTestId('aggregate-coverage')[0].textContent).toMatch(/1\/2 nông hộ/))
     expect([...calls].sort()).toEqual(['farm-performance', 'metrics', 'organization'])
     expect(perSeason).not.toHaveBeenCalled()

@@ -4,6 +4,7 @@ import { apiRequest, endSession, setAccessToken, setUnauthorizedHandler } from '
 import { clearOrganizationCache } from './organizations'
 import { clearViewerHint } from './me'
 import { clearFarmerCache } from '../farmer/data'
+import { clearQueryCache, setQueryUser } from '../query/client'
 
 function requireAuthClient() { if (!supabase) throw new Error('Thiếu VITE_SUPABASE_URL hoặc VITE_SUPABASE_PUBLISHABLE_KEY.'); return supabase }
 
@@ -29,6 +30,7 @@ function finish(reason: AuthEndReason) {
   // so anything left here would be shown to the next person who signs in.
   clearOrganizationCache()
   clearFarmerCache()
+  clearQueryCache()
   clearViewerHint()
   if (!live) return
   live = false
@@ -43,6 +45,9 @@ function watchSession() {
   watching = true
   supabase.auth.onAuthStateChange((event, session) => {
     if (session?.access_token && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) setAccessToken(session.access_token)
+    // Another tab signed a different person in: nothing cached for the old
+    // one may be shown (setQueryUser clears on any change of user).
+    if (session?.user?.id && event === 'SIGNED_IN') setQueryUser(session.user.id)
     if (event === 'SIGNED_OUT' && !signingOut) finish('expired')
   })
 }
@@ -63,6 +68,7 @@ export async function restoreSession(): Promise<Session | null> {
   const { data, error } = await requireAuthClient().auth.getSession()
   if (error) throw error
   setAccessToken(data.session?.access_token ?? null)
+  setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
   watchSession()
   return data.session
@@ -82,6 +88,7 @@ export async function signIn(email: string, password: string) {
   const { data, error } = await requireAuthClient().auth.signInWithPassword({ email, password })
   if (error) throw new Error(signInErrorMessage(error))
   setAccessToken(data.session?.access_token ?? null)
+  setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
   watchSession()
   return data.session

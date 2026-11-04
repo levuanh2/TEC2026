@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FarmPerformance, OrgMetrics } from '../api/organizations'
+import { withQuery } from '../test/withQuery'
 
 /* Round 4.4 gate — Management must not call a partly harvested farm
  * "unharvested", must not publish a cooperative figure from incomplete data,
@@ -51,7 +52,7 @@ beforeEach(() => { calls.length = 0; farms = [PARTIAL] })
 afterEach(cleanup)
 
 async function renderPage() {
-  render(<PerformancePage organizationId="o" />)
+  render(withQuery(<PerformancePage organizationId="o" />))
   await waitFor(() => expect(screen.getAllByTestId('aggregate-coverage')).toHaveLength(4))
   await waitFor(() => expect(screen.getAllByTestId('aggregate-coverage')[0].textContent).toMatch(/nông hộ/))
   await screen.findByRole('table')

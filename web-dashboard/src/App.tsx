@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from './query/client'
 import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { getOrganization } from './api/organizations'
@@ -7,17 +9,17 @@ import { usingMockData } from './api/farms'
 import { Ico } from './icons'
 import { routeName, routeParam } from './routes'
 import { buildNav } from './nav'
-import { go, Link, Notice } from './ui'
-import { DashboardPage } from './pages/dashboard'
-import { OrganizationsPage, FarmsPage, FarmPage, PlotPage } from './pages/directory'
-import { FarmerAccountsPage, ProvisionFarmerPage } from './pages/farmers'
-import { PerformancePage } from './pages/performance'
-import { SeasonHub, type SeasonTab } from './pages/season'
-import { MrvPage } from './pages/mrv'
+import { go, LoadingSkeleton, Notice, setLinkIntentHandler } from './ui'
+import { prefetchRoute } from './routeChunks'
+import { prefetchRouteData } from './query/prefetch'
+import type { SeasonTab } from './pages/season'
 import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
+import {
+  FarmerAccountsPage, FarmerExperience, FarmPage, FarmsPage, MrvPage, OrganizationsPage,
+  PerformancePage, PlotPage, ProvisionFarmerPage, SeasonHub,
+} from './routeChunks'
 import { AccountName, Sidebar } from './components/Sidebar'
 import { useMobileDrawer } from './components/useMobileDrawer'
-import { FarmerExperience } from './farmer/FarmerExperience'
 import { ForcedPasswordChange } from './components/ForcedPasswordChange'
 import { prefetchFarmerScope } from './farmer/scope'
 
@@ -113,6 +115,13 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
     }
   }, [viewer.organizationId])
 
+  // Hover/focus on any in-app link starts that route's code download and its
+  // top-of-page organisation reads (both deduplicated against the cache).
+  useEffect(() => {
+    setLinkIntentHandler((to) => { prefetchRoute(to); prefetchRouteData(to, viewer.organizationId) })
+    return () => setLinkIntentHandler(null)
+  }, [viewer.organizationId])
+
   const groups = buildNav(viewer.role)
   const email = session?.user.email ?? 'Chế độ demo'
 
@@ -174,7 +183,9 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
         </header>
         <main className="content" id="main" tabIndex={-1}>
           {usingMockData && <Notice kind="warning">Dữ liệu minh họa — không phải số liệu thật.</Notice>}
-          {children}
+          {/* A route's code arrives on first visit (or on hover of its link);
+            * until then the content area holds a skeleton, the shell stays. */}
+          <Suspense fallback={<LoadingSkeleton variant="page" />}>{children}</Suspense>
         </main>
       </div>
     </div>
@@ -192,7 +203,7 @@ function render(path: string, viewer: CurrentUser): ReactNode {
     case 'performance':
       return <PerformancePage organizationId={viewer.organizationId} />
     case 'farms':
-      return <FarmsPage />
+      return <FarmsPage organizationId={viewer.organizationId} />
     case 'farmer-accounts':
       return <FarmerAccountsPage organizationId={viewer.organizationId} role={viewer.role} />
     case 'farmer-account-new':
@@ -256,7 +267,18 @@ function applyRoleRedirect(role: string, currentPath: string) {
   if (role !== 'farmer' && currentPath.startsWith('/farmer')) go('/dashboard')
 }
 
+/** The query cache wraps the whole app here (not in main.tsx) so every way
+ *  the app is mounted — the browser entry and the DOM tests — gets the same
+ *  session-scoped cache. */
 export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppRoot />
+    </QueryClientProvider>
+  )
+}
+
+function AppRoot() {
   const [path, setPath] = useState(location.pathname)
   const [session, setSession] = useState<Session | null>(null)
   const [viewer, setViewer] = useState<CurrentUser>({ role: 'farmer', organizationId: null })
@@ -406,7 +428,11 @@ export default function App() {
   if (session && !viewerReady) return <main className="login">Đang tải phạm vi tài khoản…</main>
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
-    return <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
+    return (
+      <Suspense fallback={<main className="login">Đang tải…</main>}>
+        <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
+      </Suspense>
+    )
   }
 
   return (

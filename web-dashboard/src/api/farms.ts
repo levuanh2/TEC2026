@@ -8,8 +8,8 @@ export const usingMockData = import.meta.env.VITE_USE_MOCK_DATA === 'true'
 const farm = (x: any): Farm => ({ id: x.id, code: x.farm_code, name: x.farm_name, province: x.province_name, district: x.district_name, commune: x.commune_name, plotCount: x.plot_count })
 const plot = (x: any): Plot => ({ id: x.id, farmId: x.farm_id, code: x.plot_code, name: x.name, areaHa: x.area_ha, location: x.latitude == null ? undefined : `${x.latitude}, ${x.longitude}` })
 export async function listFarms(): Promise<Farm[]> { return usingMockData ? farms : (await apiRequest<{ items: any[] }>('/v1/farms')).items.map(farm) }
-export async function getFarm(id: string): Promise<Farm | undefined> { return usingMockData ? farms.find((x) => x.id === id) : farm(await apiRequest<any>(`/v1/farms/${id}`)) }
-export async function getPlotsForFarm(id: string): Promise<Plot[]> { return usingMockData ? plots.filter((x) => x.farmId === id) : (await apiRequest<{ items: any[] }>(`/v1/farms/${id}/plots`)).items.map(plot) }
+export async function getFarm(id: string, signal?: AbortSignal): Promise<Farm | undefined> { return usingMockData ? farms.find((x) => x.id === id) : farm(await apiRequest<any>(`/v1/farms/${id}`, { signal })) }
+export async function getPlotsForFarm(id: string, signal?: AbortSignal): Promise<Plot[]> { return usingMockData ? plots.filter((x) => x.farmId === id) : (await apiRequest<{ items: any[] }>(`/v1/farms/${id}/plots`, { signal })).items.map(plot) }
 export async function getPlot(id: string): Promise<Plot | undefined> { return usingMockData ? plots.find((x) => x.id === id) : plot(await apiRequest<any>(`/v1/plots/${id}`)) }
 
 // --- Farm-level rollups (brief §7 "hiệu suất riêng 1 farm", §22 no client math) ---
@@ -25,9 +25,9 @@ export async function getFarmerScope(): Promise<FarmerScope> {
   return { farms: x.farms.map(farm), plots: x.plots.map(plot), seasons: x.crop_seasons.map(farmSeason) }
 }
 
-export async function getFarmCropSeasons(farmId: string): Promise<CropSeason[]> {
+export async function getFarmCropSeasons(farmId: string, signal?: AbortSignal): Promise<CropSeason[]> {
   if (usingMockData) { const ids = plots.filter((p) => p.farmId === farmId).map((p) => p.id); return cropSeasons.filter((s) => ids.includes(s.plotId)) }
-  return (await apiRequest<{ items: any[] }>(`/v1/farms/${farmId}/crop-seasons`)).items.map(farmSeason)
+  return (await apiRequest<{ items: any[] }>(`/v1/farms/${farmId}/crop-seasons`, { signal })).items.map(farmSeason)
 }
 
 /** Plots and seasons of every farm of the organization in ONE request (Round
@@ -43,9 +43,9 @@ export async function getOrganizationPlotsSeasons(organizationId: string): Promi
   return new Map(body.items.map((i) => [i.farm_id, { plots: i.plots.map(plot), seasons: i.crop_seasons.map(farmSeason) }]))
 }
 
-export async function getFarmMetrics(farmId: string): Promise<SeasonMetrics | null> {
+export async function getFarmMetrics(farmId: string, signal?: AbortSignal): Promise<SeasonMetrics | null> {
   if (usingMockData) return null
-  const x = await apiRequest<any>(`/v1/farms/${farmId}/metrics`)
+  const x = await apiRequest<any>(`/v1/farms/${farmId}/metrics`, { signal })
   return {
     yieldKg: x.yield_kg ?? null, waterM3: x.water_m3 ?? null, fertilizerKg: x.fertilizer_kg ?? null,
     totalCo2eKg: x.total_co2e_kg ?? null, waterPerKg: x.water_per_kg ?? null, fertilizerPerKg: x.fertilizer_per_kg ?? null,
