@@ -18,6 +18,16 @@ export function onAuthEnded(fn: (reason: AuthEndReason) => void): () => void {
   return () => { ended.delete(fn) }
 }
 
+const refreshed = new Set<() => void>()
+/** Fires after the access token was refreshed (background refresh or a 401
+ *  recovered by a refresh). The shell re-reads /v1/me then: the person's role
+ *  may have changed while the tab stayed open. */
+export function onSessionRefreshed(fn: () => void): () => void {
+  refreshed.add(fn)
+  return () => { refreshed.delete(fn) }
+}
+function notifyRefreshed() { for (const fn of refreshed) fn() }
+
 /** True from a sign-in until that session ends. A failed refresh makes
  *  Supabase emit SIGNED_OUT *after* the 401 already ended the session; without
  *  this the shell heard "ended" twice, the second time while already on
@@ -45,6 +55,7 @@ function watchSession() {
   watching = true
   supabase.auth.onAuthStateChange((event, session) => {
     if (session?.access_token && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) setAccessToken(session.access_token)
+    if (session?.access_token && event === 'TOKEN_REFRESHED') notifyRefreshed()
     // Another tab signed a different person in: nothing cached for the old
     // one may be shown (setQueryUser clears on any change of user).
     if (session?.user?.id && event === 'SIGNED_IN') setQueryUser(session.user.id)
@@ -58,7 +69,7 @@ setUnauthorizedHandler(async () => {
   try {
     const { data, error } = await supabase.auth.refreshSession()
     const token = error ? null : data.session?.access_token ?? null
-    if (token) { setAccessToken(token); return token }
+    if (token) { setAccessToken(token); notifyRefreshed(); return token }
   } catch { /* fall through: the session cannot be recovered */ }
   finish('expired')
   return null

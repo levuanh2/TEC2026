@@ -2,7 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type Re
 import type { Session } from '@supabase/supabase-js'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { clearQueryData, queryClient } from './query/client'
-import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
+import { mustChangePassword, onAuthEnded, onSessionRefreshed, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { ApiError } from './api/client'
 import { clearOrganizationCache, getOrganization } from './api/organizations'
@@ -272,8 +272,13 @@ function applyRoleRedirect(role: string, currentPath: string) {
 /** Everything a confirmed viewer's cached reads depend on. Two answers with
  *  the same signature may share cached data; any difference drops it. */
 function verifiedScope(userId: string, v: CurrentUser): string {
-  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort()])
+  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.mustChangePassword === true])
 }
+
+/** A verified tab re-reads /v1/me when it comes back into view or its token is
+ *  refreshed, but never more often than this: switching tabs back and forth
+ *  must not turn into a request per switch. */
+export const REVALIDATE_MIN_INTERVAL_MS = 60_000
 
 /** /v1/me did not answer, so the backend has not said who this account is.
  *  Tied to the session it was asked for, so a failure can never be shown for
@@ -361,6 +366,12 @@ function AppRoot() {
   // that commit — its catch then ran the role redirect from /login to /farmer
   // and the person lost the page to return to (Round 4.4 final gate).
   const liveSession = useRef<Session | null>(null)
+  // Bumped when a background re-check finds a different scope: it is the key
+  // of the business tree, so every page remounts and nothing rendered under
+  // the old role or organisation survives (component state included).
+  const [scopeEpoch, setScopeEpoch] = useState(0)
+  const lastCheck = useRef(0)
+  const checking = useRef(false)
 
   useEffect(() => {
     const update = () => setPath(location.pathname)
@@ -471,6 +482,65 @@ function AppRoot() {
   const verified = session !== null && verifiedFor === session
   const failure = session && viewerFailure?.session === session ? viewerFailure : null
 
+  // The role is read on restore, sign-in and retry. A tab left open would
+  // otherwise keep its old role -- and the rows cached under it -- after the
+  // role was revoked or changed, until a reload (the server still refuses every
+  // new read, but what was loaded stayed on screen). So a verified tab re-reads
+  // /v1/me when it is focused or shown again and after a token refresh, at most
+  // once per REVALIDATE_MIN_INTERVAL_MS and never twice at a time:
+  //  - same scope: nothing changes on screen;
+  //  - different scope: every cache is dropped and the business tree remounts
+  //    under the newly confirmed role (the role redirect applies);
+  //  - 401/403: caches and hint dropped, the neutral "unverified" screen;
+  //  - network error / 5xx: nothing is inferred, the confirmed role stays and
+  //    the next focus or refresh tries again.
+  useEffect(() => {
+    if (usingMockData || !session || !verified || failure) return
+    lastCheck.current = Date.now()
+    const revalidate = () => {
+      if (checking.current || Date.now() - lastCheck.current < REVALIDATE_MIN_INTERVAL_MS) return
+      checking.current = true
+      lastCheck.current = Date.now()
+      void getMe()
+        .then((v) => {
+          if (liveSession.current !== session) return
+          const scope = verifiedScope(session.user.id, v)
+          if (scope === lastVerified.current) return
+          clearFarmerCache()
+          clearOrganizationCache()
+          clearQueryData()
+          lastVerified.current = scope
+          writeViewerHint(session.user.id, v)
+          setViewer(v)
+          setScopeEpoch((n) => n + 1)
+          applyRoleRedirect(v.role, location.pathname)
+        })
+        .catch((e: unknown) => {
+          if (liveSession.current !== session) return
+          const status = e instanceof ApiError ? e.status : 0
+          if (status !== 401 && status !== 403) return
+          clearViewerHint()
+          clearFarmerCache()
+          clearOrganizationCache()
+          clearQueryData()
+          lastVerified.current = null
+          setViewer({ role: 'farmer', organizationId: null })
+          setVerifiedFor(null)
+          setViewerFailure({ session, status, message: e instanceof Error ? e.message : '' })
+        })
+        .finally(() => { checking.current = false })
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') revalidate() }
+    addEventListener('focus', revalidate)
+    document.addEventListener('visibilitychange', onVisible)
+    const offRefreshed = onSessionRefreshed(revalidate)
+    return () => {
+      removeEventListener('focus', revalidate)
+      document.removeEventListener('visibilitychange', onVisible)
+      offRefreshed()
+    }
+  }, [session, verified, failure])
+
   // Ongoing protection once the viewer is verified for this session: catches
   // a manual URL edit into the "wrong side" while already logged in. Keyed
   // only on `path` (not session/viewer) so it never re-fires from the same
@@ -523,14 +593,14 @@ function AppRoot() {
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
     return (
-      <Suspense fallback={<main className="login">Đang tải…</main>}>
+      <Suspense key={scopeEpoch} fallback={<main className="login">Đang tải…</main>}>
         <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
       </Suspense>
     )
   }
 
   return (
-    <AppShell session={session} viewer={viewer} path={path}>
+    <AppShell key={scopeEpoch} session={session} viewer={viewer} path={path}>
       {render(path, viewer)}
     </AppShell>
   )

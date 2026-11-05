@@ -26,6 +26,7 @@ const seenAtFirstRender: { page: string; cached: unknown }[] = []
 
 vi.mock('./api/auth', () => ({
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
+  onSessionRefreshed: () => () => {},
   restoreSession: async () => SESSION,
   signIn: () => signIn(),
   signOut: vi.fn(),

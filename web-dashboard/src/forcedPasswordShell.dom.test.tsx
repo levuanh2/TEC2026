@@ -13,6 +13,7 @@ const FRESH = { access_token: 'fresh', user: { id: 'u1', email: 'f@x.vn', app_me
 const getMe = vi.fn(async () => ({ role: 'farmer', organizationId: null, mustChangePassword: false }))
 vi.mock('./api/auth', () => ({
   onAuthEnded: () => () => {},
+  onSessionRefreshed: () => () => {},
   restoreSession: async () => FLAGGED,
   signIn: vi.fn(),
   signOut: vi.fn(),

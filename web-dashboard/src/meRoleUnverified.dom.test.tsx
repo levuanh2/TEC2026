@@ -32,6 +32,7 @@ const renders = { farmer: 0, ops: 0, seasons: 0, mrv: 0 }
 
 vi.mock('./api/auth', () => ({
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
+  onSessionRefreshed: () => () => {},
   restoreSession: async () => SESSION_A,
   signIn: () => signIn(),
   signOut: () => signOut(),
