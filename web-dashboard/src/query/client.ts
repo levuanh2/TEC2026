@@ -69,6 +69,14 @@ export function clearQueryCache(): void {
   scopeUser = null
 }
 
+/** Same user, different scope (role, organisation or farm access confirmed by
+ *  /v1/me): cancel what is in flight and forget every cached answer, but keep
+ *  the user prefix -- the session itself has not changed. */
+export function clearQueryData(): void {
+  void queryClient.cancelQueries()
+  queryClient.clear()
+}
+
 /** Prefix of every key: whose data this is. */
 export function scope(): readonly ['u', string] {
   return ['u', scopeUser ?? 'anonymous'] as const

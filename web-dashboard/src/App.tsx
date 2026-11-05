@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClient } from './query/client'
+import { clearQueryData, queryClient } from './query/client'
 import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { ApiError } from './api/client'
@@ -269,6 +269,12 @@ function applyRoleRedirect(role: string, currentPath: string) {
   if (role !== 'farmer' && currentPath.startsWith('/farmer')) go('/dashboard')
 }
 
+/** Everything a confirmed viewer's cached reads depend on. Two answers with
+ *  the same signature may share cached data; any difference drops it. */
+function verifiedScope(userId: string, v: CurrentUser): string {
+  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort()])
+}
+
 /** /v1/me did not answer, so the backend has not said who this account is.
  *  Tied to the session it was asked for, so a failure can never be shown for
  *  (or hide) a different session. */
@@ -348,7 +354,7 @@ function AppRoot() {
   // Who /v1/me last confirmed in this tab. When the next answer names another
   // user, role or organisation, the in-memory caches filled under the old
   // scope are dropped before the new shell mounts (see the /v1/me effect).
-  const lastVerified = useRef<{ userId: string; role: string; organizationId: string | null } | null>(null)
+  const lastVerified = useRef<string | null>(null)
   // The session a /v1/me answer belongs to, cleared *synchronously* when the
   // session ends. The effect's own `alive` flag only flips when React commits
   // the next render, and a /v1/me whose 401 ends the session rejects before
@@ -428,15 +434,19 @@ function AppRoot() {
     void getMe()
       .then((v) => {
         if (!current()) return
-        // A different user, role or organisation than the last answer in this
-        // tab: what the caches hold was read under the old scope. Drop it
-        // before the new shell mounts, so it can only show fresh reads.
-        const prev = lastVerified.current
-        if (prev && (prev.userId !== session.user.id || prev.role !== v.role || prev.organizationId !== v.organizationId)) {
+        // A different user, role, organisation or farm access than the last
+        // answer in this tab: what the caches hold was read under the old
+        // scope. Drop all of it before the new shell mounts, so it can only
+        // show fresh reads. The query cache is cleared too: its keys carry
+        // the user and organisation but not the role, so a role change with
+        // the same user and organisation would otherwise reuse the old rows.
+        const scope = verifiedScope(session.user.id, v)
+        if (lastVerified.current !== null && lastVerified.current !== scope) {
           clearFarmerCache()
           clearOrganizationCache()
+          clearQueryData()
         }
-        lastVerified.current = { userId: session.user.id, role: v.role, organizationId: v.organizationId }
+        lastVerified.current = scope
         setViewer(v)
         setVerifiedFor(session)
         writeViewerHint(session.user.id, v)
