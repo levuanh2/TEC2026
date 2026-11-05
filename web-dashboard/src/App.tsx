@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
-import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
+import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
+import { ApiError } from './api/client'
 import { getOrganization } from './api/organizations'
 import { usingMockData } from './api/farms'
 import { Ico } from './icons'
@@ -256,6 +257,38 @@ function applyRoleRedirect(role: string, currentPath: string) {
   if (role !== 'farmer' && currentPath.startsWith('/farmer')) go('/dashboard')
 }
 
+/** /v1/me did not answer, so the backend has not said who this account is. */
+interface ViewerFailure { status: number; message: string }
+
+function viewerFailureText(f: ViewerFailure): string {
+  if (f.status === 0) return 'Không kết nối được máy chủ để xác minh quyền của tài khoản.'
+  if (f.status === 401) return 'Phiên đăng nhập không còn hợp lệ, nên chưa xác minh được quyền của tài khoản.'
+  if (f.status === 403) return 'Máy chủ từ chối xác minh quyền của tài khoản này.'
+  return `Máy chủ chưa xác minh được quyền của tài khoản (mã ${f.status}).`
+}
+
+/** Neutral on purpose: no role label, no navigation, no business screen. A
+ *  Manager must not land in the Farmer UI (or anyone in any UI) because the
+ *  role read failed — the role is whatever the backend says, and it has not
+ *  said yet. */
+function ViewerUnverified({ failure, onRetry }: { failure: ViewerFailure; onRetry: () => void }) {
+  return (
+    <main className="login">
+      <section className="login-card" role="alert" data-testid="viewer-unverified">
+        <p className="eyebrow">AGRICARBON</p>
+        <h1>Chưa xác minh được quyền tài khoản</h1>
+        <p>{viewerFailureText(failure)} Chưa thể mở màn hình nghiệp vụ nào cho tới khi máy chủ xác nhận.</p>
+        <div className="state__actions">
+          <button type="button" className="btn" onClick={onRetry}>Thử lại</button>
+          <button type="button" className="btn btn--ghost" onClick={() => void signOut()}>
+            {failure.status === 401 ? 'Đăng nhập lại' : 'Đăng xuất'}
+          </button>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 export default function App() {
   const [path, setPath] = useState(location.pathname)
   const [session, setSession] = useState<Session | null>(null)
@@ -263,6 +296,10 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [viewerReady, setViewerReady] = useState(false)
   const [ended, setEnded] = useState<AuthEndReason | null>(null)
+  // Set when /v1/me failed for the live session: the role is unverified and
+  // no business screen renders. `meAttempt` re-runs the read (Thử lại).
+  const [viewerFailure, setViewerFailure] = useState<ViewerFailure | null>(null)
+  const [meAttempt, setMeAttempt] = useState(0)
   // The session a /v1/me answer belongs to, cleared *synchronously* when the
   // session ends. The effect's own `alive` flag only flips when React commits
   // the next render, and a /v1/me whose 401 ends the session rejects before
@@ -316,6 +353,7 @@ export default function App() {
   // (never a value read back from state), and reserving the separate
   // path-watching effect below for path changes only.
   useEffect(() => {
+    setViewerFailure(null)
     if (!session) {
       setViewer({ role: 'farmer', organizationId: null })
       setViewerReady(true)
@@ -333,7 +371,9 @@ export default function App() {
     // A cached role hint for this same user lets a refresh/deep link paint
     // its shell immediately; /v1/me still revalidates below and its result
     // (not the hint) drives the redirect, exactly as before.
-    const hint = usingMockData ? null : readViewerHint(session.user.id)
+    // Not on a retry after a failure: the hint would paint a business shell
+    // the server has just failed to confirm.
+    const hint = usingMockData || meAttempt > 0 ? null : readViewerHint(session.user.id)
     if (hint) {
       setViewer(hint)
       setViewerReady(true)
@@ -352,16 +392,21 @@ export default function App() {
         writeViewerHint(session.user.id, v)
         if (!usingMockData) applyRoleRedirect(v.role, location.pathname)
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         if (!current()) return
+        // Never a fallback role: an unanswered /v1/me used to make every
+        // account a Farmer and redirect a Manager to /farmer. The URL stays,
+        // the viewer stays unverified, and the person can retry.
+        const status = e instanceof ApiError ? e.status : 0
+        if (status === 401 || status === 403) clearViewerHint()
         setViewer({ role: 'farmer', organizationId: null })
-        if (!usingMockData) applyRoleRedirect('farmer', location.pathname)
+        setViewerFailure({ status, message: e instanceof Error ? e.message : '' })
       })
       .finally(() => alive && setViewerReady(true))
     return () => {
       alive = false
     }
-  }, [session])
+  }, [session, meAttempt])
 
   // Ongoing protection once viewer/viewerReady are already settled: catches
   // a manual URL edit into the "wrong side" while already logged in. Keyed
@@ -369,7 +414,7 @@ export default function App() {
   // from the same commit as the effect above — by the time `path` itself
   // changes, viewer/viewerReady for the current session are already settled.
   useEffect(() => {
-    if (usingMockData || !session || !viewerReady) return
+    if (usingMockData || !session || !viewerReady || viewerFailure) return
     applyRoleRedirect(viewer.role, path)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
@@ -404,6 +449,12 @@ export default function App() {
     }} />
   }
   if (session && !viewerReady) return <main className="login">Đang tải phạm vi tài khoản…</main>
+  if (session && viewerFailure) {
+    return <ViewerUnverified failure={viewerFailure} onRetry={() => {
+      setViewerReady(false)
+      setMeAttempt((n) => n + 1)
+    }} />
+  }
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
     return <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
