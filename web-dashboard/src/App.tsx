@@ -12,7 +12,8 @@ import { Ico } from './icons'
 import { routeName, routeParam } from './routes'
 import { buildNav } from './nav'
 import { go, LoadingSkeleton, Notice, setLinkIntentHandler } from './ui'
-import { prefetchRoute } from './routeChunks'
+import { prefetchRoute, retryFailedChunks } from './routeChunks'
+import { ChunkErrorBoundary } from './chunkRecovery'
 import { prefetchRouteData } from './query/prefetch'
 import type { SeasonTab } from './pages/season'
 import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
@@ -187,7 +188,12 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
           {usingMockData && <Notice kind="warning">Dữ liệu minh họa — không phải số liệu thật.</Notice>}
           {/* A route's code arrives on first visit (or on hover of its link);
             * until then the content area holds a skeleton, the shell stays. */}
-          <Suspense fallback={<LoadingSkeleton variant="page" />}>{children}</Suspense>
+          {/* A page whose code cannot be fetched (offline, or replaced by a
+            * deployment) shows a retry inside the shell instead of blanking
+            * the whole app; leaving for another page clears it. */}
+          <ChunkErrorBoundary resetKey={path} onRetry={retryFailedChunks}>
+            <Suspense fallback={<LoadingSkeleton variant="page" />}>{children}</Suspense>
+          </ChunkErrorBoundary>
         </main>
       </div>
     </div>
@@ -523,9 +529,11 @@ function AppRoot() {
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
     return (
-      <Suspense fallback={<main className="login">Đang tải…</main>}>
-        <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
-      </Suspense>
+      <ChunkErrorBoundary fullPage resetKey={path} onRetry={retryFailedChunks}>
+        <Suspense fallback={<main className="login">Đang tải…</main>}>
+          <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
+        </Suspense>
+      </ChunkErrorBoundary>
     )
   }
 
