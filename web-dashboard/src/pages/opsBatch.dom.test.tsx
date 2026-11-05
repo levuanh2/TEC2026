@@ -3,6 +3,7 @@ import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CarbonSeasonStatus } from '../api/carbon'
 import { carbonView } from '../carbon/readiness'
+import { queryWrapper } from '../test/withQuery'
 
 /* Round 5.1: Management reads every season's Carbon state with ONE request.
  * Before, `useOperations` asked for readiness and the actual result once per
@@ -64,7 +65,7 @@ function useSeasons(n: number) {
 }
 
 async function settle() {
-  const hook = renderHook(() => useOperations('org-1'))
+  const hook = renderHook(() => useOperations('org-1'), { wrapper: queryWrapper() })
   await waitFor(() => expect(hook.result.current.data?.pending).toBe(0))
   await waitFor(() => expect(hook.result.current.loading).toBe(false))
   return hook.result.current.data!

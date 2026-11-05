@@ -1,12 +1,12 @@
 import { Ico } from '../icons'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   listOrganizations,
   getOrganization,
   getOrganizationSummary,
   getFarmPerformance,
 } from '../api/organizations'
-import { listFarms, getFarm, getPlotsForFarm, getPlot, getFarmMetrics, getFarmCropSeasons } from '../api/farms'
+import { listFarms, getFarm, getPlotsForFarm, getPlot, getFarmMetrics, getFarmCropSeasons, getOrganizationPlotsSeasons } from '../api/farms'
 import { getCropSeasons } from '../api/crops'
 import { ha, kg, place, perKg, date, plotTitle } from '../format'
 import { seasonStatus } from '../vocab'
@@ -28,7 +28,10 @@ import {
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
 import { farmArea, type FarmArea } from '../utils/area'
 import { StartSeasonForm } from '../features/startSeason'
-import type { Role } from '../types'
+import type { Plot, Role } from '../types'
+import { useApiQuery, useNearViewport } from '../query/hooks'
+import { keys, METADATA_STALE_MS } from '../query/client'
+import { StaleNotice } from '../query/StaleNotice'
 
 const isActiveSeason = (status: string | null | undefined) =>
   ['active', 'in_progress', 'planted'].includes(String(status ?? '').toLowerCase())
@@ -42,7 +45,7 @@ function plotName(plots: { id: string; name: string }[] | null | undefined, plot
 /* ============================================================ Organizations */
 
 export function OrganizationsPage() {
-  const state = useAsync(() => listOrganizations(), [])
+  const state = useApiQuery(keys.organizations(), () => listOrganizations(), { staleTime: METADATA_STALE_MS })
   return (
     <>
       {/* The subtitle used to say "chọn một tổ chức" unconditionally, but the
@@ -65,11 +68,20 @@ export function OrganizationsPage() {
 function OrgDetail({ ids }: { ids: { id: string; name: string }[] }) {
   const [selected, setSelected] = useState(ids[0].id)
   // Detail card and the (slow) farm-performance table load independently.
-  const detail = useAsync(
-    () => Promise.all([getOrganization(selected), getOrganizationSummary(selected)]),
-    [selected],
-  )
-  const performance = useAsync(() => getFarmPerformance(selected), [selected])
+  // The table sits below the fold: it is read only once it comes within
+  // 300 px of the visible area, and from the shared cache when /performance
+  // already read it.
+  const org = useApiQuery(keys.orgMeta(selected), () => getOrganization(selected), { staleTime: METADATA_STALE_MS })
+  const summary = useApiQuery(keys.org(selected, 'summary'), () => getOrganizationSummary(selected))
+  const detail = {
+    data: org.data && summary.data ? [org.data, summary.data] as const : undefined,
+    error: org.error ?? summary.error,
+    loading: !(org.data && summary.data) && !(org.error ?? summary.error),
+    reload: () => { org.reload(); summary.reload() },
+  }
+  const tableRef = useRef<HTMLDivElement>(null)
+  const near = useNearViewport(tableRef)
+  const performance = useApiQuery(keys.org(selected, 'farm-performance'), () => getFarmPerformance(selected), { enabled: near })
 
   return (
     <>
@@ -105,10 +117,14 @@ function OrgDetail({ ids }: { ids: { id: string; name: string }[] }) {
         )}
       </Async>
 
+      <StaleNotice error={summary.refreshError} updatedAt={summary.updatedAt} onRetry={summary.reload} what="số liệu tổng hợp" />
       <Section title="Nông hộ trực thuộc" description="So sánh hiệu suất — nhấp một hàng để mở hồ sơ nông hộ">
-        <Async state={performance} skeleton="table">
-          {(rows) => <FarmPerformanceTable items={rows} />}
-        </Async>
+        <div ref={tableRef}>
+          <StaleNotice error={performance.refreshError} updatedAt={performance.updatedAt} onRetry={performance.reload} what="bảng hiệu suất" />
+          <Async state={performance} skeleton="table">
+            {(rows) => <FarmPerformanceTable items={rows} />}
+          </Async>
+        </div>
       </Section>
     </>
   )
@@ -122,16 +138,31 @@ function AreaValue({ area }: { area: FarmArea | undefined }) {
   return <>{ha(area.ha)}{!area.complete && <small className="cell-note"> · còn thửa chưa ghi</small>}</>
 }
 
-export function FarmsPage() {
-  const state = useAsync(() => listFarms(), [])
-  // `/v1/farms` has no area. Read each farm's plots (the same read the farm
-  // page makes) and sum them, so the register never shows "—" for a farm
-  // whose page shows 3,9 ha.
-  const areas = useAsync(async () => {
-    const out = new Map<string, FarmArea>()
-    for (const f of state.data ?? []) out.set(f.id, farmArea(await getPlotsForFarm(f.id)))
-    return out
-  }, [state.data])
+export function FarmsPage({ organizationId = null }: { organizationId?: string | null }) {
+  const state = useApiQuery(keys.farms(), () => listFarms())
+  // `/v1/farms` has no area. The plots of every farm of the organisation come
+  // in ONE request (the listing the operations pages already cache), so the
+  // register never shows "—" for a farm whose page shows 3,9 ha. It used to
+  // read each farm's plots one after another: 1 + N sequential requests.
+  const listing = useApiQuery(keys.org(organizationId ?? '', 'plots-seasons'),
+    () => getOrganizationPlotsSeasons(organizationId ?? ''), { enabled: Boolean(organizationId) })
+  const farmIds = (state.data ?? []).map((f) => f.id)
+  // Farms the listing does not cover (no organisation, or a farm visible to
+  // this account from outside it) are read one by one — in parallel, bounded
+  // by the client's read limit, never in a serial chain.
+  const uncovered = organizationId ? farmIds.filter((id) => listing.data && !listing.data.has(id)) : farmIds
+  const extra = useApiQuery([...keys.farms(), 'plots-of', uncovered],
+    async () => new Map(await Promise.all(uncovered.map(async (id) => [id, await getPlotsForFarm(id)] as [string, Plot[]]))),
+    { enabled: Boolean(state.data) && (!organizationId || Boolean(listing.data)) && uncovered.length > 0 })
+  const areasReady = Boolean(state.data) && (!organizationId || Boolean(listing.data) || Boolean(listing.error))
+    && (uncovered.length === 0 || Boolean(extra.data) || Boolean(extra.error))
+  const areas = {
+    loading: !areasReady,
+    data: areasReady ? new Map<string, FarmArea>(farmIds.flatMap((id) => {
+      const plots = listing.data?.get(id)?.plots ?? extra.data?.get(id)
+      return plots ? [[id, farmArea(plots)] as [string, FarmArea]] : []
+    })) : undefined,
+  }
   // A cooperative has hundreds of households; the register had no way to find
   // one but the browser's own page search. Name, code and place are the three
   // things an officer has in hand when they go looking.
@@ -171,7 +202,9 @@ export function FarmsPage() {
               { label: 'Thửa', align: 'num', render: (f) => f.plotCount },
               { label: 'Diện tích', align: 'num', render: (f) => (areas.loading
                 ? <span className="skeleton" style={{ display: 'inline-block', width: 52, height: 13, borderRadius: 5 }} aria-label="Đang tính diện tích" />
-                : <AreaValue area={areas.data?.get(f.id)} />) },
+                : areas.data?.has(f.id) ? <AreaValue area={areas.data.get(f.id)} />
+                // Unread is not the same as unrecorded: never say "Chưa có".
+                : <span className="cell-empty" title="Không đọc được danh sách thửa">Không đọc được</span>) },
             ]}
           />
           )}
@@ -186,10 +219,13 @@ export function FarmsPage() {
 /* =============================================================== Farm page */
 
 export function FarmPage({ id }: { id: string }) {
-  const head = useAsync(() => getFarm(id), [id])
-  const plots = useAsync(() => getPlotsForFarm(id), [id])
-  const metrics = useAsync(() => getFarmMetrics(id), [id])
-  const seasons = useAsync(() => getFarmCropSeasons(id), [id])
+  // One farm's own reads: cached per farm (back navigation is instant) and
+  // aborted if the person leaves before they answer.
+  const leave = { abortOnLeave: true }
+  const head = useApiQuery(keys.farm(id, 'head'), (signal) => getFarm(id, signal), leave)
+  const plots = useApiQuery(keys.farm(id, 'plots'), (signal) => getPlotsForFarm(id, signal), leave)
+  const metrics = useApiQuery(keys.farm(id, 'metrics'), (signal) => getFarmMetrics(id, signal), leave)
+  const seasons = useApiQuery(keys.farm(id, 'seasons'), (signal) => getFarmCropSeasons(id, signal), leave)
 
   return (
     <Async state={head} isEmpty={(f) => !f} empty={<EmptyState icon="search" title="Không tìm thấy nông hộ" />}>

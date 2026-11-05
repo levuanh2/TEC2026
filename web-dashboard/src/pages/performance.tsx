@@ -1,6 +1,9 @@
 import { getOrganization, getOrganizationMetrics, getFarmPerformance } from '../api/organizations'
 import { perKg, vndPerKg } from '../format'
-import { Async, EmptyState, PageHead, Section, useAsync } from '../ui'
+import { Async, EmptyState, PageHead, Section } from '../ui'
+import { useApiQuery } from '../query/hooks'
+import { keys, METADATA_STALE_MS } from '../query/client'
+import { StaleNotice } from '../query/StaleNotice'
 import { AggregateBasis, AggregateMetric } from '../components/AggregateMetric'
 import { FarmPerformanceTable } from '../components/FarmPerformanceTable'
 import { coverageOf } from './coverage'
@@ -23,9 +26,12 @@ export function PerformancePage({ organizationId }: { organizationId: string | n
 }
 
 function PerformanceBody({ organizationId }: { organizationId: string }) {
-  const org = useAsync(() => getOrganization(organizationId), [organizationId])
-  const metrics = useAsync(() => getOrganizationMetrics(organizationId), [organizationId])
-  const performance = useAsync(() => getFarmPerformance(organizationId), [organizationId])
+  // Shared cache entries: the organisation's name is the same one the shell
+  // header read, and the farm-performance rows are the ones /organizations
+  // shows — neither is fetched twice while fresh.
+  const org = useApiQuery(keys.orgMeta(organizationId), () => getOrganization(organizationId), { staleTime: METADATA_STALE_MS })
+  const metrics = useApiQuery(keys.org(organizationId, 'metrics'), () => getOrganizationMetrics(organizationId))
+  const performance = useApiQuery(keys.org(organizationId, 'farm-performance'), () => getFarmPerformance(organizationId))
   // Coverage per farm, from the farm-performance rows this page already
   // loads for its comparison table — no request of its own.
   const cov = (key: 'water' | 'fertilizer' | 'cost' | 'carbon') =>
@@ -41,6 +47,9 @@ function PerformanceBody({ organizationId }: { organizationId: string }) {
         * each other in identical tiles they read as two outputs of one
         * calculation. Every figure now carries the farms behind it. */}
       <AggregateBasis scope={scope} />
+      <StaleNotice error={metrics.refreshError ?? performance.refreshError}
+        updatedAt={metrics.refreshError ? metrics.updatedAt : performance.updatedAt}
+        onRetry={() => { metrics.reload(); performance.reload() }} what="số liệu hiệu suất" />
       <Async state={metrics} skeleton="kpis">
         {(m) => (
           <>

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Ico } from '../icons'
 import { Link, SideDrawer } from '../ui'
-import { exceptionsOf, useOperations, type Exception, type OpsRow, type Severity } from './ops'
+import { exceptionsOf, queueGaps, useOperations, type Exception, type OpsRow, type OpsState, type Severity } from './ops'
+import { readTime, StaleNotice } from '../query/StaleNotice'
 import { label } from '../vocab'
 import { perKg as perKgFmt } from '../format'
 
@@ -57,6 +58,8 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
   const ops = useOperations(organizationId)
   const rows = ops.data?.rows ?? []
   const queue = useMemo(() => exceptionsOf(rows), [rows])
+  // Counted only over rows whose Carbon state is known; how many are not is
+  // carried next to every Carbon-derived figure (see SumTile).
   const counts = {
     missing: rows.filter((r) => r.missing.length).length,
     ready: rows.filter((r) => r.carbon === 'ready').length,
@@ -65,6 +68,7 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
     mrv: rows.filter((r) => r.mrv && r.mrv.status !== 'verified' && r.mrv.status !== 'closed').length,
     limited: rows.filter((r) => r.carbon === 'methodology_limited').length,
   }
+  const busy = ops.loading || ops.refreshing
 
   return (
     <section className="ops">
@@ -74,8 +78,8 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
           <p className="ops__sub">Toàn bộ việc cần chú ý của hợp tác xã, xếp theo mức độ.</p>
         </div>
         {organizationId && (
-          <button type="button" className="btn btn--ghost" onClick={ops.reload} disabled={ops.loading}>
-            <Ico name="refresh" size={14} />{ops.loading ? 'Đang tải…' : 'Tải lại'}
+          <button type="button" className="btn btn--ghost" onClick={ops.reload} disabled={busy}>
+            <Ico name="refresh" size={14} />{busy ? 'Đang tải…' : 'Tải lại'}
           </button>
         )}
       </header>
@@ -90,66 +94,154 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
       ) : (
         <>
 
+      {ops.stale && <StaleNotice error={ops.stale.error} updatedAt={ops.stale.updatedAt} onRetry={ops.reload} />}
+
       <div className="ops-sum">
-        {summaryTiles(counts, ops.loading).map((t) => (
-          <SumTile key={t.label} {...t} loading={ops.loading} />
+        {summaryTiles(counts, ops).map((t) => (
+          <SumTile key={t.label} {...t} />
         ))}
       </div>
 
       {/* The counts above are work items, each tile opening exactly the
         * seasons it counts; this line says what they were counted over. */}
-      {!ops.loading && rows.length > 0 && (
+      {!ops.seasons.loading && rows.length > 0 && (
         <p className="ops-scope" data-testid="ops-scope">
           Phạm vi: toàn HTX · {rows.length} vụ · mỗi ô mở đúng danh sách vụ được đếm. Đây là số việc cần xử lý, không phải điểm hiệu suất.
         </p>
       )}
 
-      {ops.error && <p className="ops-error" role="alert"><Ico name="warning" size={14} />{ops.error}</p>}
+      <OpsSourceErrors ops={ops} total={rows.length} />
 
       <h2 className="ops__section">Danh sách công việc ưu tiên</h2>
       {ops.data?.pending ? (
-        <p className="ops-note" aria-live="polite"><Ico name="refresh" size={13} />Đang đọc {ops.data.pending} vụ — danh sách hiện dần.</p>
+        <p className="ops-note" aria-live="polite"><Ico name="refresh" size={13} />Đang đọc trạng thái Carbon của {ops.data.pending} vụ — danh sách hiện dần.</p>
       ) : null}
-      {ops.loading && !queue.length ? (
-        <p className="ops-note">Đang đọc dữ liệu từng vụ…</p>
-      ) : queue.length === 0 && !ops.data?.pending ? (
-        <p className="ops-note"><Ico name="check" size={14} />Không có việc nào cần xử lý lúc này.</p>
-      ) : (
-        <ExceptionTable queue={queue} />
-      )}
+      <QueueBody ops={ops} queue={queue} />
         </>
       )}
     </section>
   )
 }
 
+/** The work queue, or why there is none.
+ *
+ * "Không có việc nào cần xử lý" is a claim about every season, so it is made
+ * only when every source answered. With a source missing the queue may be
+ * empty merely because that source said nothing: the page says the data is
+ * incomplete and offers a retry. A queue from an earlier read whose refresh
+ * failed says when it was read. */
+function QueueBody({ ops, queue }: { ops: OpsState; queue: Exception[] }) {
+  if (ops.seasons.loading) return <p className="ops-note">Đang đọc dữ liệu từng vụ…</p>
+  const gaps = queueGaps(ops)
+  const pending = Boolean(ops.data?.pending)
+  if (ops.error || (gaps.length && queue.length === 0 && !pending)) {
+    return (
+      <div className="state" role="status" data-testid="ops-queue-incomplete">
+        <p className="state__title">Chưa đọc được đầy đủ dữ liệu</p>
+        <p className="state__body">
+          Chưa đọc được {gaps.join(', ')}, nên chưa thể kết luận là không có việc cần xử lý.
+        </p>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload} disabled={ops.refreshing}>
+          <Ico name="refresh" size={14} />Thử lại
+        </button>
+      </div>
+    )
+  }
+  if (queue.length === 0 && !pending) {
+    return ops.stale ? (
+      <p className="ops-note" data-testid="ops-queue-empty-stale">
+        <Ico name="clock" size={14} />Không có việc nào cần xử lý trong dữ liệu đọc lúc {readTime(ops.stale.updatedAt)} — dữ liệu này có thể đã cũ.
+      </p>
+    ) : (
+      <p className="ops-note" data-testid="ops-queue-empty"><Ico name="check" size={14} />Không có việc nào cần xử lý lúc này.</p>
+    )
+  }
+  return (
+    <>
+      {gaps.length > 0 && (
+        <p className="ops-note" data-testid="ops-queue-partial">
+          <Ico name="warning" size={13} />Danh sách có thể chưa đủ: chưa đọc được {gaps.join(', ')}.
+        </p>
+      )}
+      <ExceptionTable queue={queue} />
+    </>
+  )
+}
+
+/** What could not be read, said once per source. A failed Carbon read is the
+ *  reason the Carbon cards have no number — never an implied "0 vụ". */
+function OpsSourceErrors({ ops, total }: { ops: OpsState; total: number }) {
+  if (ops.error) {
+    return (
+      <p className="ops-error" role="alert" data-testid="ops-seasons-error">
+        <Ico name="warning" size={14} />Không đọc được danh sách vụ: {ops.error}
+        <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload}>Thử lại</button>
+      </p>
+    )
+  }
+  return (
+    <>
+      {ops.carbon.error ? (
+        <p className="ops-error" role="alert" data-testid="ops-carbon-error">
+          <Ico name="warning" size={14} />Không đọc được trạng thái Carbon: {ops.carbon.error} Các ô Carbon chưa có số.
+          <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload}>Thử lại</button>
+        </p>
+      ) : ops.carbon.failedSeasons > 0 ? (
+        <p className="ops-error" role="alert" data-testid="ops-carbon-partial">
+          <Ico name="warning" size={14} />{ops.carbon.failedSeasons}/{total} vụ chưa đọc được trạng thái Carbon — các số bên trên chưa gồm những vụ này.
+        </p>
+      ) : null}
+      {ops.mrv.error && (
+        <p className="ops-error" role="alert" data-testid="ops-mrv-error">
+          <Ico name="warning" size={14} />Không đọc được hồ sơ MRV: {ops.mrv.error} Ô MRV chưa có số.
+          <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload}>Thử lại</button>
+        </p>
+      )}
+    </>
+  )
+}
+
 type TileIcon = 'warning' | 'leaf' | 'mrv' | 'info' | 'clock'
-interface Tile { role: string; icon: TileIcon; value: number; label: string; to: string }
+/** `null` value: the source could not be read, so there is no number. */
+interface Tile { role: string; icon: TileIcon; value: number | null; label: string; to: string; loading: boolean; incomplete: number }
 
 /** Which summary cards are worth a place.
  *
- * While the read is still running every card shows, so the row does not
- * reflow under the officer's cursor. Once it has finished, a card standing at
- * zero is not work — it drops out rather than competing with the ones that
- * are. If nothing is outstanding at all, the queue's own "không có việc nào"
- * says so and no cards are needed. */
-function summaryTiles(counts: { missing: number; ready: number; stale: number; mrv: number; limited: number }, loading: boolean): Tile[] {
+ * Each card follows its own source: the Carbon cards wait for (and only for)
+ * the Carbon status, the MRV card for the MRV read. A card whose source is
+ * still loading, failed, or answered for only part of the seasons always shows
+ * — a zero is dropped only when it is a final, complete zero. */
+export function summaryTiles(counts: { missing: number; ready: number; stale: number; mrv: number; limited: number }, ops: OpsState): Tile[] {
+  const seasonsLoading = ops.seasons.loading
+  const carbon = {
+    loading: seasonsLoading || ops.carbon.loading || Boolean(ops.data?.pending),
+    // Every count is over the season list: without it no count is known.
+    failed: Boolean(ops.seasons.error || ops.carbon.error), incomplete: ops.carbon.failedSeasons,
+  }
+  const mrv = { loading: seasonsLoading || ops.mrv.loading, failed: Boolean(ops.seasons.error || ops.mrv.error), incomplete: 0 }
+  const tile = (t: Omit<Tile, 'loading' | 'incomplete' | 'value'> & { value: number }, src: typeof carbon): Tile => ({
+    ...t, value: src.failed ? null : t.value, loading: src.loading && !src.failed, incomplete: src.failed ? 0 : src.incomplete,
+  })
   const all: Tile[] = [
-    { role: 'attention', icon: 'warning', value: counts.missing, label: 'Vụ thiếu dữ liệu', to: '/data-gaps?loc=missing' },
-    { role: 'water', icon: 'leaf', value: counts.ready, label: 'Sẵn sàng tính Carbon', to: '/carbon?loc=ready' },
-    { role: 'attention', icon: 'clock', value: counts.stale, label: 'Kết quả cần tính lại', to: '/carbon?loc=stale' },
-    { role: 'info', icon: 'mrv', value: counts.mrv, label: 'Hồ sơ MRV chờ xử lý', to: '/mrv' },
-    { role: 'methodology', icon: 'info', value: counts.limited, label: 'Vướng giới hạn hệ số', to: '/carbon?loc=methodology_limited' },
+    tile({ role: 'attention', icon: 'warning', value: counts.missing, label: 'Vụ thiếu dữ liệu', to: '/data-gaps?loc=missing' }, carbon),
+    tile({ role: 'water', icon: 'leaf', value: counts.ready, label: 'Sẵn sàng tính Carbon', to: '/carbon?loc=ready' }, carbon),
+    tile({ role: 'attention', icon: 'clock', value: counts.stale, label: 'Kết quả cần tính lại', to: '/carbon?loc=stale' }, carbon),
+    tile({ role: 'info', icon: 'mrv', value: counts.mrv, label: 'Hồ sơ MRV chờ xử lý', to: '/mrv' }, mrv),
+    tile({ role: 'methodology', icon: 'info', value: counts.limited, label: 'Vướng giới hạn hệ số', to: '/carbon?loc=methodology_limited' }, carbon),
   ]
-  return loading ? all : all.filter((t) => t.value > 0)
+  return all.filter((t) => t.loading || t.value === null || t.incomplete > 0 || t.value > 0)
 }
 
-function SumTile({ role, icon, value, label, to, loading }: Tile & { loading: boolean }) {
+function SumTile({ role, icon, value, label, to, loading, incomplete }: Tile) {
   return (
     <Link to={to} className={`ops-sum__tile role--${role}`}>
       <span className="ops-sum__ico" aria-hidden="true"><Ico name={icon} size={16} /></span>
-      {/* Never "…" as a resting value: a skeleton reads as "still coming". */}
-      {loading ? <Sk w={34} h={26} /> : <b>{value}</b>}
+      {/* Never "…" as a resting value: a skeleton reads as "still coming". A
+        * failed source shows a dash, never a zero it did not count; a count
+        * over only part of the seasons is marked as a lower bound. */}
+      {loading ? <Sk w={34} h={26} /> : value === null
+        ? <b aria-label="Chưa có số liệu">—</b>
+        : <b>{value}{incomplete > 0 && <small className="ops-sum__partial" title={`Chưa gồm ${incomplete} vụ không đọc được`}>+?</small>}</b>}
       <span>{label}</span>
     </Link>
   )
@@ -282,8 +374,8 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
           <h1>{copy.title}</h1>
           <p className="ops__sub">{copy.sub}</p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={ops.reload} disabled={ops.loading}>
-          <Ico name="refresh" size={14} />{ops.loading ? 'Đang tải…' : 'Tải lại'}
+        <button type="button" className="btn btn--ghost" onClick={ops.reload} disabled={ops.loading || ops.refreshing}>
+          <Ico name="refresh" size={14} />{ops.loading || ops.refreshing ? 'Đang tải…' : 'Tải lại'}
         </button>
       </header>
 
@@ -325,7 +417,8 @@ export function SeasonsWorkspace({ organizationId, focus = 'all' }: { organizati
         </p>
       </div>
 
-      {ops.error && <p className="ops-error" role="alert"><Ico name="warning" size={14} />{ops.error}</p>}
+      {ops.stale && <StaleNotice error={ops.stale.error} updatedAt={ops.stale.updatedAt} onRetry={ops.reload} />}
+      <OpsSourceErrors ops={ops} total={rows.length} />
 
       <div className="ops-table__wrap">
         <table className={`ops-table ops-table--seasons ops-table--${focus}`}>

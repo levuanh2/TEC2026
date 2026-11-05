@@ -9,6 +9,7 @@ const signInWithPassword = vi.fn()
 vi.mock('./client', () => ({
   apiRequest: (...a: unknown[]) => apiRequest(...a),
   endSession: vi.fn(), setAccessToken: vi.fn(), setUnauthorizedHandler: vi.fn(),
+  setWriteListener: vi.fn(), isTransientError: () => false,
 }))
 vi.mock('../utils/supabase', () => ({
   supabase: { auth: {

@@ -10,6 +10,11 @@ export function go(to: string) {
   dispatchEvent(new PopStateEvent('popstate'))
 }
 
+/** Hover/focus on a link: the app may start loading that route's code and
+ *  data before the click (registered by App, so this file stays route-agnostic). */
+let linkIntent: ((to: string) => void) | null = null
+export function setLinkIntentHandler(fn: ((to: string) => void) | null): void { linkIntent = fn }
+
 export function Link({
   to, className, children, onClick, ...rest
 }: { to: string; className?: string; children: ReactNode; onClick?: (e: MouseEvent<HTMLAnchorElement>) => void } & Record<string, unknown>) {
@@ -17,6 +22,8 @@ export function Link({
     <a
       href={to}
       className={className}
+      onMouseEnter={() => linkIntent?.(to)}
+      onFocus={() => linkIntent?.(to)}
       onClick={(e) => {
         // A caller-supplied onClick (e.g. closing the mobile sidebar drawer)
         // must run ALONGSIDE the SPA navigation, not replace it — destructuring
