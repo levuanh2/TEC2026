@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Khoá ký release: đọc từ android/key.properties (gitignored) hoặc biến môi
+// trường AGRICARBON_KEYSTORE_* — KHÔNG bao giờ để mật khẩu trong file này.
+// Thiếu cấu hình thì bản release DỪNG build, không lặng lẽ ký bằng debug key.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun signingValue(property: String, env: String): String? =
+    keystoreProperties.getProperty(property) ?: System.getenv(env)
+val releaseStoreFile = signingValue("storeFile", "AGRICARBON_KEYSTORE_PATH")
+val hasReleaseSigning = releaseStoreFile != null && file(releaseStoreFile).exists()
 
 android {
     namespace = "vn.agricarbon.mobile"
@@ -29,12 +43,34 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = signingValue("storePassword", "AGRICARBON_KEYSTORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "AGRICARBON_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "AGRICARBON_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val buildsRelease = allTasks.any { it.project == project && it.name.contains("Release") }
+    if (buildsRelease && !hasReleaseSigning) {
+        throw GradleException(
+            "Release signing is not configured: create android/key.properties " +
+                "(storeFile, storePassword, keyAlias, keyPassword) or set AGRICARBON_KEYSTORE_*. " +
+                "A release build is never signed with the debug key."
+        )
     }
 }
 

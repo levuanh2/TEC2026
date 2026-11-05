@@ -962,8 +962,8 @@ nguyên. **Không service-role key, không chạm Supabase/hosted.**
   trạng thái đúng, không phải bug app.
 - **Chờ cấu hình hệ thống:** Supabase Redirect URL cho deep link reset mật
   khẩu; hosted E2E cho write/sync/`/v1/me`/carbon; macOS + Xcode + signing cho
-  build iOS; keystore release Android (đang ký debug key — "build kỹ thuật đạt,
-  chưa sẵn sàng phát hành").
+  build iOS; keystore release Android (bản release không còn ký debug key: thiếu
+  keystore thì build release dừng — "build kỹ thuật đạt, chưa sẵn sàng phát hành").
 
 ### Checklist nghiệm thu thủ công (người nhận chạy)
 
