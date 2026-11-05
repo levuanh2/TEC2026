@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Ico } from '../icons'
 import { Link, SideDrawer } from '../ui'
-import { exceptionsOf, useOperations, type Exception, type OpsRow, type OpsState, type Severity } from './ops'
-import { StaleNotice } from '../query/StaleNotice'
+import { exceptionsOf, queueGaps, useOperations, type Exception, type OpsRow, type OpsState, type Severity } from './ops'
+import { readTime, StaleNotice } from '../query/StaleNotice'
 import { label } from '../vocab'
 import { perKg as perKgFmt } from '../format'
 
@@ -116,23 +116,69 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
       {ops.data?.pending ? (
         <p className="ops-note" aria-live="polite"><Ico name="refresh" size={13} />Đang đọc trạng thái Carbon của {ops.data.pending} vụ — danh sách hiện dần.</p>
       ) : null}
-      {ops.seasons.loading ? (
-        <p className="ops-note">Đang đọc dữ liệu từng vụ…</p>
-      ) : queue.length === 0 && !ops.data?.pending ? (
-        <p className="ops-note"><Ico name="check" size={14} />Không có việc nào cần xử lý lúc này.</p>
-      ) : (
-        <ExceptionTable queue={queue} />
-      )}
+      <QueueBody ops={ops} queue={queue} />
         </>
       )}
     </section>
   )
 }
 
+/** The work queue, or why there is none.
+ *
+ * "Không có việc nào cần xử lý" is a claim about every season, so it is made
+ * only when every source answered. With a source missing the queue may be
+ * empty merely because that source said nothing: the page says the data is
+ * incomplete and offers a retry. A queue from an earlier read whose refresh
+ * failed says when it was read. */
+function QueueBody({ ops, queue }: { ops: OpsState; queue: Exception[] }) {
+  if (ops.seasons.loading) return <p className="ops-note">Đang đọc dữ liệu từng vụ…</p>
+  const gaps = queueGaps(ops)
+  const pending = Boolean(ops.data?.pending)
+  if (ops.error || (gaps.length && queue.length === 0 && !pending)) {
+    return (
+      <div className="state" role="status" data-testid="ops-queue-incomplete">
+        <p className="state__title">Chưa đọc được đầy đủ dữ liệu</p>
+        <p className="state__body">
+          Chưa đọc được {gaps.join(', ')}, nên chưa thể kết luận là không có việc cần xử lý.
+        </p>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload} disabled={ops.refreshing}>
+          <Ico name="refresh" size={14} />Thử lại
+        </button>
+      </div>
+    )
+  }
+  if (queue.length === 0 && !pending) {
+    return ops.stale ? (
+      <p className="ops-note" data-testid="ops-queue-empty-stale">
+        <Ico name="clock" size={14} />Không có việc nào cần xử lý trong dữ liệu đọc lúc {readTime(ops.stale.updatedAt)} — dữ liệu này có thể đã cũ.
+      </p>
+    ) : (
+      <p className="ops-note" data-testid="ops-queue-empty"><Ico name="check" size={14} />Không có việc nào cần xử lý lúc này.</p>
+    )
+  }
+  return (
+    <>
+      {gaps.length > 0 && (
+        <p className="ops-note" data-testid="ops-queue-partial">
+          <Ico name="warning" size={13} />Danh sách có thể chưa đủ: chưa đọc được {gaps.join(', ')}.
+        </p>
+      )}
+      <ExceptionTable queue={queue} />
+    </>
+  )
+}
+
 /** What could not be read, said once per source. A failed Carbon read is the
  *  reason the Carbon cards have no number — never an implied "0 vụ". */
 function OpsSourceErrors({ ops, total }: { ops: OpsState; total: number }) {
-  if (ops.error) return <p className="ops-error" role="alert"><Ico name="warning" size={14} />{ops.error}</p>
+  if (ops.error) {
+    return (
+      <p className="ops-error" role="alert" data-testid="ops-seasons-error">
+        <Ico name="warning" size={14} />Không đọc được danh sách vụ: {ops.error}
+        <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload}>Thử lại</button>
+      </p>
+    )
+  }
   return (
     <>
       {ops.carbon.error ? (
@@ -146,7 +192,10 @@ function OpsSourceErrors({ ops, total }: { ops: OpsState; total: number }) {
         </p>
       ) : null}
       {ops.mrv.error && (
-        <p className="ops-error" role="alert" data-testid="ops-mrv-error"><Ico name="warning" size={14} />Không đọc được hồ sơ MRV: {ops.mrv.error}</p>
+        <p className="ops-error" role="alert" data-testid="ops-mrv-error">
+          <Ico name="warning" size={14} />Không đọc được hồ sơ MRV: {ops.mrv.error} Ô MRV chưa có số.
+          <button type="button" className="btn btn--ghost btn--sm" onClick={ops.reload}>Thử lại</button>
+        </p>
       )}
     </>
   )
@@ -166,9 +215,10 @@ export function summaryTiles(counts: { missing: number; ready: number; stale: nu
   const seasonsLoading = ops.seasons.loading
   const carbon = {
     loading: seasonsLoading || ops.carbon.loading || Boolean(ops.data?.pending),
-    failed: Boolean(ops.carbon.error), incomplete: ops.carbon.failedSeasons,
+    // Every count is over the season list: without it no count is known.
+    failed: Boolean(ops.seasons.error || ops.carbon.error), incomplete: ops.carbon.failedSeasons,
   }
-  const mrv = { loading: seasonsLoading || ops.mrv.loading, failed: Boolean(ops.mrv.error), incomplete: 0 }
+  const mrv = { loading: seasonsLoading || ops.mrv.loading, failed: Boolean(ops.seasons.error || ops.mrv.error), incomplete: 0 }
   const tile = (t: Omit<Tile, 'loading' | 'incomplete' | 'value'> & { value: number }, src: typeof carbon): Tile => ({
     ...t, value: src.failed ? null : t.value, loading: src.loading && !src.failed, incomplete: src.failed ? 0 : src.incomplete,
   })

@@ -205,6 +205,18 @@ export function useOperations(organizationId: string | null): OpsState {
   }
 }
 
+/** Which reads the work queue is missing, one phrase per source; empty when
+ *  every source answered. A queue built without one of them may be empty only
+ *  because that source said nothing — it is never shown as "nothing to do". */
+export function queueGaps(ops: OpsState): string[] {
+  const gaps: string[] = []
+  if (ops.error) gaps.push('danh sách vụ')
+  if (ops.carbon.error) gaps.push('trạng thái Carbon')
+  else if (ops.carbon.failedSeasons > 0) gaps.push(`trạng thái Carbon của ${ops.carbon.failedSeasons} vụ`)
+  if (ops.mrv.error) gaps.push('hồ sơ MRV')
+  return gaps
+}
+
 export type Severity = 'high' | 'medium' | 'low'
 
 export interface Exception {
