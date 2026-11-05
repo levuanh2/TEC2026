@@ -23,6 +23,7 @@ const opsRenders: { org: string | null; cached: unknown }[] = []
 vi.mock('./api/auth', () => ({
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: (fn: () => void) => { refreshListeners.add(fn); return () => { refreshListeners.delete(fn) } },
+  onSessionReplaced: () => () => {},
   restoreSession: async () => ({ access_token: 't', user: { id: 'u1', email: 'qa@example.test', app_metadata: {} } }),
   signIn: vi.fn(),
   signOut: vi.fn(),
@@ -73,6 +74,9 @@ async function startAsManager() {
   await screen.findByText('ops-overview org-1')
   queryClient.setQueryData(keys.org('org-1', 'carbon-status'), ROWS)
   expect(getMe).toHaveBeenCalledTimes(1)
+  // findByText resolves on the DOM commit, possibly before React has run the
+  // passive effects that register the focus/visibility listeners: flush them.
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
 }
 
 beforeEach(() => {

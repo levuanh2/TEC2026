@@ -14,6 +14,7 @@ const getMe = vi.fn(async () => ({ role: 'farmer', organizationId: null, mustCha
 vi.mock('./api/auth', () => ({
   onAuthEnded: () => () => {},
   onSessionRefreshed: () => () => {},
+  onSessionReplaced: () => () => {},
   restoreSession: async () => FLAGGED,
   signIn: vi.fn(),
   signOut: vi.fn(),

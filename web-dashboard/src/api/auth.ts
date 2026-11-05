@@ -28,6 +28,17 @@ export function onSessionRefreshed(fn: () => void): () => void {
 }
 function notifyRefreshed() { for (const fn of refreshed) fn() }
 
+const replaced = new Set<(session: Session) => void>()
+/** Fires when Supabase reports a sign-in of a DIFFERENT user than this tab's
+ *  (another tab of the same browser signed someone else in; the storage and
+ *  the token are shared). The shell must re-verify with that session instead
+ *  of showing the new person's data under the old person's role. */
+export function onSessionReplaced(fn: (session: Session) => void): () => void {
+  replaced.add(fn)
+  return () => { replaced.delete(fn) }
+}
+let liveUserId: string | null = null
+
 /** True from a sign-in until that session ends. A failed refresh makes
  *  Supabase emit SIGNED_OUT *after* the 401 already ended the session; without
  *  this the shell heard "ended" twice, the second time while already on
@@ -59,6 +70,13 @@ function watchSession() {
     // Another tab signed a different person in: nothing cached for the old
     // one may be shown (setQueryUser clears on any change of user).
     if (session?.user?.id && event === 'SIGNED_IN') setQueryUser(session.user.id)
+    if (session?.user?.id && event === 'SIGNED_IN' && live && liveUserId && session.user.id !== liveUserId) {
+      liveUserId = session.user.id
+      clearOrganizationCache()
+      clearFarmerCache()
+      clearViewerHint()
+      for (const fn of replaced) fn(session)
+    }
     if (event === 'SIGNED_OUT' && !signingOut) finish('expired')
   })
 }
@@ -81,6 +99,7 @@ export async function restoreSession(): Promise<Session | null> {
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
+  liveUserId = data.session?.user?.id ?? null
   watchSession()
   return data.session
 }
@@ -101,6 +120,7 @@ export async function signIn(email: string, password: string) {
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
+  liveUserId = data.session?.user?.id ?? null
   watchSession()
   return data.session
 }

@@ -17,6 +17,7 @@ const renders = { farmer: 0, ops: 0 }
 vi.mock('./api/auth', () => ({
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
+  onSessionReplaced: () => () => {},
   restoreSession: async () => ({ access_token: 'expired', user: { id: 'u1', email: 'manager@example.test', app_metadata: {} } }),
   signIn: vi.fn(),
   signOut: vi.fn(),

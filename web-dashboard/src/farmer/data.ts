@@ -21,6 +21,11 @@ const listeners = new Map<string, Set<() => void>>()
  * survives `clearFarmerCache`, and so a reader can tell "nothing changed" from
  * "changed back to the same value". */
 const seqs = new Map<string, number>()
+/** Bumped by `clearFarmerCache`. A request started before a clear belongs to
+ *  the old session or scope: when it settles it must not write into the
+ *  cleared store (the per-entry `version` cannot tell, a fresh entry starts at
+ *  the same version as the old one). */
+let generation = 0
 
 export const STABLE_MS = 5 * 60_000
 export const LIVE_MS = 20_000
@@ -55,8 +60,10 @@ export function fetchQuery<T>(key: string, fetcher: () => Promise<T>, { staleMs 
   if (e.promise) return e.promise as Promise<T>
   if (!force && e.data !== undefined && Date.now() - e.at < staleMs) return Promise.resolve(e.data as T)
   const version = e.version
+  const started = generation
   const promise = fetcher().then(
     (data) => {
+      if (started !== generation) return data
       const cur = entry(key)
       if (cur.version === version) { cur.data = data; cur.error = undefined; cur.at = Date.now() }
       if (cur.promise === promise) cur.promise = undefined
@@ -64,6 +71,7 @@ export function fetchQuery<T>(key: string, fetcher: () => Promise<T>, { staleMs 
       return data
     },
     (err: unknown) => {
+      if (started !== generation) throw err
       const cur = entry(key)
       if (cur.version === version) cur.error = err instanceof Error ? err.message : 'Không thể tải dữ liệu.'
       if (cur.promise === promise) cur.promise = undefined
@@ -121,6 +129,7 @@ export const seasonDataChanged = (seasonId: string) => changedSeasons.has(season
 export const clearSeasonDataChanged = (seasonId: string) => { changedSeasons.delete(seasonId) }
 
 export function clearFarmerCache(): void {
+  generation++
   store.clear()
   changedSeasons.clear()
   carbonInputsChanged.clear()

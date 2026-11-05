@@ -31,7 +31,7 @@ describe('role resolution from /v1/me', () => {
       user_id: 'u-2', full_name: null, roles: ['enterprise_viewer'],
       organization_memberships: [{ organization_id: 'org-ent' }], farm_memberships: [],
     })
-    expect(user).toEqual({ role: 'enterprise_viewer', organizationId: 'org-ent', fullName: null, writableFarmIds: [] })
+    expect(user).toEqual({ role: 'enterprise_viewer', organizationId: 'org-ent', fullName: null, writableFarmIds: [], userId: 'u-2' })
   })
 
   it('manager wins over other roles; the retired alias is not recognized', () => {

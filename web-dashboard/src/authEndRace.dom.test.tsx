@@ -20,6 +20,7 @@ let rejectMe: ((e: unknown) => void) | null = null
 vi.mock('./api/auth', () => ({
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
+  onSessionReplaced: () => () => {},
   restoreSession: async () => ({ access_token: 't', user: { id: 'u1', email: 'farmer@example.test' } }),
   signIn: vi.fn(),
   signOut: vi.fn(),
