@@ -67,22 +67,41 @@ export async function deployedEntry(fetchImpl: typeof fetch = fetch): Promise<st
   }
 }
 
-/** Any form field on the page whose value differs from what it was rendered with. */
+/* Unsaved input. React keeps a controlled field's `defaultValue` equal to its
+ * current value (React 19 syncs the attribute) and never marks the chosen
+ * <option> as `defaultSelected`, so comparing a field with its defaults
+ * misses typed text and flags untouched selects. What a person typed is
+ * therefore recorded from the `input`/`change` events themselves; the
+ * default comparison still covers fields changed without React. A field that
+ * was edited and is still on the page counts as unsaved even after a save:
+ * the safe side (no automatic reload, the reload button asks first). */
+const editedFields = new WeakSet<EventTarget>()
+
+/** Record every field a person edits. Installed once at startup (main.tsx). */
+export function installEditTracker(target: Document = document): () => void {
+  const on = (e: Event) => { if (e.target) editedFields.add(e.target) }
+  target.addEventListener('input', on, true)
+  target.addEventListener('change', on, true)
+  return () => {
+    target.removeEventListener('input', on, true)
+    target.removeEventListener('change', on, true)
+  }
+}
+
+/** Any form field still on the page that a person edited, or whose value
+ *  differs from what it was rendered with. */
 export function hasUnsavedInput(doc: Document = document): boolean {
   for (const el of doc.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select')) {
+    if (el instanceof HTMLInputElement && (el.type === 'hidden' || el.type === 'submit' || el.type === 'button')) continue
+    if (editedFields.has(el)) return true
     if (el instanceof HTMLInputElement) {
-      if (el.type === 'hidden' || el.type === 'submit' || el.type === 'button') continue
       if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked !== el.defaultChecked) return true; continue }
       if (el.value !== el.defaultValue) return true
     } else if (el instanceof HTMLTextAreaElement) {
       if (el.value !== el.defaultValue) return true
-    } else if (el.multiple) {
+    } else if ([...el.options].some((o) => o.defaultSelected)) {
+      // Only a select with a marked default can be compared (see above).
       if ([...el.options].some((o) => o.selected !== o.defaultSelected)) return true
-    } else {
-      // A single select with no `selected` attribute shows its first option.
-      const marked = [...el.options].findIndex((o) => o.defaultSelected)
-      const initial = marked !== -1 ? marked : el.options.length ? 0 : -1
-      if (el.selectedIndex !== initial) return true
     }
   }
   return false

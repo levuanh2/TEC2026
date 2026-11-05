@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  CHUNK_ERROR_TEXT, ChunkErrorBoundary, chunkVerdict, deployedEntry, hasUnsavedInput, isChunkLoadError,
+  CHUNK_ERROR_TEXT, ChunkErrorBoundary, chunkVerdict, deployedEntry, hasUnsavedInput, installEditTracker, isChunkLoadError,
   reloadOnceFor, runningEntry, type ChunkDecision,
 } from './chunkRecovery'
 import { lazyRoute, retryFailedChunks } from './routeChunks'
@@ -61,8 +61,47 @@ describe('classification helpers', () => {
     ;(document.getElementById('c') as HTMLInputElement).checked = true
     expect(hasUnsavedInput()).toBe(true)
     ;(document.getElementById('c') as HTMLInputElement).checked = false
-    ;(document.getElementById('s') as HTMLSelectElement).selectedIndex = 1
-    expect(hasUnsavedInput()).toBe(true)
+    expect(hasUnsavedInput()).toBe(false)
+    const stop = installEditTracker()
+    try {
+      // A select without a marked default is judged by the person's change event.
+      const s = document.getElementById('s') as HTMLSelectElement
+      s.selectedIndex = 1
+      fireEvent.change(s)
+      expect(hasUnsavedInput()).toBe(true)
+    } finally { stop() }
+  })
+
+  it('React controlled fields: typed text counts as unsaved, an untouched controlled select does not', () => {
+    // React 19 keeps defaultValue equal to value on controlled fields, and marks
+    // no option defaultSelected, so only the edit events tell what was typed.
+    function Form() {
+      const [text, setText] = useState('')
+      const [note, setNote] = useState('')
+      const [unit, setUnit] = useState('kg')
+      return (
+        <form>
+          <input aria-label="text" value={text} onChange={(e) => setText(e.target.value)} />
+          <textarea aria-label="note" value={note} onChange={(e) => setNote(e.target.value)} />
+          <select aria-label="unit" value={unit} onChange={(e) => setUnit(e.target.value)}>
+            <option value="t">t</option><option value="kg">kg</option>
+          </select>
+        </form>
+      )
+    }
+    const stop = installEditTracker()
+    try {
+      render(<Form />)
+      expect(hasUnsavedInput()).toBe(false)
+      fireEvent.change(screen.getByLabelText('text'), { target: { value: 'ghi chú' } })
+      expect((screen.getByLabelText('text') as HTMLInputElement).defaultValue).toBe('ghi chú')
+      expect(hasUnsavedInput()).toBe(true)
+      cleanup()
+      render(<Form />)
+      expect(hasUnsavedInput()).toBe(false)
+      fireEvent.change(screen.getByLabelText('note'), { target: { value: 'chưa lưu' } })
+      expect(hasUnsavedInput()).toBe(true)
+    } finally { stop() }
   })
 })
 
