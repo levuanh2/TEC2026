@@ -3,8 +3,10 @@ import type { Session } from '@supabase/supabase-js'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './query/client'
 import { mustChangePassword, onAuthEnded, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
-import { getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
-import { getOrganization } from './api/organizations'
+import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
+import { ApiError } from './api/client'
+import { clearOrganizationCache, getOrganization } from './api/organizations'
+import { clearFarmerCache } from './farmer/data'
 import { usingMockData } from './api/farms'
 import { Ico } from './icons'
 import { routeName, routeParam } from './routes'
@@ -267,6 +269,56 @@ function applyRoleRedirect(role: string, currentPath: string) {
   if (role !== 'farmer' && currentPath.startsWith('/farmer')) go('/dashboard')
 }
 
+/** /v1/me did not answer, so the backend has not said who this account is.
+ *  Tied to the session it was asked for, so a failure can never be shown for
+ *  (or hide) a different session. */
+interface ViewerFailure { session: Session; status: number; message: string }
+
+/** Neutral on purpose, like the error below: no role label, no navigation and
+ *  no business data. Shown while the session is restored and while /v1/me has
+ *  not yet confirmed this session's role — the only source of the role. */
+function ViewerVerifying({ text }: { text: string }) {
+  return (
+    <main className="login" aria-busy="true">
+      <section className="login-card" data-testid="viewer-verifying">
+        <p className="eyebrow">AGRICARBON</p>
+        <p role="status">{text}</p>
+        <span className="skeleton" style={{ display: 'block', height: 14, borderRadius: 5, marginTop: 12 }} aria-hidden="true" />
+        <span className="skeleton" style={{ display: 'block', height: 14, width: '70%', borderRadius: 5, marginTop: 8 }} aria-hidden="true" />
+      </section>
+    </main>
+  )
+}
+
+function viewerFailureText(f: ViewerFailure): string {
+  if (f.status === 0) return 'Không kết nối được máy chủ để xác minh quyền của tài khoản.'
+  if (f.status === 401) return 'Phiên đăng nhập không còn hợp lệ, nên chưa xác minh được quyền của tài khoản.'
+  if (f.status === 403) return 'Máy chủ từ chối xác minh quyền của tài khoản này.'
+  return `Máy chủ chưa xác minh được quyền của tài khoản (mã ${f.status}).`
+}
+
+/** Neutral on purpose: no role label, no navigation, no business screen. A
+ *  Manager must not land in the Farmer UI (or anyone in any UI) because the
+ *  role read failed — the role is whatever the backend says, and it has not
+ *  said yet. */
+function ViewerUnverified({ failure, onRetry }: { failure: ViewerFailure; onRetry: () => void }) {
+  return (
+    <main className="login">
+      <section className="login-card" role="alert" data-testid="viewer-unverified">
+        <p className="eyebrow">AGRICARBON</p>
+        <h1>Chưa xác minh được quyền tài khoản</h1>
+        <p>{viewerFailureText(failure)} Chưa thể mở màn hình nghiệp vụ nào cho tới khi máy chủ xác nhận.</p>
+        <div className="state__actions">
+          <button type="button" className="btn" onClick={onRetry}>Thử lại</button>
+          <button type="button" className="btn btn--ghost" onClick={() => void signOut()}>
+            {failure.status === 401 ? 'Đăng nhập lại' : 'Đăng xuất'}
+          </button>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 /** The query cache wraps the whole app here (not in main.tsx) so every way
  *  the app is mounted — the browser entry and the DOM tests — gets the same
  *  session-scoped cache. */
@@ -283,8 +335,20 @@ function AppRoot() {
   const [session, setSession] = useState<Session | null>(null)
   const [viewer, setViewer] = useState<CurrentUser>({ role: 'farmer', organizationId: null })
   const [ready, setReady] = useState(false)
-  const [viewerReady, setViewerReady] = useState(false)
+  // The session `viewer` was confirmed for by /v1/me. A business screen renders
+  // only while this IS the current session: a new or restored session starts
+  // unverified in the very render that introduces it, so no earlier viewer (or
+  // a cached role hint) can paint a shell for it, not even for one frame.
+  const [verifiedFor, setVerifiedFor] = useState<Session | null>(null)
   const [ended, setEnded] = useState<AuthEndReason | null>(null)
+  // Set when /v1/me failed for the live session: the role is unverified and
+  // no business screen renders. `meAttempt` re-runs the read (Thử lại).
+  const [viewerFailure, setViewerFailure] = useState<ViewerFailure | null>(null)
+  const [meAttempt, setMeAttempt] = useState(0)
+  // Who /v1/me last confirmed in this tab. When the next answer names another
+  // user, role or organisation, the in-memory caches filled under the old
+  // scope are dropped before the new shell mounts (see the /v1/me effect).
+  const lastVerified = useRef<{ userId: string; role: string; organizationId: string | null } | null>(null)
   // The session a /v1/me answer belongs to, cleared *synchronously* when the
   // session ends. The effect's own `alive` flag only flips when React commits
   // the next render, and a /v1/me whose 401 ends the session rejects before
@@ -327,8 +391,8 @@ function AppRoot() {
   // effect and the role-redirect effect below both depended on `session`.
   // When `session` flips from null to a real value, React runs BOTH in the
   // same commit's effect flush, in declaration order — but the redirect
-  // effect's closure still sees THIS render's stale `viewerReady`/`viewer`
-  // (still the pre-session-change default), because `setViewerReady(false)`
+  // effect's closure still sees THIS render's stale readiness/`viewer`
+  // (still the pre-session-change default), because a state reset
   // called here only takes effect on a LATER render, not synchronously for
   // a sibling effect in the same flush. Net result: every full page load
   // (deep link or refresh) for a non-farmer role spuriously pushed '/farmer'
@@ -338,9 +402,10 @@ function AppRoot() {
   // (never a value read back from state), and reserving the separate
   // path-watching effect below for path changes only.
   useEffect(() => {
+    setViewerFailure(null)
     if (!session) {
       setViewer({ role: 'farmer', organizationId: null })
-      setViewerReady(true)
+      setVerifiedFor(null)
       return
     }
     let alive = true
@@ -348,50 +413,61 @@ function AppRoot() {
     // Still on the temporary password: every business read would be refused,
     // so none is sent; the change form is all this session gets.
     if (mustChangePassword(session)) {
-      setViewerReady(true)
       return () => { alive = false }
     }
     const current = () => alive && liveSession.current === session
-    // A cached role hint for this same user lets a refresh/deep link paint
-    // its shell immediately; /v1/me still revalidates below and its result
-    // (not the hint) drives the redirect, exactly as before.
-    const hint = usingMockData ? null : readViewerHint(session.user.id)
-    if (hint) {
-      setViewer(hint)
-      setViewerReady(true)
-    } else {
-      setViewerReady(false)
-    }
-    // Overlap the Farmer scope read with /v1/me rather than waiting for the
-    // role to come back first (see prefetchFarmerScope). Skipped once we
-    // already know this user is not a farmer, so a manager's session costs
-    // nothing extra.
-    if (!hint || hint.role === 'farmer') prefetchFarmerScope()
+    // The cached role hint is NOT used to render anything: until /v1/me
+    // answers for this session, the screen is the neutral skeleton. Its one
+    // remaining use is a network optimisation with no authority: overlap the
+    // Farmer scope read with /v1/me (see prefetchFarmerScope), skipped when
+    // this user was last seen as a non-farmer. That read is authorized by the
+    // server like any other, lands in the in-memory cache only, and nothing
+    // shows it unless /v1/me says Farmer.
+    const hintedRole = usingMockData ? null : readViewerHint(session.user.id)?.role
+    if (!hintedRole || hintedRole === 'farmer') prefetchFarmerScope()
     void getMe()
       .then((v) => {
         if (!current()) return
+        // A different user, role or organisation than the last answer in this
+        // tab: what the caches hold was read under the old scope. Drop it
+        // before the new shell mounts, so it can only show fresh reads.
+        const prev = lastVerified.current
+        if (prev && (prev.userId !== session.user.id || prev.role !== v.role || prev.organizationId !== v.organizationId)) {
+          clearFarmerCache()
+          clearOrganizationCache()
+        }
+        lastVerified.current = { userId: session.user.id, role: v.role, organizationId: v.organizationId }
         setViewer(v)
+        setVerifiedFor(session)
         writeViewerHint(session.user.id, v)
         if (!usingMockData) applyRoleRedirect(v.role, location.pathname)
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         if (!current()) return
+        // Never a fallback role: an unanswered /v1/me used to make every
+        // account a Farmer and redirect a Manager to /farmer. The URL stays,
+        // the viewer stays unverified, and the person can retry.
+        const status = e instanceof ApiError ? e.status : 0
+        if (status === 401 || status === 403) clearViewerHint()
         setViewer({ role: 'farmer', organizationId: null })
-        if (!usingMockData) applyRoleRedirect('farmer', location.pathname)
+        setVerifiedFor(null)
+        setViewerFailure({ session, status, message: e instanceof Error ? e.message : '' })
       })
-      .finally(() => alive && setViewerReady(true))
     return () => {
       alive = false
     }
-  }, [session])
+  }, [session, meAttempt])
 
-  // Ongoing protection once viewer/viewerReady are already settled: catches
+  const verified = session !== null && verifiedFor === session
+  const failure = session && viewerFailure?.session === session ? viewerFailure : null
+
+  // Ongoing protection once the viewer is verified for this session: catches
   // a manual URL edit into the "wrong side" while already logged in. Keyed
-  // only on `path` (not session/viewer/viewerReady) so it never re-fires
-  // from the same commit as the effect above — by the time `path` itself
-  // changes, viewer/viewerReady for the current session are already settled.
+  // only on `path` (not session/viewer) so it never re-fires from the same
+  // commit as the effect above, and it does nothing until /v1/me has
+  // confirmed the role of the current session.
   useEffect(() => {
-    if (usingMockData || !session || !viewerReady) return
+    if (usingMockData || !session || !verified || failure) return
     applyRoleRedirect(viewer.role, path)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
@@ -400,13 +476,14 @@ function AppRoot() {
     document.title = 'AgriCarbon — Dashboard'
   }, [])
 
-  if (!ready) return <main className="login">Đang khôi phục phiên…</main>
+  if (!ready) return <ViewerVerifying text="Đang khôi phục phiên…" />
 
   // Before the /login check: a flagged sign-in stays on /login (the role
   // redirect needs /v1/me, which is skipped while the flag is set).
-  if (session && (mustChangePassword(session) || viewer.mustChangePassword)) {
+  if (session && (mustChangePassword(session) || (verified && viewer.mustChangePassword))) {
     return <ForcedPasswordChange session={session} done={(s) => {
       setViewer({ role: 'farmer', organizationId: null })
+      setVerifiedFor(null)
       setSession(s)
     }} />
   }
@@ -425,7 +502,14 @@ function AppRoot() {
       setSession(s)
     }} />
   }
-  if (session && !viewerReady) return <main className="login">Đang tải phạm vi tài khoản…</main>
+  if (failure) {
+    return <ViewerUnverified failure={failure} onRetry={() => {
+      setViewerFailure(null)
+      setMeAttempt((n) => n + 1)
+    }} />
+  }
+  // Every business screen below needs a role /v1/me confirmed for THIS session.
+  if (session && !verified) return <ViewerVerifying text="Đang xác minh quyền tài khoản…" />
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
     return (
