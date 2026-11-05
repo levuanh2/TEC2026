@@ -277,14 +277,16 @@ interpreter.
 
 Never uploaded: `.env`, credentials, database dumps, local SQLite, keystores.
 
-**Release APK.** CI builds debug only. On `main`, `app/android/app/build.gradle.kts`
-still has the Flutter template's release config, which signs with the
-**debug** key. A `--release` build from CI would therefore look like a release
-but be debug-signed. The fail-closed release signing
-(`release/agricarbon-flutter-staging-signing`, not merged) refuses that. A
-future release workflow should build `--release` with the keystore from an
-approved environment and run `dart run tool/verify_release_apk.dart` on the
-output.
+**Release APK.** CI builds debug only. Release signing in
+`app/android/app/build.gradle.kts` is fail-closed: it reads the keystore from
+`android/key.properties` (gitignored) or `AGRICARBON_KEYSTORE_PATH` /
+`AGRICARBON_KEYSTORE_PASSWORD` / `AGRICARBON_KEY_ALIAS` /
+`AGRICARBON_KEY_PASSWORD`, and a release build without one stops with a
+`GradleException` instead of falling back to the debug key. No keystore exists
+in the repository or in CI; who creates and holds the release key is an owner
+decision. A future release workflow should build `--release` with that
+keystore from an approved environment and verify the APK is not signed
+`CN=Android Debug`.
 
 ## 7. Security checks
 
@@ -533,7 +535,7 @@ sweep therefore enumerates `app.openapi()["paths"]`.
 | EXC-API-02 | 401 sweep | the 3 Carbon routes answer 401 `missing_authorization` (Flutter `carbon_api_service` maps it); every other route `unauthenticated`. All answer 401 before 422/503 | 3 routes | backend | 2026-09-27 | 2026-12-31 |
 | EXC-DB-03 | RLS_PERMISSIVE | `mrv_step_catalog_select` is `USING (true)` for authenticated: static MRV step catalog, no tenant data | 1 policy | backend | 2026-09-27 | 2026-12-31 |
 | EXC-WEB-01 | page-health | `api/carbon.ts`, `api/engine.ts`, `api/organizations.ts` are not mock-gated; in mock mode they hit a port Chrome refuses (127.0.0.1:9) | 6 exact requests + 1 console text | web | 2026-09-27 | 2026-12-31 (mock-gate the modules) |
-| EXC-ANDROID-01 | RELEASE_DEBUG_SIGNING | `main` still signs release with the debug key; fail-closed signing is on the unmerged release branch | `app/android/app/build.gradle.kts` | app | 2026-09-27 | **2026-10-31, enforced in code** |
+| EXC-ANDROID-01 | RELEASE_DEBUG_SIGNING | **closed 2026-11-04, not extended**: release signing is fail-closed, the check has no exception any more | `app/android/app/build.gradle.kts` | app | 2026-09-27 | expired 2026-10-31; removed |
 
 DB exceptions (EXC-DB-01..03) are data in `policy.json` `db_exceptions`, read by
 `db_audit.py`; growing them is a policy relaxation.

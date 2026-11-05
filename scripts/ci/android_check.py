@@ -5,8 +5,8 @@
 
 SOURCE (app/android/app)
   RELEASE_DEBUG_SIGNING  the release buildType signs with the DEBUG key -- a release
-                         build would look distributable but be debug-signed. Allowed
-                         only by the dated exception below while it is unexpired.
+                         build would look distributable but be debug-signed. No
+                         exception: EXC-ANDROID-01 was closed by fail-closed signing.
   MANIFEST_CLEARTEXT     main network security config / manifest permits cleartext HTTP
   MANIFEST_DEBUGGABLE    android:debuggable set in the main (release) manifest
 APK (merged manifest via aapt2, strings from every file in the archive)
@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import datetime as dt
 import json
 import os
 import re
@@ -46,10 +45,6 @@ PERMISSIONS_ALLOWED = {
     "android.permission.ACCESS_NETWORK_STATE": "connectivity_plus online/offline",
     f"{PACKAGE}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION": "AndroidX internal, app-private",
 }
-# EXC-ANDROID-01 (docs/CI_PIPELINE.md): main still has the Flutter template's
-# debug-key release signing; the fail-closed signing work is on the unmerged
-# release/agricarbon-flutter-staging-signing branch. Expires -> CI fails.
-RELEASE_DEBUG_SIGNING_EXCEPTION_EXPIRES = dt.date(2026, 10, 31)
 
 JWT = re.compile(rb"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
 SECRET_KEY = re.compile(rb"sb_secret_[A-Za-z0-9_-]{16,}")
@@ -67,12 +62,13 @@ def fail(code: str, msg: str) -> None:
 def check_source() -> None:
     gradle = (ANDROID / "build.gradle.kts").read_text(encoding="utf-8")
     release = re.search(r"release\s*\{(.*?)\n\s*\}", gradle, re.S)
-    if release and 'signingConfigs.getByName("debug")' in release.group(1):
-        if dt.date.today() <= RELEASE_DEBUG_SIGNING_EXCEPTION_EXPIRES:
-            notes.append(f"EXC-ANDROID-01 active until {RELEASE_DEBUG_SIGNING_EXCEPTION_EXPIRES}: release buildType "
-                         "signs with the DEBUG key -- never distribute a release APK built from this config")
-        else:
-            fail("RELEASE_DEBUG_SIGNING", "release buildType signs with the debug key and EXC-ANDROID-01 has expired")
+    if not release:
+        fail("RELEASE_DEBUG_SIGNING", "no release buildType block found in build.gradle.kts")
+    elif 'signingConfigs.getByName("debug")' in release.group(1):
+        fail("RELEASE_DEBUG_SIGNING", "release buildType signs with the debug key")
+    if "GradleException" not in gradle or "hasReleaseSigning" not in gradle:
+        fail("RELEASE_DEBUG_SIGNING", "release signing is not fail-closed: a release build without a "
+                                      "configured keystore must stop (GradleException), not fall back")
     manifest = (ANDROID / "src/main/AndroidManifest.xml").read_text(encoding="utf-8")
     nsc = (ANDROID / "src/main/res/xml/network_security_config.xml").read_text(encoding="utf-8")
     if re.search(r'usesCleartextTraffic\s*=\s*"true"', manifest) or 'cleartextTrafficPermitted="true"' in nsc:
