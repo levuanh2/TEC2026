@@ -254,6 +254,15 @@
    "execute": [],
    "security_definer": false
   },
+  "private.readable_batch_ids()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.set_updated_at()": {
    "config": [
     "search_path=\"\""
@@ -567,7 +576,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((deleted_at IS NULL) AND private.user_can_read_batch(production_batch_id))",
+   "using": "((deleted_at IS NULL) AND (production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))",
    "with_check": null
   },
   "activities.activities_update": {
@@ -801,7 +810,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fertilizer_applications.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fertilizer_applications.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "fertilizer_applications.fertilizer_applications_update": {
@@ -828,7 +837,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fuel_usages.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = fuel_usages.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "fuel_usages.fuel_usages_update": {
@@ -855,7 +864,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = harvest_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = harvest_events.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "harvest_events.harvest_events_update": {
@@ -882,7 +891,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = irrigation_events.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "irrigation_events.irrigation_events_update": {
@@ -1098,7 +1107,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = pesticide_applications.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = pesticide_applications.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "pesticide_applications.pesticide_applications_update": {
@@ -1260,7 +1269,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = seeding_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = seeding_events.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "seeding_events.seeding_events_update": {
@@ -1287,7 +1296,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = straw_management_events.activity_id) AND private.user_can_read_batch(a.production_batch_id))))",
+   "using": "(EXISTS ( SELECT 1\n   FROM activities a\n  WHERE ((a.id = straw_management_events.activity_id) AND (a.production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids)))))",
    "with_check": null
   },
   "straw_management_events.straw_management_events_update": {
