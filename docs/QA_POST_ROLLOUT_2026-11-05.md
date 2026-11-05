@@ -101,6 +101,21 @@ The "hard refresh" variant still transferred 1 KB, so it did not bypass the cach
 
 #17 and #18 both touch `App.tsx`. Whichever merges second needs one conflict hunk resolved (wrap the Farmer boundary with `key={scopeEpoch}`) and two mock lines added to `chunkRecoveryApp.dom.test.tsx`. Trial merge main + #18 (`35dd20a`) + #17 (`0828f05`) with that resolution: build passes, Vitest 87 files / 678 tests, Playwright (mock) 111/111.
 
+### Release, 2026-11-06
+
+Both PRs were merged with `--admin` as an owner-authorized exception, because the required reviewer had not responded. This is **not** an independent approval. The conditions are recorded on each PR: admin executor, verified HEAD, required CI 17/17, a separate read-only review with verdict APPROVE (0 critical, 0 major), and local gates.
+
+| PR | Merge commit | Render deploy | Production check |
+|---|---|---|---|
+| #18 | `a2f4801` | `dep-dbmch5e1egvs73andcvg`, entry `index-Dz1ntsjT.js` | CDN, origin and browser serve the new entry. All lazy chunks return 200. No service-role key, DB URL or JWT in the bundle. The real bundle with browser-side interception: a chunk 404 shows the retry UI without a reload; a newer build triggers exactly one reload and no loop; unsaved input prevents the reload |
+| #17 | `654f95c` | `dep-dbmcstd9fdbs73ckg6e0`, entry `index-YKjxTk3n.js` | Same checks as #18, plus revalidation on the real bundle with a fake session answered in the browser. A focus within 60 s sends nothing; a burst after 60 s sends one `/v1/me`; a role change shows the Farmer UI and sends no Management read; a 403 shows the neutral screen. The #17 build in real Chrome with two tabs: a sign-in by another person, a sign-out while a re-check is pending, and a late answer after a switch never show the old role |
+
+The conflict was resolved as described above. After the merge: Vitest 87 files / 679 tests, Playwright (mock) 111/111.
+
+Rollback (Render static site): to `dep-dbmch5e1egvs73andcvg` (`a2f4801`, #18 only), or to `dep-dbm3otd9fdbs73bp12i0` (`71409ea`, before both). After a deploy or rollback, wait until `https://agricarbon.info.vn/` names the expected `index-*.js` (Cloudflare `s-maxage=300`) before asking users to reload.
+
+Authenticated QA with real Manager and Farmer accounts has **not** run, because no credentials have been provided. The release status stays **PRODUCTION CONDITIONAL — AUTHENTICATED QA PENDING**.
+
 ## 5. How to run the authenticated QA (pending)
 
 `.tmp/post-rollout-qa/run_real_qa.sh` is a local file, not committed. It runs the existing read-only real specs (`web-real-data`, `farmer-real-data`, `round4-real`, `round44-real`, `sidebar-parity-real`) against production. A self-test with a fake Playwright (`test_run_real_qa.sh`) checks each point below.
