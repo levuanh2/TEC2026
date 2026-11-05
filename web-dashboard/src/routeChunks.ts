@@ -1,4 +1,4 @@
-import { lazy, type ComponentType } from 'react'
+import { createElement, lazy, type ComponentType } from 'react'
 import { routeName } from './routes'
 
 /* Route-level code splitting.
@@ -29,20 +29,49 @@ export const loaders = {
   farmer: once(() => import('./farmer/FarmerExperience')),
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pick = <M, K extends keyof M>(load: () => Promise<M>, key: K) =>
-  lazy(async () => ({ default: (await load())[key] as unknown as ComponentType<any> }))
+/* React.lazy remembers a rejected load for good, so a page whose chunk failed
+ * once (network drop, file missing after a deployment) would fail forever in
+ * this tab. Each route therefore keeps a replaceable lazy component: when its
+ * load fails it registers itself here, and `retryFailedChunks` (the "Thử lại"
+ * button of ChunkErrorBoundary) swaps in a fresh one, whose render calls the
+ * loader again (`once` above already forgot the failed promise). */
+const failedRoutes = new Set<() => void>()
 
-export const OrganizationsPage = pick(loaders.directory, 'OrganizationsPage')
-export const FarmsPage = pick(loaders.directory, 'FarmsPage')
-export const FarmPage = pick(loaders.directory, 'FarmPage')
-export const PlotPage = pick(loaders.directory, 'PlotPage')
-export const FarmerAccountsPage = pick(loaders.farmers, 'FarmerAccountsPage')
-export const ProvisionFarmerPage = pick(loaders.farmers, 'ProvisionFarmerPage')
-export const PerformancePage = pick(loaders.performance, 'PerformancePage')
-export const SeasonHub = pick(loaders.season, 'SeasonHub')
-export const MrvPage = pick(loaders.mrv, 'MrvPage')
-export const FarmerExperience = pick(loaders.farmer, 'FarmerExperience')
+export function retryFailedChunks(): void {
+  const resets = [...failedRoutes]
+  failedRoutes.clear()
+  for (const reset of resets) reset()
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const lazyRoute = <M, K extends keyof M>(load: () => Promise<M>, key: K): ComponentType<any> => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const make = () => lazy(async () => {
+    try {
+      return { default: (await load())[key] as unknown as ComponentType<any> }
+    } catch (e) {
+      failedRoutes.add(reset)
+      throw e
+    }
+  })
+  let Current = make()
+  const reset = () => { Current = make() }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Route = (props: any) => createElement(Current, props)
+  Route.displayName = `Route(${String(key)})`
+  return Route
+}
+
+export const OrganizationsPage = lazyRoute(loaders.directory, 'OrganizationsPage')
+export const FarmsPage = lazyRoute(loaders.directory, 'FarmsPage')
+export const FarmPage = lazyRoute(loaders.directory, 'FarmPage')
+export const PlotPage = lazyRoute(loaders.directory, 'PlotPage')
+export const FarmerAccountsPage = lazyRoute(loaders.farmers, 'FarmerAccountsPage')
+export const ProvisionFarmerPage = lazyRoute(loaders.farmers, 'ProvisionFarmerPage')
+export const PerformancePage = lazyRoute(loaders.performance, 'PerformancePage')
+export const SeasonHub = lazyRoute(loaders.season, 'SeasonHub')
+export const MrvPage = lazyRoute(loaders.mrv, 'MrvPage')
+export const FarmerExperience = lazyRoute(loaders.farmer, 'FarmerExperience')
 
 /** Which chunk a path needs (null: it is in the entry bundle). */
 export function chunkFor(path: string): (() => Promise<unknown>) | null {
