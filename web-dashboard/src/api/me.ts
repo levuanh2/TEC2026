@@ -15,6 +15,8 @@ const WRITE_FARM_ROLES = new Set(['owner', 'editor'])
  *  writes (owner/editor). Only drives which write buttons the Farmer UI shows —
  *  FastAPI and RLS enforce the rule. Absent = not known yet. */
 export interface CurrentUser { role: Role; organizationId: string | null; fullName?: string | null; writableFarmIds?: string[]
+  /** The account /v1/me answered for (absent in hints and mocks). */
+  userId?: string
   /** Live server flag: the account still has its temporary password. */
   mustChangePassword?: boolean }
 
@@ -30,6 +32,7 @@ export function toCurrentUser(response: MeResponse): CurrentUser {
     writableFarmIds,
     // Present only when set, so every normal account keeps the same shape.
     ...(response.must_change_password === true ? { mustChangePassword: true } : {}),
+    ...(response.user_id ? { userId: response.user_id } : {}),
   }
 }
 

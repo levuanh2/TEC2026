@@ -17,6 +17,8 @@ const chunk404 = (name: string) => new TypeError(`Failed to fetch dynamically im
 
 vi.mock('./api/auth', () => ({
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
+  onSessionRefreshed: () => () => {},
+  onSessionReplaced: () => () => {},
   restoreSession: async () => ({ access_token: 't', user: { id: 'u1', email: 'qa@example.test', app_metadata: {} } }),
   signIn: vi.fn(),
   signOut: vi.fn(),

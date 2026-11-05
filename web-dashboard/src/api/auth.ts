@@ -18,6 +18,27 @@ export function onAuthEnded(fn: (reason: AuthEndReason) => void): () => void {
   return () => { ended.delete(fn) }
 }
 
+const refreshed = new Set<() => void>()
+/** Fires after the access token was refreshed (background refresh or a 401
+ *  recovered by a refresh). The shell re-reads /v1/me then: the person's role
+ *  may have changed while the tab stayed open. */
+export function onSessionRefreshed(fn: () => void): () => void {
+  refreshed.add(fn)
+  return () => { refreshed.delete(fn) }
+}
+function notifyRefreshed() { for (const fn of refreshed) fn() }
+
+const replaced = new Set<(session: Session) => void>()
+/** Fires when Supabase reports a sign-in of a DIFFERENT user than this tab's
+ *  (another tab of the same browser signed someone else in; the storage and
+ *  the token are shared). The shell must re-verify with that session instead
+ *  of showing the new person's data under the old person's role. */
+export function onSessionReplaced(fn: (session: Session) => void): () => void {
+  replaced.add(fn)
+  return () => { replaced.delete(fn) }
+}
+let liveUserId: string | null = null
+
 /** True from a sign-in until that session ends. A failed refresh makes
  *  Supabase emit SIGNED_OUT *after* the 401 already ended the session; without
  *  this the shell heard "ended" twice, the second time while already on
@@ -45,9 +66,17 @@ function watchSession() {
   watching = true
   supabase.auth.onAuthStateChange((event, session) => {
     if (session?.access_token && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) setAccessToken(session.access_token)
+    if (session?.access_token && event === 'TOKEN_REFRESHED') notifyRefreshed()
     // Another tab signed a different person in: nothing cached for the old
     // one may be shown (setQueryUser clears on any change of user).
     if (session?.user?.id && event === 'SIGNED_IN') setQueryUser(session.user.id)
+    if (session?.user?.id && event === 'SIGNED_IN' && live && liveUserId && session.user.id !== liveUserId) {
+      liveUserId = session.user.id
+      clearOrganizationCache()
+      clearFarmerCache()
+      clearViewerHint()
+      for (const fn of replaced) fn(session)
+    }
     if (event === 'SIGNED_OUT' && !signingOut) finish('expired')
   })
 }
@@ -58,7 +87,7 @@ setUnauthorizedHandler(async () => {
   try {
     const { data, error } = await supabase.auth.refreshSession()
     const token = error ? null : data.session?.access_token ?? null
-    if (token) { setAccessToken(token); return token }
+    if (token) { setAccessToken(token); notifyRefreshed(); return token }
   } catch { /* fall through: the session cannot be recovered */ }
   finish('expired')
   return null
@@ -70,6 +99,7 @@ export async function restoreSession(): Promise<Session | null> {
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
+  liveUserId = data.session?.user?.id ?? null
   watchSession()
   return data.session
 }
@@ -90,6 +120,7 @@ export async function signIn(email: string, password: string) {
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
+  liveUserId = data.session?.user?.id ?? null
   watchSession()
   return data.session
 }
