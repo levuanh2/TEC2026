@@ -162,6 +162,28 @@ describe('what a re-check does', () => {
     expect(queryClient.getQueryData(keys.org('org-1', 'carbon-status'))).toBeUndefined()
   })
 
+  it('farm scope changed (a writable farm added): caches dropped and the tree remounts; the same farms reordered change nothing', async () => {
+    meAnswer = async () => FARMER
+    history.replaceState({}, '', '/farmer')
+    render(<App />)
+    await screen.findByText('farmer-experience')
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    queryClient.setQueryData(keys.org('org-1', 'carbon-status'), ROWS)
+    expect(mounts.farmer).toBe(1)
+
+    meAnswer = async () => ({ ...FARMER, writableFarmIds: ['farm-1', 'farm-2'] })
+    later(); await focus(); await settle()
+    await waitFor(() => expect(mounts.farmer).toBe(2))
+    expect(queryClient.getQueryData(keys.org('org-1', 'carbon-status'))).toBeUndefined()
+
+    queryClient.setQueryData(keys.org('org-1', 'carbon-status'), ROWS)
+    meAnswer = async () => ({ ...FARMER, writableFarmIds: ['farm-2', 'farm-1'] })
+    later(); await focus(); await settle()
+    expect(getMe).toHaveBeenCalledTimes(3)
+    expect(mounts.farmer).toBe(2)
+    expect(queryClient.getQueryData(keys.org('org-1', 'carbon-status'))).toEqual(ROWS)
+  })
+
   it.each([
     ['network error', () => Promise.reject(new ApiError(0, 'offline', 'offline'))],
     ['500', () => Promise.reject(new ApiError(500, 'internal_error', 'HTTP 500'))],
