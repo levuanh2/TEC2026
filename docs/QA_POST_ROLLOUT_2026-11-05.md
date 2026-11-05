@@ -76,6 +76,12 @@ The round trip to the API host is about 320 ms from this location, and FastAPI's
 
 Unfiltered, they take 2.1 s (`carbon_calculations`) and 4.3 s (`carbon_breakdowns`) for both roles, even when the farmer sees 0 rows. `carbon-status` itself reads the calculations through the owner connection, so it does not pay this RLS cost.
 
+Follow-up, the same day (read-only `EXPLAIN ANALYZE`, rolled back): which of these a user actually waits on, and what the set-based form would save.
+- The API reads `production_batches` and `carbon_calculations` under RLS (`read_repo` through PostgREST: Manager rollups and the season hub). Server time for the Manager's 27 seasons: 235 ms and 227 ms; with a `readable_crop_ids()` predicate, 12.6 ms and 25.6 ms. 0 visibility mismatches for 14 identities.
+- No API path reads `carbon_breakdowns` under RLS (only `pg_carbon_repo`, owner connection). Its 959 ms / 4.3 s does not reach users today.
+- The farmer's 669 ms above is the unfiltered table read. Filtered by the farmer's own seasons, as the API reads it, it takes ~10 ms of server time either way. Full-table scans say nothing about the filtered endpoints.
+- A candidate migration (`20261105090000`, not applied, not in a PR) is on the local branch `perf/rls-set-based-batch-carbon-reads`.
+
 **Frontend, unauthenticated login page** (8 interleaved rounds):
 
 | Load | p50 | p95 | Transferred |
@@ -90,16 +96,17 @@ The "hard refresh" variant still transferred 1 KB, so it did not bypass the cach
 
 | PR | Purpose | Status |
 |---|---|---|
-| #18 `fix/web-chunk-load-recovery` | Error boundary, retry and a single bounded reload for route chunks that fail to load (P1) | CI 17/17; real-Chrome swap test passes; review requested |
-| #17 `feat/web-session-revalidation` | Re-check `/v1/me` on focus, visibility and token refresh | Review found and fixed 3 bugs (cross-tab sign-in of another person, stale writes after a cache clear, hung re-check); review requested |
+| #18 `fix/web-chunk-load-recovery` | Error boundary, retry and a single bounded reload for route chunks that fail to load (P1) | Follow-up `35dd20a`: unsaved input in React-controlled fields was not detected (React 19 keeps `defaultValue` equal to `value`), fixed with edit tracking. CI 17/17; real-Chrome swap test 5/5 on the new head (the added React-style case fails on the old head); review requested |
+| #17 `feat/web-session-revalidation` | Re-check `/v1/me` on focus, visibility and token refresh | Review found and fixed 3 bugs (cross-tab sign-in of another person, stale writes after a cache clear, hung re-check). Follow-up `0828f05`: tests for a re-check still pending at sign-out, at a cross-tab sign-in and at a token refresh, and for a Management read in flight when the scope changes. CI 17/17; review requested |
 
-#17 and #18 both touch `App.tsx`. Whichever merges second needs one conflict hunk resolved (wrap the Farmer boundary with `key={scopeEpoch}`) and two mock lines added to `chunkRecoveryApp.dom.test.tsx`. A trial merge with that resolution passes 87 files / 673 tests.
+#17 and #18 both touch `App.tsx`. Whichever merges second needs one conflict hunk resolved (wrap the Farmer boundary with `key={scopeEpoch}`) and two mock lines added to `chunkRecoveryApp.dom.test.tsx`. Trial merge main + #18 (`35dd20a`) + #17 (`0828f05`) with that resolution: build passes, Vitest 87 files / 678 tests, Playwright (mock) 111/111.
 
 ## 5. How to run the authenticated QA (pending)
 
-`.tmp/post-rollout-qa/run_real_qa.sh` is a local file, not committed. It runs the existing read-only real specs (`web-real-data`, `farmer-real-data`, `round4-real`, `round44-real`, `sidebar-parity-real`) against production.
+`.tmp/post-rollout-qa/run_real_qa.sh` is a local file, not committed. It runs the existing read-only real specs (`web-real-data`, `farmer-real-data`, `round4-real`, `round44-real`, `sidebar-parity-real`) against production. A self-test with a fake Playwright (`test_run_real_qa.sh`) checks each point below.
 
-- One worker.
-- The MRV export test is disabled, because it writes a record.
-- Traces are off; screenshots are taken only on failure, and password fields are masked.
-- Credentials are read only from a file **outside the repository** (default `~/.agricarbon-qa.env`). The runner deletes that file when it finishes and refuses a file inside the repository.
+- Fails when a test fails: Playwright's exit status survives the log pipeline (`pipefail`); a run in which no test executed fails too.
+- One worker, no retries. The MRV export tests stay disabled, because they write a record.
+- Runs only the audited spec files: it refuses when a spec, its helpers or the real config changed since the read-only audit (sha256 pinned).
+- Credentials are read only from a file **outside the repository** (default `~/.agricarbon-qa.env`), parsed as plain `KEY=VALUE` lines with four allowed keys; nothing in the file is executed. The file is kept unless `--delete-env-after` is passed.
+- Traces are off. Passwords, JWTs, Bearer/Authorization values and token fields are redacted from the log, and the failure artifacts are scrubbed and re-checked. Results go outside the repository.
