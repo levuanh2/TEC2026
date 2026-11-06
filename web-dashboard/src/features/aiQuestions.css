@@ -1,0 +1,75 @@
+/* AI Q&A panel (features/aiQuestions.tsx). Uses the shared tokens of styles.css,
+ * which both the Management and the Farmer shells load. Mobile first. */
+.aiq {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card, 12px);
+  background: var(--surface, var(--bg-elevated));
+  color: var(--ink-body, var(--ink));
+  min-width: 0;
+}
+.aiq__title { margin: 0; font-size: 1.05rem; color: var(--ink); }
+.aiq__lead, .aiq__muted, .aiq__provenance, .aiq__asked { margin: 0; color: var(--ink-muted); font-size: 0.875rem; }
+.aiq__suggest { display: flex; flex-wrap: wrap; gap: 8px; }
+.aiq__chip {
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg-subtle);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+}
+.aiq__chip:disabled { opacity: 0.6; cursor: progress; }
+.aiq__form { display: grid; gap: 8px; }
+.aiq__intents { display: flex; flex-wrap: wrap; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.aiq__legend { width: 100%; font-size: 0.8125rem; font-weight: 600; color: var(--ink-muted); }
+.aiq__intent {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm, 8px);
+  padding: 6px 10px; font-size: 0.875rem; cursor: pointer;
+}
+.aiq__intent.is-on { border-color: var(--brand); background: var(--brand-050, var(--bg-subtle)); }
+.aiq__intent input { margin: 0; }
+.aiq__input {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px;
+  border: 1px solid var(--border-input, var(--border)); border-radius: var(--radius-sm, 8px);
+  padding: 10px; font: inherit; color: var(--ink); background: var(--bg-elevated, var(--surface));
+}
+.aiq__actions { display: flex; justify-content: flex-end; }
+.aiq__send, .aiq__retry {
+  border: 0; border-radius: var(--radius-sm, 8px); padding: 10px 16px; font: inherit; font-weight: 600;
+  background: var(--brand); color: #fff; cursor: pointer; min-height: 44px;
+}
+.aiq__send:disabled { opacity: 0.55; cursor: not-allowed; }
+.aiq__retry { background: var(--bg-subtle); color: var(--ink); border: 1px solid var(--border); }
+.aiq__chip:focus-visible, .aiq__send:focus-visible, .aiq__retry:focus-visible,
+.aiq__intent:focus-within, .aiq__input:focus-visible, .aiq a:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+.aiq__result:empty { display: none; }
+.aiq__skeleton { display: grid; gap: 8px; }
+.aiq__skeleton span { display: block; height: 14px; border-radius: 6px; background: var(--bg-subtle); animation: aiq-pulse 1.2s ease-in-out infinite; }
+.aiq__skeleton span:nth-child(2) { width: 85%; }
+.aiq__skeleton span:nth-child(3) { width: 60%; }
+@keyframes aiq-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .aiq__skeleton span { animation: none; } }
+.aiq__error { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-sm, 8px); background: var(--error-bg); }
+.aiq__error p { margin: 0; }
+.aiq__answer { display: grid; gap: 10px; }
+.aiq__answer.is-insufficient .aiq__text { color: var(--ink-muted); }
+.aiq__text { margin: 0; line-height: 1.55; color: var(--ink); overflow-wrap: anywhere; }
+.aiq__block h3, .aiq__block summary { margin: 0 0 4px; font-size: 0.875rem; font-weight: 600; color: var(--ink); cursor: default; }
+.aiq__block summary { cursor: pointer; }
+.aiq__block ul, .aiq__block ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 0.875rem; }
+.aiq__cite-title { font-weight: 600; overflow-wrap: anywhere; }
+.aiq__facts code { font-family: var(--font-mono, monospace); font-size: 0.8125rem; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .aiq { padding: 12px; }
+  .aiq__actions { justify-content: stretch; }
+  .aiq__send { width: 100%; }
+}

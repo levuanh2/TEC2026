@@ -154,6 +154,19 @@ let onWrite: (() => void) | null = null
 export function setWriteListener(fn: (() => void) | null): void { onWrite = fn }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return requestJson<T>(path, init, !isRead(init))
+}
+
+/** A POST that changes nothing on the server (an ephemeral AI question:
+ * nothing is persisted), so it must not mark every cached read stale the way a
+ * write does. Same auth, identity and error contract as `apiRequest`; like any
+ * non-GET it is not queued behind reads and has no client read timeout, so the
+ * caller bounds it with its own `signal`. */
+export async function apiPostNoWrite<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: 'POST', body: JSON.stringify(body), signal }, false)
+}
+
+async function requestJson<T>(path: string, init: RequestInit, signalsWrite: boolean): Promise<T> {
   const headers = new Headers(init.headers); headers.set('Accept', 'application/json')
   // A FormData body (multipart upload) must NOT get a manual Content-Type —
   // the browser sets one itself with the correct boundary.
@@ -163,7 +176,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   // Hợp đồng lỗi thống nhất backend (2026-09-08): { detail: { error: { code, message } } }
   // trên MỌI route, kể cả 422 tự động của Pydantic — không còn detail.error dạng string.
   if (!response.ok) { const detail = body.detail ?? body; const err = detail.error ?? {}; throw new ApiError(response.status, err.code ?? 'request_failed', err.message ?? 'Yêu cầu không thành công.') }
-  if (!isRead(init)) onWrite?.()
+  if (signalsWrite) onWrite?.()
   return body as T
 }
 
