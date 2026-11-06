@@ -214,3 +214,20 @@ describe('the unconfirmed token does not outlive the next sign-in', () => {
     expect(calls.filter((u) => u.includes('/logout'))).toEqual([])
   })
 })
+
+describe('the server confirmed, but this browser still stores the session', () => {
+  it('is not reported as a confirmed sign-out (storage silently kept it)', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => undefined) // silently keeps everything
+    try {
+      const ended = vi.fn(); const off = auth.onAuthEnded(ended)
+      await auth.signOut()
+      expect(stored()).toBe('user-A')
+      expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
+      off()
+    } finally {
+      removeItem.mockRestore()
+      localStorage.clear()
+    }
+  })
+})
