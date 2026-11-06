@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js'
-import { supabase } from '../utils/supabase'
+import { revokeSessionsWithToken, supabase } from '../utils/supabase'
 import { apiRequest, beginIdentity, currentAccessToken, endSession, setAccessToken, setUnauthorizedHandler } from './client'
 import { clearOrganizationCache } from './organizations'
 import { clearViewerHint } from './me'
@@ -231,13 +231,9 @@ function confirmRevocation(token: string) {
  *  already expired (the server can no longer be asked with it). */
 export async function confirmSignOut(): Promise<boolean> {
   const token = unconfirmedToken
-  if (!token || !supabase) return false
-  try {
-    const { error } = await supabase.auth.admin.signOut(token, 'global')
-    if (error) return false
-  } catch {
-    return false
-  }
+  if (!token) return false
+  // The person's own token, not an admin call (see revokeSessionsWithToken).
+  if (!(await revokeSessionsWithToken(token))) return false
   confirmRevocation(token)
   return true
 }

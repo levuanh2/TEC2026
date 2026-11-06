@@ -41,7 +41,12 @@ async function network(input: RequestInfo | URL, init?: RequestInit): Promise<Re
 vi.mock('../utils/supabase', async (orig) => {
   const real = await orig<typeof import('../utils/supabase')>()
   const { createClient } = await import('@supabase/supabase-js')
-  return { ...real, supabase: createClient(PROJECT, 'publishable-test-key', { auth: { autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: real.boundedAuthFetch(network) } }) }
+  return {
+    ...real,
+    supabase: createClient(PROJECT, 'publishable-test-key', { auth: { autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: real.boundedAuthFetch(network) } }),
+    // The real revoker, pointed at the same fake project and network.
+    revokeSessionsWithToken: real.revokerFor(PROJECT, 'publishable-test-key', real.boundedAuthFetch(network)),
+  }
 })
 vi.mock('../farmer/data', () => ({ clearFarmerCache: () => {} }))
 

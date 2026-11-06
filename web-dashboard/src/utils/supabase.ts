@@ -30,5 +30,25 @@ export function boundedAuthFetch(base: typeof fetch = (...a) => fetch(...a)): ty
   }
 }
 
+/** End every session of the account that owns `token` (scope `global`): the
+ *  same `POST /auth/v1/logout` auth-js's signOut sends, with the person's OWN
+ *  access token and the publishable key. It is NOT an admin call, and nothing
+ *  here holds a service-role key. True only on a 2xx answer. */
+export function revokerFor(baseUrl: string | undefined, key: string | undefined, fetchImpl: typeof fetch = boundedAuthFetch()) {
+  return async (token: string): Promise<boolean> => {
+    if (!baseUrl || !key || !token) return false
+    try {
+      const res = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/auth/v1/logout?scope=global`, {
+        method: 'POST',
+        headers: { apikey: key, Authorization: `Bearer ${token}` },
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+}
+export const revokeSessionsWithToken = revokerFor(url, publishableKey)
+
 // Auth only. Dashboard data is intentionally fetched through FastAPI.
 export const supabase = url && publishableKey ? createClient(url, publishableKey, { global: { fetch: boundedAuthFetch() } }) : null
