@@ -35,6 +35,8 @@ const getMe = vi.fn(() => meAnswer())
 const renders: { page: string; email: string | null }[] = []
 
 vi.mock('./api/auth', () => ({
+  onSignOutConfirmed: () => () => {},
+  confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: (fn: () => void) => { refreshed = fn; return () => { refreshed = null } },
   onSessionReplaced: (fn: typeof replace) => { replace = fn; return () => { replace = null } },

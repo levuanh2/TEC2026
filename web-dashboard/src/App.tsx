@@ -2,7 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type Re
 import type { Session } from '@supabase/supabase-js'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { clearQueryData, queryClient } from './query/client'
-import { mustChangePassword, onAuthEnded, onSessionRefreshed, onSessionReplaced, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
+import { confirmSignOut, mustChangePassword, onAuthEnded, onSessionRefreshed, onSessionReplaced, onSignOutConfirmed, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { ApiError } from './api/client'
 import { clearOrganizationCache, getOrganization } from './api/organizations'
@@ -36,11 +36,40 @@ const ROLE_LABEL: Record<string, string> = {
 /* --------------------------------------------------------------------- Login */
 
 const ENDED_NOTICE: Record<AuthEndReason, { kind: 'info' | 'warning'; text: string }> = {
+  // Only when the server confirmed the revocation AND nothing is stored here.
   signed_out: { kind: 'info', text: 'Bạn đã đăng xuất.' },
+  signed_out_unconfirmed: {
+    kind: 'warning',
+    text: 'Đã đăng xuất trên thiết bị này, nhưng chưa xác nhận được với máy chủ (mất mạng hoặc máy chủ không phản hồi), nên phiên có thể vẫn còn hiệu lực ở nơi khác. Hãy thử xác nhận lại khi có mạng.',
+  },
+  ended_elsewhere: { kind: 'info', text: 'Phiên đăng nhập đã kết thúc ở một tab khác của trình duyệt này.' },
   expired: { kind: 'warning', text: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' },
 }
 
-function Login({ done, ended }: { done: (s: Session) => void; ended: AuthEndReason | null }) {
+/** "Thử xác nhận lại" for a sign-out the server has not confirmed. */
+function ConfirmSignOut({ onConfirmed }: { onConfirmed: () => void }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'failed'>('idle')
+  async function retry() {
+    setState('busy')
+    if (await confirmSignOut()) onConfirmed()
+    else setState('failed')
+  }
+  return (
+    <>
+      {state === 'failed' && (
+        <p data-testid="sign-out-unconfirmed-help">
+          Vẫn chưa xác nhận được. Khi có mạng, hãy thử lại. Nếu đây là máy dùng chung và vẫn không xác nhận được,
+          hãy đăng nhập lại rồi đăng xuất, hoặc đổi mật khẩu để chấm dứt mọi phiên của tài khoản.
+        </p>
+      )}
+      <button type="button" className="btn btn--ghost" disabled={state === 'busy'} onClick={() => void retry()}>
+        {state === 'busy' ? 'Đang xác nhận…' : 'Thử xác nhận lại'}
+      </button>
+    </>
+  )
+}
+
+function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void; ended: AuthEndReason | null; onSignOutConfirmed: () => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -66,10 +95,11 @@ function Login({ done, ended }: { done: (s: Session) => void; ended: AuthEndReas
         <h1>Đăng nhập</h1>
         <p>Nhật ký canh tác, hiệu suất tài nguyên và Carbon cho lúa gạo.</p>
         {ended && !error && (
-          <div role={ended === 'expired' ? 'alert' : 'status'} data-testid="auth-ended">
+          <div role={ENDED_NOTICE[ended].kind === 'warning' ? 'alert' : 'status'} data-testid="auth-ended" data-reason={ended}>
             <Notice kind={ENDED_NOTICE[ended].kind}>{ENDED_NOTICE[ended].text}</Notice>
           </div>
         )}
+        {ended === 'signed_out_unconfirmed' && !error && <ConfirmSignOut onConfirmed={onSignOutConfirmed} />}
         <form onSubmit={submit}>
           <label>
             Email
@@ -425,6 +455,11 @@ function AppRoot() {
     setPath('/login')
   }), [])
 
+  // A sign-out reported as unconfirmed was confirmed later (late /logout answer).
+  useEffect(() => onSignOutConfirmed(() => {
+    setEnded((r) => (r === 'signed_out_unconfirmed' ? 'signed_out' : r))
+  }), [])
+
   // Another tab signed a different person in (shared storage and token): this
   // tab switches to that session and verifies it from the neutral skeleton.
   // The previous person's viewer and caches are never shown with it.
@@ -634,7 +669,7 @@ function AppRoot() {
   // the real Supabase credentials loaded from .env during the mock smoke test.
   const authRequired = Boolean(!usingMockData && import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY && !session)
   if (path === '/login' || authRequired) {
-    return <Login ended={ended} done={(s) => {
+    return <Login ended={ended} onSignOutConfirmed={() => setEnded((r) => (r === 'signed_out_unconfirmed' ? 'signed_out' : r))} done={(s) => {
       setEnded(null)
       // Back to where an expired session interrupted the person, if it was a
       // page of this app; the role redirect still applies once /v1/me answers.

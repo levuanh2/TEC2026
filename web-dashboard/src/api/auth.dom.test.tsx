@@ -31,7 +31,8 @@ describe('auth boundary', () => {
     const ended = vi.fn()
     const off = onAuthEnded(ended)
     await signOut()
-    expect(ended).toHaveBeenCalledWith('signed_out')
+    // The server never confirmed it: signed out here, but not reported as a confirmed sign-out.
+    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
     expect(clearFarmerCache).toHaveBeenCalled()
     off()
   })

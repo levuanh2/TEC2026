@@ -68,7 +68,7 @@ describe('sign-out with the real auth-js client', () => {
     const ended = vi.fn()
     const off = auth.onAuthEnded(ended)
     await auth.signOut()
-    expect(ended).toHaveBeenCalledWith('signed_out')
+    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
     // What a reload reads: the stored session.
     expect(stored()).toBeNull()
     expect(await auth.restoreSession()).toBeNull()
@@ -127,5 +127,90 @@ describe('boundedAuthFetch', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('sign-out outcome: local cleanup and server revocation are reported separately', () => {
+  it('server confirms in time: "signed_out"', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
+    await auth.signOut()
+    expect(ended).toHaveBeenCalledWith('signed_out')
+    expect(stored()).toBeNull()
+    off()
+  })
+
+  it('offline: stored session removed, reason "signed_out_unconfirmed"; a retry once the network is back confirms it', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    logout = () => Promise.reject(new TypeError('Failed to fetch'))
+    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
+    const confirmed = vi.fn(); const offC = auth.onSignOutConfirmed(confirmed)
+    await auth.signOut()
+    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
+    expect(stored()).toBeNull()
+    // Still offline: the retry cannot confirm.
+    expect(await auth.confirmSignOut()).toBe(false)
+    expect(confirmed).not.toHaveBeenCalled()
+    // Network back: the retry asks the server with the captured token (scope global).
+    logout = async () => new Response(null, { status: 204 })
+    calls.length = 0
+    expect(await auth.confirmSignOut()).toBe(true)
+    expect(calls.some((u) => /\/auth\/v1\/logout\?scope=global/.test(u))).toBe(true)
+    expect(confirmed).toHaveBeenCalledTimes(1)
+    // Nothing left to confirm.
+    expect(await auth.confirmSignOut()).toBe(false)
+    off(); offC()
+  })
+
+  it('slow /logout that succeeds after the shell left: first "unconfirmed", then confirmed', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    let release!: () => void
+    logout = () => new Promise<Response>((r) => { release = () => r(new Response(null, { status: 204 })) })
+    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
+    const confirmed = vi.fn(); const offC = auth.onSignOutConfirmed(confirmed)
+    await auth.signOut()
+    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
+    expect(confirmed).not.toHaveBeenCalled()
+    release()
+    await vi.waitFor(() => expect(confirmed).toHaveBeenCalledTimes(1))
+    off(); offC()
+  }, 10_000)
+
+  it('a server refusal of the retry (expired token) does not confirm', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    logout = () => Promise.reject(new TypeError('Failed to fetch'))
+    await auth.signOut()
+    logout = async () => new Response('{"code":401,"msg":"invalid JWT"}', { status: 401, headers: { 'content-type': 'application/json' } })
+    expect(await auth.confirmSignOut()).toBe(false)
+  })
+})
+
+describe('another tab of this browser removes the stored session', () => {
+  it('this tab ends as "ended_elsewhere"; a refresh written by another tab is not an ending', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, oldValue: '{}', newValue: '{"refreshed":true}' }))
+    window.dispatchEvent(new StorageEvent('storage', { key: 'some-other-key', oldValue: 'x', newValue: null }))
+    expect(ended).not.toHaveBeenCalled()
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, oldValue: '{}', newValue: null }))
+    expect(ended).toHaveBeenCalledWith('ended_elsewhere')
+    expect(ended).toHaveBeenCalledTimes(1)
+    // Requests stop at once in this tab.
+    await expect((await import('./client')).apiRequest('/v1/me')).rejects.toMatchObject({ code: 'session_expired' })
+    off()
+  })
+})
+
+describe('the unconfirmed token does not outlive the next sign-in', () => {
+  it('after a new sign-in there is nothing left to confirm', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    logout = () => Promise.reject(new TypeError('Failed to fetch'))
+    await auth.signOut()
+    logout = async () => new Response(null, { status: 204 })
+    nextUser = 'user-B'
+    await auth.signIn('b@example.test', 'pw')
+    calls.length = 0
+    expect(await auth.confirmSignOut()).toBe(false)
+    expect(calls.filter((u) => u.includes('/logout'))).toEqual([])
   })
 })

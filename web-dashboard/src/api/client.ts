@@ -17,6 +17,8 @@ let sessionEnded = false
  * does not move it. */
 let identity = 0
 export const setAccessToken = (token: string | null) => { accessToken = token; if (token) sessionEnded = false }
+/** The token requests go out with now (the auth module reads it at sign-out). */
+export const currentAccessToken = (): string | null => accessToken
 export function endSession(): void { accessToken = null; sessionEnded = true; identity++ }
 /** A different person's session takes over: call before installing its token. */
 export function beginIdentity(): void { identity++ }

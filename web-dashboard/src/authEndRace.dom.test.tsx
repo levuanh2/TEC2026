@@ -18,6 +18,8 @@ let ended: ((reason: 'expired' | 'signed_out') => void) | null = null
 let rejectMe: ((e: unknown) => void) | null = null
 
 vi.mock('./api/auth', () => ({
+  onSignOutConfirmed: () => () => {},
+  confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
   onSessionReplaced: () => () => {},

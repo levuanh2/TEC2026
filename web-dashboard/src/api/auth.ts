@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../utils/supabase'
-import { apiRequest, beginIdentity, endSession, setAccessToken, setUnauthorizedHandler } from './client'
+import { apiRequest, beginIdentity, currentAccessToken, endSession, setAccessToken, setUnauthorizedHandler } from './client'
 import { clearOrganizationCache } from './organizations'
 import { clearViewerHint } from './me'
 import { clearFarmerCache } from '../farmer/data'
@@ -8,8 +8,9 @@ import { clearQueryCache, setQueryUser } from '../query/client'
 
 function requireAuthClient() { if (!supabase) throw new Error('Thiếu VITE_SUPABASE_URL hoặc VITE_SUPABASE_PUBLISHABLE_KEY.'); return supabase }
 
-/** Why a signed-in session stopped: the person asked, or the token ran out. */
-export type AuthEndReason = 'signed_out' | 'expired'
+/** Why a signed-in session stopped: the person asked (and the server confirmed
+ *  it, or not yet), another tab of this browser ended it, or the token ran out. */
+export type AuthEndReason = 'signed_out' | 'signed_out_unconfirmed' | 'ended_elsewhere' | 'expired'
 const ended = new Set<(reason: AuthEndReason) => void>()
 /** The app shell listens here and drops to the login screen — no page has to
  * notice a dead session on its own and render a half-signed-in state. */
@@ -58,8 +59,6 @@ function finish(reason: AuthEndReason) {
   for (const fn of ended) fn(reason)
 }
 
-/** Supabase refreshes the token in the background; the API client has to be
- * told, or every request after the first hour goes out with a dead token. */
 /** `session`, when it belongs to someone other than this tab's live person. */
 function otherPerson(session: Session | null): Session | null {
   return session?.access_token && session.user?.id && live && liveUserId && session.user.id !== liveUserId ? session : null
@@ -79,10 +78,32 @@ function replaceWith(session: Session) {
   for (const fn of replaced) fn(session)
 }
 
+/** Another tab of this browser removed the stored session (its sign-out, even
+ *  one whose /logout never answered): this tab is signed out too. Without this,
+ *  a second tab kept its Manager screen and in-memory session after the first
+ *  tab had shown "signed out" (real Chrome, R3). auth-js's own cross-tab
+ *  SIGNED_OUT only arrives once that /logout returns. */
+function watchStoredSession(client: NonNullable<typeof supabase>) {
+  const key = storageKeyOf(client)
+  if (!key || typeof addEventListener !== 'function') return
+  addEventListener('storage', (e: StorageEvent) => {
+    if (e.key !== null && e.key !== key) return
+    if (e.key === key && e.newValue !== null) return   // a refresh or another sign-in: not an ending
+    if (!live) return
+    finish('ended_elsewhere')
+    // Drop auth-js's in-memory copy too; nothing is stored any more, so this
+    // sends nothing, and its SIGNED_OUT finds the session already ended.
+    void client.auth.signOut({ scope: 'local' }).catch(() => undefined)
+  })
+}
+
+/** Supabase refreshes the token in the background; the API client has to be
+ * told, or every request after the first hour goes out with a dead token. */
 let watching = false
 function watchSession() {
   if (watching || !supabase) return
   watching = true
+  watchStoredSession(supabase)
   supabase.auth.onAuthStateChange((event, session) => {
     // Whatever the event is called: a SIGNED_IN from the other tab, or a
     // TOKEN_REFRESHED that picked up the other person's stored session.
@@ -144,6 +165,7 @@ export async function signIn(email: string, password: string) {
   const { data, error } = await client.auth.signInWithPassword({ email, password })
   if (error) throw new Error(signInErrorMessage(error))
   beginIdentity()
+  unconfirmedToken = null
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
@@ -161,36 +183,98 @@ let pendingSignOut: Promise<unknown> | null = null
 /** How long the shell waits for the server sign-out before leaving anyway. */
 export const SIGN_OUT_WAIT_MS = 1500
 
+function storageKeyOf(client: NonNullable<typeof supabase>): string | null {
+  const key = (client.auth as unknown as { storageKey?: unknown }).storageKey
+  return typeof key === 'string' && key ? key : null
+}
+
 /** Remove the stored Supabase session of this browser, without the network.
  *  auth-js only removes it once its /logout call returns; until then a reload
  *  (or the next person opening the site) would restore the session the person
- *  was just told had ended. */
+ *  was just told had ended. Removing it also fires a `storage` event, which is
+ *  how the other tabs of this browser learn of it (see watchStoredSession). */
 function dropStoredSession(client: NonNullable<typeof supabase>) {
-  const key = (client.auth as unknown as { storageKey?: unknown }).storageKey
-  if (typeof key !== 'string' || !key) return
+  const key = storageKeyOf(client)
+  if (!key) return
   try { for (const k of [key, `${key}-user`, `${key}-code-verifier`]) localStorage.removeItem(k) } catch { /* storage unavailable */ }
 }
 
-/** Sign out is a local decision first: the tab is cleared and the shell leaves
+/** True when this browser no longer stores a Supabase session. */
+function storedSessionGone(client: NonNullable<typeof supabase>): boolean {
+  const key = storageKeyOf(client)
+  if (!key) return false
+  try { return localStorage.getItem(key) === null } catch { return false }
+}
+
+/* ------------------------------------------------- server-side revocation */
+
+/** The access token of a sign-out the server has not confirmed, kept in this
+ *  tab's memory only so "Thử xác nhận lại" can ask again. Dropped on success
+ *  and on the next sign-in. */
+let unconfirmedToken: string | null = null
+const revocationConfirmed = new Set<() => void>()
+/** Fires when a sign-out first reported as unconfirmed is later confirmed by
+ *  the server (the late answer arrived, or a retry succeeded). */
+export function onSignOutConfirmed(fn: () => void): () => void {
+  revocationConfirmed.add(fn)
+  return () => { revocationConfirmed.delete(fn) }
+}
+function confirmRevocation(token: string) {
+  if (unconfirmedToken !== token) return
+  unconfirmedToken = null
+  for (const fn of revocationConfirmed) fn()
+}
+
+/** Ask the server again to end every session of the account that signed out
+ *  here (scope `global`). True only when the server confirmed it. False when
+ *  there is nothing to confirm, the network still fails, or the token has
+ *  already expired (the server can no longer be asked with it). */
+export async function confirmSignOut(): Promise<boolean> {
+  const token = unconfirmedToken
+  if (!token || !supabase) return false
+  try {
+    const { error } = await supabase.auth.admin.signOut(token, 'global')
+    if (error) return false
+  } catch {
+    return false
+  }
+  confirmRevocation(token)
+  return true
+}
+
+/**
+ * Sign out is a local decision first: the tab is cleared and the shell leaves
  * even when the server call fails (offline, or a token already expired), since
- * a failed network call must never leave someone stuck inside the app. */
+ * a failed network call must never leave someone stuck inside the app.
+ *
+ * Two separate facts decide what the login screen then says:
+ *  - local: this browser no longer stores the session (always made true here);
+ *  - server: Supabase confirmed the revocation (`/logout` answered). Only when
+ *    both hold is it "Bạn đã đăng xuất". Otherwise the reason is
+ *    `signed_out_unconfirmed`: signed out on this device, but the session may
+ *    still be valid on the server, and the screen says so.
+ */
 export async function signOut() {
   signingOut = true
   const client = requireAuthClient()
+  const token = currentAccessToken()
   // Revoke on the server, but never hold the person inside the app for it:
   // measured on a phone profile the round trip took over three seconds, and
   // the shell stayed on screen the whole time. Wait at most 1.5s, then leave.
-  const remote = client.auth.signOut().catch(() => undefined)
+  // auth-js answers { error } (it does not throw) when the network fails.
+  const remote: Promise<boolean> = client.auth.signOut().then(({ error }) => !error, () => false)
   pendingSignOut = remote
-  const settled = await Promise.race([remote.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), SIGN_OUT_WAIT_MS))])
-  // Leaving before the server answered: the stored session goes now, so
-  // "Bạn đã đăng xuất" is true on this device whatever the network does.
-  if (!settled) dropStoredSession(client)
-  finish('signed_out')
-  void remote.finally(() => {
-    signingOut = false
-    if (pendingSignOut === remote) pendingSignOut = null
-  })
+  const outcome = await Promise.race([remote, new Promise<'pending'>((r) => setTimeout(() => r('pending'), SIGN_OUT_WAIT_MS))])
+  // Not confirmed (yet): the stored session goes now anyway.
+  if (outcome !== true) dropStoredSession(client)
+  const confirmed = outcome === true && storedSessionGone(client)
+  unconfirmedToken = confirmed ? null : token
+  finish(confirmed ? 'signed_out' : 'signed_out_unconfirmed')
+  void remote.then((ok) => { if (ok && token && outcome === 'pending' && storedSessionGone(client)) confirmRevocation(token) })
+    .finally(() => {
+      signingOut = false
+      if (pendingSignOut === remote) pendingSignOut = null
+    })
 }
 
 /** Supabase's password-change refusals, in the words the Account page uses. */
