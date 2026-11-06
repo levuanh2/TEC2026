@@ -46,8 +46,8 @@ Without the hash, the font handler is blocked silently: the stylesheet stays `me
 
 | Stage | Headers | Gate to go to the next stage |
 |---|---|---|
-| 0 (now) | `X-Content-Type-Options: nosniff` (from the host) | — |
-| **1** | `nosniff`; `Referrer-Policy: strict-origin-when-cross-origin`; `X-Frame-Options: DENY`; `Permissions-Policy`; **`Strict-Transport-Security: max-age=300`**; **enforced** `Content-Security-Policy: frame-ancestors 'none'; object-src 'none'; base-uri 'self'`; the full policy as **`Content-Security-Policy-Report-Only`** | ≥ 7 days. Harness `LIVE=1 STAGE=1` green. Manager and Farmer real QA with no console CSP report. No user report of breakage |
+| 0 (now) | `X-Content-Type-Options: nosniff`, sent by Render itself on every response (origin and CDN). It is therefore never set in `render.yaml` (that would duplicate it), and `--verify` requires it | — |
+| **1** | (`nosniff` from the host); `Referrer-Policy: strict-origin-when-cross-origin`; `X-Frame-Options: DENY`; `Permissions-Policy`; **`Strict-Transport-Security: max-age=300`**; **enforced** `Content-Security-Policy: frame-ancestors 'none'; object-src 'none'; base-uri 'self'`; the full policy as **`Content-Security-Policy-Report-Only`** | ≥ 7 days. Harness `LIVE=1 STAGE=1` green. Manager and Farmer real QA with no console CSP report. No user report of breakage |
 | 2 | Full CSP **enforced**; HSTS `max-age=86400` | ≥ 14 days, same checks |
 | 3 | HSTS `max-age=31536000` (this host only) | — |
 | later | `includeSubDomains`, then `preload` | only after an audit of **every** subdomain of `agricarbon.info.vn` (DNS is in Cloudflare and was not visible to this review). `api.` already redirects to HTTPS (Caddy, 308); `www.` → 301 to the apex |

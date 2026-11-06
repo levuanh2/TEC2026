@@ -64,7 +64,7 @@ export function check() {
     if (h['X-Frame-Options'] !== 'DENY') problems.push(`stage ${st}: X-Frame-Options must be DENY`)
     if (!/frame-ancestors 'none'/.test(h['Content-Security-Policy'] ?? '')) problems.push(`stage ${st}: frame-ancestors 'none' must be ENFORCED`)
     if (/frame-ancestors/.test(h['Content-Security-Policy-Report-Only'] ?? '')) problems.push(`stage ${st}: frame-ancestors in Report-Only is ignored`)
-    if (h['X-Content-Type-Options'] !== 'nosniff') problems.push(`stage ${st}: nosniff missing`)
+    if ('X-Content-Type-Options' in h) problems.push(`stage ${st}: X-Content-Type-Options is sent by Render itself; setting it again duplicates it`)
     for (const v of [h['Content-Security-Policy'], h['Content-Security-Policy-Report-Only']]) {
       if (v && /'unsafe-inline'|'unsafe-eval'|\*/.test(v)) problems.push(`stage ${st}: CSP allows unsafe-inline/unsafe-eval/wildcard`)
     }
@@ -89,6 +89,10 @@ async function verify(stage, url = config.site) {
   const want = headersFor(stage)
   const res = await fetch(url, { redirect: 'manual' })
   const diff = []
+  for (const [name, value] of Object.entries(config.hostProvided ?? {}).filter(([k]) => !k.startsWith('$'))) {
+    const got = res.headers.get(name)
+    if (got !== value) diff.push({ header: name, want: value, got, note: 'host-provided' })
+  }
   for (const [name, value] of Object.entries(want)) {
     const got = res.headers.get(name)
     if (got !== value) diff.push({ header: name, want: value, got })
