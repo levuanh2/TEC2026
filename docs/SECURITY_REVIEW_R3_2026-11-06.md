@@ -63,7 +63,7 @@ Severity is for this application (web dashboard; authorization is server-enforce
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| F4 | **Medium** | **Sign-out on a slow or hung network leaves the session restorable.** The shell leaves after 1.5 s, while auth-js removes the stored session only when `/logout` returns. Measured with the real auth-js 2.116 client: 1.6 s after sign-out, the stored session was still A's. Also seen in real Chrome on the #17 build: `/logout` hangs, the screen says "Bạn đã đăng xuất", the person closes the tab, and opening the site again in the same browser sends `/v1/me` with the Manager's token and **shows the Management shell**. Closing the tab also aborts the revocation, so the refresh token stays valid. Present since `3acfba7` (2026-09-23), so it is in every rollback target. **Found in the remediation pass, on #21's first head:** offline at sign-out, the screen still said "Bạn đã đăng xuất." with no server revocation; and a hung `/logout` in tab A left tab B of the same browser in the Manager shell. | Fixed in #21 (`f52300e`, `8bc8fc6`). Local cleanup and server revocation are reported separately: "Bạn đã đăng xuất." only when `/logout` answered and nothing is stored; otherwise a warning with "Thử xác nhận lại" (`/logout?scope=global`). The stored session is removed at once; `/logout` is bounded to 8 s; a `storage` removal ends every other tab. **Residual:** if the server is never reached and the access token expires before a retry, the refresh token stays valid on the server until used or revoked. The warning says so |
+| F4 | **Medium** | **Sign-out on a slow or hung network leaves the session restorable.** The shell leaves after 1.5 s, while auth-js removes the stored session only when `/logout` returns. Measured with the real auth-js 2.116 client: 1.6 s after sign-out, the stored session was still A's. Also seen in real Chrome on the #17 build: `/logout` hangs, the screen says "Bạn đã đăng xuất", the person closes the tab, and opening the site again in the same browser sends `/v1/me` with the Manager's token and **shows the Management shell**. Closing the tab also aborts the revocation, so the refresh token stays valid. Present since `3acfba7` (2026-09-23), so it is in every rollback target. **Found in the remediation pass, on #21's first head:** offline at sign-out, the screen still said "Bạn đã đăng xuất." with no server revocation; and a hung `/logout` in tab A left tab B of the same browser in the Manager shell. | Fixed in #21 (`f52300e`, `8fb4c0f`). Local cleanup and server revocation are reported separately: "Bạn đã đăng xuất." only when `/logout` answered and nothing is stored; otherwise a warning with "Thử xác nhận lại" (`/logout?scope=global`). The stored session is removed at once; `/logout` is bounded to 8 s; a `storage` removal ends every other tab. **Residual:** if the server is never reached and the access token expires before a retry, the refresh token stays valid on the server until used or revoked. The warning says so |
 | F1 | **Medium** | **Losing read-only access is not detected by the open-tab re-check.** The compared scope was (user, role, first organisation, writable farms, password flag). Removing a `viewer` farm role, or ending a second organisation membership, changed none of them, so the rows cached under that access (the Farmer scope is cached for 5 min) stayed on screen. The server refuses new reads; what was already loaded stayed visible. | Fixed: the scope includes every membership and farm role from `/v1/me` (`access`) |
 | F2 | Low | **A request can be retried, or sent from the read queue, with the next person's token.** On a 401, `send()` retried with the current token if it had changed, without checking whose it was. A read queued behind the 4-request limit was sent with whatever token was current when its slot came. A 401 refresh used the stored session, which another tab may have replaced. Only SIGNED_IN was recognised as a takeover. In the tests, the cache layers (generation counter, user-keyed query keys, unmounting) kept such answers off screen, so no exposure was observed. The property itself did not hold. | Fixed: an identity counter in `client.ts`; a takeover is recognised from any auth event and from a refresh |
 | F5 | Low | **A late sign-out removes the next person's session.** `/logout` is slow, the shell has already left, and B signs in on the same tab. When A's call returns, auth-js removes the stored session, which is now B's, and emits SIGNED_OUT, which the app ignored while its sign-out flag was still set. B stays signed in until the token expires, then is dropped; a reload drops B at once. Reproduced with the real auth-js client. | Fixed: sign-in waits for a pending (bounded) sign-out |
@@ -75,11 +75,11 @@ Severity is for this application (web dashboard; authorization is server-enforce
 | F10 | Info | The viewer hint (`agricarbon.viewer.v1`: name, organisation id, writable farm ids) stays in `localStorage` until sign-out or expiry. It is not cleared when the browser closes. | Open, accepted (no authority; it only steers a prefetch) |
 | F11 | Info | The QA runner's sidebar spec writes screenshots into `.qa-screenshots/` of the web checkout it runs from (gitignored, inside a worktree). Text artifacts are scrubbed; PNGs are not (passwords are masked dots). | Open, accepted |
 
-No Critical or High finding, so no containment or rollback is proposed. The production build `654f95c` contains F1–F6. They are fixed in #21 (head `8bc8fc6`), which needs human review before it is merged or deployed.
+No Critical or High finding, so no containment or rollback is proposed. The production build `654f95c` contains F1–F6. They are fixed in #21 (head `8fb4c0f`), which needs human review before it is merged or deployed.
 
 ## 5. Tests and mutation check
 
-Gates on #21 head `8bc8fc6`: `tsc -b` and `npm run build` pass. Vitest **92 files / 719 tests** (main: 87 / 679). Playwright (mock) **111 / 111**. Real Chrome, two tabs of one browser with fake origins answered in the browser (`.tmp/release-r3/twotab/`, local), 12 scenarios: the production-equivalent #17 build passes **6 / 12** (every R3 sign-out scenario fails); #21's first head passes 9 / 12; **`8bc8fc6` passes 12 / 12**.
+Gates on #21 head `8fb4c0f`: `tsc -b` and `npm run build` pass. Vitest **92 files / 719 tests** (main: 87 / 679). Playwright (mock) **111 / 111**. Real Chrome, two tabs of one browser with fake origins answered in the browser (`.tmp/release-r3/twotab/`, local), 12 scenarios: the production-equivalent #17 build passes **6 / 12** (every R3 sign-out scenario fails); #21's first head passes 9 / 12; **`8fb4c0f` passes 12 / 12**.
 
 Regression tests added (each fails on `main`; 11 of the new cases were run against the `main` sources and failed):
 
@@ -91,15 +91,17 @@ Regression tests added (each fails on `main`; 11 of the new cases were run again
 | `src/signOutNotice.dom.test.tsx` | F4 on screen: the confirmation only when confirmed; the warning (`role=alert`), the retry, a late confirmation, "ended in another tab" |
 | `src/accessScope.dom.test.tsx` | F1 (read-only farm, second organisation, reorder changes nothing), F3, F6 (3 crafted values, plus a real page still returned to) |
 
+An existing backend guard caught a mistake in the remediation pass. `test_react_never_holds_a_service_role_credential` (CI on `8bc8fc6`) flagged the first "Thử xác nhận lại" implementation, which used `auth.admin.signOut(token)`. That call sends the user's own token, but the guard bans the `auth.admin` namespace in React code outright. `8fb4c0f` calls `POST /auth/v1/logout?scope=global` itself, with the publishable key and the user's token, and the guard passes. The guard was kept unchanged.
+
 Targeted mutation run: each security guard disabled on its own, then the full Vitest suite run.
 
 | Guards | First run | After `83b17b6` |
 |---|---|---|
 | 13 added by #21 (identity checks ×3, stored-session drop, sign-in wait, replacement on any event, refresh of another person, takeover moves the identity, `access` mapped, `access` compared, first `/v1/me` user check, same-origin `next`, `/logout` timeout) | 13 killed | 13 killed |
 | 13 existing guards from #12/#15/#17 | 8 killed, **5 survived** | 13 killed |
-| 9 F4 guards added in the remediation pass (`f52300e`) | 7 killed, 1 survived, 1 bad pattern | 9 killed (`8bc8fc6` adds the missing test) |
+| 11 F4 guards added in the remediation pass (`f52300e`, `8fb4c0f`) | 9 killed, 1 survived, 1 bad pattern | 11 killed (a test was added for the survivor) |
 
-**Total on `8bc8fc6`: 35 / 35 guards killed.**
+**Total on `8fb4c0f`: 37 / 37 guards killed.**
 
 The 5 survivors were guards that no test exercised:
 - the first `/v1/me` answer after the session ended (it rewrote the hint and redirected away from `/login`);
@@ -193,8 +195,8 @@ Verdict line: `HUMAN_REVIEW #17: APPROVE | REQUEST_CHANGES — <name>, <date>`. 
 
 | Condition for PRODUCTION PASS | Status |
 |---|---|
-| 1. F1–F6 fixed and verified | **Fixed and verified in #21 `8bc8fc6`; not merged and not deployed.** Production still has them |
-| 2. #21 human security review | **PENDING** (requested on `8bc8fc6`) |
+| 1. F1–F6 fixed and verified | **Fixed and verified in #21 `8fb4c0f`; not merged and not deployed.** Production still has them |
+| 2. #21 human security review | **PENDING** (requested on `8fb4c0f`) |
 | 3. Human review of the RLS/role changes (#13, #15/#16, #17) | **PENDING** (requested; record in the tracking issue) |
 | 4. Authenticated Manager/Farmer QA | **BLOCKED_CREDENTIALS** |
 | 5. No unresolved Critical/High | **Met**: none found |
