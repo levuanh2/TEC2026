@@ -63,23 +63,23 @@ Severity is for this application (web dashboard; authorization is server-enforce
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| F4 | **Medium** | **Sign-out on a slow or hung network leaves the session restorable.** The shell leaves after 1.5 s, while auth-js removes the stored session only when `/logout` returns. Measured with the real auth-js 2.116 client: 1.6 s after sign-out, the stored session was still A's. Also seen in real Chrome on the #17 build: `/logout` hangs, the screen says "Bạn đã đăng xuất", the person closes the tab, and opening the site again in the same browser sends `/v1/me` with the Manager's token and **shows the Management shell**. Closing the tab also aborts the revocation, so the refresh token stays valid. Present since `3acfba7` (2026-09-23), so it is in every rollback target. | Fixed in #21: the stored session is removed locally when the server has not answered, and `/logout` is bounded to 8 s |
+| F4 | **Medium** | **Sign-out on a slow or hung network leaves the session restorable.** The shell leaves after 1.5 s, while auth-js removes the stored session only when `/logout` returns. Measured with the real auth-js 2.116 client: 1.6 s after sign-out, the stored session was still A's. Also seen in real Chrome on the #17 build: `/logout` hangs, the screen says "Bạn đã đăng xuất", the person closes the tab, and opening the site again in the same browser sends `/v1/me` with the Manager's token and **shows the Management shell**. Closing the tab also aborts the revocation, so the refresh token stays valid. Present since `3acfba7` (2026-09-23), so it is in every rollback target. **Found in the remediation pass, on #21's first head:** offline at sign-out, the screen still said "Bạn đã đăng xuất." with no server revocation; and a hung `/logout` in tab A left tab B of the same browser in the Manager shell. | Fixed in #21 (`f52300e`, `8bc8fc6`). Local cleanup and server revocation are reported separately: "Bạn đã đăng xuất." only when `/logout` answered and nothing is stored; otherwise a warning with "Thử xác nhận lại" (`/logout?scope=global`). The stored session is removed at once; `/logout` is bounded to 8 s; a `storage` removal ends every other tab. **Residual:** if the server is never reached and the access token expires before a retry, the refresh token stays valid on the server until used or revoked. The warning says so |
 | F1 | **Medium** | **Losing read-only access is not detected by the open-tab re-check.** The compared scope was (user, role, first organisation, writable farms, password flag). Removing a `viewer` farm role, or ending a second organisation membership, changed none of them, so the rows cached under that access (the Farmer scope is cached for 5 min) stayed on screen. The server refuses new reads; what was already loaded stayed visible. | Fixed: the scope includes every membership and farm role from `/v1/me` (`access`) |
 | F2 | Low | **A request can be retried, or sent from the read queue, with the next person's token.** On a 401, `send()` retried with the current token if it had changed, without checking whose it was. A read queued behind the 4-request limit was sent with whatever token was current when its slot came. A 401 refresh used the stored session, which another tab may have replaced. Only SIGNED_IN was recognised as a takeover. In the tests, the cache layers (generation counter, user-keyed query keys, unmounting) kept such answers off screen, so no exposure was observed. The property itself did not hold. | Fixed: an identity counter in `client.ts`; a takeover is recognised from any auth event and from a refresh |
 | F5 | Low | **A late sign-out removes the next person's session.** `/logout` is slow, the shell has already left, and B signs in on the same tab. When A's call returns, auth-js removes the stored session, which is now B's, and emits SIGNED_OUT, which the app ignored while its sign-out flag was still set. B stays signed in until the token expires, then is dropped; a reload drops B at once. Reproduced with the real auth-js client. | Fixed: sign-in waits for a pending (bounded) sign-out |
 | F3 | Low | The first `/v1/me` of a session was applied even when it named another `user_id` (token replaced in flight). That wrote the other person's role into this user's hint. Nothing rendered, because the session check still failed. | Fixed: the neutral screen; no hint |
 | F6 | Low | `?next=/\evil.example` passed the `startsWith('/')` check. The browser resolves it to another origin, so `history.replaceState` throws and the sign-in fails with an error. This is not an open redirect. | Fixed: `next` is accepted only when it resolves to this origin |
-| F7 | Medium (hardening) | The frontend sends no `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`/`frame-ancestors` or `Referrer-Policy` (only `X-Content-Type-Options`). The app can be framed (clickjacking), and nothing limits script sources, while the Supabase refresh token sits in `localStorage`. | **Open.** It needs a Render static-site header rule (or Cloudflare), which is a production configuration change outside this review's authority. Proposed values in §7 |
+| F7 | Medium (hardening) | The frontend sends no `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`/`frame-ancestors` or `Referrer-Policy` (only `X-Content-Type-Options`). The app can be framed (clickjacking), and nothing limits script sources, while the Supabase refresh token sits in `localStorage`. | **Open, plan ready: #23.** Staged headers, measured on the production bundle in real Chrome (0 violations with the full CSP enforced; framing refused). Not applied. Each stage is a `render.yaml` PR, and merging it is the rollout (Blueprint auto-sync). See §7 |
 | F8 | Low | An account with no recognised role (for example, every organisation membership ended) falls back to the Farmer shell (`toCurrentUser`). Its reads are RLS-scoped and return nothing it may not see. | Open, product decision. A neutral "no role" screen would be stricter |
 | F9 | Low | `organizationId` is the first membership, and the role is the highest across all memberships. A person who is a manager in org X and a farmer in org Y can get the Management UI pointed at Y. The server answers 403. | Open, UX only |
 | F10 | Info | The viewer hint (`agricarbon.viewer.v1`: name, organisation id, writable farm ids) stays in `localStorage` until sign-out or expiry. It is not cleared when the browser closes. | Open, accepted (no authority; it only steers a prefetch) |
 | F11 | Info | The QA runner's sidebar spec writes screenshots into `.qa-screenshots/` of the web checkout it runs from (gitignored, inside a worktree). Text artifacts are scrubbed; PNGs are not (passwords are masked dots). | Open, accepted |
 
-No Critical or High finding, so no containment or rollback is proposed. The production build `654f95c` contains F1–F6. They are fixed on the fix branch, which needs human review before it is merged or deployed.
+No Critical or High finding, so no containment or rollback is proposed. The production build `654f95c` contains F1–F6. They are fixed in #21 (head `8bc8fc6`), which needs human review before it is merged or deployed.
 
 ## 5. Tests and mutation check
 
-Gates on #21: TypeScript `tsc -b` passes. Vitest **91 files / 707 tests** (main: 87 / 679). Playwright (mock) **111 / 111**. Real Chrome, two tabs of one browser with fake origins answered in the browser (`.tmp/release-r3/twotab/`, local): the #17 build passes 5 of 7 (the two sign-out scenarios fail); #21 passes **7 / 7**.
+Gates on #21 head `8bc8fc6`: `tsc -b` and `npm run build` pass. Vitest **92 files / 719 tests** (main: 87 / 679). Playwright (mock) **111 / 111**. Real Chrome, two tabs of one browser with fake origins answered in the browser (`.tmp/release-r3/twotab/`, local), 12 scenarios: the production-equivalent #17 build passes **6 / 12** (every R3 sign-out scenario fails); #21's first head passes 9 / 12; **`8bc8fc6` passes 12 / 12**.
 
 Regression tests added (each fails on `main`; 11 of the new cases were run against the `main` sources and failed):
 
@@ -87,7 +87,8 @@ Regression tests added (each fails on `main`; 11 of the new cases were run again
 |---|---|
 | `src/api/sessionIdentity.test.ts` | F2: retry after a takeover, a refresh returning someone else, a sign-out in flight, a queued read; the same person's rotation still retried |
 | `src/api/authReplacement.dom.test.ts` | F2: SIGNED_IN and TOKEN_REFRESHED of another user; a 401 recovery returning another user; the same user refreshed causes no replacement |
-| `src/api/authSignOutRealClient.dom.test.ts` | F4, F5 with the **real auth-js client**; storage key pinned; `boundedAuthFetch` timeout |
+| `src/api/authSignOutRealClient.dom.test.ts` | F4, F5 with the **real auth-js client**: hung, slow, offline and refused `/logout`; a retry once the network is back; storage that silently keeps the session; the cross-tab `storage` event; the token dropped by the next sign-in; storage key pinned; `boundedAuthFetch` timeout |
+| `src/signOutNotice.dom.test.tsx` | F4 on screen: the confirmation only when confirmed; the warning (`role=alert`), the retry, a late confirmation, "ended in another tab" |
 | `src/accessScope.dom.test.tsx` | F1 (read-only farm, second organisation, reorder changes nothing), F3, F6 (3 crafted values, plus a real page still returned to) |
 
 Targeted mutation run: each security guard disabled on its own, then the full Vitest suite run.
@@ -96,6 +97,9 @@ Targeted mutation run: each security guard disabled on its own, then the full Vi
 |---|---|---|
 | 13 added by #21 (identity checks ×3, stored-session drop, sign-in wait, replacement on any event, refresh of another person, takeover moves the identity, `access` mapped, `access` compared, first `/v1/me` user check, same-origin `next`, `/logout` timeout) | 13 killed | 13 killed |
 | 13 existing guards from #12/#15/#17 | 8 killed, **5 survived** | 13 killed |
+| 9 F4 guards added in the remediation pass (`f52300e`) | 7 killed, 1 survived, 1 bad pattern | 9 killed (`8bc8fc6` adds the missing test) |
+
+**Total on `8bc8fc6`: 35 / 35 guards killed.**
 
 The 5 survivors were guards that no test exercised:
 - the first `/v1/me` answer after the session ended (it rewrote the hint and redirected away from `/login`);
@@ -113,28 +117,34 @@ Tick these in a GitHub review of the fix PR (or reply with the item numbers). A 
 - [ ] R3. `me.ts` + `App.tsx`: the compared scope includes every organisation membership and farm role (`access`), read-only ones included; a reorder is not a change.
 - [ ] R4. `client.ts`: a request started under one identity is never sent (after the read queue) or retried (after a 401) under another; the same person's token rotation still retries once.
 - [ ] R5. `auth.ts`: a session of another user arriving by SIGNED_IN, TOKEN_REFRESHED or the 401 refresh is a replacement (identity moved, caches and hint cleared, shell re-verifies).
-- [ ] R6. `auth.ts` + `utils/supabase.ts`: after sign-out the stored session is gone even if `/logout` hangs; `/logout` is bounded; a sign-in waits for a pending sign-out. Check `authSignOutRealClient.dom.test.ts`, which uses the real auth-js client.
+- [ ] R6. `auth.ts` + `utils/supabase.ts`: after sign-out the stored session is gone even if `/logout` hangs; "Bạn đã đăng xuất." appears only when the server confirmed it AND nothing is stored, otherwise the warning and "Thử xác nhận lại"; `/logout` is bounded; a sign-in waits for a pending sign-out; a removal in another tab ends this tab. Check `authSignOutRealClient.dom.test.ts`, which uses the real auth-js client.
 - [ ] R7. Fail-closed: 401/403 on a re-check gives the neutral screen; 0/5xx/timeout keeps the confirmed role. Agree, or ask for a stricter rule.
 - [ ] R8. Server side: `/v1/me` filters ended memberships (`read_repo.me`); no web change weakens a server check (the PR touches only `web-dashboard/src`).
 - [ ] R9. Open items F7–F11: agree with the severity, or say what has to change before PRODUCTION PASS.
 - [ ] R10. The real-Chrome two-tab results (in the fix PR) match what the unit tests claim.
+- [ ] R16. Behaviour change: when the stored session is removed in another tab, this tab ends ("kết thúc ở một tab khác") instead of following the next sign-in. The residual risk of F4 is accepted as written in §4.
 
 For #13, #15 and #16, see §8 (R11–R15). The human review is complete only when §6 and §8 are both done.
 
 Verdict line for the reviewer to copy: `HUMAN_REVIEW: APPROVE | REQUEST_CHANGES — <name>, <date>`.
 
-## 7. Proposed headers (F7, not applied)
+## 7. F7 plan (#23, not applied)
 
-For the Render static site (Settings → Headers, path `/*`). This is a production change, so it needs the owner's approval and a check that the login still works:
+**Correction.** The first version of this section (2026-11-06, `de27220`) proposed headers that were wrong:
+- `includeSubDomains` before any subdomain audit;
+- `script-src 'self'` without the hash, which silently blocks `index.html`'s font-switch handler (the UI would lose its font);
+- a `wss://` source the app does not use;
+- setting them by hand in the Render dashboard, although the Blueprint `tec` auto-syncs `render.yaml`.
 
-```
-Strict-Transport-Security: max-age=31536000; includeSubDomains
-X-Frame-Options: DENY
-Content-Security-Policy: frame-ancestors 'none'; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://api.agricarbon.info.vn https://<project-ref>.supabase.co wss://<project-ref>.supabase.co; base-uri 'self'; form-action 'self'
-Referrer-Policy: strict-origin-when-cross-origin
-```
+Use #23 instead. It measured the policy on the production bundle in real Chrome, split it into stages, and comes with a runbook and a rollback.
 
-Start the CSP as `Content-Security-Policy-Report-Only` for a release, and check the browser console on the Manager and Farmer flows before you enforce it.
+| Stage | Headers | Status |
+|---|---|---|
+| 1 | `Referrer-Policy`, `X-Frame-Options: DENY`, `Permissions-Policy`, HSTS `max-age=300`, **enforced** `frame-ancestors 'none'; object-src 'none'; base-uri 'self'`, full policy **Report-Only** | ready; harness pass with 0 reports; owner approval needed |
+| 2 | full CSP **enforced**, HSTS 1 day | harness pass with 0 violations; after ≥ 7 days of stage 1 |
+| 3 | HSTS 1 year, this host only | after ≥ 14 days of stage 2 |
+
+`render.yaml` is not code-owned, although its merge changes production. Adding it to CODEOWNERS is an owner decision.
 
 ## 8. Also pending human review: #13 (RLS, applied to hosted) and #15/#16 (role verification)
 
@@ -159,3 +169,36 @@ Checklist (tick in a review or a comment on the PR concerned):
 - [ ] R15. #16: no Management or Farmer business read is rendered before `/v1/me` confirms the role; the speculative Farmer-scope prefetch is server-authorized, stays in memory and is not shown (`roleVerifiedQueryCache.dom.test.tsx`).
 
 Verdict line per PR: `HUMAN_REVIEW #13|#15|#16: APPROVE | REQUEST_CHANGES — <name>, <date>`.
+
+### R17–R19: #17 (open-tab re-check and multi-tab), merged
+
+#17 is reviewed through #21: #21 changes the same code. These items are what #17 itself claims. They are checked by the tests named, and a human should confirm them.
+- [ ] R17. Focus, visibility and a token refresh trigger at most one `/v1/me` per 60 s, never two in flight, and a hung check stops blocking after 30 s (`sessionRevalidation.dom.test.tsx`, real Chrome scenario 4).
+- [ ] R18. A changed scope drops every cache and remounts the business tree (`scopeEpoch`); a 401/403 shows the neutral screen; 0/5xx keeps the role (`sessionRevalidation.dom.test.tsx`, real Chrome scenario 5).
+- [ ] R19. A late answer for an ended or replaced session changes nothing (`sessionReplacement.dom.test.tsx`, real Chrome scenarios 2 and 3).
+
+Verdict line: `HUMAN_REVIEW #17: APPROVE | REQUEST_CHANGES — <name>, <date>`. The verdict is recorded after the merge, and it does not turn #17's admin merge into a pre-merge approval.
+
+## 9. What each kind of evidence is worth
+
+| Kind | What exists | What it is not |
+|---|---|---|
+| **Human review** | **None so far**, on any PR from #12 to #23 | — |
+| AI review | agy reports on #13, #17, #18, #19 (before merge); this R3 package and #21–#23 (Claude Code) | not an approval; the agy reports missed F1 and F4 |
+| CI | 17 required checks green on `main` and on the open PRs | does not run real browsers against production, real Supabase sign-outs, or authenticated flows |
+| Local test evidence | Vitest, Playwright mock, real auth-js client, real Chrome (two tabs), mutation runs, production smoke without credentials, F7 harness on the production bundle | not a real Manager or Farmer session |
+| **Not verified** | authenticated Manager/Farmer QA and cross-account isolation with real accounts (`BLOCKED_CREDENTIALS`); endpoint p50/p95; EC2 5xx log; the subdomain list (for HSTS `includeSubDomains`); whether the Render dashboard headers survive a Blueprint sync | — |
+
+## 10. Release gate (2026-11-06)
+
+| Condition for PRODUCTION PASS | Status |
+|---|---|
+| 1. F1–F6 fixed and verified | **Fixed and verified in #21 `8bc8fc6`; not merged and not deployed.** Production still has them |
+| 2. #21 human security review | **PENDING** (requested on `8bc8fc6`) |
+| 3. Human review of the RLS/role changes (#13, #15/#16, #17) | **PENDING** (requested; record in the tracking issue) |
+| 4. Authenticated Manager/Farmer QA | **BLOCKED_CREDENTIALS** |
+| 5. No unresolved Critical/High | **Met**: none found |
+| 6. Production smoke | **PASS** (no-credential smoke 6/6; F7 harness `LIVE=1` 5/5) |
+| F7 | not a blocker per the owner decision; plan in #23; the residual risk is clickjacking and no CSP until stage 1 |
+
+**Result: `PRODUCTION CONDITIONAL`.**
