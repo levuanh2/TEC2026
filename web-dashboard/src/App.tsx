@@ -2,7 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type Re
 import type { Session } from '@supabase/supabase-js'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { clearQueryData, queryClient } from './query/client'
-import { confirmSignOut, mustChangePassword, onAuthEnded, onSessionRefreshed, onSessionReplaced, onSignOutConfirmed, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
+import { canConfirmSignOut, confirmSignOut, mustChangePassword, onAuthEnded, onSessionRefreshed, onSessionReplaced, onSignOutOutcome, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { ApiError } from './api/client'
 import { clearOrganizationCache, getOrganization } from './api/organizations'
@@ -38,6 +38,8 @@ const ROLE_LABEL: Record<string, string> = {
 const ENDED_NOTICE: Record<AuthEndReason, { kind: 'info' | 'warning'; text: string }> = {
   // Only when the server confirmed the revocation AND nothing is stored here.
   signed_out: { kind: 'info', text: 'Bạn đã đăng xuất.' },
+  // The local session is already gone; the server has not answered yet.
+  signing_out: { kind: 'info', text: 'Đã đăng xuất trên thiết bị này. Đang xác nhận với máy chủ…' },
   signed_out_unconfirmed: {
     kind: 'warning',
     text: 'Đã đăng xuất trên thiết bị này, nhưng chưa xác nhận được với máy chủ (mất mạng hoặc máy chủ không phản hồi), nên phiên có thể vẫn còn hiệu lực ở nơi khác. Hãy thử xác nhận lại khi có mạng.',
@@ -54,17 +56,21 @@ function ConfirmSignOut({ onConfirmed }: { onConfirmed: () => void }) {
     if (await confirmSignOut()) onConfirmed()
     else setState('failed')
   }
+  // Bounded: after MAX_CONFIRM_ATTEMPTS the button is gone and only the advice stays.
+  const canRetry = canConfirmSignOut()
   return (
     <>
-      {state === 'failed' && (
+      {(state === 'failed' || !canRetry) && (
         <p data-testid="sign-out-unconfirmed-help">
-          Vẫn chưa xác nhận được. Khi có mạng, hãy thử lại. Nếu đây là máy dùng chung và vẫn không xác nhận được,
-          hãy đăng nhập lại rồi đăng xuất, hoặc đổi mật khẩu để chấm dứt mọi phiên của tài khoản.
+          {canRetry ? 'Vẫn chưa xác nhận được. Khi có mạng, hãy thử lại. ' : 'Không xác nhận được với máy chủ. '}
+          Nếu đây là máy dùng chung, hãy đăng nhập lại rồi đăng xuất khi có mạng, hoặc đổi mật khẩu để chấm dứt mọi phiên của tài khoản.
         </p>
       )}
-      <button type="button" className="btn btn--ghost" disabled={state === 'busy'} onClick={() => void retry()}>
-        {state === 'busy' ? 'Đang xác nhận…' : 'Thử xác nhận lại'}
-      </button>
+      {canRetry && (
+        <button type="button" className="btn btn--ghost" disabled={state === 'busy'} onClick={() => void retry()}>
+          {state === 'busy' ? 'Đang xác nhận…' : 'Thử xác nhận lại'}
+        </button>
+      )}
     </>
   )
 }
@@ -455,9 +461,13 @@ function AppRoot() {
     setPath('/login')
   }), [])
 
-  // A sign-out reported as unconfirmed was confirmed later (late /logout answer).
-  useEffect(() => onSignOutConfirmed(() => {
-    setEnded((r) => (r === 'signed_out_unconfirmed' ? 'signed_out' : r))
+    // The server's answer to a sign-out: confirmed -> "Bạn đã đăng xuất.";
+  // unconfirmed -> the warning. Only ever moves a sign-out notice.
+  useEffect(() => onSignOutOutcome((o) => {
+    setEnded((r) => {
+      if (o === 'confirmed') return r === 'signing_out' || r === 'signed_out_unconfirmed' ? 'signed_out' : r
+      return r === 'signing_out' ? 'signed_out_unconfirmed' : r
+    })
   }), [])
 
   // Another tab signed a different person in (shared storage and token): this

@@ -15,7 +15,8 @@ let ended: ((reason: 'expired' | 'signed_out') => void) | null = null
 const renders = { farmer: 0, ops: 0 }
 
 vi.mock('./api/auth', () => ({
-  onSignOutConfirmed: () => () => {},
+  onSignOutOutcome: () => () => {},
+  canConfirmSignOut: () => false,
   confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},

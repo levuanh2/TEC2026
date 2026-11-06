@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
  * fails, and every session-scoped cache is dropped. */
 
 const remoteSignOut = vi.fn()
+const revoke = vi.fn(async (_token: string) => false)
 vi.mock('../utils/supabase', () => ({
+  revokeSessionsWithToken: (t: string) => revoke(t),
   supabase: {
     auth: {
       signOut: (...a: unknown[]) => remoteSignOut(...a),
@@ -19,7 +21,7 @@ vi.mock('../utils/supabase', () => ({
 const clearFarmerCache = vi.fn()
 vi.mock('../farmer/data', () => ({ clearFarmerCache: () => clearFarmerCache() }))
 
-const { onAuthEnded, restoreSession, signIn, signOut, signInErrorMessage } = await import('./auth')
+const { onAuthEnded, onSignOutOutcome, restoreSession, signIn, signOut, signInErrorMessage } = await import('./auth')
 const { apiRequest } = await import('./client')
 
 afterEach(() => { vi.unstubAllGlobals(); remoteSignOut.mockReset(); clearFarmerCache.mockReset() })
@@ -27,12 +29,18 @@ afterEach(() => { vi.unstubAllGlobals(); remoteSignOut.mockReset(); clearFarmerC
 describe('auth boundary', () => {
   it('sign-out tells the shell and clears caches even when the server call throws', async () => {
     remoteSignOut.mockRejectedValue(new Error('network down'))
+    revoke.mockRejectedValueOnce(new Error('network down'))
     await restoreSession()
     const ended = vi.fn()
     const off = onAuthEnded(ended)
+    const outcome = vi.fn()
+    const offO = onSignOutOutcome(outcome)
     await signOut()
-    // The server never confirmed it: signed out here, but not reported as a confirmed sign-out.
-    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
+    // The shell leaves at once; the server never confirmed it.
+    expect(ended).toHaveBeenCalledWith('signing_out')
+    expect(outcome).toHaveBeenCalledWith('unconfirmed')
+    expect(outcome).not.toHaveBeenCalledWith('confirmed')
+    offO()
     expect(clearFarmerCache).toHaveBeenCalled()
     off()
   })

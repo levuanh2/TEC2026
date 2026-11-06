@@ -21,7 +21,8 @@ const mounts = { ops: 0, farmer: 0 }
 const opsRenders: { org: string | null; cached: unknown }[] = []
 
 vi.mock('./api/auth', () => ({
-  onSignOutConfirmed: () => () => {},
+  onSignOutOutcome: () => () => {},
+  canConfirmSignOut: () => false,
   confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: (fn: () => void) => { refreshListeners.add(fn); return () => { refreshListeners.delete(fn) } },

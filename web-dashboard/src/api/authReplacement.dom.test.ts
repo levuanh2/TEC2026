@@ -13,6 +13,7 @@ type Listener = (event: string, session: unknown) => void
 let listener: Listener | null = null
 let refreshed: unknown = null
 vi.mock('../utils/supabase', () => ({
+  revokeSessionsWithToken: async () => true,
   supabase: {
     auth: {
       onAuthStateChange: (fn: Listener) => { listener = fn; return { data: { subscription: { unsubscribe: () => {} } } } },

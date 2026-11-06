@@ -3,19 +3,23 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 /* R3 F4: the login screen after a sign-out says only what is true.
- *  - "Bạn đã đăng xuất." only when the server confirmed the revocation;
- *  - otherwise a warning that the session may still be valid elsewhere, with
- *    "Thử xác nhận lại"; a late confirmation (or a successful retry) turns it
- *    into the plain confirmation;
- *  - a sign-out from another tab is reported as such, not as a confirmation. */
+ *  - At once (local session gone, server not answered): "Đang xác nhận…",
+ *    never the plain confirmation, and no business screen.
+ *  - "Bạn đã đăng xuất." only after the server confirmed.
+ *  - Otherwise a warning that the session may still be valid elsewhere, with a
+ *    BOUNDED "Thử xác nhận lại"; a late confirmation or a successful retry
+ *    turns it into the confirmation.
+ *  - R16 (owner-approved): a session ended in another tab is reported as such. */
 
 let ended: ((reason: string) => void) | null = null
-let confirmedListener: (() => void) | null = null
+let outcome: ((o: 'confirmed' | 'unconfirmed') => void) | null = null
 const confirmSignOut = vi.fn(async () => false)
+let canConfirm = true
 
 vi.mock('./api/auth', () => ({
-  onSignOutConfirmed: (fn: () => void) => { confirmedListener = fn; return () => { confirmedListener = null } },
+  onSignOutOutcome: (fn: typeof outcome) => { outcome = fn; return () => { outcome = null } },
   confirmSignOut: () => confirmSignOut(),
+  canConfirmSignOut: () => canConfirm,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
   onSessionReplaced: () => () => {},
@@ -31,7 +35,7 @@ vi.mock('./farmer/FarmerExperience', () => ({ FarmerExperience: () => <p>farmer-
 
 const { default: App } = await import('./App')
 
-afterEach(() => { cleanup(); ended = null; confirmedListener = null; confirmSignOut.mockReset() })
+afterEach(() => { cleanup(); ended = null; outcome = null; confirmSignOut.mockReset(); canConfirm = true })
 
 async function signedInThenEnded(reason: string) {
   history.replaceState({}, '', '/farmer')
@@ -40,41 +44,67 @@ async function signedInThenEnded(reason: string) {
   act(() => ended!(reason))
   return screen.findByTestId('auth-ended')
 }
+const notice = () => screen.getByTestId('auth-ended')
 
 describe('login screen after a sign-out', () => {
-  it('confirmed: the plain "Bạn đã đăng xuất." and no retry', async () => {
-    const notice = await signedInThenEnded('signed_out')
-    expect(notice.textContent).toBe('Bạn đã đăng xuất.')
+  it('at once: the business screen is gone and the notice says the server is being asked, not "signed out"', async () => {
+    await signedInThenEnded('signing_out')
+    expect(screen.queryByText('farmer-experience')).toBeNull()
+    expect(notice().textContent).toMatch(/Đang xác nhận với máy chủ/)
+    expect(notice().textContent).not.toBe('Bạn đã đăng xuất.')
     expect(screen.queryByRole('button', { name: 'Thử xác nhận lại' })).toBeNull()
   })
 
-  it('unconfirmed: a warning (role=alert), never the plain confirmation; a failed retry explains what to do', async () => {
-    const notice = await signedInThenEnded('signed_out_unconfirmed')
-    expect(notice.getAttribute('role')).toBe('alert')
-    expect(notice.textContent).toMatch(/chưa xác nhận được với máy chủ/)
-    expect(notice.textContent).not.toBe('Bạn đã đăng xuất.')
+  it('then confirmed by the server: "Bạn đã đăng xuất." and no retry', async () => {
+    await signedInThenEnded('signing_out')
+    act(() => outcome!('confirmed'))
+    expect(notice().textContent).toBe('Bạn đã đăng xuất.')
+    expect(screen.queryByRole('button', { name: 'Thử xác nhận lại' })).toBeNull()
+  })
+
+  it('then unconfirmed: a warning (role=alert), never the plain confirmation; a failed retry explains what to do', async () => {
+    await signedInThenEnded('signing_out')
+    act(() => outcome!('unconfirmed'))
+    expect(notice().getAttribute('role')).toBe('alert')
+    expect(notice().textContent).toMatch(/chưa xác nhận được với máy chủ/)
     confirmSignOut.mockResolvedValueOnce(false)
     fireEvent.click(screen.getByRole('button', { name: 'Thử xác nhận lại' }))
     expect(await screen.findByTestId('sign-out-unconfirmed-help')).toBeTruthy()
-    expect(screen.getByTestId('auth-ended').textContent).toMatch(/chưa xác nhận/)
+    expect(notice().textContent).toMatch(/chưa xác nhận/)
   })
 
   it('unconfirmed, then a successful retry: "Bạn đã đăng xuất."', async () => {
-    await signedInThenEnded('signed_out_unconfirmed')
+    await signedInThenEnded('signing_out')
+    act(() => outcome!('unconfirmed'))
     confirmSignOut.mockResolvedValueOnce(true)
     fireEvent.click(screen.getByRole('button', { name: 'Thử xác nhận lại' }))
-    await vi.waitFor(() => expect(screen.getByTestId('auth-ended').textContent).toBe('Bạn đã đăng xuất.'))
-    expect(screen.queryByRole('button', { name: 'Thử xác nhận lại' })).toBeNull()
+    await vi.waitFor(() => expect(notice().textContent).toBe('Bạn đã đăng xuất.'))
   })
 
   it('unconfirmed, then the late server answer confirms it on its own', async () => {
-    await signedInThenEnded('signed_out_unconfirmed')
-    act(() => confirmedListener!())
-    expect(screen.getByTestId('auth-ended').textContent).toBe('Bạn đã đăng xuất.')
+    await signedInThenEnded('signing_out')
+    act(() => outcome!('unconfirmed'))
+    act(() => outcome!('confirmed'))
+    expect(notice().textContent).toBe('Bạn đã đăng xuất.')
   })
 
-  it('ended in another tab: said as such', async () => {
-    const notice = await signedInThenEnded('ended_elsewhere')
-    expect(notice.textContent).toMatch(/ở một tab khác/)
+  it('retries used up: no button any more, only the advice', async () => {
+    canConfirm = false
+    await signedInThenEnded('signing_out')
+    act(() => outcome!('unconfirmed'))
+    expect(screen.queryByRole('button', { name: 'Thử xác nhận lại' })).toBeNull()
+    expect(screen.getByTestId('sign-out-unconfirmed-help').textContent).toMatch(/Không xác nhận được với máy chủ/)
+  })
+
+  it('an outcome never turns another kind of ending into "signed out" (expired stays expired)', async () => {
+    await signedInThenEnded('expired')
+    act(() => outcome!('confirmed'))
+    expect(notice().textContent).toMatch(/hết hạn/)
+  })
+
+  it('R16 (owner-approved): ended in another tab is said as such, on the neutral login screen', async () => {
+    await signedInThenEnded('ended_elsewhere')
+    expect(notice().textContent).toMatch(/ở một tab khác/)
+    expect(screen.queryByText('farmer-experience')).toBeNull()
   })
 })

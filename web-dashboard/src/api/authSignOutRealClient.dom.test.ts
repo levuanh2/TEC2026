@@ -1,35 +1,43 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-/* R3 security review, findings F4/F5, against the REAL auth-js client (only
- * the network is fake; the session lives in jsdom's localStorage exactly as in
- * a browser). Pins the library behaviour the fix relies on, so an auth-js
+/* R3 security review, F4/F5, against the REAL auth-js client: only the network
+ * is fake, and the session lives in jsdom's localStorage exactly as in a
+ * browser. This pins the auth-js behaviour the sign-out relies on, so an
  * upgrade that changes it fails here.
  *
- * F4: the shell leaves after SIGN_OUT_WAIT_MS while /logout may still be
- *     running; auth-js removes the stored session only when that call
- *     returns, so a reload in between restored the session the person had
- *     just been told was ended (shared computer).
- * F5: when that late /logout returned after the next person had signed in,
- *     auth-js removed THEIR stored session (and its SIGNED_OUT was ignored
- *     while the sign-out flag was still set). */
+ * Sign-out contract:
+ *  - local first, at once: nothing stored, requests stopped, the shell leaves
+ *    ("signing_out") before the server answers;
+ *  - server revocation (/logout?scope=global, the person's own token): only a
+ *    2xx confirms it. Offline, hung, 401/403/500/503, or a session still
+ *    stored -> "unconfirmed";
+ *  - "Thử xác nhận lại" uses that sign-out's own token and is bounded;
+ *  - a late sign-out never removes the next person's session (F5);
+ *  - a token refresh racing the sign-out cannot bring the session back. */
 
 const PROJECT = 'https://r3probe.supabase.co'
 const STORAGE_KEY = 'sb-r3probe-auth-token'
 let logout: () => Promise<Response>
 let nextUser = 'user-A'
 const calls: string[] = []
+const logoutAuth: string[] = []
 
 const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
-const jwt = (sub: string) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.c2ln`
+const jwt = (sub: string, n = 0) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, n, exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.c2ln`
+let tokenSerial = 0
 function sessionFor(sub: string) {
-  return { access_token: jwt(sub), refresh_token: `r-${sub}`, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: sub, aud: 'authenticated', email: `${sub}@example.test`, app_metadata: {}, user_metadata: {} } }
+  tokenSerial++
+  return { access_token: jwt(sub, tokenSerial), refresh_token: `r-${sub}-${tokenSerial}`, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: sub, aud: 'authenticated', email: `${sub}@example.test`, app_metadata: {}, user_metadata: {} } }
 }
+let refresh: () => Promise<Response> = async () => new Response('{}', { status: 400 })
 async function network(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   calls.push(url.replace(PROJECT, ''))
   if (url.includes('/token?grant_type=password')) return new Response(JSON.stringify(sessionFor(nextUser)), { status: 200, headers: { 'content-type': 'application/json' } })
+  if (url.includes('/token?grant_type=refresh_token')) return refresh()
   if (url.includes('/logout')) {
+    logoutAuth.push(new Headers(init?.headers).get('Authorization') ?? '')
     return new Promise<Response>((resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(init.signal!.reason ?? new DOMException('aborted', 'AbortError')), { once: true })
       logout().then(resolve, reject)
@@ -51,57 +59,200 @@ vi.mock('../utils/supabase', async (orig) => {
 vi.mock('../farmer/data', () => ({ clearFarmerCache: () => {} }))
 
 const auth = await import('./auth')
+const client = await import('./client')
 const { supabase } = await import('../utils/supabase')
 const stored = () => { const raw = localStorage.getItem(STORAGE_KEY); return raw ? (JSON.parse(raw).user?.id ?? null) : null }
+const ok204 = async () => new Response(null, { status: 204 })
+const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms))
 
-beforeEach(() => { calls.length = 0; nextUser = 'user-A'; logout = async () => new Response(null, { status: 204 }) })
-afterEach(async () => { logout = async () => new Response(null, { status: 204 }); localStorage.clear() })
+function record() {
+  const ended = vi.fn(); const offE = auth.onAuthEnded(ended)
+  const outcome = vi.fn(); const offO = auth.onSignOutOutcome(outcome)
+  return { ended, outcome, off: () => { offE(); offO() } }
+}
 
-describe('sign-out with the real auth-js client', () => {
-  it('the storage key the fix removes is the one auth-js uses', async () => {
+beforeEach(() => { calls.length = 0; logoutAuth.length = 0; nextUser = 'user-A'; logout = ok204; refresh = async () => new Response('{}', { status: 400 }) })
+afterEach(() => { logout = ok204; localStorage.clear() })
+
+describe('sign-out: local first, then the server', () => {
+  it('the storage key removed is the one auth-js uses; 204 -> "signing_out" then "confirmed"', async () => {
     expect((supabase!.auth as unknown as { storageKey: string }).storageKey).toBe(STORAGE_KEY)
     await auth.signIn('a@example.test', 'pw')
     expect(stored()).toBe('user-A')
+    const r = record()
     await auth.signOut()
+    expect(r.ended).toHaveBeenCalledWith('signing_out')
+    expect(r.outcome).toHaveBeenCalledWith('confirmed')
+    expect(r.outcome).not.toHaveBeenCalledWith('unconfirmed')
     expect(stored()).toBeNull()
+    expect(calls.filter((u) => u.includes('/logout'))).toEqual(['/auth/v1/logout?scope=global'])
+    r.off()
   })
 
-  it('F4: /logout hangs — once the shell has left, a reload restores nothing', async () => {
+  it('the shell leaves at once: "signing_out", nothing stored and requests refused, before the server answers', async () => {
     await auth.signIn('a@example.test', 'pw')
-    expect(stored()).toBe('user-A')
-    logout = () => new Promise<Response>(() => {})
-    const ended = vi.fn()
-    const off = auth.onAuthEnded(ended)
-    await auth.signOut()
-    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
-    // What a reload reads: the stored session.
+    let unhang!: () => void
+    logout = () => new Promise<Response>((res) => { unhang = () => res(new Response(null, { status: 204 })) })
+    const r = record()
+    const out = auth.signOut()
+    await settle(20)
+    expect(r.ended).toHaveBeenCalledWith('signing_out')
+    expect(r.outcome).not.toHaveBeenCalled()
     expect(stored()).toBeNull()
-    expect(await auth.restoreSession()).toBeNull()
-    off()
+    await expect(client.apiRequest('/v1/me')).rejects.toMatchObject({ code: 'session_expired' })
+    await out
+    unhang(); await settle()   // let the pending sign-out end: the next sign-in would wait for it
+    r.off()
   }, 10_000)
 
-  it('F5: /logout is slow and the next person signs in meanwhile — their session survives the late sign-out', async () => {
+  it('F4: /logout hangs -> "unconfirmed"; a reload restores nothing', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    let unhang!: () => void
+    logout = () => new Promise<Response>((res) => { unhang = () => res(new Response(null, { status: 204 })) })
+    const r = record()
+    await auth.signOut()
+    expect(r.outcome).toHaveBeenCalledWith('unconfirmed')
+    expect(stored()).toBeNull()
+    expect(await auth.restoreSession()).toBeNull()
+    unhang(); await settle()
+    r.off()
+  }, 10_000)
+
+  it.each([401, 403, 500, 503])('/logout answers %i -> "unconfirmed" (auth-js would call 401/403 a success)', async (status) => {
+    await auth.signIn('a@example.test', 'pw')
+    logout = async () => new Response(JSON.stringify({ code: status, msg: 'x' }), { status, headers: { 'content-type': 'application/json' } })
+    const r = record()
+    await auth.signOut()
+    expect(r.outcome).toHaveBeenCalledWith('unconfirmed')
+    expect(r.outcome).not.toHaveBeenCalledWith('confirmed')
+    expect(stored()).toBeNull()
+    r.off()
+  })
+
+  it('offline -> "unconfirmed"; the retry while still offline fails; once the network is back it confirms with the ORIGINAL token', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    const tokenA = JSON.parse(localStorage.getItem(STORAGE_KEY)!).access_token
+    logout = () => Promise.reject(new TypeError('Failed to fetch'))
+    const r = record()
+    await auth.signOut()
+    expect(r.outcome).toHaveBeenCalledWith('unconfirmed')
+    expect(stored()).toBeNull()
+    expect(await auth.confirmSignOut()).toBe(false)
+    logout = ok204
+    logoutAuth.length = 0; calls.length = 0
+    expect(await auth.confirmSignOut()).toBe(true)
+    expect(calls.filter((u) => u.includes('/logout'))).toEqual(['/auth/v1/logout?scope=global'])
+    expect(logoutAuth).toEqual([`Bearer ${tokenA}`])
+    expect(r.outcome).toHaveBeenLastCalledWith('confirmed')
+    expect(await auth.confirmSignOut()).toBe(false)   // nothing left to confirm
+    r.off()
+  })
+
+  it(`the retry is bounded: after ${3} failures it stops and sends nothing more`, async () => {
+    await auth.signIn('a@example.test', 'pw')
+    logout = () => Promise.reject(new TypeError('Failed to fetch'))
+    await auth.signOut()
+    for (let i = 0; i < auth.MAX_CONFIRM_ATTEMPTS; i++) expect(await auth.confirmSignOut()).toBe(false)
+    expect(auth.canConfirmSignOut()).toBe(false)
+    calls.length = 0
+    logout = ok204
+    expect(await auth.confirmSignOut()).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('slow /logout that succeeds after the shell left: "unconfirmed", then "confirmed"', async () => {
     await auth.signIn('a@example.test', 'pw')
     let release!: () => void
-    logout = () => new Promise<Response>((r) => { release = () => r(new Response(null, { status: 204 })) })
-    const ended = vi.fn()
-    const off = auth.onAuthEnded(ended)
-    await auth.signOut()                         // left after SIGN_OUT_WAIT_MS, /logout still pending
-    expect(ended).toHaveBeenCalledTimes(1)
+    logout = () => new Promise<Response>((res) => { release = () => res(new Response(null, { status: 204 })) })
+    const r = record()
+    await auth.signOut()
+    expect(r.outcome).toHaveBeenCalledWith('unconfirmed')
+    release()
+    await vi.waitFor(() => expect(r.outcome).toHaveBeenLastCalledWith('confirmed'))
+    r.off()
+  }, 10_000)
+
+  it('the server confirmed, but the browser still stores the session -> "unconfirmed"', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => undefined) // silently keeps everything
+    try {
+      const r = record()
+      await auth.signOut()
+      expect(stored()).toBe('user-A')
+      expect(r.outcome).toHaveBeenCalledWith('unconfirmed')
+      expect(r.outcome).not.toHaveBeenCalledWith('confirmed')
+      r.off()
+    } finally {
+      removeItem.mockRestore()
+      localStorage.clear()
+    }
+  })
+
+  it('a token refresh racing the sign-out cannot bring the session back', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    let releaseRefresh!: () => void
+    refresh = () => new Promise<Response>((res) => { releaseRefresh = () => res(new Response(JSON.stringify(sessionFor('user-A')), { status: 200, headers: { 'content-type': 'application/json' } })) })
+    const refreshing = supabase!.auth.refreshSession().catch(() => undefined)
+    await settle(10)
+    const out = auth.signOut()
+    await settle(10)
+    releaseRefresh()                       // the refresh stores a NEW session after the local removal
+    await refreshing
+    await out
+    await settle(100)
+    expect(stored()).toBeNull()
+    expect((await supabase!.auth.getSession()).data.session).toBeNull()
+  }, 10_000)
+})
+
+describe('F5: a late sign-out and the next person', () => {
+  it('/logout is slow and the next person signs in meanwhile: their session survives; the sign-in waited', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    let release!: () => void
+    logout = () => new Promise<Response>((res) => { release = () => res(new Response(null, { status: 204 })) })
+    const r = record()
+    await auth.signOut()
     nextUser = 'user-B'
     const signingIn = auth.signIn('b@example.test', 'pw')
-    await new Promise((r) => setTimeout(r, 50))
-    release()                                    // A's sign-out finally returns
+    await settle()
+    release()
     const b = await signingIn
     expect(b?.user.id).toBe('user-B')
-    await new Promise((r) => setTimeout(r, 50))
+    await settle()
     expect(stored()).toBe('user-B')
     expect((await supabase!.auth.getSession()).data.session?.user.id).toBe('user-B')
-    expect(ended).toHaveBeenCalledTimes(1)
+    expect(r.ended).toHaveBeenCalledTimes(1)
     // B's password grant went out only after A's /logout had returned.
     expect(calls.filter((u) => /logout|grant_type=password/.test(u)).map((u) => (u.includes('logout') ? 'logout' : 'token'))).toEqual(['token', 'logout', 'token'])
-    off()
+    r.off()
   }, 10_000)
+
+  it('the next sign-in drops the unconfirmed token: nothing left to confirm, nothing sent', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    logout = () => Promise.reject(new TypeError('Failed to fetch'))
+    await auth.signOut()
+    logout = ok204
+    nextUser = 'user-B'
+    await auth.signIn('b@example.test', 'pw')
+    calls.length = 0
+    expect(await auth.confirmSignOut()).toBe(false)
+    expect(calls.filter((u) => u.includes('/logout'))).toEqual([])
+  })
+})
+
+describe('another tab of this browser removes the stored session', () => {
+  it('this tab ends as "ended_elsewhere"; a refresh written by another tab is not an ending', async () => {
+    await auth.signIn('a@example.test', 'pw')
+    const r = record()
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, oldValue: '{}', newValue: '{"refreshed":true}' }))
+    window.dispatchEvent(new StorageEvent('storage', { key: 'some-other-key', oldValue: 'x', newValue: null }))
+    expect(r.ended).not.toHaveBeenCalled()
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, oldValue: '{}', newValue: null }))
+    expect(r.ended).toHaveBeenCalledWith('ended_elsewhere')
+    expect(r.ended).toHaveBeenCalledTimes(1)
+    await expect(client.apiRequest('/v1/me')).rejects.toMatchObject({ code: 'session_expired' })
+    r.off()
+  })
 })
 
 describe('boundedAuthFetch', () => {
@@ -131,108 +282,6 @@ describe('boundedAuthFetch', () => {
       own.abort()
     } finally {
       vi.useRealTimers()
-    }
-  })
-})
-
-describe('sign-out outcome: local cleanup and server revocation are reported separately', () => {
-  it('server confirms in time: "signed_out"', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
-    await auth.signOut()
-    expect(ended).toHaveBeenCalledWith('signed_out')
-    expect(stored()).toBeNull()
-    off()
-  })
-
-  it('offline: stored session removed, reason "signed_out_unconfirmed"; a retry once the network is back confirms it', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    logout = () => Promise.reject(new TypeError('Failed to fetch'))
-    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
-    const confirmed = vi.fn(); const offC = auth.onSignOutConfirmed(confirmed)
-    await auth.signOut()
-    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
-    expect(stored()).toBeNull()
-    // Still offline: the retry cannot confirm.
-    expect(await auth.confirmSignOut()).toBe(false)
-    expect(confirmed).not.toHaveBeenCalled()
-    // Network back: the retry asks the server with the captured token (scope global).
-    logout = async () => new Response(null, { status: 204 })
-    calls.length = 0
-    expect(await auth.confirmSignOut()).toBe(true)
-    expect(calls.some((u) => /\/auth\/v1\/logout\?scope=global/.test(u))).toBe(true)
-    expect(confirmed).toHaveBeenCalledTimes(1)
-    // Nothing left to confirm.
-    expect(await auth.confirmSignOut()).toBe(false)
-    off(); offC()
-  })
-
-  it('slow /logout that succeeds after the shell left: first "unconfirmed", then confirmed', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    let release!: () => void
-    logout = () => new Promise<Response>((r) => { release = () => r(new Response(null, { status: 204 })) })
-    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
-    const confirmed = vi.fn(); const offC = auth.onSignOutConfirmed(confirmed)
-    await auth.signOut()
-    expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
-    expect(confirmed).not.toHaveBeenCalled()
-    release()
-    await vi.waitFor(() => expect(confirmed).toHaveBeenCalledTimes(1))
-    off(); offC()
-  }, 10_000)
-
-  it('a server refusal of the retry (expired token) does not confirm', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    logout = () => Promise.reject(new TypeError('Failed to fetch'))
-    await auth.signOut()
-    logout = async () => new Response('{"code":401,"msg":"invalid JWT"}', { status: 401, headers: { 'content-type': 'application/json' } })
-    expect(await auth.confirmSignOut()).toBe(false)
-  })
-})
-
-describe('another tab of this browser removes the stored session', () => {
-  it('this tab ends as "ended_elsewhere"; a refresh written by another tab is not an ending', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    const ended = vi.fn(); const off = auth.onAuthEnded(ended)
-    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, oldValue: '{}', newValue: '{"refreshed":true}' }))
-    window.dispatchEvent(new StorageEvent('storage', { key: 'some-other-key', oldValue: 'x', newValue: null }))
-    expect(ended).not.toHaveBeenCalled()
-    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, oldValue: '{}', newValue: null }))
-    expect(ended).toHaveBeenCalledWith('ended_elsewhere')
-    expect(ended).toHaveBeenCalledTimes(1)
-    // Requests stop at once in this tab.
-    await expect((await import('./client')).apiRequest('/v1/me')).rejects.toMatchObject({ code: 'session_expired' })
-    off()
-  })
-})
-
-describe('the unconfirmed token does not outlive the next sign-in', () => {
-  it('after a new sign-in there is nothing left to confirm', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    logout = () => Promise.reject(new TypeError('Failed to fetch'))
-    await auth.signOut()
-    logout = async () => new Response(null, { status: 204 })
-    nextUser = 'user-B'
-    await auth.signIn('b@example.test', 'pw')
-    calls.length = 0
-    expect(await auth.confirmSignOut()).toBe(false)
-    expect(calls.filter((u) => u.includes('/logout'))).toEqual([])
-  })
-})
-
-describe('the server confirmed, but this browser still stores the session', () => {
-  it('is not reported as a confirmed sign-out (storage silently kept it)', async () => {
-    await auth.signIn('a@example.test', 'pw')
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => undefined) // silently keeps everything
-    try {
-      const ended = vi.fn(); const off = auth.onAuthEnded(ended)
-      await auth.signOut()
-      expect(stored()).toBe('user-A')
-      expect(ended).toHaveBeenCalledWith('signed_out_unconfirmed')
-      off()
-    } finally {
-      removeItem.mockRestore()
-      localStorage.clear()
     }
   })
 })

@@ -25,7 +25,8 @@ const clearFarmerCache = vi.fn()
 const seenAtFirstRender: { page: string; cached: unknown }[] = []
 
 vi.mock('./api/auth', () => ({
-  onSignOutConfirmed: () => () => {},
+  onSignOutOutcome: () => () => {},
+  canConfirmSignOut: () => false,
   confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},

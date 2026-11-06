@@ -10,7 +10,7 @@ function requireAuthClient() { if (!supabase) throw new Error('Thiếu VITE_SUPA
 
 /** Why a signed-in session stopped: the person asked (and the server confirmed
  *  it, or not yet), another tab of this browser ended it, or the token ran out. */
-export type AuthEndReason = 'signed_out' | 'signed_out_unconfirmed' | 'ended_elsewhere' | 'expired'
+export type AuthEndReason = 'signing_out' | 'signed_out' | 'signed_out_unconfirmed' | 'ended_elsewhere' | 'expired'
 const ended = new Set<(reason: AuthEndReason) => void>()
 /** The app shell listens here and drops to the login screen — no page has to
  * notice a dead session on its own and render a half-signed-in state. */
@@ -166,6 +166,7 @@ export async function signIn(email: string, password: string) {
   if (error) throw new Error(signInErrorMessage(error))
   beginIdentity()
   unconfirmedToken = null
+  confirmAttempts = 0
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
@@ -208,69 +209,101 @@ function storedSessionGone(client: NonNullable<typeof supabase>): boolean {
 
 /* ------------------------------------------------- server-side revocation */
 
-/** The access token of a sign-out the server has not confirmed, kept in this
- *  tab's memory only so "Thử xác nhận lại" can ask again. Dropped on success
- *  and on the next sign-in. */
-let unconfirmedToken: string | null = null
-const revocationConfirmed = new Set<() => void>()
-/** Fires when a sign-out first reported as unconfirmed is later confirmed by
- *  the server (the late answer arrived, or a retry succeeded). */
-export function onSignOutConfirmed(fn: () => void): () => void {
-  revocationConfirmed.add(fn)
-  return () => { revocationConfirmed.delete(fn) }
+/** What the server said about the last sign-out of this tab. */
+export type SignOutOutcome = 'confirmed' | 'unconfirmed'
+const outcomeListeners = new Set<(o: SignOutOutcome) => void>()
+/** Fires once the server's answer to a sign-out is known (or the wait is
+ *  over), and again if an unconfirmed sign-out is confirmed later (the late
+ *  answer arrived, or "Thử xác nhận lại" succeeded). */
+export function onSignOutOutcome(fn: (o: SignOutOutcome) => void): () => void {
+  outcomeListeners.add(fn)
+  return () => { outcomeListeners.delete(fn) }
 }
+function tellOutcome(o: SignOutOutcome) { for (const fn of outcomeListeners) fn(o) }
+
+/** The access token of a sign-out the server has not confirmed, kept in this
+ *  tab's memory only (never stored, never logged) so "Thử xác nhận lại" asks
+ *  the server about exactly that session. Dropped on success, after
+ *  MAX_CONFIRM_ATTEMPTS, and by the next sign-in. */
+let unconfirmedToken: string | null = null
+let confirmAttempts = 0
+/** "Thử xác nhận lại" is asked at most this many times per sign-out; each try
+ *  is one bounded request (LOGOUT_TIMEOUT_MS). Nothing retries on its own. */
+export const MAX_CONFIRM_ATTEMPTS = 3
+
 function confirmRevocation(token: string) {
   if (unconfirmedToken !== token) return
   unconfirmedToken = null
-  for (const fn of revocationConfirmed) fn()
+  tellOutcome('confirmed')
 }
 
 /** Ask the server again to end every session of the account that signed out
- *  here (scope `global`). True only when the server confirmed it. False when
- *  there is nothing to confirm, the network still fails, or the token has
- *  already expired (the server can no longer be asked with it). */
+ *  here (scope `global`), with that sign-out's own token. True only on a 2xx
+ *  answer. False when there is nothing to confirm, the attempts are used up,
+ *  the network still fails, or the server refuses (an expired token: 401). */
 export async function confirmSignOut(): Promise<boolean> {
   const token = unconfirmedToken
-  if (!token) return false
+  if (!token || confirmAttempts >= MAX_CONFIRM_ATTEMPTS) return false
+  confirmAttempts++
   // The person's own token, not an admin call (see revokeSessionsWithToken).
-  if (!(await revokeSessionsWithToken(token))) return false
+  if (!(await revokeSessionsWithToken(token).catch(() => false))) {
+    if (confirmAttempts >= MAX_CONFIRM_ATTEMPTS && unconfirmedToken === token) unconfirmedToken = null
+    return false
+  }
   confirmRevocation(token)
   return true
 }
+/** True while "Thử xác nhận lại" can still be offered for the last sign-out. */
+export const canConfirmSignOut = (): boolean => unconfirmedToken !== null && confirmAttempts < MAX_CONFIRM_ATTEMPTS
 
 /**
- * Sign out is a local decision first: the tab is cleared and the shell leaves
- * even when the server call fails (offline, or a token already expired), since
- * a failed network call must never leave someone stuck inside the app.
- *
- * Two separate facts decide what the login screen then says:
- *  - local: this browser no longer stores the session (always made true here);
- *  - server: Supabase confirmed the revocation (`/logout` answered). Only when
- *    both hold is it "Bạn đã đăng xuất". Otherwise the reason is
- *    `signed_out_unconfirmed`: signed out on this device, but the session may
- *    still be valid on the server, and the screen says so.
+ * Sign out. In this order:
+ *  1. Local first, at once: the stored session is removed (which also ends
+ *     every other tab of this browser through the `storage` event), requests
+ *     stop, the caches are dropped and the shell leaves (`signing_out`). No
+ *     business screen stays up while the server is asked.
+ *  2. The server is asked to revoke every session of the account
+ *     (`POST /auth/v1/logout?scope=global`, the person's own token, bounded).
+ *     Only a 2xx answer is a confirmation: auth-js treats 401/403/404 as
+ *     "signed out" because the local session is gone anyway, but a 401 (expired
+ *     token) means the server revoked nothing.
+ *  3. auth-js drops its own in-memory copy (scope `local`: nothing is stored
+ *     any more, so it sends nothing). If a token refresh was in flight and
+ *     stored a new session meanwhile, this removes that too.
+ * The outcome follows within SIGN_OUT_WAIT_MS: `confirmed`, or `unconfirmed`
+ * (offline, hung, refused, or the session still stored); an unconfirmed
+ * sign-out can still turn into `confirmed` when the late answer arrives.
  */
 export async function signOut() {
   signingOut = true
   const client = requireAuthClient()
   const token = currentAccessToken()
-  // Revoke on the server, but never hold the person inside the app for it:
-  // measured on a phone profile the round trip took over three seconds, and
-  // the shell stayed on screen the whole time. Wait at most 1.5s, then leave.
-  // auth-js answers { error } (it does not throw) when the network fails.
-  const remote: Promise<boolean> = client.auth.signOut().then(({ error }) => !error, () => false)
-  pendingSignOut = remote
-  const outcome = await Promise.race([remote, new Promise<'pending'>((r) => setTimeout(() => r('pending'), SIGN_OUT_WAIT_MS))])
-  // Not confirmed (yet): the stored session goes now anyway.
-  if (outcome !== true) dropStoredSession(client)
-  const confirmed = outcome === true && storedSessionGone(client)
-  unconfirmedToken = confirmed ? null : token
-  finish(confirmed ? 'signed_out' : 'signed_out_unconfirmed')
-  void remote.then((ok) => { if (ok && token && outcome === 'pending' && storedSessionGone(client)) confirmRevocation(token) })
-    .finally(() => {
-      signingOut = false
-      if (pendingSignOut === remote) pendingSignOut = null
-    })
+  dropStoredSession(client)
+  unconfirmedToken = token
+  confirmAttempts = 0
+  const server: Promise<boolean> = token ? revokeSessionsWithToken(token).catch(() => false) : Promise.resolve(false)
+  const local = client.auth.signOut({ scope: 'local' }).then(() => undefined, () => undefined)
+  const pending = Promise.allSettled([server, local])
+  pendingSignOut = pending
+  finish('signing_out')
+  const early = await Promise.race([server, new Promise<'pending'>((r) => setTimeout(() => r('pending'), SIGN_OUT_WAIT_MS))])
+  await Promise.race([local, new Promise((r) => setTimeout(r, 50))])
+  const confirmedNow = early === true && storedSessionGone(client)
+  if (confirmedNow && token) confirmRevocation(token)
+  else tellOutcome('unconfirmed')
+  // Not confirmed yet: the late answer (or a refresh that stored a session
+  // until auth-js removed it) can still confirm it.
+  void (async () => {
+    if (confirmedNow || !token) return
+    const ok = early === 'pending' ? await server : early
+    if (!ok) return
+    await local
+    if (storedSessionGone(client)) confirmRevocation(token)
+  })()
+  void pending.finally(() => {
+    signingOut = false
+    if (pendingSignOut === pending) pendingSignOut = null
+  })
 }
 
 /** Supabase's password-change refusals, in the words the Account page uses. */
