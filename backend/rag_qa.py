@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -339,6 +340,32 @@ PUBLIC_MESSAGES: dict[str, str] = {
     "tenant_isolation_violation": "Lỗi hệ thống.",
 }
 _GROUNDING_MESSAGE = "Câu trả lời không vượt qua kiểm tra nguồn dẫn nên đã bị chặn. Vui lòng thử lại."
+
+
+class QuestionRefused(Exception):
+    """What the route turns into the Core V1 error envelope. Carries no internal detail."""
+
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(code)
+        self.status, self.code, self.message = status, code, message
+
+
+def respond(service: RagQuestionService, **kwargs: Any) -> dict[str, Any]:
+    """`service.answer`, with every RAG refusal mapped to `QuestionRefused` (§15)."""
+    try:
+        return service.answer(**kwargs)
+    except RagError as exc:
+        raise QuestionRefused(*http_error(exc)) from exc
+
+
+def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None) -> RagQuestionService:
+    """Composition-root factory: provider and retrieval cutoff from server-side env only."""
+    from infrastructure.llm_client import build_llm_client, load_llm_settings
+
+    raw = (os.environ.get("RAG_RETRIEVAL_MIN_FUSED_SCORE") or "").strip()
+    retrieval = RetrievalSettings(min_fused_score=float(raw)) if raw else RetrievalSettings()
+    return RagQuestionService(carbon_service=carbon_service, llm_client=build_llm_client(load_llm_settings()),
+                              retrieval=retrieval, write_gate=write_gate)
 
 
 def http_error(exc: RagError) -> tuple[int, str, str]:
