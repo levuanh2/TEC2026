@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../utils/supabase'
-import { apiRequest, endSession, setAccessToken, setUnauthorizedHandler } from './client'
+import { apiRequest, beginIdentity, endSession, setAccessToken, setUnauthorizedHandler } from './client'
 import { clearOrganizationCache } from './organizations'
 import { clearViewerHint } from './me'
 import { clearFarmerCache } from '../farmer/data'
@@ -60,23 +60,37 @@ function finish(reason: AuthEndReason) {
 
 /** Supabase refreshes the token in the background; the API client has to be
  * told, or every request after the first hour goes out with a dead token. */
+/** `session`, when it belongs to someone other than this tab's live person. */
+function otherPerson(session: Session | null): Session | null {
+  return session?.access_token && session.user?.id && live && liveUserId && session.user.id !== liveUserId ? session : null
+}
+
+/** Another tab signed a different person in (the storage and the token are
+ *  shared). From here on nothing asked for the previous person may be sent or
+ *  retried with the new token, and nothing cached for them may be shown. */
+function replaceWith(session: Session) {
+  beginIdentity()
+  liveUserId = session.user.id
+  setAccessToken(session.access_token)
+  setQueryUser(session.user.id)   // clears the query cache on a change of user
+  clearOrganizationCache()
+  clearFarmerCache()
+  clearViewerHint()
+  for (const fn of replaced) fn(session)
+}
+
 let watching = false
 function watchSession() {
   if (watching || !supabase) return
   watching = true
   supabase.auth.onAuthStateChange((event, session) => {
+    // Whatever the event is called: a SIGNED_IN from the other tab, or a
+    // TOKEN_REFRESHED that picked up the other person's stored session.
+    const other = otherPerson(session)
+    if (other) { replaceWith(other); return }
     if (session?.access_token && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) setAccessToken(session.access_token)
     if (session?.access_token && event === 'TOKEN_REFRESHED') notifyRefreshed()
-    // Another tab signed a different person in: nothing cached for the old
-    // one may be shown (setQueryUser clears on any change of user).
     if (session?.user?.id && event === 'SIGNED_IN') setQueryUser(session.user.id)
-    if (session?.user?.id && event === 'SIGNED_IN' && live && liveUserId && session.user.id !== liveUserId) {
-      liveUserId = session.user.id
-      clearOrganizationCache()
-      clearFarmerCache()
-      clearViewerHint()
-      for (const fn of replaced) fn(session)
-    }
     if (event === 'SIGNED_OUT' && !signingOut) finish('expired')
   })
 }
@@ -86,7 +100,13 @@ setUnauthorizedHandler(async () => {
   if (!supabase) return null
   try {
     const { data, error } = await supabase.auth.refreshSession()
-    const token = error ? null : data.session?.access_token ?? null
+    const session = error ? null : data.session
+    // The refresh uses whatever session is stored, which another tab may have
+    // replaced with someone else's: that is a replacement, never a token for
+    // this request (the API client refuses it because the identity moved).
+    const other = otherPerson(session)
+    if (other) { replaceWith(other); return other.access_token }
+    const token = session?.access_token ?? null
     if (token) { setAccessToken(token); notifyRefreshed(); return token }
   } catch { /* fall through: the session cannot be recovered */ }
   finish('expired')
@@ -115,8 +135,15 @@ export function signInErrorMessage(error: unknown): string {
 }
 
 export async function signIn(email: string, password: string) {
-  const { data, error } = await requireAuthClient().auth.signInWithPassword({ email, password })
+  const client = requireAuthClient()
+  // A sign-out still running would, when it returns, remove the session this
+  // sign-in is about to store (auth-js removes whatever is stored by then) and
+  // the next person would be dropped minutes later. It is bounded
+  // (LOGOUT_TIMEOUT_MS), so waiting for it is too.
+  if (pendingSignOut) await pendingSignOut
+  const { data, error } = await client.auth.signInWithPassword({ email, password })
   if (error) throw new Error(signInErrorMessage(error))
+  beginIdentity()
   setAccessToken(data.session?.access_token ?? null)
   setQueryUser(data.session?.user?.id ?? null)
   live = Boolean(data.session)
@@ -129,18 +156,41 @@ export async function signIn(email: string, password: string) {
 export function expireSession(): void { finish('expired') }
 
 let signingOut = false
+/** The server sign-out still running after the shell already left, if any. */
+let pendingSignOut: Promise<unknown> | null = null
+/** How long the shell waits for the server sign-out before leaving anyway. */
+export const SIGN_OUT_WAIT_MS = 1500
+
+/** Remove the stored Supabase session of this browser, without the network.
+ *  auth-js only removes it once its /logout call returns; until then a reload
+ *  (or the next person opening the site) would restore the session the person
+ *  was just told had ended. */
+function dropStoredSession(client: NonNullable<typeof supabase>) {
+  const key = (client.auth as unknown as { storageKey?: unknown }).storageKey
+  if (typeof key !== 'string' || !key) return
+  try { for (const k of [key, `${key}-user`, `${key}-code-verifier`]) localStorage.removeItem(k) } catch { /* storage unavailable */ }
+}
+
 /** Sign out is a local decision first: the tab is cleared and the shell leaves
  * even when the server call fails (offline, or a token already expired), since
  * a failed network call must never leave someone stuck inside the app. */
 export async function signOut() {
   signingOut = true
+  const client = requireAuthClient()
   // Revoke on the server, but never hold the person inside the app for it:
   // measured on a phone profile the round trip took over three seconds, and
   // the shell stayed on screen the whole time. Wait at most 1.5s, then leave.
-  const remote = requireAuthClient().auth.signOut().catch(() => undefined)
-  await Promise.race([remote, new Promise((r) => setTimeout(r, 1500))])
+  const remote = client.auth.signOut().catch(() => undefined)
+  pendingSignOut = remote
+  const settled = await Promise.race([remote.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), SIGN_OUT_WAIT_MS))])
+  // Leaving before the server answered: the stored session goes now, so
+  // "Bạn đã đăng xuất" is true on this device whatever the network does.
+  if (!settled) dropStoredSession(client)
   finish('signed_out')
-  void remote.finally(() => { signingOut = false })
+  void remote.finally(() => {
+    signingOut = false
+    if (pendingSignOut === remote) pendingSignOut = null
+  })
 }
 
 /** Supabase's password-change refusals, in the words the Account page uses. */

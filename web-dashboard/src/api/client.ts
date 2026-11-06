@@ -8,9 +8,20 @@ let accessToken: string | null = null
  * so a page still mounted behind the login screen cannot keep firing
  * authenticated reads with nothing to authenticate them. */
 let sessionEnded = false
+/** Whose session the token belongs to, as a counter. It moves when a session
+ * ends and when a session of another person takes over this tab (a sign-in,
+ * or another tab signing someone else in). A request remembers the value it
+ * started under and is never sent, or retried after a 401, under a later one:
+ * it was asked on behalf of someone who is no longer signed in here, and the
+ * new person's token must not answer it. A token refresh of the same person
+ * does not move it. */
+let identity = 0
 export const setAccessToken = (token: string | null) => { accessToken = token; if (token) sessionEnded = false }
-export function endSession(): void { accessToken = null; sessionEnded = true }
+export function endSession(): void { accessToken = null; sessionEnded = true; identity++ }
+/** A different person's session takes over: call before installing its token. */
+export function beginIdentity(): void { identity++ }
 export const SESSION_EXPIRED_MESSAGE = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.'
+export const SESSION_REPLACED_MESSAGE = 'Phiên đăng nhập đã chuyển sang tài khoản khác.'
 
 /** Called on a 401 for a request that carried a token. Returns a fresh token to
  * retry once with, or null when the session cannot be recovered. Registered by
@@ -20,6 +31,8 @@ let onUnauthorized: UnauthorizedHandler | null = null
 export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void { onUnauthorized = fn }
 
 function ended(): ApiError { return new ApiError(401, 'session_expired', SESSION_EXPIRED_MESSAGE) }
+/** The request's own session is over: ended, or replaced by someone else's. */
+function gone(): ApiError { return sessionEnded ? ended() : new ApiError(401, 'session_replaced', SESSION_REPLACED_MESSAGE) }
 
 export const OFFLINE_MESSAGE = 'Không thể kết nối FastAPI. Kiểm tra mạng hoặc API server.'
 export const TIMEOUT_MESSAGE = 'Máy chủ phản hồi quá lâu nên yêu cầu đã dừng. Vui lòng thử lại.'
@@ -96,16 +109,23 @@ async function fetchOnce(url: string, init: RequestInit, headers: Headers): Prom
 
 async function send(path: string, init: RequestInit, headers: Headers): Promise<Response> {
   if (sessionEnded) throw ended()
+  const own = identity
   const release = isRead(init) ? await acquireRead(init.signal) : null
   try {
-    // The session may have ended while this read waited for a slot.
+    // The session may have ended, or become someone else's, while this read
+    // waited for a slot.
     if (sessionEnded) throw ended()
+    if (identity !== own) throw gone()
     const sentWith = accessToken
     if (sentWith) headers.set('Authorization', `Bearer ${sentWith}`)
     const response = await fetchOnce(`${baseUrl}${path}`, init, headers)
     if (response.status !== 401 || !sentWith || !onUnauthorized) return response
+    // Signed out or replaced while in flight: neither a refresh (it would
+    // refresh whoever is stored now) nor the current token may answer it.
+    if (identity !== own) throw gone()
     // A token that was valid a moment ago: Supabase may simply have rotated it.
     const fresh = accessToken && accessToken !== sentWith ? accessToken : await onUnauthorized()
+    if (identity !== own) throw gone()
     if (!fresh) throw ended()
     headers.set('Authorization', `Bearer ${fresh}`)
     return await fetchOnce(`${baseUrl}${path}`, init, headers)

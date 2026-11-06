@@ -278,7 +278,25 @@ function applyRoleRedirect(role: string, currentPath: string) {
 /** Everything a confirmed viewer's cached reads depend on. Two answers with
  *  the same signature may share cached data; any difference drops it. */
 function verifiedScope(userId: string, v: CurrentUser): string {
-  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.mustChangePassword === true])
+  // `access` lists every membership and farm role, read-only ones included:
+  // losing a farm this account could only read must drop its cached rows too.
+  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.access ?? [], v.mustChangePassword === true])
+}
+
+/** /v1/me answered for an account other than the session's (the shared token
+ *  was replaced under this request). Nothing in it may be applied to this
+ *  session; the auth layer switches the tab to the stored session. */
+const ANSWER_FOR_ANOTHER_ACCOUNT = 409
+
+/** A `next` page to return to after sign-in: only a path of this site. */
+function sameOriginPath(raw: string | null): string | null {
+  if (!raw || !raw.startsWith('/')) return null
+  try {
+    const u = new URL(raw, location.origin)
+    return u.origin === location.origin ? `${u.pathname}${u.search}${u.hash}` : null
+  } catch {
+    return null
+  }
 }
 
 /** A verified tab re-reads /v1/me when it comes back into view or its token is
@@ -314,6 +332,7 @@ function viewerFailureText(f: ViewerFailure): string {
   if (f.status === 0) return 'Không kết nối được máy chủ để xác minh quyền của tài khoản.'
   if (f.status === 401) return 'Phiên đăng nhập không còn hợp lệ, nên chưa xác minh được quyền của tài khoản.'
   if (f.status === 403) return 'Máy chủ từ chối xác minh quyền của tài khoản này.'
+  if (f.status === ANSWER_FOR_ANOTHER_ACCOUNT) return 'Phiên đăng nhập vừa chuyển sang một tài khoản khác, nên chưa xác minh được quyền.'
   return `Máy chủ chưa xác minh được quyền của tài khoản (mã ${f.status}).`
 }
 
@@ -466,6 +485,13 @@ function AppRoot() {
     void getMe()
       .then((v) => {
         if (!current()) return
+        // Someone else's answer (the token changed hands while it was in
+        // flight): never this session's role, hint or redirect.
+        if (v.userId && v.userId !== session.user.id) {
+          setVerifiedFor(null)
+          setViewerFailure({ session, status: ANSWER_FOR_ANOTHER_ACCOUNT, message: '' })
+          return
+        }
         // A different user, role, organisation or farm access than the last
         // answer in this tab: what the caches hold was read under the old
         // scope. Drop all of it before the new shell mounts, so it can only
@@ -612,8 +638,8 @@ function AppRoot() {
       setEnded(null)
       // Back to where an expired session interrupted the person, if it was a
       // page of this app; the role redirect still applies once /v1/me answers.
-      const next = new URLSearchParams(location.search).get('next')
-      if (next && next.startsWith('/') && !next.startsWith('//')) { history.replaceState({}, '', next); setPath(next) }
+      const next = sameOriginPath(new URLSearchParams(location.search).get('next'))
+      if (next) { history.replaceState({}, '', next); setPath(location.pathname) }
       setSession(s)
     }} />
   }
