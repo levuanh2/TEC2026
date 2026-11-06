@@ -215,6 +215,10 @@ describe('F5: a late sign-out and the next person', () => {
     nextUser = 'user-B'
     const signingIn = auth.signIn('b@example.test', 'pw')
     await settle()
+    // While A's revocation is pending, the next sign-in has NOT gone out yet: a
+    // global revocation landing after it would also end a new session of the
+    // same account.
+    expect(calls.filter((u) => u.includes('grant_type=password'))).toHaveLength(1)
     release()
     const b = await signingIn
     expect(b?.user.id).toBe('user-B')
