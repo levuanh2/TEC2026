@@ -41,3 +41,16 @@ describe('viewer hint round-trip', () => {
     expect(readViewerHint('u-1')?.writableFarmIds).toBeUndefined()
   })
 })
+
+describe('viewer hint belongs to one user (R3)', () => {
+  afterEach(() => { localStorage.clear() })
+  it('a hint written for one user is never returned for another', () => {
+    writeViewerHint('u-1', { role: 'cooperative_manager', organizationId: 'org-1' })
+    expect(readViewerHint('u-1')?.role).toBe('cooperative_manager')
+    expect(readViewerHint('u-2')).toBeNull()
+  })
+  it('the access list is never written to storage', () => {
+    writeViewerHint('u-1', { role: 'farmer', organizationId: 'org-1', access: ['farm:f1:viewer'] })
+    expect(localStorage.getItem('agricarbon.viewer.v1')).not.toContain('farm:f1')
+  })
+})

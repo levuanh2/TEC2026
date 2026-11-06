@@ -21,10 +21,11 @@ let raw: () => Promise<Raw>
 const writeViewerHint = vi.fn()
 const signIn = vi.fn()
 const mounts = { farmer: 0 }
+let ended: ((reason: 'expired' | 'signed_out') => void) | null = null
 let session: { access_token: string; user: { id: string; email: string; app_metadata: object } } | null
 
 vi.mock('./api/auth', () => ({
-  onAuthEnded: () => () => {},
+  onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
   onSessionReplaced: () => () => {},
   restoreSession: async () => session,
@@ -149,5 +150,23 @@ describe('F6: ?next= after sign-in', () => {
     fireEvent.submit(form)
     expect(await screen.findByText('farmer-experience')).toBeTruthy()
     expect(location.pathname + location.search).toBe('/farmer/journal?season=s1')
+  })
+})
+
+describe('the first /v1/me of a session still pending when the session ends', () => {
+  it('sign-out: its late answer writes no hint, renders nothing and does not leave /login', async () => {
+    let resolveLate: (r: Raw) => void = () => {}
+    let asked = false
+    raw = () => { asked = true; return new Promise<Raw>((r) => { resolveLate = r }) }
+    history.replaceState({}, '', '/dashboard')
+    render(<App />)
+    await waitFor(() => expect(asked).toBe(true))
+    act(() => ended!('signed_out'))
+    expect(location.pathname).toBe('/login')
+    resolveLate({ user_id: 'user-A', full_name: 'A', roles: ['cooperative_manager'], organization_memberships: [{ organization_id: 'org-1', role: 'cooperative_manager' }], farm_memberships: [] })
+    await settle()
+    expect(location.pathname).toBe('/login')
+    expect(writeViewerHint).not.toHaveBeenCalled()
+    expect(document.querySelector('.shell, .role-chip')).toBeNull()
   })
 })

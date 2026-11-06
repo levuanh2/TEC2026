@@ -101,4 +101,19 @@ describe('a request belongs to the identity it started under', () => {
     await expect(c.apiRequest('/v1/me')).resolves.toEqual({ ok: true })
     expect(sent).toEqual(['Bearer token-B'])
   })
+
+  it('a read queued behind the concurrency limit when the session ends is never sent and ends as expired', async () => {
+    c.setAccessToken('token-A')
+    const hold = Array.from({ length: c.MAX_CONCURRENT_READS }, deferred)
+    let i = 0
+    answer = () => (i < hold.length ? hold[i++].p : Promise.resolve(new Response('{}', { status: 200 })))
+    const busy = hold.map((_, k) => c.apiRequest(`/v1/busy/${k}`))
+    await vi.waitFor(() => expect(sent.length).toBe(c.MAX_CONCURRENT_READS))
+    const queued = c.apiRequest('/v1/organizations/org-A/seasons')
+    c.endSession()
+    hold.forEach((h) => h.resolve(new Response('{}', { status: 200 })))
+    await Promise.all(busy)
+    await expect(queued).rejects.toMatchObject({ code: 'session_expired' })
+    expect(sent.length).toBe(c.MAX_CONCURRENT_READS)
+  })
 })

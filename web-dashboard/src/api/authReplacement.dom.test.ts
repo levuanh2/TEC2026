@@ -27,6 +27,7 @@ vi.mock('../farmer/data', () => ({ clearFarmerCache: () => {} }))
 function sessionOf(id: string, token: string) { return { access_token: token, user: { id, app_metadata: {} } } }
 
 const auth = await import('./auth')
+const { queryClient } = await import('../query/client')
 const client = await import('./client')
 const sent: (string | null)[] = []
 let answer: (authz: string | null) => Promise<Response>
@@ -89,5 +90,13 @@ describe('another person takes over the shared session', () => {
     listener!('TOKEN_REFRESHED', sessionOf('user-A', 'token-A3'))
     expect(replaced).not.toHaveBeenCalled()
     off()
+  })
+})
+
+describe('sign-out', () => {
+  it('drops every cached query answer, even when the next person is the same account', async () => {
+    queryClient.setQueryData(['u', 'user-A', 'org', 'org-1', 'carbon-status'], [{ row: 1 }])
+    await auth.signOut()
+    expect(queryClient.getQueryCache().getAll()).toEqual([])
   })
 })
