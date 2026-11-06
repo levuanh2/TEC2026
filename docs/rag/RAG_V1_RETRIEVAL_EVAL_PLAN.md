@@ -125,3 +125,15 @@ chunks; `top_k` clamped.
 Lexical runs execute in CI against the local Supabase stack with the fixture corpus (correctness and
 security). The metric runs over the approved corpus are operator/nightly jobs (no network in PR CI);
 their reports are committed with any change to retrieval parameters.
+
+## 10. Runner (implemented; no real metrics yet)
+
+| Piece | Where | Behaviour |
+|---|---|---|
+| metrics | `backend/rag_eval.py` (pure) | the file loader refuses duplicate ids, a topic group in two splits (anti-leakage), a negative query with labels, a positive query without one, and an unknown split. `judge()` finds the first rank that matches an `expected`/`acceptable` label: by `chunk_ids` when given, otherwise by `section_path` or one of its subsections. `score()` gives Hit@1/3/5/8, Recall@5/8, MRR@10, negative FPR, empty-result rate, latency p50/p95, per-category counts and the failed query ids. It refuses to mix splits |
+| runner | `backend/scripts/eval_retrieval.py` | every query goes through the production `RagEvidenceService`: a real JWT (`EVAL_ACCESS_TOKEN`, env only, never written to the report), the D3 resolver, the lexical RPC and `--min-fused-score`. Writes a JSON report with the configuration and per-query top-10 |
+| tests | `tests/test_rag_eval.py`, `tests/test_rag_eval_db.py` | the metric arithmetic on hand-built rankings; the runner end to end on a local stack against the TEST FIXTURE corpus of `test_rag_retrieval_db.py` |
+
+The fixture numbers prove the runner, not retrieval quality. The 64-query DEV/HOLDOUT files
+(§3) still need approved documents to label. Until C1 approves a corpus, there is no cutoff
+calibration (§6) and no done gate (§7).
