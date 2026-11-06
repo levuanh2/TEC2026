@@ -148,6 +148,7 @@ From GitHub on 2026-11-06. Branch protection on `main`: 1 approving review requi
 | #18 | Chunk-load recovery | `a2f4801` | 2026-11-05 18:10 | levuanh2, `--admin` | 0 | agy (read-only), APPROVE |
 | #17 | **Auth/RBAC** (open-tab `/v1/me` re-check, cache isolation) | `654f95c` | 2026-11-05 18:35 | levuanh2, `--admin` | 0 | agy (read-only), APPROVE |
 | #19 | Docs (this report) | `1e720e5` | 2026-11-05 18:55 | levuanh2, `--admin` | 0 | agy (read-only) |
+| #21 | **Auth** (R3 security fixes F1–F6) | `48a5a2a` | 2026-11-06 | levuanh2, owner-authorized `--admin` (only the required review was missing; CI 17/17; head pinned) | 0 | Claude Code (author); human review pending in #24 |
 
 A review request to SiriusNoPro is open on #17, #18, #19 and #20. #13, #15 and #16 had none; R3 requested one (2026-11-06). SiriusNoPro has write access and is not a code owner. The web source (`web-dashboard/src/**`) is not a code-owned path, so an approval by SiriusNoPro satisfies the review rule for a PR that changes only that path.
 
@@ -156,7 +157,7 @@ A review request to SiriusNoPro is open on #17, #18, #19 and #20. #13, #15 and #
 | Area | Status | Evidence |
 |---|---|---|
 | `main` | `1e720e5`. CI `42088924919` and Strict CI (nightly) `42133051409` green | GitHub Actions |
-| Production frontend | Render `dep-dbmcstd9fdbs73ckg6e0` live at `654f95c`, entry `index-YKjxTk3n.js`. No deploy after it (Render deploy list, read-only). `654f95c..1e720e5` is docs only | Render API; `curl https://agricarbon.info.vn/` |
+| Production frontend | Render `dep-dbmp3eu1egvs73d85g60` live at `48a5a2a` (#21), entry `index-Xl7lm6cM.js`, deployed 2026-11-06. Before: `dep-dbmcstd9fdbs73ckg6e0` at `654f95c` (rollback target) | Render API; `curl https://agricarbon.info.vn/` |
 | Rollback targets | `dep-dbmch5e1egvs73andcvg` (`a2f4801`, #18 only), then `dep-dbm3otd9fdbs73bp12i0` (`71409ea`) | unchanged from §4 |
 | HTTPS and redirects | PASS. `http://` → 301 `https://`; `www` → 301 apex; API `http://` → 308 | `curl -I` |
 | Bundle | PASS. 10 of 10 lazy chunks 200; no service-role key, DB URL or secret key; publishable key only | downloaded and scanned |
@@ -167,7 +168,7 @@ A review request to SiriusNoPro is open on #17, #18, #19 and #20. #13, #15 and #
 | Frontend security headers | **Open (Medium, hardening)**: only `X-Content-Type-Options`; no HSTS, CSP, `frame-ancestors`/`X-Frame-Options` or `Referrer-Policy`. A staged plan was measured on the production bundle (0 CSP violations with the full policy enforced; framing refused) and is in **#23, not applied** | finding F7; #23 |
 | `render.yaml` | **Merging a change to it is a production rollout.** The Render Blueprint `tec` has `autoSync: true` on `main`, and `agricarbon-web-staging` is the production site. The file is not code-owned | Render API, read-only |
 | Security review | **`HUMAN_REVIEW_PENDING`**. AI-prepared package with findings F1–F11 and a reviewer checklist. The scope of the human review is #21 **plus #13 (RLS, applied to hosted) and #15/#16 (role verification)**: approving #21 alone does not complete it | [`SECURITY_REVIEW_R3_2026-11-06.md`](SECURITY_REVIEW_R3_2026-11-06.md) |
-| Security fixes | F1–F6 fixed in PR #21, head `8fb4c0f`. The remediation pass extended F4: an offline sign-out no longer claims success, and the other tabs end with it. Vitest 719/719, Playwright mock 111/111, real Chrome 12/12 (production-equivalent build 6/12), mutation 37/37. Not merged and not deployed: an Auth change needs a human approval first | PR #21 |
+| Security fixes | **F1–F6 fixed and deployed** (#21, merged `48a5a2a` by owner-authorized admin exception; independent human review pending). Final F4 design: local first, at once; only a 2xx from `/logout` confirms; bounded retry; the other tabs end. Vitest 727/727, Playwright mock 111/111, real Chrome 16/16 (old build 5/16), mutation 40/40; browser smoke on the deployed bundle 8/8 | PR #21; security review §11 |
 | Manager and Farmer real QA, cross-account isolation | **`BLOCKED_CREDENTIALS` / `AUTHENTICATED_QA_PENDING`**. `~/.agricarbon-qa.env` does not exist. The runner was re-audited: self-test 24/24, specs unchanged since the audit (sha256), 1 worker, traces off, no write spec | `.tmp/post-rollout-qa/` (local) |
 | Authenticated endpoint p50/p95 | `BLOCKED_CREDENTIALS` | — |
 | PR #20 (migration 026) | Draft. **NO-GO / INSUFFICIENT ENDPOINT EVIDENCE**. The SQL review passes (same access as the per-row helpers) and CI is green; the gain is proven only at query level | PR #20 review comment |
