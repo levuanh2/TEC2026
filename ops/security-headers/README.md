@@ -1,6 +1,6 @@
 # F7: security headers for agricarbon.info.vn (staged rollout runbook)
 
-**Status:** prepared and tested. **Nothing applied.** Production sends only `X-Content-Type-Options` (stage 0, checked 2026-11-06 with `--verify 0` and the harness in `LIVE=1` mode).
+**Status (2026-11-06): stage 1 is LIVE.** It was rolled out by #25 (merge `27c6cfa`, Blueprint sync `exe-dbmpfuff3r2c73aln6m0`, 09:03:54Z), and `--verify 1` plus the harness on the real headers (`LIVE=1 STAGE=1`) pass with 0 CSP reports. Rollback target: revert #25. **Stage 2 is not approved.** Earliest date to propose it: 2026-11-13 (7 days of stage 1).
 
 Finding F7 (R3 security review, Medium, hardening): the frontend sends no HSTS, CSP, `frame-ancestors`/`X-Frame-Options`, `Referrer-Policy` or `Permissions-Policy`. The site can be framed (clickjacking), and nothing limits script or connection sources while the Supabase session sits in `localStorage`.
 
