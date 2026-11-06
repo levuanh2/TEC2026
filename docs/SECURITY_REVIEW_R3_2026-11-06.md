@@ -4,6 +4,13 @@
 
 An AI agent (Claude Code) prepared this package on 2026-11-06. **It is not a human review**, and nothing in it approves anything. It exists so that a human reviewer (SiriusNoPro, or another person with authority over the repository) can check the authentication and authorization code of the web dashboard quickly and record a verdict.
 
+**What "human review complete" means for the release gate.** A human has reviewed **all** of these:
+- the fix PR #21 (§6, R1–R10);
+- #13, the RLS migration that is **already applied to the hosted database**;
+- #15/#16, role verification through `/v1/me` (§8, R11–R15).
+
+Approving #21 alone does not complete the human review. Every PR from #12 to #19 was merged with `--admin` and 0 human reviews.
+
 Release R2 (#17, #18, #19) was merged with `--admin` on 2026-11-05. Before those merges, the only review was a read-only report by another AI agent (agy), with the verdict APPROVE (0 critical, 0 major). That report is not a human approval. This R3 review re-read the same code and found two Medium issues and four Low issues that the earlier report did not list (§4).
 
 ## 1. Scope
@@ -112,6 +119,8 @@ Tick these in a GitHub review of the fix PR (or reply with the item numbers). A 
 - [ ] R9. Open items F7–F11: agree with the severity, or say what has to change before PRODUCTION PASS.
 - [ ] R10. The real-Chrome two-tab results (in the fix PR) match what the unit tests claim.
 
+For #13, #15 and #16, see §8 (R11–R15). The human review is complete only when §6 and §8 are both done.
+
 Verdict line for the reviewer to copy: `HUMAN_REVIEW: APPROVE | REQUEST_CHANGES — <name>, <date>`.
 
 ## 7. Proposed headers (F7, not applied)
@@ -126,3 +135,27 @@ Referrer-Policy: strict-origin-when-cross-origin
 ```
 
 Start the CSP as `Content-Security-Policy-Report-Only` for a release, and check the browser console on the Manager and Farmer flows before you enforce it.
+
+## 8. Also pending human review: #13 (RLS, applied to hosted) and #15/#16 (role verification)
+
+These were merged before R2's session work, with `--admin` and 0 human reviews, and no review was requested on them. They are in scope for the human review. #13 matters most: it changed which rows each person can read, and it runs on the production database now.
+
+| PR | What it changed | State |
+|---|---|---|
+| #13 `ec5e81f` | Migration `20261104090000`: `private.readable_batch_ids()` and set-based SELECT policies on `activities` plus 7 detail tables (`… production_batch_id in (select private.readable_batch_ids())`) | Applied to hosted 2026-11-05 07:57:40Z. On 2026-11-06 the hosted history has 25 rows, equal to `main`. Evidence so far, all produced by AI agents: 14-identity equivalence, 0 mismatches; guards in a rolled-back transaction; rollback tested on an isolated stack (`.tmp/rls-20261104090000/ROLLOUT_LOG_2026-11-05.md`) |
+| #15 `8aedb3d` | A failed `/v1/me` never assigns a role (neutral unverified screen) | In production since `71409ea` |
+| #16 `71409ea` | #12 (query cache, lazy routes) integrated behind the `/v1/me` role gate | In production since `71409ea` |
+
+R3 checked part of #13 again (AI, read-only): `readable_batch_ids()` follows the same chain as `user_can_read_batch` (batch → season → plot → `user_can_read_farm`, no `deleted_at` filter on the batch). It is `security definer` with `search_path = ''`, executable by `authenticated` only, and lives in `private`, which PostgREST does not expose. The live policies on hosted are the set-based ones. That is not a human review.
+
+**Code-owner note.** #13 touches code-owned paths (`supabase/migrations/`, `scripts/ci/policy/`). Their only code owner is the PR's author (`levuanh2`), so no independent code-owner review is possible today. A review by SiriusNoPro (write access, not a code owner) is a valid human review, but GitHub does not count it as a code-owner approval. Either accept that and record it, or add a second code owner.
+
+Checklist (tick in a review or a comment on the PR concerned):
+
+- [ ] R11. #13 SQL: each new SELECT policy grants exactly what the per-row policy it replaced granted, for `activities` and each of the 7 detail tables (soft-deleted activities stay hidden from the detail rows).
+- [ ] R12. #13 function: `private.readable_batch_ids()` is `stable`, `security definer`, `set search_path = ''`, fully qualified, `execute` revoked from `public`/`anon`; it returns only ids the caller may read.
+- [ ] R13. #13 hosted state: the applied SQL equals the file on `main` (checksum in `scripts/ci/policy/migrations.sha256`); the rollback (`supabase/rollbacks/20261104090000_…down.sql`) restores the old policies; 026 (#20) must be rolled back first if it is ever applied.
+- [ ] R14. #15: every `/v1/me` failure path (0, 401, 403, 5xx, timeout) renders the neutral screen and assigns no role (`meRoleUnverified.dom.test.tsx`).
+- [ ] R15. #16: no Management or Farmer business read is rendered before `/v1/me` confirms the role; the speculative Farmer-scope prefetch is server-authorized, stays in memory and is not shown (`roleVerifiedQueryCache.dom.test.tsx`).
+
+Verdict line per PR: `HUMAN_REVIEW #13|#15|#16: APPROVE | REQUEST_CHANGES — <name>, <date>`.

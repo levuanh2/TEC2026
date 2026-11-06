@@ -149,7 +149,7 @@ From GitHub on 2026-11-06. Branch protection on `main`: 1 approving review requi
 | #17 | **Auth/RBAC** (open-tab `/v1/me` re-check, cache isolation) | `654f95c` | 2026-11-05 18:35 | levuanh2, `--admin` | 0 | agy (read-only), APPROVE |
 | #19 | Docs (this report) | `1e720e5` | 2026-11-05 18:55 | levuanh2, `--admin` | 0 | agy (read-only) |
 
-A review request to SiriusNoPro is open on #17, #18, #19 and #20. SiriusNoPro has write access and is not a code owner. The web source (`web-dashboard/src/**`) is not a code-owned path, so an approval by SiriusNoPro satisfies the review rule for a PR that changes only that path.
+A review request to SiriusNoPro is open on #17, #18, #19 and #20. #13, #15 and #16 had none; R3 requested one (2026-11-06). SiriusNoPro has write access and is not a code owner. The web source (`web-dashboard/src/**`) is not a code-owned path, so an approval by SiriusNoPro satisfies the review rule for a PR that changes only that path.
 
 ## 7. Release R3 status (2026-11-06)
 
@@ -165,7 +165,7 @@ A review request to SiriusNoPro is open on #17, #18, #19 and #20. SiriusNoPro ha
 | Hosted migration history and RLS | PASS. 25 rows, last `20261104090000`, equal to the 25 files on `main`. 026 not applied (`private.readable_crop_ids` absent). `activities_select` is set-based; `production_batches_select` and both `carbon_calculations` SELECT policies are still per-row | read-only session (`transaction_read_only=on`), 2026-11-06 |
 | API 5xx in the container log | Not checked in R3: reading the EC2 log needs the user to run `.tmp/rls-20261104090000/ec2_error_counts.sh` | — |
 | Frontend security headers | **Open (Medium, hardening)**: only `X-Content-Type-Options`; no HSTS, CSP, `frame-ancestors`/`X-Frame-Options` or `Referrer-Policy` | finding F7 in the security review |
-| Security review | **`HUMAN_REVIEW_PENDING`**. AI-prepared package with findings F1–F11 and a reviewer checklist | [`SECURITY_REVIEW_R3_2026-11-06.md`](SECURITY_REVIEW_R3_2026-11-06.md) |
+| Security review | **`HUMAN_REVIEW_PENDING`**. AI-prepared package with findings F1–F11 and a reviewer checklist. The scope of the human review is #21 **plus #13 (RLS, applied to hosted) and #15/#16 (role verification)**: approving #21 alone does not complete it | [`SECURITY_REVIEW_R3_2026-11-06.md`](SECURITY_REVIEW_R3_2026-11-06.md) |
 | Security fixes | F1–F6 fixed on `fix/web-auth-session-hardening` (PR #21). Not merged and not deployed: an Auth change needs a human approval first | PR #21 |
 | Manager and Farmer real QA, cross-account isolation | **`BLOCKED_CREDENTIALS` / `AUTHENTICATED_QA_PENDING`**. `~/.agricarbon-qa.env` does not exist. The runner was re-audited: self-test 24/24, specs unchanged since the audit (sha256), 1 worker, traces off, no write spec | `.tmp/post-rollout-qa/` (local) |
 | Authenticated endpoint p50/p95 | `BLOCKED_CREDENTIALS` | — |
