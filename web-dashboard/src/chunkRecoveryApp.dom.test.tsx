@@ -16,6 +16,9 @@ const fail = { mrv: false, farmer: false }
 const chunk404 = (name: string) => new TypeError(`Failed to fetch dynamically imported module: https://agricarbon.info.vn/assets/${name}-OLD.js`)
 
 vi.mock('./api/auth', () => ({
+  onSignOutOutcome: () => () => {},
+  canConfirmSignOut: () => false,
+  confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
   onSessionReplaced: () => () => {},

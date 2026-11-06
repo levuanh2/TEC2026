@@ -2,6 +2,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from './api/client'
 import type { CurrentUser } from './api/me'
 import { keys, queryClient } from './query/client'
 import { clearFarmerCache, fetchQuery, peekQuery } from './farmer/data'
@@ -34,6 +35,9 @@ const getMe = vi.fn(() => meAnswer())
 const renders: { page: string; email: string | null }[] = []
 
 vi.mock('./api/auth', () => ({
+  onSignOutOutcome: () => () => {},
+  canConfirmSignOut: () => false,
+  confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: (fn: () => void) => { refreshed = fn; return () => { refreshed = null } },
   onSessionReplaced: (fn: typeof replace) => { replace = fn; return () => { replace = null } },
@@ -194,6 +198,23 @@ describe('a re-check still in flight', () => {
     expect(screen.queryByText('ops-overview')).toBeNull()
     expect(location.pathname).toBe('/farmer')
     expect(renders.every((r) => r.email === 'b@example.test')).toBe(true)
+  })
+
+  it("B took over while A's re-check was pending: A's late 403 does not send B back to the verifying screen", async () => {
+    await startAsManagerA()
+    let rejectLate: (e: unknown) => void = () => {}
+    const answers: (() => Promise<CurrentUser>)[] = [() => new Promise<CurrentUser>((_r, reject) => { rejectLate = reject })]
+    meAnswer = () => (answers.shift() ?? (async () => FARMER_B))()
+    now += REVALIDATE_MIN_INTERVAL_MS + 1
+    await focus()
+    act(() => replace!(B))
+    expect(await screen.findByText('farmer-experience b@example.test')).toBeTruthy()
+    // A's re-check fails last, with a decision (403) that was about A.
+    rejectLate(new ApiError(403, 'forbidden', 'HTTP 403'))
+    await settle()
+    expect(screen.getByText('farmer-experience b@example.test')).toBeTruthy()
+    expect(screen.queryByTestId('viewer-verifying')).toBeNull()
+    expect(screen.queryByTestId('viewer-unverified')).toBeNull()
   })
 
   it('a token refresh while it is pending sends no second /v1/me; the answer is applied once', async () => {

@@ -2,7 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type Re
 import type { Session } from '@supabase/supabase-js'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { clearQueryData, queryClient } from './query/client'
-import { mustChangePassword, onAuthEnded, onSessionRefreshed, onSessionReplaced, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
+import { canConfirmSignOut, confirmSignOut, mustChangePassword, onAuthEnded, onSessionRefreshed, onSessionReplaced, onSignOutOutcome, restoreSession, signIn, signOut, type AuthEndReason } from './api/auth'
 import { clearViewerHint, getMe, readViewerHint, writeViewerHint, type CurrentUser } from './api/me'
 import { ApiError } from './api/client'
 import { clearOrganizationCache, getOrganization } from './api/organizations'
@@ -36,11 +36,46 @@ const ROLE_LABEL: Record<string, string> = {
 /* --------------------------------------------------------------------- Login */
 
 const ENDED_NOTICE: Record<AuthEndReason, { kind: 'info' | 'warning'; text: string }> = {
+  // Only when the server confirmed the revocation AND nothing is stored here.
   signed_out: { kind: 'info', text: 'Bạn đã đăng xuất.' },
+  // The local session is already gone; the server has not answered yet.
+  signing_out: { kind: 'info', text: 'Đã đăng xuất trên thiết bị này. Đang xác nhận với máy chủ…' },
+  signed_out_unconfirmed: {
+    kind: 'warning',
+    text: 'Đã đăng xuất trên thiết bị này, nhưng chưa xác nhận được với máy chủ (mất mạng hoặc máy chủ không phản hồi), nên phiên có thể vẫn còn hiệu lực ở nơi khác. Hãy thử xác nhận lại khi có mạng.',
+  },
+  ended_elsewhere: { kind: 'info', text: 'Phiên đăng nhập đã kết thúc ở một tab khác của trình duyệt này.' },
   expired: { kind: 'warning', text: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' },
 }
 
-function Login({ done, ended }: { done: (s: Session) => void; ended: AuthEndReason | null }) {
+/** "Thử xác nhận lại" for a sign-out the server has not confirmed. */
+function ConfirmSignOut({ onConfirmed }: { onConfirmed: () => void }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'failed'>('idle')
+  async function retry() {
+    setState('busy')
+    if (await confirmSignOut()) onConfirmed()
+    else setState('failed')
+  }
+  // Bounded: after MAX_CONFIRM_ATTEMPTS the button is gone and only the advice stays.
+  const canRetry = canConfirmSignOut()
+  return (
+    <>
+      {(state === 'failed' || !canRetry) && (
+        <p data-testid="sign-out-unconfirmed-help">
+          {canRetry ? 'Vẫn chưa xác nhận được. Khi có mạng, hãy thử lại. ' : 'Không xác nhận được với máy chủ. '}
+          Nếu đây là máy dùng chung, hãy đăng nhập lại rồi đăng xuất khi có mạng, hoặc đổi mật khẩu để chấm dứt mọi phiên của tài khoản.
+        </p>
+      )}
+      {canRetry && (
+        <button type="button" className="btn btn--ghost" disabled={state === 'busy'} onClick={() => void retry()}>
+          {state === 'busy' ? 'Đang xác nhận…' : 'Thử xác nhận lại'}
+        </button>
+      )}
+    </>
+  )
+}
+
+function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void; ended: AuthEndReason | null; onSignOutConfirmed: () => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -66,10 +101,11 @@ function Login({ done, ended }: { done: (s: Session) => void; ended: AuthEndReas
         <h1>Đăng nhập</h1>
         <p>Nhật ký canh tác, hiệu suất tài nguyên và Carbon cho lúa gạo.</p>
         {ended && !error && (
-          <div role={ended === 'expired' ? 'alert' : 'status'} data-testid="auth-ended">
+          <div role={ENDED_NOTICE[ended].kind === 'warning' ? 'alert' : 'status'} data-testid="auth-ended" data-reason={ended}>
             <Notice kind={ENDED_NOTICE[ended].kind}>{ENDED_NOTICE[ended].text}</Notice>
           </div>
         )}
+        {ended === 'signed_out_unconfirmed' && !error && <ConfirmSignOut onConfirmed={onSignOutConfirmed} />}
         <form onSubmit={submit}>
           <label>
             Email
@@ -278,7 +314,25 @@ function applyRoleRedirect(role: string, currentPath: string) {
 /** Everything a confirmed viewer's cached reads depend on. Two answers with
  *  the same signature may share cached data; any difference drops it. */
 function verifiedScope(userId: string, v: CurrentUser): string {
-  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.mustChangePassword === true])
+  // `access` lists every membership and farm role, read-only ones included:
+  // losing a farm this account could only read must drop its cached rows too.
+  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.access ?? [], v.mustChangePassword === true])
+}
+
+/** /v1/me answered for an account other than the session's (the shared token
+ *  was replaced under this request). Nothing in it may be applied to this
+ *  session; the auth layer switches the tab to the stored session. */
+const ANSWER_FOR_ANOTHER_ACCOUNT = 409
+
+/** A `next` page to return to after sign-in: only a path of this site. */
+function sameOriginPath(raw: string | null): string | null {
+  if (!raw || !raw.startsWith('/')) return null
+  try {
+    const u = new URL(raw, location.origin)
+    return u.origin === location.origin ? `${u.pathname}${u.search}${u.hash}` : null
+  } catch {
+    return null
+  }
 }
 
 /** A verified tab re-reads /v1/me when it comes back into view or its token is
@@ -314,6 +368,7 @@ function viewerFailureText(f: ViewerFailure): string {
   if (f.status === 0) return 'Không kết nối được máy chủ để xác minh quyền của tài khoản.'
   if (f.status === 401) return 'Phiên đăng nhập không còn hợp lệ, nên chưa xác minh được quyền của tài khoản.'
   if (f.status === 403) return 'Máy chủ từ chối xác minh quyền của tài khoản này.'
+  if (f.status === ANSWER_FOR_ANOTHER_ACCOUNT) return 'Phiên đăng nhập vừa chuyển sang một tài khoản khác, nên chưa xác minh được quyền.'
   return `Máy chủ chưa xác minh được quyền của tài khoản (mã ${f.status}).`
 }
 
@@ -406,6 +461,15 @@ function AppRoot() {
     setPath('/login')
   }), [])
 
+    // The server's answer to a sign-out: confirmed -> "Bạn đã đăng xuất.";
+  // unconfirmed -> the warning. Only ever moves a sign-out notice.
+  useEffect(() => onSignOutOutcome((o) => {
+    setEnded((r) => {
+      if (o === 'confirmed') return r === 'signing_out' || r === 'signed_out_unconfirmed' ? 'signed_out' : r
+      return r === 'signing_out' ? 'signed_out_unconfirmed' : r
+    })
+  }), [])
+
   // Another tab signed a different person in (shared storage and token): this
   // tab switches to that session and verifies it from the neutral skeleton.
   // The previous person's viewer and caches are never shown with it.
@@ -466,6 +530,13 @@ function AppRoot() {
     void getMe()
       .then((v) => {
         if (!current()) return
+        // Someone else's answer (the token changed hands while it was in
+        // flight): never this session's role, hint or redirect.
+        if (v.userId && v.userId !== session.user.id) {
+          setVerifiedFor(null)
+          setViewerFailure({ session, status: ANSWER_FOR_ANOTHER_ACCOUNT, message: '' })
+          return
+        }
         // A different user, role, organisation or farm access than the last
         // answer in this tab: what the caches hold was read under the old
         // scope. Drop all of it before the new shell mounts, so it can only
@@ -608,12 +679,12 @@ function AppRoot() {
   // the real Supabase credentials loaded from .env during the mock smoke test.
   const authRequired = Boolean(!usingMockData && import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY && !session)
   if (path === '/login' || authRequired) {
-    return <Login ended={ended} done={(s) => {
+    return <Login ended={ended} onSignOutConfirmed={() => setEnded((r) => (r === 'signed_out_unconfirmed' ? 'signed_out' : r))} done={(s) => {
       setEnded(null)
       // Back to where an expired session interrupted the person, if it was a
       // page of this app; the role redirect still applies once /v1/me answers.
-      const next = new URLSearchParams(location.search).get('next')
-      if (next && next.startsWith('/') && !next.startsWith('//')) { history.replaceState({}, '', next); setPath(next) }
+      const next = sameOriginPath(new URLSearchParams(location.search).get('next'))
+      if (next) { history.replaceState({}, '', next); setPath(location.pathname) }
       setSession(s)
     }} />
   }

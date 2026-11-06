@@ -31,6 +31,9 @@ const clearOrganizationCache = vi.fn()
 const renders = { farmer: 0, ops: 0, seasons: 0, mrv: 0 }
 
 vi.mock('./api/auth', () => ({
+  onSignOutOutcome: () => () => {},
+  canConfirmSignOut: () => false,
+  confirmSignOut: async () => false,
   onAuthEnded: (fn: typeof ended) => { ended = fn; return () => { ended = null } },
   onSessionRefreshed: () => () => {},
   onSessionReplaced: () => () => {},
