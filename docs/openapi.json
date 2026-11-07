@@ -7441,6 +7441,17 @@
             "const": false,
             "title": "Persisted",
             "default": false
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
           }
         },
         "type": "object",

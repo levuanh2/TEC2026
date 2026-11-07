@@ -481,6 +481,8 @@ class RagAnswerProvenanceResponse(BaseModel):
     output_tokens: int | None = None
     cost_usd: float | None = None
     persisted: Literal[False] = False
+    #: D8-C (experimental): why a READ model answer was replaced by the system-composed one.
+    fallback_reason: str | None = None
 
 
 class RagQuestionResponse(BaseModel):

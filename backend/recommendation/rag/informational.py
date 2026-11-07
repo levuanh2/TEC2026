@@ -214,9 +214,15 @@ class CapabilityRoutedGenerator:
     `GenerationUnavailable` (503), never silently answered by something else.
     """
 
-    def __init__(self, *, action: AnswerGenerator | None = None) -> None:
+    def __init__(self, *, action: AnswerGenerator | None = None, read: AnswerGenerator | None = None) -> None:
         self._informational = TrustedInformationalComposer()
         self._action = action
+        #: D8 strategy C (EXPERIMENTAL, off unless a composition root passes it): a grounded
+        #: READ generator that must raise `GenerationUnavailable` for anything it cannot prove
+        #: safe and grounded; the trusted composer (strategy B) then answers instead.
+        self._read = read
+        self.answered_by: str | None = None
+        self.fallback_reason: str | None = None
 
     @property
     def action_configured(self) -> bool:
@@ -224,7 +230,18 @@ class CapabilityRoutedGenerator:
 
     def generate(self, request: GenerationInput) -> Mapping[str, Any]:
         if request.capability is GenerationCapability.INFORMATIONAL:
+            if self._read is not None:
+                try:
+                    answer = self._read.generate(request)
+                    self.answered_by = "model_generated"
+                    return answer
+                except GenerationUnavailable as exc:
+                    # Never an error and never a partial model answer: the deterministic B answer,
+                    # labelled system-composed, with the reason recorded for provenance.
+                    self.fallback_reason = str(exc) or "d8c_unavailable"
+            self.answered_by = "system_composed"
             return self._informational.generate(request)
+        self.answered_by = "model_generated"
         if self._action is None:
             raise GenerationUnavailable("no action generator is configured")
         return self._action.generate(request)
