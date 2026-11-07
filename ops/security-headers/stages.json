@@ -1,0 +1,110 @@
+{
+  "$comment": "F7 security headers for the Render static site agricarbon-web-staging (= https://agricarbon.info.vn). Stage N is applied by a PR that copies render-yaml.mjs output for that stage into render.yaml. The Blueprint 'tec' auto-syncs render.yaml from main, so MERGING that PR IS THE ROLLOUT. This file itself changes nothing in production.",
+  "site": "https://agricarbon.info.vn",
+  "origins": {
+    "api": "https://api.agricarbon.info.vn",
+    "supabase": "https://awazhdqzkktekbwaqiic.supabase.co",
+    "fontsCss": "https://fonts.googleapis.com",
+    "fontsFiles": "https://fonts.gstatic.com"
+  },
+  "inlineHandlerHashes": {
+    "$comment": "index.html: <link ... media=\"print\" onload=\"this.media='all'\"> (non-render-blocking webfont). sha256 of the exact attribute value. If index.html changes that handler, this hash must change too (the harness checks that the webfont is applied).",
+    "this.media='all'": "sha256-MhtPZXr7+LpJUY5qtMutB+qWfQtMaPccfe7QXtCcEYc="
+  },
+  "policy": {
+    "$comment": "The full CSP the app needs, measured with the harness (csp.spec.ts) on the production bundle. Report-Only in stage 1, enforced from stage 2.",
+    "default-src": [
+      "'self'"
+    ],
+    "script-src": [
+      "'self'",
+      "'unsafe-hashes'",
+      "'sha256-MhtPZXr7+LpJUY5qtMutB+qWfQtMaPccfe7QXtCcEYc='"
+    ],
+    "style-src": [
+      "'self'",
+      "https://fonts.googleapis.com"
+    ],
+    "font-src": [
+      "'self'",
+      "https://fonts.gstatic.com"
+    ],
+    "img-src": [
+      "'self'",
+      "data:",
+      "blob:"
+    ],
+    "connect-src": [
+      "'self'",
+      "https://api.agricarbon.info.vn",
+      "https://awazhdqzkktekbwaqiic.supabase.co"
+    ],
+    "object-src": [
+      "'none'"
+    ],
+    "base-uri": [
+      "'self'"
+    ],
+    "form-action": [
+      "'self'"
+    ],
+    "frame-ancestors": [
+      "'none'"
+    ]
+  },
+  "stages": {
+    "0": {
+      "description": "Current production (2026-11-06): only X-Content-Type-Options, which Render sends itself. Rollback target for every later stage.",
+      "headers": {}
+    },
+    "1": {
+      "description": "No-break hardening. Anti-framing and the structural CSP directives are ENFORCED (frame-ancestors is ignored in Report-Only); script/style/connect restrictions are Report-Only. HSTS 5 minutes, this host only.",
+      "minDaysBeforeNext": 7,
+      "headers": {
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "DENY",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=(), clipboard-write=(self)",
+        "Strict-Transport-Security": "max-age=300",
+        "Content-Security-Policy": {
+          "directives": [
+            "frame-ancestors",
+            "object-src",
+            "base-uri"
+          ]
+        },
+        "Content-Security-Policy-Report-Only": {
+          "directives": "all"
+        }
+      }
+    },
+    "2": {
+      "description": "Full CSP enforced after stage 1 shows no violation (harness on the live headers, plus the Manager/Farmer real QA). HSTS 1 day.",
+      "minDaysBeforeNext": 14,
+      "headers": {
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "DENY",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=(), clipboard-write=(self)",
+        "Strict-Transport-Security": "max-age=86400",
+        "Content-Security-Policy": {
+          "directives": "all"
+        }
+      }
+    },
+    "3": {
+      "description": "HSTS one year for this host. includeSubDomains and preload stay OFF until every subdomain of agricarbon.info.vn is audited (DNS is in Cloudflare; not visible to this review).",
+      "headers": {
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "DENY",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=(), clipboard-write=(self)",
+        "Strict-Transport-Security": "max-age=31536000",
+        "Content-Security-Policy": {
+          "directives": "all"
+        }
+      }
+    }
+  },
+  "hostProvided": {
+    "$comment": "Sent by Render itself on every response (checked 2026-11-06 at the origin and through the CDN). Not set in render.yaml, so it is never duplicated (\"nosniff, nosniff\"); --verify still requires it.",
+    "X-Content-Type-Options": "nosniff"
+  }
+}
