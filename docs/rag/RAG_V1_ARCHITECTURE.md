@@ -278,6 +278,8 @@ POST /v1/crop-seasons/{id}/questions (future)  — Depends(_read_repo) caller JW
   7. catalog  = build_fact_catalog(context, what_if)                trusted GroundedFacts
      assert_fact_scope(catalog, scope, context)                     → TenantIsolationViolation
   8. COMPARE without a comparison fact → insufficient_evidence / no_comparison_basis (no model call)
+     RECOMMEND without a stored deterministic (M05) rule outcome → insufficient_evidence /
+       no_rule_signal (no retrieval, no model call: a recommendation only explains an existing rule)
   9. evidence = retriever.retrieve(build_retrieval_query(...))      → RetrievalUnavailable
      assert_tenant_isolation(evidence, scope)                       → TenantIsolationViolation
  10. no documents + intent needs documents → insufficient_evidence / no_evidence_retrieved
@@ -289,6 +291,8 @@ POST /v1/crop-seasons/{id}/questions (future)  — Depends(_read_repo) caller JW
                      → fact references + numeric claims       → FactReferenceMismatch / GroundingFailed
                      → intent policy                          → GroundingFailed
                      → trusted fact rendering (render_answer)  → FactReferenceMismatch
+                     → trusted "estimate, not MRV" limitation when a Carbon-derived fact is shown
+                       and the stored result is not mrv_compliant (always today: IPCC Tier 1)
                      → TRUSTED RagAnswerResult (assembled by the orchestrator)
 ```
 
