@@ -98,6 +98,10 @@ def _plan(env, data, version="v1", source=None, **kw):
 
 
 def _ingest(env, p, data):
+    # The plan's chunks belong to this fixture: register them so Tx.rpc_ids (which ignores
+    # foreign, committed knowledge of a shared database) sees them -- before any assertion,
+    # so "not retrievable before approval" is never vacuously true.
+    env["tx"].mine.update(c.chunk_id for c in p.chunks)
     return ingest(p, data=data, store=env["store"], artifacts=env["artifacts"])
 
 
