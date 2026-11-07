@@ -289,8 +289,14 @@ POST /v1/crop-seasons/{id}/questions (future)  — Depends(_read_repo) caller JW
   8. COMPARE without a comparison fact → insufficient_evidence / no_comparison_basis (no model call)
      RECOMMEND without a stored deterministic (M05) rule outcome → insufficient_evidence /
        no_rule_signal (no retrieval, no model call: a recommendation only explains an existing rule)
+     ACTION question (recommend / what_if) talking to the assistant, or about something no tier
+       answers (pesticide, disease, weather, other tenants, markets; accent-insensitive) →
+       insufficient_evidence / instruction_like_question | out_of_scope_question (no retrieval,
+       no model call; question_scope.action_question_refusal — a first layer, not the boundary)
   9. evidence = retriever.retrieve(build_retrieval_query(...))      → RetrievalUnavailable
      assert_tenant_isolation(evidence, scope)                       → TenantIsolationViolation
+     relevance: instruction-like chunks dropped; a chunk is ADMITTED only by its body (shared
+       words or shared agronomic concept); title/section only rank (orchestrator._relevant_evidence)
  10. no documents + intent needs documents → insufficient_evidence / no_evidence_retrieved
  11. raw = generator.generate(GenerationInput(question, intent, facts=catalog, evidence))
                                                                     → GenerationUnavailable
@@ -538,8 +544,13 @@ A fact id is never accepted as a document citation and vice versa (tested both w
      No precision metadata exists on facts today, so none is invented; a display-precision field
      would be a later, explicit contract change.
    - Unit: the fact's own unit appended verbatim (`kg CO2e`, `m3`, `VND/kg`, …). The
-     dimensionless `fraction` is shown as the bare number — never ×100 into `%`, which would be
-     a unit conversion. A generator must not repeat the unit after a placeholder.
+     dimensionless `fraction` is shown as the bare number, EXCEPT the audited relative-change
+     facts in `answers.PERCENT_CHANGE_FACTS` (today only `co2e_percent_delta` = (before − after) /
+     before), shown as a percentage: Decimal ×100, one decimal, half-up (`0.2069` → `20,7%`,
+     `1` → `100%`, `0` → `0%`). Owner decision 2026-11-07 after Flash R2 showed "giảm khoảng
+     0,2069" to a farmer. The stored value and unit never change; CV `confidence` (a probability)
+     stays a bare fraction; a percentage-POINT difference would need its own unit. A generator
+     must not repeat the unit or add `%` after a placeholder (the prose gate rejects `%`).
    - Unknown id, malformed placeholder (the renderer re-applies the placeholder grammar of
      rule 4 before substituting) or non-finite value → `FactReferenceMismatch` (fail closed);
      no raw `{{...}}` ever reaches a client.
@@ -552,14 +563,15 @@ A fact id is never accepted as a document citation and vice versa (tested both w
    not detected (MEDIUM).
 8. **Canonical facts are not presentation values (D7, decided; display deferred).** String facts
    render exactly as stored, so a code such as `irrigated_continuous_flooding` can appear inside
-   a Vietnamese sentence, and `fraction` facts (`co2e_percent_delta`) render as `0,2069`, not
-   `20,69%`. This is accepted for V1:
+   a Vietnamese sentence. (`co2e_percent_delta` now renders as `20,7%`: see rule 6, owner
+   decision 2026-11-07 — a display rule in the renderer, the canonical value is unchanged.)
+   The rest is accepted for V1:
    - `GroundedFact.value` and `GroundedFact.unit` always hold the **canonical** value and unit.
      The grounding core (`facts.py`, grounding, renderer) never converts a fraction to a
      percentage, changes a unit, localizes an enum or replaces a code with a label, and never
      mutates a fact to suit a UI.
-   - Farmer-friendly display (`0.2069 fraction` → `20,69%`, `irrigated_continuous_flooding` →
-     "Tưới ngập liên tục") belongs to a later trusted **presentation layer** (server or client)
+   - Other farmer-friendly display (`irrigated_continuous_flooding` → "Tưới ngập liên tục")
+     belongs to a later trusted **presentation layer** (server or client)
      that may derive `display_value` / `display_label` from the canonical fact without changing
      it. No backend Vietnamese label exists for IPCC water-regime codes today (`mrv/labels.py`
      covers other vocabularies).

@@ -43,7 +43,7 @@ CATALOG = {f.fact_id: f for f in (
     ("current.metrics.water_m3", "1.234.567,5 m3"),
     ("current.metrics.cost_per_kg", "340.000 VND/kg"),
     ("what_if.awd.delta_co2e_kg", "-200 kg CO2e"),
-    ("current.signal.r.co2e_percent_delta", "0,2069"),       # dimensionless: never converted to %
+    ("current.signal.r.co2e_percent_delta", "0,2069"),       # not a RULE_SIGNAL fact: no conversion
     ("current.completeness.water", "không"),
     ("current.season.ipcc_water_regime", "irrigated_continuous_flooding"),
 ])
@@ -118,3 +118,49 @@ def test_render_answer_renders_every_text_field_and_keeps_the_template():
     assert rendered["limitations"] == ("Tổng 2.900 kg CO2e là bản tính đã lưu.",)
     # the grounded generator answer itself is untouched
     assert answer.recommendations[0].title == "Giảm {{fact:what_if.awd.delta_co2e_kg}}"
+
+
+# -- percentage rendering of audited relative-change fractions (Flash R2 finding) ---------------
+
+def _signal_percent(value):
+    return GroundedFact(fact_id="current.signal.water.awd_from_continuous_flooding.co2e_percent_delta",
+                        kind=FactKind.RULE_SIGNAL, value=value, unit="fraction", source="recommendation_rules",
+                        provenance={"rule_code": "water.awd_from_continuous_flooding"})
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    (0.2069, "20,7%"), (0, "0%"), (0.0, "0%"), (1, "100%"), (1.0, "100%"), (0.5, "50%"),
+    (-0.05, "-5%"), (-0.2069, "-20,7%"),               # negative = an increase, sign kept
+    (0.0005, "0,1%"), (0.00049, "0%"), (-0.0004, "0%"),  # half-up at one decimal; never "-0%"
+    (0.125, "12,5%"), (0.99999, "100%"), (12.345, "1.234,5%"),
+    (0.1 + 0.2, "30%"),                                 # binary noise does not leak into the display
+])
+def test_a_relative_change_fraction_reads_as_a_percentage(value, expected):
+    assert format_fact(_signal_percent(value)) == expected
+
+
+def test_a_missing_percentage_reads_as_missing():
+    assert format_fact(_signal_percent(None)) == MISSING_FACT_TEXT
+
+
+def test_percentage_display_never_changes_the_stored_value():
+    fact = _signal_percent(0.2069)
+    text = render_facts("giảm khoảng {{fact:%s}}" % fact.fact_id, {fact.fact_id: fact})
+    assert text == "giảm khoảng 20,7%" and fact.value == 0.2069
+
+
+@pytest.mark.parametrize("fact_id", ["current.cv.0.confidence", "x.some_ratio", "current.metrics.share"])
+def test_other_fraction_facts_are_not_converted(fact_id):
+    """CV confidence is a probability, not a relative change; only audited ids become %."""
+    assert format_fact(_fact(fact_id, 0.87, "fraction")) == "0,87"
+
+
+def test_a_percentage_suffix_without_the_fraction_unit_is_not_converted():
+    assert format_fact(_fact("current.signal.r.co2e_percent_delta", 0.2069, None)) == "0,2069"
+
+
+@pytest.mark.parametrize("fact_id", ["benchmark.x.co2e_percent_delta", "season.s2.signal.r.co2e_percent_delta"])
+def test_only_a_current_rule_signal_is_converted_even_with_the_same_suffix(fact_id):
+    fact = GroundedFact(fact_id=fact_id, kind=FactKind.RULE_SIGNAL, value=0.2069, unit="fraction",
+                        source="recommendation_rules", provenance={"rule_code": "r"})
+    assert format_fact(fact) == "0,2069"

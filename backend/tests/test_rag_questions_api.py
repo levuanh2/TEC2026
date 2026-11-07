@@ -89,7 +89,8 @@ def test_recommend_without_write_is_404_and_never_reaches_the_provider():
 
 def test_recommend_with_write_and_a_provider():
     service = RagQuestionService(carbon_service=Carbon(), llm_client=Llm(GOOD_RECOMMEND), write_gate=gate())
-    body = client(service).post(URL, json={"question": "?", "intent": "recommend"}, headers=AUTH).json()
+    body = client(service).post(URL, json={"question": "Tôi nên làm gì cho vụ này?", "intent": "recommend"},
+                                headers=AUTH).json()
     assert body["status"] == "generated" and body["provenance"]["answer_source"] == "model_generated"
     assert body["recommendations"][0]["rule_code"]
 

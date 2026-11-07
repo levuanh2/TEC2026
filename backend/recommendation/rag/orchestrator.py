@@ -18,6 +18,7 @@ from typing import TypeVar
 
 from pydantic import ValidationError
 
+from .answer_consistency import answer_policy_violation
 from .answers import (
     INSUFFICIENT_MESSAGES,
     LIMITATION_CARBON_ESTIMATE,
@@ -37,7 +38,7 @@ from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis, 
 from .grounding import validate_grounding
 from .intents import INTENT_POLICIES, FactUsage, GenerationCapability, RagIntent, allowed_fact_usage, required_access
 from .models import FactKind, GeneratedAnswer, GroundedFact, InformationalAnswer, RagQuestionRequest, WhatIfResult
-from .question_scope import content_terms, looks_like_instructions, overlap
+from .question_scope import action_question_refusal, body_relevance, concepts, content_terms, looks_like_instructions, overlap
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import ensure_supported
 
@@ -81,21 +82,29 @@ class RagOrchestrator:
             ensure_supported(request.hypothetical)  # before any read or Carbon call
 
         context = build_season_context(scope, facts, mode=request.mode)
-        what_if = self._what_if.simulate(scope, request.hypothetical) if request.hypothetical is not None else None
-        catalog = build_fact_catalog(context, what_if)
-        assert_fact_scope(catalog, scope, context)
-        # What this capability may see, reference and render; INFORMATIONAL
-        # never handles ACTION_CONTEXT (stored recommendations, what-if impact).
-        usable = usable_facts(catalog, capability)
+        # INFORMATIONAL never handles ACTION_CONTEXT (stored recommendations, what-if impact).
         signals = context.signals if FactUsage.ACTION_CONTEXT in allowed_fact_usage(capability) else ()
-
-        if intent is RagIntent.COMPARE and not has_comparison_basis(usable):
-            return _insufficient(request, intent, context, signals, what_if, "no_comparison_basis")
         if intent is RagIntent.RECOMMEND and not signals:
             # A recommendation may only explain an existing deterministic (M05) rule
             # outcome. With none there is nothing to explain: no retrieval, no model call,
             # and no season data leaves the server.
-            return _insufficient(request, intent, context, signals, what_if, "no_rule_signal")
+            return _insufficient(request, intent, context, signals, None, "no_rule_signal")
+        if capability is GenerationCapability.ACTION_PRODUCING:
+            # After authorization and the rule-signal gate; before the what-if simulation, any
+            # retrieval and any model call: a question addressed to the assistant, or about
+            # something no tier answers, is refused by trusted code. A first layer only
+            # (question_scope.OUT_OF_SCOPE); the provider prompt, rule_code and grounding follow.
+            refusal = action_question_refusal(request.question)
+            if refusal is not None:
+                return _insufficient(request, intent, context, signals, None, refusal)
+
+        what_if = self._what_if.simulate(scope, request.hypothetical) if request.hypothetical is not None else None
+        catalog = build_fact_catalog(context, what_if)
+        assert_fact_scope(catalog, scope, context)
+        # What this capability may see, reference and render.
+        usable = usable_facts(catalog, capability)
+        if intent is RagIntent.COMPARE and not has_comparison_basis(usable):
+            return _insufficient(request, intent, context, signals, what_if, "no_comparison_basis")
 
         query = build_retrieval_query(request.question, intent, scope)
         evidence = tuple(_adapter_call(lambda: self._retriever.retrieve(query), RetrievalUnavailable))
@@ -113,6 +122,13 @@ class RagOrchestrator:
         generated = validate_grounding(
             _parse(raw, capability), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
         )
+        if capability is GenerationCapability.ACTION_PRODUCING:
+            # Trusted consistency gate (answer_consistency.py): a refusal that still advises, or a
+            # recommendation whose rule is not about what was asked, discards the WHOLE model answer.
+            violation = answer_policy_violation(request.question, generated)
+            if violation is not None:
+                result = _insufficient(request, intent, context, signals, what_if, "answer_policy_rejected")
+                return result.model_copy(update={"policy_rejection": violation})
         # Rendering only ever sees a grounded answer and the facts this
         # capability may use (grounding already rejected any other reference).
         rendered = render_answer(generated, {fact.fact_id: fact for fact in usable})
@@ -147,16 +163,31 @@ def _insufficient(
 
 
 def _relevant_evidence(question: str, evidence: tuple, signals: tuple) -> tuple:
-    """Drop chunks written as instructions to an assistant (never evidence), and chunks that
-    share no distinctive term with the question -- or, for an action answer, with the stored
-    rule it explains. Runs AFTER the tenant-isolation check, on the caller's own evidence."""
-    terms = content_terms(question, *(f"{s.title or ''} {s.reason or ''}" for s in signals))
-    scored = [(overlap(terms, (c.content, c.section or "", c.title or "")), c) for c in evidence
-              if not looks_like_instructions(c.content)]
-    best = max((score for score, _ in scored), default=0)
-    # keep the chunks at least half as related as the best one (ranking kept), never 0-overlap
-    floor = max(1, -(-best // 2))
-    return tuple(c for score, c in scored if score >= floor)
+    """Drop chunks written as instructions to an assistant (never evidence), and chunks whose
+    OWN TEXT relates neither to the question nor, for an action answer, to the stored rule it
+    explains. Runs AFTER the tenant-isolation check, on the caller's own evidence.
+
+    ADMISSION reads the chunk body only (shared distinctive words + shared concepts,
+    `question_scope.body_relevance`): a title or section that matches the question (every chunk
+    of an AWD guide is titled "AWD") can never admit an unrelated paragraph.
+    RANKING may use metadata: among admitted chunks, those scoring less than half of the best
+    (body words + title/section words + concepts) are dropped and the rest are ordered by that
+    score, retrieval order breaking ties. Nothing admitted -> empty -> insufficient evidence."""
+    texts = (question, *(f"{s.title or ''} {s.reason or ''}" for s in signals))
+    terms, wanted = content_terms(*texts), concepts(*texts)
+    scored = []
+    for rank, chunk in enumerate(evidence):
+        if looks_like_instructions(chunk.content):
+            continue
+        if body_relevance(texts, wanted, chunk.content) == 0:
+            continue  # metadata alone never makes a chunk evidence
+        total = (overlap(terms, (chunk.content, chunk.section or "", chunk.title or ""))
+                 + len(wanted & concepts(chunk.content)))
+        scored.append((total, rank, chunk))
+    best = max((total for total, *_ in scored), default=0)
+    floor = max(1, -(-best // 2))  # at least half as related as the best admitted chunk
+    kept = sorted((entry for entry in scored if entry[0] >= floor), key=lambda e: (-e[0], e[1]))
+    return tuple(chunk for *_, chunk in kept)
 
 
 def _parse(raw: object, capability: GenerationCapability) -> GeneratedAnswer:

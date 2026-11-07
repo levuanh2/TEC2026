@@ -169,7 +169,7 @@ returned to a client.
 | `confidence` | grounded `GeneratedAnswer` |
 | `facts[]` | exactly the referenced `GroundedFact`s from the catalog, canonical values unchanged |
 | `evidence[]` (`CitedEvidence`) | `resolve_citations` from trusted chunk metadata |
-| `insufficient_reason` | `no_evidence_retrieved \| no_comparison_basis \| generator_declined`, set iff insufficient |
+| `insufficient_reason` | `no_evidence_retrieved \| no_comparison_basis \| no_rule_signal \| generator_declined \| out_of_scope_question \| instruction_like_question`, set iff insufficient |
 | `signals[]` | copied from `SeasonRagContext.signals` for ACTION_PRODUCING only; `()` for INFORMATIONAL (stored recommendations are ACTION_CONTEXT) |
 | `what_if` | `WhatIfResult` from the Carbon service, or None |
 | `basis` | `AnswerBasis(carbon_calculation_id, carbon_input_hash, ef_config_version, signal_rule_codes)`; None for `needs_clarification` |
@@ -203,6 +203,8 @@ Valid results, not exceptions:
 | `insufficient_evidence / no_comparison_basis` | COMPARE with no finalized benchmark and no comparison season — answer "Không có benchmark hoặc vụ đối chiếu đủ điều kiện để so sánh." | no |
 | `insufficient_evidence / no_evidence_retrieved` | RECOMMEND/EVIDENCE with no retrieved document | no |
 | `insufficient_evidence / generator_declined` | generator returned `insufficient_evidence` (no recommendations allowed) | yes |
+| `insufficient_evidence / out_of_scope_question` | RECOMMEND/WHAT_IF question about pesticide, disease, weather, other tenants or markets | no; no retrieval |
+| `insufficient_evidence / instruction_like_question` | RECOMMEND/WHAT_IF question addressed to the assistant ("bỏ qua quy tắc …") | no; no retrieval |
 
 Deterministic `signals` (ACTION_PRODUCING only) and `what_if` numbers are still returned when
 insufficient.

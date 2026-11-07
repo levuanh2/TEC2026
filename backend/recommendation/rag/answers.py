@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
 from pydantic import model_validator
@@ -21,6 +21,7 @@ from .models import (
     Confidence,
     Contract,
     EvidenceChunk,
+    FactKind,
     GeneratedAnswer,
     GroundedFact,
     Question,
@@ -29,7 +30,8 @@ from .models import (
 from .prose import validate_placeholder_syntax
 
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
-InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined"]
+InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined",
+                             "out_of_scope_question", "instruction_like_question", "answer_policy_rejected"]
 
 #: Trusted copy for states no generator is asked about.
 NEEDS_CLARIFICATION_MESSAGE = (
@@ -41,6 +43,21 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
     "no_rule_signal": (
         "Vụ này chưa có khuyến nghị nào do hệ thống quy tắc ghi nhận, nên trợ lý không đưa ra gợi ý hành động."
         " Trợ lý chỉ giải thích khuyến nghị đã có, không tự tạo khuyến nghị mới."
+    ),
+    # Action questions refused before retrieval (question_scope.action_question_refusal).
+    "out_of_scope_question": (
+        "Câu hỏi này nằm ngoài phạm vi trợ lý: hệ thống không tư vấn sâu bệnh, thuốc bảo vệ thực vật, thời tiết"
+        " hay dữ liệu của đơn vị khác. Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
+    ),
+    # A grounded model answer the trusted consistency gate refused (answer_consistency.py): the whole
+    # model text is discarded; this copy is all the caller sees.
+    "answer_policy_rejected": (
+        "Câu trả lời tự động không khớp với điều bạn hỏi nên đã bị hệ thống chặn."
+        " Trợ lý chỉ giải thích khuyến nghị đã có của vụ khi khuyến nghị đó liên quan trực tiếp đến câu hỏi."
+    ),
+    "instruction_like_question": (
+        "Câu hỏi có nội dung như một mệnh lệnh gửi cho trợ lý nên không được xử lý."
+        " Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
     ),
 }
 
@@ -58,8 +75,16 @@ UNKNOWN_FACTOR_SET_TEXT = "chưa xác định"
 #: How a fact whose authoritative value is None reads — never "0".
 MISSING_FACT_TEXT = "chưa có dữ liệu"
 _BOOLEAN_TEXT = {True: "có", False: "không"}
-#: Dimensionless units: the number is shown alone (no conversion, e.g. never ×100 to "%").
+#: Dimensionless units: the number is shown alone (no conversion), except the audited facts below.
 _UNITLESS = frozenset({"fraction"})
+#: `fraction` facts whose value is a RELATIVE change (share of a baseline: M05
+#: co2e_percent_delta = (before - after) / before) and therefore read as a percentage. Audited
+#: 2026-11-07: the only other `fraction` fact, CV `confidence`, is a probability and stays as is.
+#: A percentage-POINT difference (two percentages subtracted) is not a relative change and must
+#: never be added here; it would need its own unit and wording ("điểm phần trăm").
+PERCENT_CHANGE_FACTS = frozenset({"co2e_percent_delta"})
+#: One decimal, half-up: 0.2069 -> "20,7%". The stored value is never changed.
+_PERCENT_QUANTUM = Decimal("0.1")
 
 
 def _vietnamese_number(value: int | float) -> str:
@@ -68,11 +93,33 @@ def _vietnamese_number(value: int | float) -> str:
     trailing zeros of the fraction (2900.0 -> "2.900") are dropped."""
     if isinstance(value, float) and not math.isfinite(value):
         raise FactReferenceMismatch(f"system fact has a non-finite value: {value!r}")
-    text = format(Decimal(repr(value)) if isinstance(value, float) else Decimal(value), "f")
+    return _vietnamese_decimal(Decimal(repr(value)) if isinstance(value, float) else Decimal(value))
+
+
+def _vietnamese_decimal(number: Decimal) -> str:
+    text = format(number, "f")
     sign, text = ("-", text[1:]) if text.startswith("-") else ("", text)
     whole, _, fraction = text.partition(".")
     fraction = fraction.rstrip("0")
+    if int(whole) == 0 and not fraction:
+        sign = ""  # never "-0"
     return sign + f"{int(whole):,}".replace(",", ".") + ("," + fraction if fraction else "")
+
+
+def format_percent_change(value: int | float) -> str:
+    """A relative-change fraction as a Vietnamese percentage: 0.2069 -> "20,7%", 1 -> "100%",
+    0 -> "0%", -0.05 -> "-5%". Decimal arithmetic, one decimal, half-up; display only."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise FactReferenceMismatch(f"system fact has a non-finite value: {value!r}")
+    exact = Decimal(repr(value)) if isinstance(value, float) else Decimal(value)
+    return _vietnamese_decimal((exact * 100).quantize(_PERCENT_QUANTUM, rounding=ROUND_HALF_UP)) + "%"
+
+
+def is_percent_change(fact: GroundedFact) -> bool:
+    """Only a stored rule signal's audited field (`current.signal.<rule>.co2e_percent_delta`), never a
+    benchmark or other fact whose id merely ends the same way."""
+    return (fact.unit == "fraction" and fact.kind is FactKind.RULE_SIGNAL and fact.fact_id.startswith("current.signal.")
+            and fact.fact_id.rsplit(".", 1)[-1] in PERCENT_CHANGE_FACTS)
 
 
 def format_fact(fact: GroundedFact) -> str:
@@ -84,6 +131,8 @@ def format_fact(fact: GroundedFact) -> str:
         return _BOOLEAN_TEXT[value]
     if isinstance(value, str):
         return value
+    if is_percent_change(fact):
+        return format_percent_change(value)
     number = _vietnamese_number(value)
     return number if not fact.unit or fact.unit in _UNITLESS else f"{number} {fact.unit}"
 
@@ -185,6 +234,9 @@ class RagAnswerResult(Contract):
     limitations: tuple[str, ...] = ()
     confidence: Confidence | None = None
     insufficient_reason: InsufficientReason | None = None
+    #: Sanitized reason code when the consistency gate refused a model answer (log only; the API
+    #: response drops it). One of answer_consistency.POLICY_REASONS.
+    policy_rejection: str | None = None
     signals: tuple[DeterministicSignal, ...] = ()
     what_if: WhatIfResult | None = None
     basis: AnswerBasis | None = None

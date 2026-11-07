@@ -79,7 +79,13 @@ def test_frozen_holdout_v1_ratchet():
     """Independent holdout (40 questions written WITHOUT seeing the topic lists, run once on
     2026-11-07: relevance 0.675 -> 0.825, refusals 0/10 -> 4/10, injection citations 25 -> 0,
     irrelevant citations 94 -> 7). A ratchet, not a target: do NOT tune keywords on it; add a
-    new holdout instead."""
+    new holdout instead.
+
+    CONTAMINATION NOTE (2026-11-07, Flash R1 remediation): the body-only relevance change first
+    lost the weed document for h26/h27 ("cỏ" folds to the stop word "có"); the `weed` concept
+    in question_scope.CONCEPTS was added AFTER seeing that. v1 is therefore no longer an
+    independent measure for the weed topic: commission an uninspected holdout v2 before
+    claiming READ-relevance gains. Thresholds below are unchanged."""
     FACT = {"carbon": ev.CARBON, "yield": ev.YIELD, "status": ev.STATUS, "water": ev.WATER,
             "fertilizer": ev.FERT_GAP, "cost": "current.metrics.cost_per_kg", "mrv": ev.CARBON, "overall": ev.STATUS}
     DOC = {"awd": "awd", "fertilizer": "fert", "straw": "straw", "weed": "weed", "records": "records", "mrv": "mrv"}
@@ -99,3 +105,14 @@ def test_frozen_holdout_v1_ratchet():
     r = ev.run(cases)
     assert r["injection_chunks_cited"] == 0 and r["irrelevant_citations"] <= 7
     assert r["answer_relevance"] >= 0.825 and r["correct_refusal_on_negatives"] >= 0.4
+
+
+def test_frozen_holdout_files_are_unchanged():
+    """READ v2 and ACTION v1 were frozen by sha256 before the implementation was evaluated on them
+    (docs/rag/RAG_V15_EVAL_PLAN.md). Editing them makes a new version, never a silent change."""
+    import hashlib
+    frozen = {"rag_read_holdout_v2.json": "57684eced9b393e3fb967181c16a815a6fe037d1d72768c226d3e4ba7bbc6731",
+              "rag_action_holdout_v1.json": "614b5b236bca0df40f344b75c100e7af97dc1e3364b62e04d8a8d6557ed6b5d3"}
+    for name, digest in frozen.items():
+        raw = (Path(__file__).parent / "fixtures" / name).read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(raw).hexdigest() == digest, name
