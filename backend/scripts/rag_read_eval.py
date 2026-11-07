@@ -194,3 +194,27 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def holdout_cases(path) -> list:
+    """READ holdout file (`q`, `label` FACT:/DOC:/REFUSE, `intent`) -> cases, with the SAME mapping as
+    the frozen v1 ratchet (tests/test_rag_read_quality.py). No threshold lives here."""
+    import json
+    from pathlib import Path
+    fact = {"carbon": CARBON, "yield": YIELD, "status": STATUS, "water": WATER, "fertilizer": FERT_GAP,
+            "cost": "current.metrics.cost_per_kg", "mrv": CARBON, "overall": STATUS}
+    doc = {"awd": "awd", "fertilizer": "fert", "straw": "straw", "weed": "weed", "records": "records", "mrv": "mrv"}
+    cases = []
+    for i, x in enumerate(json.loads(Path(path).read_text(encoding="utf-8"))):
+        kind, _, topic = x["label"].partition(":")
+        intent = x.get("intent") if x.get("intent") in ("explain", "evidence", "data_gap") else "explain"
+        if kind == "FACT":
+            expect = fact.get(topic, STATUS)
+            if intent == "data_gap" and topic in ("water", "cost"):
+                expect = f"current.completeness.{topic}"
+            cases.append(Case(f"mrv-premise-{i}" if topic == "mrv" else f"h{i}", intent, x["q"], expect))
+        elif kind == "DOC":
+            cases.append(Case(f"h{i}", "evidence", x["q"], "doc:" + doc.get(topic, topic)))
+        else:
+            cases.append(Case(f"h{i}", intent, x["q"], "REFUSE", True))
+    return cases
