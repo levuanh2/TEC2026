@@ -290,6 +290,38 @@ class SupabaseReadRepository:
         rows = self._many_in("activities", "production_batch_id", batch_ids)
         return [x for x in rows if x.get("deleted_at") is None]
 
+    def season_lineage(self, season_id: str) -> dict[str, str]:
+        """season -> plot -> farm -> organization, read through the caller's JWT.
+
+        RAG decision D3 (docs/rag/RAG_V1_RETRIEVAL_ADR.md §8): one additive,
+        RLS-bound read, no schema change. The season read is the 404/RLS gate;
+        a plot or farm the caller cannot see raises `ReadNotFoundError` too, so
+        a partially visible hierarchy never yields a lineage (fail closed).
+        `farm_view` omits `cooperative_id`, so the farm row is read directly.
+        """
+        season = self._one("crop_seasons", season_id)
+        plot = self._one("plots", str(season["plot_id"]))
+        farm = self._one("farms", str(plot["farm_id"]))
+        return {
+            "crop_season_id": str(season["id"]),
+            "plot_id": str(plot["id"]),
+            "farm_id": str(farm["id"]),
+            "organization_id": str(farm["cooperative_id"]),
+        }
+
+    def knowledge_matches(self, season_id: str, query: str, top_k: int) -> list[dict[str, Any]]:
+        """`public.match_knowledge_chunks_lexical` under the caller's JWT.
+
+        SECURITY INVOKER RPC (Migration A, ADR §9.6): it derives organization
+        and farm from the season the caller can read, returns approved
+        knowledge only, and takes no scope, visibility or status argument --
+        none is passed from here either. An unreadable season, or a caller
+        whose Core V1 password change is pending, yields no rows.
+        """
+        params = {"p_crop_season_id": season_id, "p_query": query, "p_top_k": top_k}
+        return self._select("rpc match_knowledge_chunks_lexical",
+                            lambda client: client.rpc("match_knowledge_chunks_lexical", params))
+
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
         self._one("crop_seasons", season_id)
         rows = self._many("season_recommendations", crop_season_id=season_id)
