@@ -52,14 +52,99 @@ TOPICS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 #: "How is this season doing?" — every topic.
 GENERIC = ("the nao", "ra sao", "tom tat", "tong quan", "tinh hinh", "giai thich vu", "the nao roi")
 #: Things no tier answers: pests/pesticides/disease, weather, other organizations, markets.
+#: A deterministic FIRST layer only: a paraphrase it misses still meets the provider prompt,
+#: the mandatory rule_code gate and grounding (rag_qa.py), and the benchmark keeps cases that
+#: deliberately avoid these phrases so the model layer stays measured.
+#: Every phrase is checked against accent folding: no bare "tri sau" (duy trì / bố trí sau),
+#: "dao on" (lãnh đạo ổn định) or "du bao" (dự báo phát thải is in scope).
 OUT_OF_SCOPE = ("thuoc tru sau", "thuoc bvtv", "thuoc bao ve thuc vat", "phun thuoc", "sau benh", "benh hai",
-                "thoi tiet", "troi mua", "du bao", "ngay mai", "htx khac", "nong ho khac", "gia ban", "thi truong")
+                "thuoc tru", "thuoc diet", "xit thuoc", "thuoc tri sau", "cach tri sau", "phun tri sau",
+                "tri benh", "tri ray", "ray nau", "benh dao on",
+                "thoi tiet", "troi mua", "du bao thoi tiet", "du bao mua", "ngay mai", "htx khac", "nong ho khac",
+                "gia ban", "thi truong")
 
 #: Text addressed to an AI/system rather than describing agronomy: a chunk containing one of
-#: these is not cited as evidence (it stays in the corpus for its operator to fix at ingestion).
+#: these is not cited as evidence (it stays in the corpus for its operator to fix at ingestion),
+#: and an ACTION question containing one is refused before retrieval.
 INSTRUCTION_MARKERS = ("bo qua moi quy tac", "bo qua cac quy tac", "bo qua quy tac", "bo qua huong dan",
+                       "bo qua chi dan", "bo qua moi chi dan", "quen cac quy tac", "quen moi quy tac",
+                       "quen huong dan", "bia so lieu", "bia ra so lieu",
                        "ignore previous", "ignore all", "ignore the above", "system prompt", "ban la tro ly",
                        "hay dong vai", "dat visibility", "khong can tuan theo", "tiet lo", "jailbreak")
+
+#: Agronomic concepts and the folded phrasings that express them. Relevance counts a shared
+#: CONCEPT as well as a shared word, so an equivalent wording ("ruộng khô dần giữa các lần
+#: tưới" for "AWD", "khí mê-tan" for "phát thải") is not refused for lack of identical words.
+#: Deliberately absent: ambiguous folds ("lan" = lân/lần/lẫn, "tien" = tiền/tiến/tiện,
+#: "dam" = đạm/đậm/đầm/dám) and bare "nuoc" (nhà nước, nước ta) / "tuoi" (tuổi, tươi):
+#: water is recognised by compounds only.
+CONCEPTS: dict[str, tuple[str, ...]] = {
+    "awd": ("awd", "kho xen ke", "uot kho", "ngap kho", "rut nuoc", "phoi ruong", "tuoi tiet kiem",
+            "tiet kiem nuoc"),
+    "water": ("muc nuoc", "nuoc tuoi", "tuoi nuoc", "ngap nuoc", "giu nuoc", "thao nuoc", "rut nuoc", "tieu nuoc",
+              "bom nuoc", "lan tuoi", "lich tuoi", "che do tuoi", "tuoi ngap", "tuoi ruong", "ngap lien tuc",
+              "thuy loi"),
+    "ghg": ("phat thai", "khi nha kinh", "me tan", "metan", "methane", "ch4", "co2", "co2e", "carbon", "cac bon",
+            "n2o"),
+    "fertilizer": ("phan bon", "bon phan", "phan dam", "ure", "urea", "npk", "kali"),
+    "cost": ("chi phi", "gia thanh", "vat tu", "loi nhuan"),
+    "yield": ("nang suat", "san luong", "thu hoach"),
+    "straw": ("rom ra", "rom", "dot rom", "vui rom"),
+    # "cỏ" folds to "co" = "có" (a stop word), so the single word can never carry relevance;
+    # two-word phrases can.
+    "weed": ("co dai", "lua co", "lua ma", "lua hoang", "diet co", "lam co", "nho co"),
+}
+
+
+def action_question_refusal(question: str) -> str | None:
+    """Why an ACTION (recommend / what-if) question is refused before retrieval, or None.
+
+    `instruction_like_question`: the question talks to the assistant ("bỏ qua quy tắc ...").
+    `out_of_scope_question`: it asks for something no tier answers (pesticide, disease,
+    weather, other tenants, markets). Accent-insensitive (`fold`). Not the security boundary:
+    a question that passes still has to survive the provider prompt, rule_code and grounding."""
+    if looks_like_instructions(question):
+        return "instruction_like_question"
+    folded = fold(question)
+    if any(_has(folded, phrase) for phrase in OUT_OF_SCOPE):
+        return "out_of_scope_question"
+    return None
+
+
+def concepts(*texts: str) -> frozenset[str]:
+    folded = " ".join(fold(text) for text in texts)
+    return frozenset(name for name, phrases in CONCEPTS.items() if any(_has(folded, p) for p in phrases))
+
+
+def _word_forms(*texts: str) -> dict[str, set[str]]:
+    """folded distinctive word -> the spellings it was written with (lower-case NFC)."""
+    forms: dict[str, set[str]] = {}
+    for text in texts:
+        for word in re.findall(r"\w+", unicodedata.normalize("NFC", text or "").lower()):
+            folded = fold(word)
+            if len(folded) >= 2 and folded not in STOP_TERMS:
+                forms.setdefault(folded, set()).add(word)
+    return forms
+
+
+def shared_words(question_texts: Iterable[str], body: str) -> frozenset[str]:
+    """Distinctive words the body shares with the question. Accent folding may join two
+    spellings only when one side was written WITHOUT accents (a farmer typing "tuoi"); two
+    different accented words that fold alike ("tưới" / "tuổi", "nước" in "nhà nước" is the same
+    word and still counts) do not match."""
+    q, b = _word_forms(*question_texts), _word_forms(body)
+    out = set()
+    for folded in q.keys() & b.keys():
+        plain = folded in q[folded] or folded in b[folded]
+        if plain or q[folded] & b[folded]:
+            out.add(folded)
+    return frozenset(out)
+
+
+def body_relevance(question_texts: Iterable[str], question_concepts: Iterable[str], body: str) -> int:
+    """How much a chunk's OWN TEXT relates to the question: shared distinctive words plus shared
+    concepts. Title/section are not read here: metadata may rank a chunk, never admit one."""
+    return len(shared_words(question_texts, body)) + len(frozenset(question_concepts) & concepts(body))
 
 
 def _has(folded: str, phrase: str) -> bool:
