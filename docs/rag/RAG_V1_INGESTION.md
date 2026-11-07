@@ -2,7 +2,7 @@
 
 Status: **implemented locally/CI; nothing ingested anywhere.** Hosted holds Migration A and ST1
 (`20261006120000`, applied 2026-10-06) and the private `knowledge-artifacts` bucket (created
-2026-10-06); ST1.1 (`20261007090000`) is not applied to hosted. No source is approved, no corpus is
+2026-10-06); ST1.1 (`20261007090000`) was applied to hosted 2026-10-06. No source is approved, no corpus is
 ingested.
 Lexical only (E1 = C): no embeddings, no vector, no LLM (D5 open, D8 closed).
 
@@ -85,7 +85,7 @@ Implemented as migration `20261006120000_knowledge_document_artifact_approval_gu
 - tests: `backend/tests/test_rag_knowledge_artifact_approval.py`.
 
 **ST1.1 — SHA binding** (migration `20261007090000_knowledge_document_artifact_sha_binding`
-(+ rollback), its own PR; applying it to hosted is a separate explicit gate). Without it a version
+(+ rollback), its own PR; applied to hosted 2026-10-06 under its own explicit gate). Without it a version
 with `file_sha256 = <A>` could be approved pointing at `knowledge-artifacts/<B>/x.pdf` — another
 file's copy. One CHECK `knowledge_documents_artifact_sha_binding_chk`: `status = 'approved'`
 additionally requires `artifact_ref` to start with `knowledge-artifacts/<file_sha256>/` (exact, in
@@ -117,7 +117,13 @@ differ, passes both. Only C establishes that the artifact is real and is the rev
 |---|---|---|
 | `.md` | `kn-markdown-1` | ATX/setext headings, fenced code, pipe tables (alignment rows dropped), lists, quotes; YAML front matter ignored (warning) |
 | `.txt` | `kn-text-1` | strict UTF-8 (BOM ok); headings = multi-level numbering, `Chương/Mục/Điều/Phần/Phụ lục`, short ALL-CAPS lines; tables marked `table_uncertain` |
-| `.pdf` | `kn-pdf-1+pypdf-<version>` | text layer only. `< 20` non-space chars = page without text; fewer than half the pages with text ⇒ `no_text_layer` (scans are refused — **never OCR**); encrypted/malformed/> 2000 pages refused |
+| `.pdf` | `kn-pdf-2+pypdf-<version>` | text layer only. `< 20` non-space chars = page without text; fewer than half the pages with text ⇒ `no_text_layer` (scans are refused — **never OCR**); encrypted/malformed/> 2000 pages refused. Lines go through the `.txt` classifier, then (kn-pdf-2) a top-level `N. Title` line becomes a heading only with document context: title shape (upper-case start, ≥ 2 words, ≤ 100 chars, no `:`/`;`/terminal punctuation), the `1.` → `2.` → `3.` sequence across pages (a non-running level-1 heading restarts it), no list numbering continuing through it (`N-1.` before / `N+1.` after), not a wrapped sentence; it nests under an open level-1 heading together with its own `N.x` subsections (rules in `knowledge/parsers/pdf.py`) |
+
+`kn-pdf-1` → `kn-pdf-2` (V1.3-C): `kn-pdf-1` kept every single-level `2. Title` line a list item, so a
+document's top-level sections (`2. Harvest`, `3. Straw`) were swallowed by the previous subsection
+(`1.6 Pests`) in `section_path`. Only the PDF parser changed: `.txt` (`kn-text-1`), Markdown, the
+normalizer and the chunker are unchanged. Versions stored with `kn-pdf-1` are `pipeline_changed`
+under `kn-pdf-2` (another `kn-pdf-N` family, §4): re-ingest as a new `document_version`.
 
 The extension selects the parser and the leading bytes must agree (a renamed DOCX/PDF/image is
 refused). DOCX, HTML, spreadsheets, OCR, crawling: unsupported. Size bounds, all checked before any
@@ -174,7 +180,7 @@ cut into 450-token windows. `section_path` = `A > B > C` (indexed by the databas
 | same bytes, pipeline versions, normalized hash, metadata, chunk set — any status | `unchanged` (no write; an archived version is never reactivated, an approved one never touched) |
 | different bytes | `content_changed` — refused; ingest as a NEW `document_version` |
 | different parser/normalizer/chunker version | `pipeline_changed` — refused; new `document_version` |
-| only the third-party build suffix differs (`kn-pdf-1+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Only `kn-pdf-N+pypdf-<version>` qualifies; any other suffix family or any output difference stays `pipeline_changed` |
+| only the third-party build suffix differs (`kn-pdf-2+pypdf-6.19.0` → `+pypdf-6.20.0`) **and** the normalized hash and chunk set are identical | `unchanged`, with a note; the stored provenance is kept. Only `kn-pdf-N+pypdf-<version>` qualifies; any other suffix family or any output difference stays `pipeline_changed` |
 | different title/language/url/date/license, or chunk set | `metadata_changed` — refused |
 | existing source with different metadata | `source_mismatch` — refused (ingestion never edits a source) |
 
@@ -256,12 +262,12 @@ that PDF can only be re-ingested as a new `document_version` (new chunk ids, fre
 **Hosted prerequisites.** Done 2026-10-06, each under its own explicit gate: ST1 applied; the
 private `knowledge-artifacts` bucket created through the Storage API (not public, 50 MiB, MIME
 `text/markdown`/`text/plain`/`application/pdf`, no `storage.objects` policy; anon and authenticated
-access verified as denied). Pending: ST1.1 (§1), under its own gate.
+access verified as denied); ST1.1 (§1) applied 2026-10-06 18:35 UTC, under its own gate.
 
 ## 8. First real corpus acceptance gate (future, mandatory)
 
 Before the first real source is approved/ingested on hosted:
-- ST1 and ST1.1 (§1) are merged and applied to hosted;
+- ST1 and ST1.1 (§1) are merged and applied to hosted (done 2026-10-06);
 - C1 source approval (exact artifact, publisher, official URL if available, license basis,
   SHA-256, human approver); the artifact stored and guarantee C verified (§5 checklist and
   pre-approval audit).

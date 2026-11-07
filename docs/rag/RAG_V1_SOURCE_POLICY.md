@@ -6,8 +6,8 @@ only by operator code: Migration A ([RAG_V1_RETRIEVAL_ADR.md §9](RAG_V1_RETRIEV
 approval record, license, lifecycle and RLS, migration `20261006120000` for the controlled
 artifact required to approve (ST1-DB), and migration `20261007090000` binding that artifact to the
 version's own `file_sha256` (ST1.1). Migration A alone still permits URL-only approval: all three
-must be applied before the first real approval (Migration A and ST1 are applied to hosted; ST1.1
-is not yet).
+must be applied before the first real approval (all three are applied to hosted: Migration A and ST1 on 2026-10-06,
+ST1.1 on 2026-10-06 18:35 UTC).
 
 ## 1. Principles
 
@@ -73,7 +73,7 @@ Every item below must exist for the **real artifact**; missing metadata is never
 | Requirement | Field(s) | Enforcement |
 |---|---|---|
 | verifiable publisher | via approved source | FK to an approved source at retrieval |
-| controlled stored copy (ST1) **and** official URL when the publisher has one | `artifact_ref` / `official_url` (`https://`) | CLI always stores `artifact_ref`; migration `20261006120000` (applied to hosted 2026-10-06) refuses approval without an opaque ASCII storage-path `artifact_ref` — `official_url` alone never suffices; migration `20261007090000` (ST1.1, **not yet applied to hosted**) requires it to be the version's own content address `knowledge-artifacts/<file_sha256>/…` |
+| controlled stored copy (ST1) **and** official URL when the publisher has one | `artifact_ref` / `official_url` (`https://`) | CLI always stores `artifact_ref`; migration `20261006120000` (applied to hosted 2026-10-06) refuses approval without an opaque ASCII storage-path `artifact_ref` — `official_url` alone never suffices; migration `20261007090000` (ST1.1, applied to hosted 2026-10-06) requires it to be the version's own content address `knowledge-artifacts/<file_sha256>/…` |
 | integrity | `file_sha256`, `normalized_sha256` | NOT NULL, hex format, immutable |
 | real version | `document_version` | NOT NULL; publisher version, else `file_sha256` prefix (stated as such) |
 | language | `language` | NOT NULL, ISO 639-1 |
@@ -99,7 +99,7 @@ Approver role (proposed): the AgriCarbon methodology/product owner. Approval is 
 - The ingestion CLI always stores the artifact; the approver re-verifies it (checklist in
   [RAG_V1_INGESTION.md](RAG_V1_INGESTION.md) §5). The database refuses approval without a
   controlled `artifact_ref` (migration `20261006120000`, applied to hosted 2026-10-06) and, with
-  ST1.1 (migration `20261007090000`, its own gate, before the first real approval), with one that is
+  ST1.1 (migration `20261007090000`, applied to hosted 2026-10-06 under its own gate), with one that is
   not the version's own content address. Neither checks Storage: object existence and the SHA-256
   of the stored bytes stay the CLI's and the approver's check (RAG_V1_INGESTION.md §1, guarantee C).
 
