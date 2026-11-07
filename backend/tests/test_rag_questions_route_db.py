@@ -8,6 +8,8 @@ TEST FIXTURES (shared with test_rag_retrieval_db.py), never real approved source
 from __future__ import annotations
 
 import sys
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tests.test_rag_retrieval_db import _SETTINGS, env, pytestmark  # noqa: E402,F401  (fixture + local-only guard)
+
+#: A revoked session is rejected like any invalid token (401 `unauthenticated`).
+REVOKED_STATUS = 401
 
 
 @pytest.fixture(scope="module")
@@ -81,9 +86,68 @@ def test_read_callers_can_ask_but_never_get_action_capability(http, env, who):
         assert response.status_code == 404, response.text
 
 
-def test_writer_passes_the_real_write_gate_then_needs_a_provider(http, env):
+@contextmanager
+def _stored_rule(env, rule_code="data.completeness.water"):
+    """One stored deterministic (M05) data_task row on the member's season, removed after."""
+    import psycopg
+
+    with psycopg.connect(_SETTINGS.supabase_db_url) as conn:
+        rec = conn.execute(
+            "insert into public.season_recommendations (crop_season_id, rule_code, rule_version, type, title,"
+            " reason, impact_status, impact_unavailable_reason, input_hash)"
+            " values (%s, %s, '1', 'data_task', 'Bổ sung lượng nước tưới', 'Còn thiếu lượng nước.', 'unavailable',"
+            " 'Đây là gợi ý bổ sung dữ liệu.', %s) returning id",
+            (env["season_member"], rule_code, f"rq-{env['run']}")).fetchone()[0]
+        conn.commit()
+    try:
+        yield rule_code
+    finally:
+        with psycopg.connect(_SETTINGS.supabase_db_url) as conn:
+            conn.execute("delete from public.season_recommendations where id = %s", (rec,))
+            conn.commit()
+
+
+def test_writer_without_a_stored_rule_gets_no_action_and_no_provider_call(http, env):
     response = http("member", "member", intent="recommend")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "insufficient_evidence" and body["insufficient_reason"] == "no_rule_signal"
+    assert body["recommendations"] == [] and body["provenance"]["llm_calls"] == 0
+
+
+def test_writer_passes_the_real_write_gate_then_needs_a_provider(http, env):
+    with _stored_rule(env):
+        response = http("member", "member", intent="recommend")
     assert response.status_code == 503 and response.json()["detail"]["error"]["code"] == "generation_unavailable"
+
+
+def test_a_signed_out_session_can_no_longer_ask(http, env):
+    """Revocation: a token whose session was signed out gets nothing from the Q&A route.
+    A dedicated user, so the shared fixture tokens are never revoked."""
+    import httpx
+    import psycopg
+    from supabase import create_client
+
+    from tests.test_rag_retrieval_db import _tenant
+
+    url, service = _SETTINGS.require_supabase()
+    _, publishable = _SETTINGS.require_publishable()
+    email, password = f"rq-{env['run']}-revoked@agricarbon-ci.invalid", f"Rq-{uuid.uuid4().hex}!9"
+    env["users"]["revoked"] = create_client(url, service).auth.admin.create_user(
+        {"email": email, "password": password, "email_confirm": True}).user.id  # removed by the env cleanup
+    with psycopg.connect(_SETTINGS.supabase_db_url) as conn:
+        _tenant(conn, env, env["run"], "revoked", "org_a")
+        conn.commit()
+    token = httpx.post(f"{url}/auth/v1/token?grant_type=password", headers={"apikey": publishable},
+                       json={"email": email, "password": password}, timeout=30).json()["access_token"]
+    env["tokens"]["revoked"] = token
+    assert http("revoked", "revoked").status_code == 200
+    out = httpx.post(f"{url}/auth/v1/logout?scope=local", timeout=30,
+                     headers={"apikey": publishable, "Authorization": f"Bearer {token}"})
+    assert out.status_code == 204, out.text
+    response = http("revoked", "revoked")
+    assert response.status_code == REVOKED_STATUS, response.text
+    assert "answer" not in response.json() and "citations" not in response.json()
 
 
 def test_out_of_corpus_evidence_is_insufficient(http, env):
