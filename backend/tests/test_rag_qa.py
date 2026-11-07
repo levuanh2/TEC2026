@@ -173,7 +173,8 @@ def test_recommend_reaches_the_provider_only_with_write():
     assert body["status"] == "generated" and len(llm.requests) == 1
     assert body["recommendations"][0]["rule_code"] == AWD_RULE
     assert body["provenance"] == {"answer_source": "model_generated", "model": "model-under-test", "llm_calls": 1,
-                                  "input_tokens": 1200, "output_tokens": 300, "cost_usd": 0.0012, "persisted": False}
+                                  "input_tokens": 1200, "output_tokens": 300, "cost_usd": 0.0012, "persisted": False,
+                                  "fallback_reason": None}
     assert body["citations"][0]["url"] == "https://example.invalid/awd"
 
 

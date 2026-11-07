@@ -281,3 +281,21 @@ def test_each_rag_module_imports_alone_without_a_cycle(path):
     done = subprocess.run([sys.executable, "-c", f"import {module}"], cwd=BACKEND,
                           capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
+
+
+def test_d8c_read_path_is_only_the_gated_grounded_read_generator():
+    """D8 strategy C (experimental): the router's `read=` may only ever be the variable `read`,
+    and `read` may only be None or a `GroundedReadGenerator(...)` (which falls back to the
+    trusted composer for anything it cannot prove safe). No other READ-tier model path."""
+    tree = ast.parse(D8_COMPOSITION_MODULE.read_text(encoding="utf-8"))
+    reads = [kw.value for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and getattr(node.func, "id", getattr(node.func, "attr", None)) == "CapabilityRoutedGenerator"
+             for kw in node.keywords if kw.arg == "read"]
+    assert reads and all(isinstance(v, ast.Name) and v.id == "read" for v in reads)
+    assigned = [node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "read" for t in node.targets)]
+    assert assigned
+    for value in assigned:
+        ok_none = isinstance(value, ast.Constant) and value.value is None
+        ok_gen = isinstance(value, ast.Call) and getattr(value.func, "id", None) == "GroundedReadGenerator"
+        assert ok_none or ok_gen, ast.dump(value)
