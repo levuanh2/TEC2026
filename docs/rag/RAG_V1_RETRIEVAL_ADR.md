@@ -12,11 +12,16 @@ with a real store and a real scope resolver. It does **not** call `AnswerGenerat
 `RagOrchestrator` generation path; the D8 gate (`test_no_answer_generator_is_wired_until_d8_is_closed`)
 stays intact. Embedding is **not** a generation-LLM choice; D5 stays open.
 
+> **2026-11-07 update** ([RAG_V1_STATUS.md](RAG_V1_STATUS.md)): D8 is now closed with strategy B
+> (owner-approved as an interim controlled MVP). The old gate test was replaced by the strategy-B
+> architecture guards in `backend/tests/test_rag_architecture.py`; `rag_qa.py` is the only module on
+> the generation path. Retrieval itself is unchanged: lexical-first, no vector.
+
 ## Decision record
 
 | Id | Decision | Status |
 |---|---|---|
-| S1 | Postgres-native knowledge store, split into **Migration A (lexical foundation)** now and an optional **Migration B (vector)** later | direction approved; Migration A spec §9 ready to write after this review |
+| S1 | Postgres-native knowledge store, split into **Migration A (lexical foundation)** now and an optional **Migration B (vector)** later | direction approved; **Migration A applied to hosted 2026-10-06** (§9 below is the review-time spec; the applied SQL in `20261005090000_knowledge_retrieval_lexical_foundation.sql` is authoritative, and ST1/ST1.1 tightened approval afterwards); Migration B not written, needs measured evidence |
 | E1 | **C — lexical-first** baseline for V1.3. No embedding model, dimension, runtime or pgvector yet | **decided** |
 | C1 | Source policy approved; candidate corpus defined; **no document approved yet** | **decided (policy)** |
 | D3 | Real `SeasonScopeResolver` reusing Core V1 RLS reads + `crop_write_authz`; additive `season_lineage` read; no schema change | **approved** |
@@ -34,7 +39,7 @@ stays intact. Embedding is **not** a generation-LLM choice; D5 stays open.
 | Extensions installed | `pg_stat_statements`, `pgcrypto`, `plpgsql`, `supabase_vault`, `uuid-ossp` | `pg_extension` |
 | Full-text configs | no `vietnamese`; `simple` available | `pg_ts_config` |
 | Local / CI stack | Supabase CLI 2.118.0, `major_version = 17`, `extra_search_path = public, extensions` | `supabase/config.toml`, `ci.yml` |
-| Migrations | 21 files, `YYYYMMDDHHMMSS_name.sql`, rollbacks in `supabase/rollbacks/`, checksummed in CI; hosted batches need explicit approval, one at a time | `supabase/migrations`, `ci.yml` (Migrations static + checksums) |
+| Migrations | 21 files at audit time (25 on 2026-11-07), `YYYYMMDDHHMMSS_name.sql`, rollbacks in `supabase/rollbacks/`, checksummed in CI; hosted batches need explicit approval, one at a time | `supabase/migrations`, `ci.yml` (Migrations static + checksums) |
 | Function convention | `set search_path = ''`, schema-qualified references | baseline migration |
 | RLS helpers to reuse | `private.user_is_org_member(uuid)`, `private.user_can_read_farm(uuid)`, `private.user_can_read_crop`, `private.user_can_write_crop` | baseline + later migrations |
 | Farm ownership | `farms.cooperative_id uuid not null references organizations` — **no immutability guard** in Core V1 | baseline line 333 |

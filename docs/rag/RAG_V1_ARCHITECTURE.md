@@ -1,8 +1,12 @@
 # RAG V1 — Recommendation Q&A Architecture
 
-Status: **architecture + provider-neutral skeleton, hardened** (branch
-`feature/rag-v1-architecture`, base `main` @ `11e5db0`). No LLM, no vector store, no embeddings,
-no ingestion, no route, no UI, no migration, no persistence. Typed contracts: [`RAG_V1_DATA_CONTRACT.md`](RAG_V1_DATA_CONTRACT.md).
+Status (2026-11-07): **current state lives in [RAG_V1_STATUS.md](RAG_V1_STATUS.md).** In short:
+Migration A, ST1 and ST1.1 are applied to hosted (schema only, 0 approved knowledge); scope resolver,
+lexical retriever, D8 strategy B (READ = fixed templates, no model), the questions route and the
+season Q&A panel are Draft PRs #27–#32 (not merged, not deployed, both switches default OFF); no
+vector store, no embeddings, no persistence. This document began as the architecture + provider-
+neutral skeleton (branch `feature/rag-v1-architecture`, base `main` @ `11e5db0`); its design
+sections below are kept as written. Typed contracts: [`RAG_V1_DATA_CONTRACT.md`](RAG_V1_DATA_CONTRACT.md).
 
 RAG is the **OPTIMIZE** layer of MEASURE → UNDERSTAND → OPTIMIZE → ACT. It explains,
 compares, recommends, simulates and cites **around one crop season's authoritative data and
@@ -127,7 +131,12 @@ retrieval adapters   generation adapters      (infrastructure/, future phases)
 
 ## 4. Project tree
 
-Created (✅) and proposed for later phases (⏳):
+Created (✅) and proposed for later phases (⏳). *2026-11-07: the ⏳ rows below are the original
+plan; as built (Draft PRs #27–#32) they are `rag_application.py` (scope resolver + lexical
+retriever), `rag_qa.py` (the composition module), `recommendation/rag/informational.py` (D8-B
+composer), `infrastructure/llm_client.py` (provider adapter), `infrastructure/read_repo.py`
+`knowledge_matches`, `backend/knowledge/` + `scripts/ingest_knowledge.py` (offline ingestion, no
+embedding) and the `POST /v1/crop-seasons/{id}/questions` route — see [RAG_V1_STATUS.md](RAG_V1_STATUS.md).*
 
 ```
 backend/
