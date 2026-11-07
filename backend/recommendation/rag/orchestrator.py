@@ -20,7 +20,9 @@ from pydantic import ValidationError
 
 from .answers import (
     INSUFFICIENT_MESSAGES,
+    LIMITATION_CARBON_ESTIMATE,
     NEEDS_CLARIFICATION_MESSAGE,
+    UNKNOWN_FACTOR_SET_TEXT,
     AnswerBasis,
     GenerationInput,
     InsufficientReason,
@@ -34,7 +36,7 @@ from .errors import GenerationUnavailable, InvalidGeneratedSchema, RagAccessDeni
 from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis, usable_facts
 from .grounding import validate_grounding
 from .intents import INTENT_POLICIES, FactUsage, GenerationCapability, RagIntent, allowed_fact_usage, required_access
-from .models import GeneratedAnswer, GroundedFact, InformationalAnswer, RagQuestionRequest, WhatIfResult
+from .models import FactKind, GeneratedAnswer, GroundedFact, InformationalAnswer, RagQuestionRequest, WhatIfResult
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import ensure_supported
 
@@ -88,6 +90,11 @@ class RagOrchestrator:
 
         if intent is RagIntent.COMPARE and not has_comparison_basis(usable):
             return _insufficient(request, intent, context, signals, what_if, "no_comparison_basis")
+        if intent is RagIntent.RECOMMEND and not signals:
+            # A recommendation may only explain an existing deterministic (M05) rule
+            # outcome. With none there is nothing to explain: no retrieval, no model call,
+            # and no season data leaves the server.
+            return _insufficient(request, intent, context, signals, what_if, "no_rule_signal")
 
         query = build_retrieval_query(request.question, intent, scope)
         evidence = tuple(_adapter_call(lambda: self._retriever.retrieve(query), RetrievalUnavailable))
@@ -107,6 +114,8 @@ class RagOrchestrator:
         # Rendering only ever sees a grounded answer and the facts this
         # capability may use (grounding already rejected any other reference).
         rendered = render_answer(generated, {fact.fact_id: fact for fact in usable})
+        rendered["limitations"] = _with_carbon_estimate_limitation(
+            rendered["limitations"], _referenced(generated, usable), context)
 
         if generated.status == "insufficient_evidence":
             return _insufficient(request, intent, context, signals, what_if, "generator_declined",
@@ -145,6 +154,40 @@ def _parse(raw: object, capability: GenerationCapability) -> GeneratedAnswer:
         return GeneratedAnswer.model_validate(raw)
     except ValidationError as exc:
         raise InvalidGeneratedSchema(f"generator output failed schema validation ({exc.error_count()} errors)") from exc
+
+
+#: Kinds whose every value comes from the Carbon Engine.
+_CARBON_KINDS = frozenset({FactKind.CARBON_TOTAL, FactKind.CARBON_INTENSITY, FactKind.CARBON_BREAKDOWN})
+
+
+def _is_carbon_derived(fact: GroundedFact) -> bool:
+    """A Carbon result, or an impact/what-if number the Carbon Engine computed."""
+    if fact.value is None:
+        return False
+    if fact.kind in _CARBON_KINDS:
+        return True
+    return fact.kind in (FactKind.RULE_SIGNAL, FactKind.WHAT_IF) and "co2e" in fact.fact_id.rsplit(".", 1)[-1]
+
+
+def _with_carbon_estimate_limitation(
+    limitations: tuple[str, ...], referenced: tuple[GroundedFact, ...], context: SeasonRagContext,
+) -> tuple[str, ...]:
+    """Append the trusted "estimate, not MRV" limitation when the answer shows a
+    Carbon-derived value and the season's stored result is not MRV-compliant (or there is
+    none). The factor-set version is named only when every such value carries the same one."""
+    carbon_facts = [fact for fact in referenced if _is_carbon_derived(fact)]
+    if not carbon_facts or (context.carbon is not None and context.carbon.mrv_compliant is True):
+        return limitations
+    # Resource Metrics take their Carbon values from the same latest succeeded actual
+    # calculation as the stored result, so they share its factor set; a rule impact
+    # carries no version of its own and keeps the set "unknown".
+    stored_version = context.carbon.ef_config_version if context.carbon is not None else None
+    versions = {stored_version if fact.source == "resource_metrics" else fact.provenance.get("ef_config_version")
+                for fact in carbon_facts}
+    version = next(iter(versions)) if len(versions) == 1 else None
+    text = LIMITATION_CARBON_ESTIMATE.format(version=version if isinstance(version, str) and version
+                                             else UNKNOWN_FACTOR_SET_TEXT)
+    return limitations if text in limitations else (*limitations, text)
 
 
 def _referenced(answer: GeneratedAnswer, catalog: tuple[GroundedFact, ...]) -> tuple[GroundedFact, ...]:
