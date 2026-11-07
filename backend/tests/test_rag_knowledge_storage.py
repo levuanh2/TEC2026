@@ -81,6 +81,11 @@ class Tx:
         self.cur.execute("insert into public.organization_data_grants (grantee_organization_id, source_organization_id)"
                          " values (%s, %s)", (self.org_e, self.org_a))
         self.pending: dict = {}
+        #: Chunk ids this transaction created. The database is shared (other runs, a seeded
+        #: synthetic corpus, a parallel worker may hold COMMITTED public knowledge), so ranking and
+        #: set assertions look at this fixture's chunks only, while every foreign row the RPC
+        #: returns is still checked to be public (`foreign_rows_are_public`).
+        self.mine: set[str] = set()
         self.season_a = self.season(self.farm_a)
         self.season_a2 = self.season(self.farm_a2)
         self.season_b = self.season(self.farm_b)
@@ -155,6 +160,7 @@ class Tx:
             values.append(value)
         self.cur.execute(f"insert into public.knowledge_chunks ({', '.join(columns)}) values"
                          f" ({', '.join(['%s'] * len(values))})", values)
+        self.mine.add(chunk_id)
         return chunk_id
 
     def corpus(self, content, **source):
@@ -186,8 +192,22 @@ class Tx:
         assert status == "ok", rows
         return rows
 
-    def rpc_ids(self, user, season, query, top_k=8, claims=None):
+    def rpc_all_ids(self, user, season, query, top_k=8, claims=None):
+        """Every chunk id the RPC returns, this fixture's or not, in rank order."""
         return [row[3] for row in self.rpc(user, season, query, top_k, claims)]
+
+    def rpc_ids(self, user, season, query, top_k=50, claims=None):
+        """This fixture's chunk ids in rank order; foreign rows must be public (asserted)."""
+        return [row[3] for row in self.own_rows(self.rpc(user, season, query, top_k, claims))]
+
+    def own_rows(self, rows):
+        assert self.foreign_rows_are_public(rows), "a non-public chunk outside this fixture was returned"
+        return [row for row in rows if row[3] in self.mine]
+
+    def foreign_rows_are_public(self, rows) -> bool:
+        """Rows this fixture did not create can only be public knowledge: every tenant row a
+        test can see belongs to this transaction's freshly created organizations."""
+        return all(row[13] == "public" and row[14] is None for row in rows if row[3] not in self.mine)
 
     def operator(self, sql, params=()):
         """('ok', None) or ('err', sqlstate) as the operator/table owner."""
@@ -616,6 +636,9 @@ def tenant_corpus(tx):
     ("grant_viewer", "season_a", {"public"}), # data-grant viewer of another organization
 ])
 def test_rpc_tenant_matrix(tx, tenant_corpus, who, season, expected):
+    every = tx.rpc_all_ids(getattr(tx, who), getattr(tx, season), "awd", 50)
+    if not expected:  # cannot read the season: NOTHING at all, whatever else the database holds
+        assert every == []
     found = set(tx.rpc_ids(getattr(tx, who), getattr(tx, season), "awd", 50))
     assert found == {tenant_corpus[name] for name in expected}
 
@@ -861,7 +884,7 @@ def test_full_text_matches_any_query_lexeme_not_all(tx):
 
 
 def test_out_of_corpus_query_returns_no_candidate(tx, lexical_corpus):
-    assert tx.rpc(tx.member, tx.season_a, "blockchain cryptocurrency") == []
+    assert tx.rpc_ids(tx.member, tx.season_a, "blockchain cryptocurrency") == []
 
 
 def test_ranking_is_rrf_of_ranks_and_deterministic(tx, lexical_corpus):
@@ -877,13 +900,13 @@ def test_ranking_is_rrf_of_ranks_and_deterministic(tx, lexical_corpus):
 def test_equal_scores_break_ties_on_citation_identity(tx):
     doc = tx.document(tx.source())
     ids = [tx.chunk(doc, "awd identical text", ordinal=i) for i in (2, 0, 1)]
-    rows = tx.rpc(tx.member, tx.season_a, "awd identical text")
+    rows = tx.own_rows(tx.rpc(tx.member, tx.season_a, "awd identical text", 50))
     assert [r[4] for r in rows] == [0, 1, 2]
     assert set(r[3] for r in rows) == set(ids)
 
 
 def test_rpc_returns_trusted_metadata_for_evidence(tx, lexical_corpus):
-    row = tx.rpc(tx.member, tx.season_a, "AWD")[0]
+    row = tx.own_rows(tx.rpc(tx.member, tx.season_a, "AWD", 50))[0]
     (source_id, document_id, version, chunk_id, ordinal, title, section, _pf, _pt, content, metadata, source_type,
      authority, visibility, organization_id, farm_id, url, _published, *_scores) = row
     assert (document_id, version, chunk_id, ordinal) == ("doc", "v1", lexical_corpus["awd"], 0)
