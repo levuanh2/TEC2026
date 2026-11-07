@@ -27,7 +27,8 @@ Configuration is server-side environment only (never a request field, never a de
                               backoff, Retry-After honoured within the deadline; never for auth
   RAG_LLM_MAX_OUTPUT_TOKENS   default 1024
   RAG_LLM_MAX_INPUT_CHARS     default 24000 (system + user text; larger requests are refused)
-  RAG_LLM_THINKING_BUDGET     gemini: optional int (0 disables where supported)
+  RAG_LLM_THINKING_BUDGET     gemini 2.x: optional int (0 disables where supported)
+  RAG_LLM_THINKING_LEVEL      gemini 3.x: optional level (e.g. minimal | low | high); never both
   RAG_LLM_THINKING            deepseek: "disabled" (default) | "enabled" | "omit"
   RAG_LLM_PRICE_INPUT_USD_PER_MTOK / RAG_LLM_PRICE_OUTPUT_USD_PER_MTOK
   RAG_LLM_PRICE_INPUT_CACHE_HIT_USD_PER_MTOK   optional (DeepSeek cache-hit input price)
@@ -91,6 +92,7 @@ class LlmSettings:
     max_retries: int = 2
     retry_backoff_seconds: float = 0.25
     thinking: str = "disabled"
+    thinking_level: str | None = None
     #: Which environment variable the key came from (a NAME, never the value).
     key_source: str = "RAG_LLM_API_KEY"
 
@@ -105,6 +107,8 @@ class LlmSettings:
             raise LlmConfigError("token/char budget out of range")
         if not (0 <= self.max_retries <= 5) or not (0 <= self.retry_backoff_seconds <= 5):
             raise LlmConfigError("retries must be in [0, 5] with a backoff in [0, 5] s")
+        if self.thinking_budget is not None and self.thinking_level is not None:
+            raise LlmConfigError("set RAG_LLM_THINKING_BUDGET or RAG_LLM_THINKING_LEVEL, not both (Gemini 400)")
         if self.thinking not in DEEPSEEK_THINKING:
             raise LlmConfigError("RAG_LLM_THINKING must be disabled, enabled or omit")
         if self.base_url is not None and not self.base_url.startswith("https://"):
@@ -157,6 +161,7 @@ def load_llm_settings(env: Mapping[str, str] | None = None) -> LlmSettings | Non
         max_retries=int(env.get("RAG_LLM_MAX_RETRIES") or 2),
         thinking_budget=int(thinking) if thinking else None,
         thinking=(env.get("RAG_LLM_THINKING") or "disabled").strip().lower(),
+        thinking_level=(env.get("RAG_LLM_THINKING_LEVEL") or "").strip().lower() or None,
         base_url=(env.get("RAG_LLM_BASE_URL") or "").strip() or None,
         price_input_usd_per_mtok=_optional_float(env, "RAG_LLM_PRICE_INPUT_USD_PER_MTOK"),
         price_output_usd_per_mtok=_optional_float(env, "RAG_LLM_PRICE_OUTPUT_USD_PER_MTOK"),
@@ -361,6 +366,8 @@ class GeminiStructuredClient(_HttpJsonClient):
                                   "maxOutputTokens": settings.max_output_tokens, "temperature": 0}
         if settings.thinking_budget is not None:
             config["thinkingConfig"] = {"thinkingBudget": settings.thinking_budget}
+        elif settings.thinking_level is not None:
+            config["thinkingConfig"] = {"thinkingLevel": settings.thinking_level}
         body = {"systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
                 "generationConfig": config}
