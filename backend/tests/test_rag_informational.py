@@ -91,6 +91,14 @@ def test_explain_without_carbon_says_so_instead_of_zero():
 def test_data_gap_lists_missing_inputs_from_readiness():
     result = Harness(readiness=READINESS).ask("data_gap")
     assert "diện tích thu hoạch" in result.answer and "chưa thể tính" in result.answer
+    assert "Còn thiếu: Thiếu" not in result.answer  # labels are whole phrases, never double-prefixed
+
+
+def test_explain_states_the_season_status_in_words_not_the_enum():
+    result = Harness().ask("explain")
+    assert "Vụ đang canh tác." in result.answer and "active" not in result.answer
+    assert "{{fact:" not in result.answer_template.split(".")[0]  # the status sentence is fixed text
+    assert "current.season.status" in {fact.fact_id for fact in result.facts}  # still provenance-linked
 
 
 def test_evidence_without_chunks_is_insufficient_not_invented():

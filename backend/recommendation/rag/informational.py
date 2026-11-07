@@ -86,9 +86,22 @@ def _cite(answer: _Answer, evidence: Sequence[EvidenceChunk]) -> list[dict[str, 
     return refs
 
 
+#: Fixed Vietnamese wording of the `crop_status` enum (baseline migration); an unknown
+#: value falls back to the placeholder so the trusted renderer shows it verbatim.
+_SEASON_STATUS_TEXT = {
+    "planned": "Vụ đang ở trạng thái kế hoạch, chưa bắt đầu canh tác.",
+    "active": "Vụ đang canh tác.",
+    "harvested": "Vụ đã thu hoạch.",
+    "closed": "Vụ đã kết thúc.",
+    "cancelled": "Vụ đã bị huỷ.",
+}
+
+
 def _explain(answer: _Answer) -> None:
     if answer.has_value("current.season.status"):
-        answer.say(f"Trạng thái ghi nhận của vụ: {_p('current.season.status')}.", "current.season.status")
+        status = answer.fact("current.season.status").value  # type: ignore[union-attr]
+        answer.say(_SEASON_STATUS_TEXT.get(str(status), f"Trạng thái ghi nhận của vụ: {_p('current.season.status')}."),
+                   "current.season.status")
     if answer.has_value("current.season.ipcc_water_regime"):
         answer.say(f"Chế độ nước ghi nhận theo phương pháp luận: {_p('current.season.ipcc_water_regime')}.",
                    "current.season.ipcc_water_regime")
@@ -116,7 +129,9 @@ def _data_gap(answer: _Answer) -> None:
                        "current.readiness.can_calculate")
     for fact in answer.facts_of(FactKind.CARBON_READINESS):
         if fact.fact_id.startswith("current.readiness.missing.") and fact.value is not None:
-            answer.say(f"Còn thiếu: {_p(fact.fact_id)}.", fact.fact_id)
+            # Carbon readiness labels are whole phrases ("Thiếu diện tích thửa", "Chưa ghi
+            # sản lượng thu hoạch"); a "Còn thiếu:" prefix would read "Còn thiếu: Thiếu ...".
+            answer.say(f"{_p(fact.fact_id)}.", fact.fact_id)
     for name, label in _COMPLETENESS_LABELS.items():
         fact_id = f"current.completeness.{name}"
         fact = answer.fact(fact_id)
