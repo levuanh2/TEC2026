@@ -4,7 +4,8 @@ Status: **implemented locally/CI; nothing ingested anywhere.** Hosted holds Migr
 (`20261006120000`, applied 2026-10-06) and the private `knowledge-artifacts` bucket (created
 2026-10-06); ST1.1 (`20261007090000`) was applied to hosted 2026-10-06. No source is approved, no corpus is
 ingested.
-Lexical only (E1 = C): no embeddings, no vector, no LLM (D5 open, D8 closed).
+Lexical only (E1 = C): no embeddings, no vector, no LLM in ingestion (D5 open; D8 closed with
+strategy B on 2026-11-07). Current cross-document state: [RAG_V1_STATUS.md](RAG_V1_STATUS.md).
 
 ```
 artifact bytes ─► parser ─► normalizer ─► chunker ─► stable ids ─► KnowledgeStore
@@ -62,7 +63,7 @@ object (private, content-addressed, inert; a later run re-verifies it before any
 An `unchanged` re-run re-verifies the stored artifact: missing, tampered or absent (`artifact_ref`
 NULL) fails with `artifact_missing` / `artifact_integrity` and changes nothing.
 
-**ST1-DB — REQUIRED FOLLOW-UP MIGRATION (decided 2026-10-06).** A real document version may not
+**ST1-DB — REQUIRED FOLLOW-UP MIGRATION (decided 2026-10-06; applied as `20261006120000` on 2026-10-06 16:55 UTC, then tightened by ST1.1 `20261007090000`).** A real document version may not
 become `approved` unless it has a controlled immutable `artifact_ref`, its exact original
 `file_sha256`, human approval metadata and the required license provenance; `official_url` alone is
 insufficient. The V1.3-C CLI already stores the artifact before the row commits, but Migration A
