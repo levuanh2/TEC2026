@@ -9,6 +9,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ApiError } from '../api/client'
 import { askSeasonQuestion, type QuestionAnswer, type QuestionIntent } from '../api/questions'
+import { suggestIntent } from './questionIntent'
 import './aiQuestions.css'
 
 export type QuestionAudience = 'farmer' | 'manager'
@@ -31,6 +32,9 @@ const READ_INTENTS: IntentOption[] = [
 const FARMER_ACTION: IntentOption = {
   intent: 'recommend', label: 'Gợi ý hành động', hint: 'Chỉ dành cho nông hộ có quyền ghi của vụ',
 }
+const INTENT_LABEL: Record<string, string> = Object.fromEntries(
+  [...READ_INTENTS, FARMER_ACTION].map((o) => [o.intent, o.label]).concat([['what_if', 'Mô phỏng']]),
+)
 
 const SUGGESTIONS: Record<QuestionAudience, { text: string; intent: QuestionIntent }[]> = {
   farmer: [
@@ -81,6 +85,10 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
   const intents = audience === 'farmer' ? [...READ_INTENTS, FARMER_ACTION] : READ_INTENTS
   const [question, setQuestion] = useState('')
   const [intent, setIntent] = useState<QuestionIntent>('explain')
+  // The user's own radio choice always wins over the typed-question hint.
+  const [intentChosen, setIntentChosen] = useState(false)
+  const [autoPicked, setAutoPicked] = useState<QuestionIntent | null>(null)
+  const [actionNotAvailable, setActionNotAvailable] = useState(false)
   const [view, setView] = useState<View>({ state: 'idle' })
   const generation = useRef(0)
   const inFlight = useRef<AbortController | null>(null)
@@ -116,6 +124,20 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
     }
   }
 
+  function onQuestionChange(text: string) {
+    setQuestion(text)
+    const hint = suggestIntent(text, audience === 'farmer')
+    setActionNotAvailable(hint.actionNotAvailable)
+    if (intentChosen) return
+    if (hint.intent && intents.some((o) => o.intent === hint.intent)) {
+      setIntent(hint.intent)
+      setAutoPicked(hint.intent)
+    } else {
+      setAutoPicked(null)
+    }
+  }
+  function chooseIntent(chosen: QuestionIntent) { setIntent(chosen); setIntentChosen(true); setAutoPicked(null) }
+
   function onSubmit(event: FormEvent) { event.preventDefault(); void ask(question, intent) }
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(question, intent) }
@@ -134,7 +156,7 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
       <div className="aiq__suggest" role="group" aria-label="Câu hỏi gợi ý">
         {SUGGESTIONS[audience].map((s) => (
           <button key={s.text} type="button" className="aiq__chip" disabled={busy}
-                  onClick={() => { setQuestion(s.text); setIntent(s.intent); void ask(s.text, s.intent) }}>
+                  onClick={() => { setQuestion(s.text); setIntent(s.intent); setAutoPicked(null); void ask(s.text, s.intent) }}>
             {s.text}
           </button>
         ))}
@@ -146,15 +168,19 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
           {intents.map((o) => (
             <label key={o.intent} className={`aiq__intent${intent === o.intent ? ' is-on' : ''}`} title={o.hint}>
               <input type="radio" name={`${ids}-intent`} value={o.intent} checked={intent === o.intent}
-                     onChange={() => setIntent(o.intent)} />
+                     onChange={() => chooseIntent(o.intent)} />
               {o.label}
             </label>
           ))}
         </fieldset>
         <label htmlFor={`${ids}-q`} className="aiq__legend">Câu hỏi của bạn</label>
         <textarea id={`${ids}-q`} className="aiq__input" rows={2} maxLength={2000} value={question}
-                  placeholder="Ví dụ: Vụ này còn thiếu dữ liệu gì?" onChange={(e) => setQuestion(e.target.value)}
-                  onKeyDown={onKeyDown} />
+                  placeholder="Ví dụ: Vụ này còn thiếu dữ liệu gì?" onChange={(e) => onQuestionChange(e.target.value)}
+                  onKeyDown={onKeyDown} aria-describedby={`${ids}-hint`} />
+        <p id={`${ids}-hint`} className="aiq__hint" aria-live="polite">
+          {autoPicked && <>Đã chọn loại câu hỏi “{INTENT_LABEL[autoPicked]}” theo nội dung câu hỏi. Bạn có thể đổi.</>}
+          {actionNotAvailable && <>Gợi ý hành động chỉ dành cho nông hộ có quyền ghi của vụ. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>}
+        </p>
         <div className="aiq__actions">
           <button type="submit" className="aiq__send" disabled={busy || !question.trim()}>
             {busy ? 'Đang trả lời…' : 'Gửi câu hỏi'}
@@ -184,22 +210,48 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
 
 function Answer({ answer, question }: { answer: QuestionAnswer; question: string }) {
   const insufficient = answer.status !== 'generated'
+  const aiWritten = answer.answerSource === 'model_generated'
+  const storedTitle = (ruleCode: string | null) =>
+    answer.storedRecommendations.find((s) => s.ruleCode === ruleCode)?.title ?? null
   return (
     <article className={`aiq__answer${insufficient ? ' is-insufficient' : ''}`}>
       <p className="aiq__asked">Câu hỏi: {question}</p>
+      <p className="aiq__kind">
+        <span className={`aiq__badge${aiWritten ? ' is-ai' : ''}`}>
+          {aiWritten ? 'Trợ lý AI viết' : 'Hệ thống soạn — không dùng AI'}
+        </span>
+        <span className="aiq__muted"> · Loại câu hỏi: {INTENT_LABEL[answer.intent] ?? answer.intent}</span>
+      </p>
       {answer.answer && <p className="aiq__text">{answer.answer}</p>}
       <p className="aiq__provenance">
-        {answer.answerSource === 'model_generated'
+        {aiWritten
           ? 'Do trợ lý AI viết từ tài liệu đã duyệt; mọi số liệu và nguồn đã được hệ thống kiểm tra.'
-          : 'Hệ thống tự soạn từ số liệu đã ghi nhận, không dùng mô hình AI.'}
+          : 'Hệ thống tự soạn từ số liệu đã ghi nhận, không dùng mô hình AI. Đây là câu trả lời theo mẫu cố định của loại câu hỏi đã chọn, không diễn giải riêng câu chữ của bạn.'}
       </p>
 
       {answer.recommendations.length > 0 && (
         <div className="aiq__block">
-          <h3>Gợi ý (không thay thế khuyến nghị đã lưu)</h3>
+          <h3>Trợ lý AI giải thích khuyến nghị đã có (không thay thế khuyến nghị đã lưu)</h3>
           <ul>
             {answer.recommendations.map((r) => (
-              <li key={r.title}><strong>{r.title}</strong>{r.actions.length > 0 && <> — {r.actions.join('; ')}</>}</li>
+              <li key={r.title}>
+                <strong>{r.title}</strong>{r.actions.length > 0 && <> — {r.actions.join('; ')}</>}
+                {storedTitle(r.ruleCode) && <span className="aiq__muted"> · Dựa trên khuyến nghị đã lưu: {storedTitle(r.ruleCode)}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {answer.storedRecommendations.length > 0 && (
+        <div className="aiq__block">
+          <h3>Khuyến nghị đã lưu của hệ thống quy tắc</h3>
+          <ul>
+            {answer.storedRecommendations.map((s) => (
+              <li key={s.ruleCode}>
+                {s.title ?? s.ruleCode}
+                <span className="aiq__muted"> · {s.type === 'data_task' ? 'Bổ sung dữ liệu' : 'Tối ưu hoá'}</span>
+              </li>
             ))}
           </ul>
         </div>

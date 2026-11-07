@@ -30,7 +30,7 @@ const answer = (over: Partial<QuestionAnswer> = {}): QuestionAnswer => ({
   citations: [{ sourceId: 'src', chunkId: 'c1', documentId: 'doc', documentVersion: 'v1', title: 'Hướng dẫn tưới AWD',
                 section: 'Tưới nước', sourceType: 'guideline', url: 'https://example.invalid/awd', publishedAt: '2025-11-10' }],
   facts: [{ factId: 'current.carbon.total_co2e_kg', kind: 'carbon_total', value: 2900, unit: 'kg CO2e', source: 'carbon_service' }],
-  recommendations: [], answerSource: 'system_composed', model: null, ...over,
+  recommendations: [], storedRecommendations: [], answerSource: 'system_composed', model: null, ...over,
 })
 
 function deferred<T>() {
@@ -159,6 +159,73 @@ describe('SeasonQuestionPanel', () => {
     expect(await screen.findByText('Câu trả lời mới')).toBeTruthy()
     await act(async () => { slow.resolve(answer({ answer: 'Câu trả lời cũ' })) })
     expect(screen.queryByText('Câu trả lời cũ')).toBeNull()
+  })
+
+  // -- typed questions (not only the suggestion chips) -------------------------
+
+  it('a typed question pre-selects the matching intent until the user picks one', async () => {
+    ask.resolve(answer({ intent: 'data_gap' }))
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    const box = screen.getByLabelText('Câu hỏi của bạn')
+    fireEvent.change(box, { target: { value: 'Ruộng tôi còn thiếu số liệu nào?' } })
+    expect((screen.getByLabelText('Dữ liệu còn thiếu') as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText(/theo nội dung câu hỏi/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
+    await waitFor(() => expect(ask.calls[0]?.[1]).toEqual({ question: 'Ruộng tôi còn thiếu số liệu nào?', intent: 'data_gap' }))
+    // an explicit choice is never overridden by later typing
+    fireEvent.click(screen.getByLabelText('So sánh'))
+    fireEvent.change(box, { target: { value: 'Tài liệu nào nói về AWD?' } })
+    expect((screen.getByLabelText('So sánh') as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('a manager asking for an action is told it is farmer-only and never gets the action intent', () => {
+    render(<SeasonQuestionPanel seasonId="s1" audience="manager" />)
+    fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'HTX nên làm gì để giảm phát thải?' } })
+    expect(screen.getByText(/chỉ dành cho nông hộ có quyền ghi/)).toBeTruthy()
+    expect(screen.queryByLabelText('Gợi ý hành động')).toBeNull()
+    expect((screen.getByLabelText('Giải thích vụ') as HTMLInputElement).checked).toBe(true)
+  })
+
+  // -- deterministic vs AI vs stored M05 ------------------------------------------
+
+  it('a system-composed answer says it is a fixed template, not AI, and names the intent answered', async () => {
+    ask.resolve(answer({ intent: 'data_gap' }))
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Vụ này còn thiếu dữ liệu gì?' }))
+    expect(await screen.findByText('Hệ thống soạn — không dùng AI')).toBeTruthy()
+    expect(screen.getByText(/mẫu cố định/)).toBeTruthy()
+    expect(screen.getByText(/Loại câu hỏi: Dữ liệu còn thiếu/)).toBeTruthy()
+    expect(screen.queryByText('Trợ lý AI viết')).toBeNull()
+  })
+
+  it('an AI explanation is labelled as such and tied to the stored M05 recommendation it explains', async () => {
+    ask.resolve(answer({
+      intent: 'recommend', answerSource: 'model_generated', model: 'm',
+      answer: 'Tài liệu đã duyệt mô tả tưới ngập khô xen kẽ.',
+      recommendations: [{ title: 'Cân nhắc tưới ngập khô xen kẽ', actions: ['Theo dõi mực nước'], ruleCode: 'water.awd_from_continuous_flooding' }],
+      storedRecommendations: [{ ruleCode: 'water.awd_from_continuous_flooding', type: 'optimization', title: 'Chuyển sang tưới AWD', status: 'generated' }],
+    }))
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    fireEvent.click(screen.getByLabelText('Gợi ý hành động'))
+    fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tôi nên làm gì?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
+    expect(await screen.findByText('Trợ lý AI viết')).toBeTruthy()
+    expect(screen.getByText(/Dựa trên khuyến nghị đã lưu: Chuyển sang tưới AWD/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Khuyến nghị đã lưu của hệ thống quy tắc' })).toBeTruthy()
+    expect(screen.queryByText(/mẫu cố định/)).toBeNull()
+  })
+
+  it('no stored rule: the action request is insufficient and shows no suggestion', async () => {
+    ask.resolve(answer({
+      status: 'insufficient_evidence', intent: 'recommend', insufficientReason: 'no_rule_signal', citations: [], facts: [],
+      answer: 'Vụ này chưa có khuyến nghị nào do hệ thống quy tắc ghi nhận, nên trợ lý không đưa ra gợi ý hành động.',
+    }))
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    fireEvent.click(screen.getByLabelText('Gợi ý hành động'))
+    fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tôi nên làm gì?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
+    expect(await screen.findByText(/chưa có khuyến nghị nào/)).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /Trợ lý AI giải thích/ })).toBeNull()
   })
 
   it('unmount (sign-out / identity change remounts the tree) aborts and drops the answer', async () => {

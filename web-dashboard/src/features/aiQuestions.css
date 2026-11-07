@@ -11,7 +11,13 @@
   min-width: 0;
 }
 .aiq__title { margin: 0; font-size: 1.05rem; color: var(--ink); }
-.aiq__lead, .aiq__muted, .aiq__provenance, .aiq__asked { margin: 0; color: var(--ink-muted); font-size: 0.875rem; }
+.aiq__lead, .aiq__muted, .aiq__provenance, .aiq__asked, .aiq__hint, .aiq__kind { margin: 0; color: var(--ink-muted); font-size: 0.875rem; }
+.aiq__hint:empty { display: none; }
+.aiq__badge {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.8125rem; font-weight: 600;
+  border: 1px solid var(--border); background: var(--bg-subtle); color: var(--ink);
+}
+.aiq__badge.is-ai { border-color: var(--brand); background: var(--brand-050, var(--bg-subtle)); }
 .aiq__suggest { display: flex; flex-wrap: wrap; gap: 8px; }
 .aiq__chip {
   border: 1px solid var(--border-strong, var(--border));
