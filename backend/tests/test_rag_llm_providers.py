@@ -291,3 +291,37 @@ def test_deepseek_output_goes_through_the_same_grounding_gates():
     with pytest.raises(GroundingFailed):
         _ask(RagQuestionService(carbon_service=Carbon(), llm_client=_ds(_ds_ok(json.dumps(raw_number))),
                                 write_gate=gate()), "recommend")
+
+
+# -- scripts/verify_llm_provider.py ------------------------------------------------------
+
+def _verify(env, handler, *argv):
+    import scripts.verify_llm_provider as verify
+    return verify.main(list(argv), env=env, http=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_verify_reports_a_credential_type_failure_once_without_the_key(capsys):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(401, json={"error": {"details": [{"reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"}]}})
+    assert _verify({"RAG_LLM_PROVIDER": "gemini", "GEMINI_API_KEY": GKEY}, handler) == 4
+    out = json.loads(capsys.readouterr().out)
+    assert out["reason"] == "credential_type_unsupported" and out["blocked"] == "BLOCKED_GEMINI_KEY"
+    assert out["key_source"] == "GEMINI_API_KEY" and GKEY not in json.dumps(out) and calls == [1]
+
+
+def test_verify_lists_models_and_checks_the_configured_one(capsys):
+    def handler(request):
+        return httpx.Response(200, json={"data": [{"id": "deepseek-flash"}, {"id": "deepseek-v4-pro"}]})
+    env = {"RAG_LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": KEY, "DEEPSEEK_MODEL": "deepseek-flash"}
+    assert _verify(env, handler) == 0
+    assert json.loads(capsys.readouterr().out)["configured_model_listed"] is True
+    assert _verify({**env, "DEEPSEEK_MODEL": "deepseek-chat"}, handler) == 3  # a model the key cannot use
+
+
+def test_verify_without_a_deepseek_key_is_a_config_error(capsys):
+    assert _verify({"RAG_LLM_PROVIDER": "deepseek", "GEMINI_API_KEY": GKEY},
+                   lambda r: httpx.Response(200, json={})) == 4
+    assert GKEY not in capsys.readouterr().out

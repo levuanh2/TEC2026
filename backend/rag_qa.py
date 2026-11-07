@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
+from infrastructure.llm_quota import QuotaGate, QuotaRefused
 from infrastructure.read_repo import ReadNotFoundError
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
@@ -214,6 +215,42 @@ class LlmActionGenerator:
         return _drop_nulls(completion.data)
 
 
+class RagQuotaExceeded(RagError):
+    """A server-enforced model-call limit was reached (429). Never retried by the server."""
+
+    code = "quota_exceeded"
+
+
+@dataclass
+class GuardedLlmClient:
+    """`StructuredLlmClient` behind the quota gate: reserve BEFORE the provider call, record
+    usage/cost after it. Kill switch -> generation_unavailable (503); any quota -> 429."""
+
+    inner: StructuredLlmClient
+    gate: QuotaGate
+    user_id: str
+    purpose: str = "action"
+
+    def complete_json(self, *, system: str, user: str, schema: Mapping[str, Any]):
+        try:
+            key = self.gate.reserve(self.user_id, purpose=self.purpose)
+        except QuotaRefused as exc:
+            if exc.code == "kill_switch":
+                raise GenerationUnavailable("kill_switch") from None
+            raise RagQuotaExceeded(exc.code) from None
+        try:
+            completion = self.inner.complete_json(system=system, user=user, schema=schema)
+        except LlmUnavailable:
+            self.gate.record(key, purpose=self.purpose, provider=None, model=None, ok=False,
+                             input_tokens=None, output_tokens=None, cost_usd=None)
+            raise
+        usage = completion.usage
+        self.gate.record(key, purpose=self.purpose, provider=getattr(completion, "provider", None),
+                         model=completion.model, ok=True, input_tokens=usage.input_tokens,
+                         output_tokens=usage.output_tokens, cost_usd=usage.cost_usd)
+        return completion
+
+
 def _drop_nulls(data: Mapping[str, Any]) -> dict[str, Any]:
     """Providers send explicit nulls / empty optionals; the core contract treats an absent
     optional as None already, and its schema refuses nothing else."""
@@ -251,11 +288,13 @@ class RagQuestionService:
     """`POST /v1/crop-seasons/{id}/questions`. Long-lived; per-request reader."""
 
     def __init__(self, *, carbon_service: Any, llm_client: StructuredLlmClient | None = None,
-                 retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None) -> None:
+                 retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None,
+                 quota: QuotaGate | None = None) -> None:
         self._carbon = carbon_service
         self._llm = llm_client
         self._retrieval = retrieval or RetrievalSettings()
         self._write_gate = write_gate
+        self._quota = quota
 
     @property
     def action_generation_configured(self) -> bool:
@@ -278,7 +317,12 @@ class RagQuestionService:
                 raise UnsupportedWhatIfDimension("a what-if scenario applies to the what_if intent only")
             request = RagQuestionRequest(question=question.question, crop_season_id=crop_season_id,
                                          intent=question.intent, mode=question.mode, hypothetical=hypothetical)
-            action = LlmActionGenerator(self._llm, meter) if self._llm is not None else None
+            llm = self._llm
+            if llm is not None and self._quota is not None:
+                # Counted only when the provider is about to be called, i.e. after the WRITE
+                # check, the rule-code short-circuit and retrieval (orchestrator order).
+                llm = GuardedLlmClient(llm, self._quota, user_id=str(reader.user_id()), purpose="action")
+            action = LlmActionGenerator(llm, meter) if llm is not None else None
             orchestrator = RagOrchestrator(
                 retriever=LexicalKnowledgeRetriever(reader, self._retrieval),
                 generator=CapabilityRoutedGenerator(action=action),
@@ -330,6 +374,7 @@ HTTP_STATUS: dict[str, int] = {
     "citation_mismatch": 502,
     "fact_reference_mismatch": 502,
     "tenant_isolation_violation": 500,
+    "quota_exceeded": 429,
 }
 
 PUBLIC_MESSAGES: dict[str, str] = {
@@ -338,6 +383,7 @@ PUBLIC_MESSAGES: dict[str, str] = {
     "retrieval_unavailable": "Chưa tra cứu được tài liệu. Vui lòng thử lại.",
     "generation_unavailable": "Trợ lý chưa sẵn sàng cho loại câu hỏi này.",
     "tenant_isolation_violation": "Lỗi hệ thống.",
+    "quota_exceeded": "Đã đạt giới hạn lượt hỏi trợ lý AI cho hôm nay. Vui lòng thử lại sau.",
 }
 _GROUNDING_MESSAGE = "Câu trả lời không vượt qua kiểm tra nguồn dẫn nên đã bị chặn. Vui lòng thử lại."
 
@@ -361,11 +407,14 @@ def respond(service: RagQuestionService, **kwargs: Any) -> dict[str, Any]:
 def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None) -> RagQuestionService:
     """Composition-root factory: provider and retrieval cutoff from server-side env only."""
     from infrastructure.llm_client import build_llm_client, load_llm_settings
+    from infrastructure.llm_quota import build_quota_gate, load_quota_policy
 
     raw = (os.environ.get("RAG_RETRIEVAL_MIN_FUSED_SCORE") or "").strip()
     retrieval = RetrievalSettings(min_fused_score=float(raw)) if raw else RetrievalSettings()
-    return RagQuestionService(carbon_service=carbon_service, llm_client=build_llm_client(load_llm_settings()),
-                              retrieval=retrieval, write_gate=write_gate)
+    settings = load_llm_settings()
+    return RagQuestionService(carbon_service=carbon_service, llm_client=build_llm_client(settings),
+                              retrieval=retrieval, write_gate=write_gate,
+                              quota=build_quota_gate(load_quota_policy(), settings))
 
 
 def http_error(exc: RagError) -> tuple[int, str, str]:
