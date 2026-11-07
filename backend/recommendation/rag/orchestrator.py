@@ -37,6 +37,7 @@ from .facts import assert_fact_scope, build_fact_catalog, has_comparison_basis, 
 from .grounding import validate_grounding
 from .intents import INTENT_POLICIES, FactUsage, GenerationCapability, RagIntent, allowed_fact_usage, required_access
 from .models import FactKind, GeneratedAnswer, GroundedFact, InformationalAnswer, RagQuestionRequest, WhatIfResult
+from .question_scope import content_terms, looks_like_instructions, overlap
 from .retrieval import assert_tenant_isolation, build_retrieval_query
 from .what_if import ensure_supported
 
@@ -99,6 +100,7 @@ class RagOrchestrator:
         query = build_retrieval_query(request.question, intent, scope)
         evidence = tuple(_adapter_call(lambda: self._retriever.retrieve(query), RetrievalUnavailable))
         assert_tenant_isolation(evidence, scope)
+        evidence = _relevant_evidence(request.question, evidence, signals)
         if not evidence and policy.needs_documents:
             return _insufficient(request, intent, context, signals, what_if, "no_evidence_retrieved")
 
@@ -142,6 +144,19 @@ def _insufficient(
         insufficient_reason=reason, facts=facts,
         signals=signals, what_if=what_if, basis=_basis(context, signals),
     )
+
+
+def _relevant_evidence(question: str, evidence: tuple, signals: tuple) -> tuple:
+    """Drop chunks written as instructions to an assistant (never evidence), and chunks that
+    share no distinctive term with the question -- or, for an action answer, with the stored
+    rule it explains. Runs AFTER the tenant-isolation check, on the caller's own evidence."""
+    terms = content_terms(question, *(f"{s.title or ''} {s.reason or ''}" for s in signals))
+    scored = [(overlap(terms, (c.content, c.section or "", c.title or "")), c) for c in evidence
+              if not looks_like_instructions(c.content)]
+    best = max((score for score, _ in scored), default=0)
+    # keep the chunks at least half as related as the best one (ranking kept), never 0-overlap
+    floor = max(1, -(-best // 2))
+    return tuple(c for score, c in scored if score >= floor)
 
 
 def _parse(raw: object, capability: GenerationCapability) -> GeneratedAnswer:

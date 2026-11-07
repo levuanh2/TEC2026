@@ -44,9 +44,13 @@ def test_off_unless_configured():
 
 
 def test_explain_answer_shape():
-    body = client().post(URL, json={"question": "Vụ này thế nào?", "intent": "explain"}, headers=AUTH).json()
+    body = client().post(URL, json={"question": "Phát thải và việc tưới nước của vụ thế nào?", "intent": "explain"},
+                         headers=AUTH).json()
     assert body["status"] == "generated" and body["provenance"]["answer_source"] == "system_composed"
-    assert body["citations"][0]["chunk_id"] == "c1" and body["provenance"]["persisted"] is False
+    assert body["citations"] == [] and body["provenance"]["persisted"] is False  # facts answer, no document
+    cited = client().post(URL, json={"question": "Tài liệu nào nói về tưới nước AWD?", "intent": "evidence"},
+                          headers=AUTH).json()
+    assert cited["citations"][0]["chunk_id"] == "c1"
     assert {f["usage"] for f in body["trusted_facts"]} == {"informational_safe"}
 
 

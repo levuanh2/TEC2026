@@ -52,7 +52,9 @@ class Harness:
             what_if=CarbonScenarioWhatIf(FakeCarbonCalculator(totals={"as_recorded": 1.0, "awd": 1.0,
                                                                       "continuous_flooding": 1.0})))
 
-    def ask(self, intent: str, question: str = "Vụ này thế nào?"):
+    def ask(self, intent: str, question: str | None = None):
+        if question is None:  # an evidence question asks about documents; others about the season
+            question = "Tài liệu nào nói về tưới nước AWD?" if intent == "evidence" else "Vụ này thế nào?"
         request = RagQuestionRequest(question=question, crop_season_id=SEASON_ID, intent=intent)
         return self.orchestrator.answer(request, scope_resolver=self.resolver, facts=self.facts)
 
@@ -74,12 +76,18 @@ def test_compare_with_a_basis_is_composed_too():
     assert "0,71" in result.answer  # rendered from the comparison season's trusted fact
 
 
-def test_explain_renders_trusted_values_and_cites_evidence():
-    result = Harness(carbon=CARBON).ask("explain")
+def test_explain_renders_trusted_values_and_cites_no_document():
+    result = Harness(carbon=CARBON).ask("explain", question="Phát thải và việc tưới nước của vụ thế nào?")
     assert "2.900 kg CO2e" in result.answer  # trusted renderer, not the composer, writes the number
     assert "{{fact:current.carbon.total_co2e_kg}}" in result.answer_template
-    assert [c.chunk_id for c in result.evidence] == ["c1"]
+    # a fact answer comes from the season's records; a document sharing a word is not cited as if it answered
+    assert result.evidence == () and "tài liệu" not in result.answer
     assert result.facts and all(f.usage == "informational_safe" for f in result.facts)
+
+
+def test_evidence_cites_the_related_chunk():
+    result = Harness(carbon=CARBON).ask("evidence", question="Tài liệu nào nói về tưới nước AWD?")
+    assert [c.chunk_id for c in result.evidence] == ["c1"]
 
 
 def test_explain_without_carbon_says_so_instead_of_zero():
@@ -106,9 +114,11 @@ def test_evidence_without_chunks_is_insufficient_not_invented():
     assert result.status == "insufficient_evidence" and result.evidence == ()
 
 
-def test_explain_without_chunks_states_the_limitation():
+def test_explain_without_chunks_answers_from_records_and_claims_no_document():
     result = Harness(chunks=()).ask("explain")
-    assert result.status == "generated" and LIMITATION_NO_EVIDENCE in result.limitations
+    assert result.status == "generated" and result.evidence == () and "tài liệu" not in result.answer
+    evidence = Harness(chunks=()).ask("evidence")
+    assert evidence.status == "insufficient_evidence" and evidence.insufficient_reason == "no_evidence_retrieved"
 
 
 def test_question_and_chunk_text_are_never_copied_into_the_answer():

@@ -93,7 +93,7 @@ def build_fact_catalog(context: SeasonRagContext, what_if: WhatIfResult | None =
     if carbon is not None:
         provenance: dict[str, Scalar] = {
             "calculation_id": carbon.calculation_id, "input_hash": carbon.input_hash,
-            "engine_version": carbon.engine_version, "ef_config_version": carbon.ef_config_version,
+            "engine_version": carbon.engine_version, "ef_config_version": carbon.ef_config_version, "mrv_compliant": carbon.mrv_compliant,
         }
         catalog.add(f"{CURRENT}.carbon.total_co2e_kg", FactKind.CARBON_TOTAL, carbon.total_co2e_kg,
                     unit=_KG_CO2E, source="carbon_service", provenance=provenance)

@@ -63,6 +63,7 @@ def test_member_gets_a_composed_answer_citing_only_their_scope(http, env):
     citations = response.json()["citations"]
     own = {c["chunk_id"] for c in citations if c["source_id"] in env["sources"]}
     assert own and env["org_b_doc"] not in own
+    assert env["injection"] not in own  # an instruction-like chunk is never cited as evidence
     assert own <= {env["public"], env["org_a_doc"], env["farm_a_doc"], env["injection"]}
     # The stack is shared: a citation this module did not create must be PUBLIC knowledge.
     foreign = sorted({c["source_id"] for c in citations if c["source_id"] not in env["sources"]})
