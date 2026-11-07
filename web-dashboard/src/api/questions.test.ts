@@ -38,6 +38,14 @@ describe('askSeasonQuestion', () => {
       .toBe('https://example.invalid/x')
   })
 
+  it('maps the stored M05 rule outcomes apart from the generated suggestions', () => {
+    const mapped = mapAnswer({ ...BODY, signals: [{ rule_code: 'data.completeness.water', type: 'data_task',
+                                                    title: 'Bổ sung lượng nước tưới', status: 'generated', reason: 'x' }] })
+    expect(mapped.storedRecommendations).toEqual([{ ruleCode: 'data.completeness.water', type: 'data_task',
+                                                    title: 'Bổ sung lượng nước tưới', status: 'generated' }])
+    expect(mapAnswer(BODY).storedRecommendations).toEqual([])
+  })
+
   it('maps the error envelope', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(
       { detail: { error: { code: 'generation_unavailable', message: 'm' } } }), { status: 503 })))

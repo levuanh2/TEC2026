@@ -33,6 +33,15 @@ export interface AnswerRecommendation {
   ruleCode: string | null
 }
 
+/** A deterministic (M05) recommendation the season already has, as stored. Only action
+ *  answers carry them (READ answers never handle recommendation data). */
+export interface StoredRecommendation {
+  ruleCode: string
+  type: string
+  title: string | null
+  status: string | null
+}
+
 export interface QuestionAnswer {
   status: AnswerStatus
   intent: string
@@ -43,6 +52,7 @@ export interface QuestionAnswer {
   citations: QuestionCitation[]
   facts: TrustedFact[]
   recommendations: AnswerRecommendation[]
+  storedRecommendations: StoredRecommendation[]
   /** 'system_composed' = written by server templates (READ tier, no model);
    *  'model_generated' = written by the configured model (write-tier farmers only). */
   answerSource: 'system_composed' | 'model_generated'
@@ -70,6 +80,9 @@ export const mapAnswer = (x: any): QuestionAnswer => ({
   })),
   recommendations: (x.recommendations ?? []).map((r: any) => ({
     title: r.title, actions: Array.isArray(r.actions) ? r.actions : [], ruleCode: r.rule_code ?? null,
+  })),
+  storedRecommendations: (x.signals ?? []).map((s: any) => ({
+    ruleCode: s.rule_code, type: s.type, title: s.title ?? null, status: s.status ?? null,
   })),
   answerSource: x.provenance?.answer_source === 'model_generated' ? 'model_generated' : 'system_composed',
   model: x.provenance?.model ?? null,
