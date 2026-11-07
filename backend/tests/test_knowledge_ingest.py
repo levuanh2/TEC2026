@@ -22,6 +22,7 @@ from knowledge.ids import sha256_hex  # noqa: E402
 from knowledge.ingest import document_differences, ingest, plan, plan_layout  # noqa: E402
 from knowledge.models import (ArtifactIntegrityError, DocumentSpec, IngestionConflict,  # noqa: E402
                               KnowledgeIngestionError, SourceSpec, StoredDocument, StoredSource)
+from knowledge.parsers.pdf import PARSER_VERSION as PDF_PARSER_VERSION  # noqa: E402
 from knowledge.ports import IdentityExists  # noqa: E402
 from scripts import ingest_knowledge as cli  # noqa: E402
 from tests.fixtures.knowledge import HERE, read  # noqa: E402
@@ -608,6 +609,9 @@ def _pdf_plan():
                 document=DocumentSpec("test-fixture-src", "awd-pdf", "v1", "TEST FIXTURE pdf", "vi"))
 
 
+PDF_FAMILY = PDF_PARSER_VERSION.split("+", 1)[0]   # kn-pdf-N of the running parser
+
+
 def _restamp(store, **change):
     (key, d), = store.docs.items()
     store.docs[key] = dataclasses.replace(d, **change)
@@ -617,18 +621,19 @@ def test_a_pypdf_patch_with_identical_output_is_unchanged_with_a_note(ports):
     store, artifacts = ports
     p = _pdf_plan()
     ingest(p, data=_PDF["data"], store=store, artifacts=artifacts)
-    _restamp(store, parser_version="kn-pdf-1+pypdf-0.0.1")
+    _restamp(store, parser_version=f"{PDF_FAMILY}+pypdf-0.0.1")
     result = ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
     assert result.outcome == "unchanged" and "identical output" in result.notes[0]
-    assert store.find_document("test-fixture-src", "awd-pdf", "v1").parser_version == "kn-pdf-1+pypdf-0.0.1"
+    assert store.find_document("test-fixture-src", "awd-pdf", "v1").parser_version == f"{PDF_FAMILY}+pypdf-0.0.1"
 
 
 @pytest.mark.parametrize("change", [
-    {"parser_version": "kn-pdf-1+pypdf-0.0.1", "normalized_sha256": "0" * 64},   # the patch changed the output
-    {"parser_version": "kn-pdf-2+pypdf-0.0.1"},                                  # another parser
-    {"parser_version": "kn-pdf-1+pdfium-1.0"},                                   # another extraction engine
-    {"parser_version": "kn-pdf-1"},                                              # no build suffix
-    "moved_pages",                                                               # same ids/content, other pages
+    {"parser_version": f"{PDF_FAMILY}+pypdf-0.0.1", "normalized_sha256": "0" * 64},  # the patch changed the output
+    {"parser_version": "kn-pdf-1+pypdf-0.0.1"},           # the previous parser (no top-level section headings)
+    {"parser_version": "kn-pdf-9+pypdf-0.0.1"},           # another parser
+    {"parser_version": f"{PDF_FAMILY}+pdfium-1.0"},       # another extraction engine
+    {"parser_version": PDF_FAMILY},                       # no build suffix
+    "moved_pages",                                        # same ids/content, other pages
 ])
 def test_a_parser_change_with_different_output_or_family_is_refused(ports, change):
     store, artifacts = ports
@@ -636,7 +641,7 @@ def test_a_parser_change_with_different_output_or_family_is_refused(ports, chang
     if change == "moved_pages":
         (_, d), = store.docs.items()
         shifted = tuple((o, s, (pf or 0) + 1, (pt or 0) + 1, m) for o, s, pf, pt, m in d.layout)
-        change = {"parser_version": "kn-pdf-1+pypdf-0.0.1", "layout": shifted}
+        change = {"parser_version": f"{PDF_FAMILY}+pypdf-0.0.1", "layout": shifted}
     _restamp(store, **change)
     with pytest.raises(IngestionConflict) as err:
         ingest(_pdf_plan(), data=_PDF["data"], store=store, artifacts=artifacts)
