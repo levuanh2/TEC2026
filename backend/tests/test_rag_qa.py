@@ -310,7 +310,7 @@ def test_errors_map_to_the_contract_without_leaking_detail(error, status, code):
 
 def test_the_log_line_has_usage_but_never_the_question_or_evidence(caplog):
     caplog.set_level(logging.INFO, logger="agricarbon.rag")
-    secret_question = "Câu hỏi riêng của nông hộ Nguyễn Văn A"
+    secret_question = "Nông hộ Nguyễn Văn A nên tưới thế nào cho vụ này?"
     _ask(RagQuestionService(carbon_service=Carbon(), llm_client=Llm(GOOD_RECOMMEND), write_gate=gate()),
          "recommend", question=secret_question)
     line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("rag_question"))

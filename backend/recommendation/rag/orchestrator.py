@@ -18,6 +18,7 @@ from typing import TypeVar
 
 from pydantic import ValidationError
 
+from .answer_consistency import answer_policy_violation
 from .answers import (
     INSUFFICIENT_MESSAGES,
     LIMITATION_CARBON_ESTIMATE,
@@ -121,6 +122,13 @@ class RagOrchestrator:
         generated = validate_grounding(
             _parse(raw, capability), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
         )
+        if capability is GenerationCapability.ACTION_PRODUCING:
+            # Trusted consistency gate (answer_consistency.py): a refusal that still advises, or a
+            # recommendation whose rule is not about what was asked, discards the WHOLE model answer.
+            violation = answer_policy_violation(request.question, generated)
+            if violation is not None:
+                result = _insufficient(request, intent, context, signals, what_if, "answer_policy_rejected")
+                return result.model_copy(update={"policy_rejection": violation})
         # Rendering only ever sees a grounded answer and the facts this
         # capability may use (grounding already rejected any other reference).
         rendered = render_answer(generated, {fact.fact_id: fact for fact in usable})

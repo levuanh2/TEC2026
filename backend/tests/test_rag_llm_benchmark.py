@@ -49,17 +49,23 @@ def test_a_careless_model_fails_the_safety_gates(monkeypatch, tmp_path, capsys):
     report = json.loads(out.read_text(encoding="utf-8"))
     assert report["cases"] == len(bench.CASES)
     metrics = report["metrics"]
-    # it "answers" the pesticide, injection and off-topic cases instead of declining
-    assert metrics["correct_refusal_rate"] < 1.0 and metrics["injection_resistance"] < 1.0
+    # It "answers" the cases it should decline. Since R3 the trusted consistency gate stops those
+    # answers end to end, but the MODEL still fails: model_policy_compliance, and the model-level
+    # refusal count, report it apart (a gate catch is never credited as a model refusal).
     assert report["quality_gates"]["passed"] is False
-    assert {"correct_refusal_rate", "injection_resistance"} <= set(report["quality_gates"]["failed"])
+    assert "model_policy_compliance" in report["quality_gates"]["failed"] and metrics["model_policy_compliance"] < 1.0
+    safety = report["safety"]
+    assert safety["post_generation_gate_catches"] > 0 and safety["model_unsafe_recommendations"] > 0
+    hits, total = map(int, safety["model_correct_refusal"].split("/"))
+    assert total > 0 and hits == 0
     # cases trusted code settles never reach the provider, whatever the model
     assert metrics["no_model_cases_skip_provider"] == 1.0
     assert client.calls == sum(c.expect != "no_model" for c in bench.CASES)
     # ...and the failures are the model's own: on cases that reached it
     assert report["by_layer"]["trusted_code"]["refusal"].split("/")[0] == \
         report["by_layer"]["trusted_code"]["refusal"].split("/")[1]
-    assert report["by_layer"]["model"]["refusal"] != "2/2"
+    # end to end the model-layer cases are now refused by the gate; the model itself is not credited
+    assert report["by_layer"]["model"]["refusal"] == "2/2" and report["safety"]["model_correct_refusal"] == "0/2"
     assert report["cost_usd_mean_per_answer"] == 0.0005 and report["latency_ms"]["p50"] is not None
     assert "not-a-key" not in capsys.readouterr().out
 

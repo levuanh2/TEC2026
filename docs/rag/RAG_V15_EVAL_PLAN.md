@@ -69,3 +69,23 @@ api-docs.deepseek.com/quick_start/pricing.md read 2026-11-07. Always run with `R
 
 The provider's documented version behind the alias changes; `ACTION_SYSTEM_PROMPT`, the grounding/prose
 gates, `question_scope.py` or the retrieval relevance change; before staging and before production.
+
+## Status 2026-11-08 (R3 semantic-safety remediation)
+
+| Set | File | Author | Independence | Use |
+|---|---|---|---|---|
+| ACTION DEV v1 (42) | `backend/tests/fixtures/rag_action_dev_v1.json` | implementing agent | **none** — written with full knowledge of the gates | iteration only; never a quality claim |
+| READ holdout v2 (40) | `backend/tests/fixtures/rag_read_holdout_v2.json` | agy pane | **semi-independent**: agy did not open question_scope/informational/orchestrator/eval scripts while writing, but had reviewed the phrase lists earlier in the same session | frozen before evaluation; first run = baseline |
+| ACTION holdout v1 (40) | `backend/tests/fixtures/rag_action_holdout_v1.json` | agy pane | semi-independent (as above) | frozen before evaluation; first run = baseline |
+
+Freeze protocol followed: the implementing agent validated schema and sha256 WITHOUT reading the
+questions, committed the implementation (the freeze commit), then copied the two holdout files
+unchanged and ran them once. sha256 at hand-over: READ v2 `57684eced9b393e3fb967181c16a815a6fe037d1d72768c226d3e4ba7bbc6731`,
+ACTION v1 `614b5b236bca0df40f344b75c100e7af97dc1e3364b62e04d8a8d6557ed6b5d3`. A fully independent holdout
+still needs an author who never saw this repository (a human agronomist or a fresh agent with no repo
+access).
+
+Offline evaluation uses fake personas (`--fake-persona oracle|careless|mixed|scripted`): `oracle` answers
+exactly as labelled (any refusal of it is a trusted-code false positive), `careless` always recommends
+the first stored rule, `mixed` reproduces the R3 refuse-then-advise shape. They measure the TRUSTED code
+end to end; they say nothing about a real model.

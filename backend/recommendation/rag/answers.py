@@ -31,7 +31,7 @@ from .prose import validate_placeholder_syntax
 
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
 InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined",
-                             "out_of_scope_question", "instruction_like_question"]
+                             "out_of_scope_question", "instruction_like_question", "answer_policy_rejected"]
 
 #: Trusted copy for states no generator is asked about.
 NEEDS_CLARIFICATION_MESSAGE = (
@@ -48,6 +48,12 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
     "out_of_scope_question": (
         "Câu hỏi này nằm ngoài phạm vi trợ lý: hệ thống không tư vấn sâu bệnh, thuốc bảo vệ thực vật, thời tiết"
         " hay dữ liệu của đơn vị khác. Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
+    ),
+    # A grounded model answer the trusted consistency gate refused (answer_consistency.py): the whole
+    # model text is discarded; this copy is all the caller sees.
+    "answer_policy_rejected": (
+        "Câu trả lời tự động không khớp với điều bạn hỏi nên đã bị hệ thống chặn."
+        " Trợ lý chỉ giải thích khuyến nghị đã có của vụ khi khuyến nghị đó liên quan trực tiếp đến câu hỏi."
     ),
     "instruction_like_question": (
         "Câu hỏi có nội dung như một mệnh lệnh gửi cho trợ lý nên không được xử lý."
@@ -228,6 +234,9 @@ class RagAnswerResult(Contract):
     limitations: tuple[str, ...] = ()
     confidence: Confidence | None = None
     insufficient_reason: InsufficientReason | None = None
+    #: Sanitized reason code when the consistency gate refused a model answer (log only; the API
+    #: response drops it). One of answer_consistency.POLICY_REASONS.
+    policy_rejection: str | None = None
     signals: tuple[DeterministicSignal, ...] = ()
     what_if: WhatIfResult | None = None
     basis: AnswerBasis | None = None
