@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 import sys
 from pathlib import Path
 
@@ -85,3 +87,75 @@ def test_choose_takes_the_cheapest_candidate_that_passes(tmp_path, capsys):
 
 def test_choose_refuses_when_nothing_passes(tmp_path):
     assert bench.main(["--choose", _report(tmp_path / "a.json", "m", False, 0.001)]) == 3
+
+
+# -- multi-provider: the real adapters over mock transports -------------------------------
+
+def _deepseek_over(handler):
+    import httpx
+    from infrastructure.llm_client import DeepSeekStructuredClient, LlmSettings
+    settings = LlmSettings(provider="deepseek", model="deepseek-flash", api_key="sk-not-a-key", max_retries=1,
+                           retry_backoff_seconds=0, price_input_usd_per_mtok=0.3,
+                           price_input_cache_hit_usd_per_mtok=0.03, price_output_usd_per_mtok=1.2)
+    return DeepSeekStructuredClient(settings, http=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def _scripted_deepseek(request):
+    """A DeepSeek-shaped endpoint whose 'model' follows the policy (bench.ScriptedModel)."""
+    import httpx
+    body = json.loads(request.content)
+    data = bench.ScriptedModel().complete_json(system=body["messages"][0]["content"],
+                                               user=body["messages"][1]["content"], schema={}).data
+    return httpx.Response(200, json={"model": "deepseek-flash-test", "choices": [
+        {"message": {"content": json.dumps(data, ensure_ascii=False)}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1500, "completion_tokens": 200, "total_tokens": 1700,
+                  "prompt_cache_hit_tokens": 1000, "prompt_cache_miss_tokens": 500}})
+
+
+def test_a_deepseek_run_records_versions_cache_cost_and_projection(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("RAG_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("RAG_LLM_MODEL", "deepseek-flash")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-not-a-key")
+    monkeypatch.setattr(bench, "build_llm_client", lambda settings: _deepseek_over(_scripted_deepseek))
+    out = tmp_path / "ds.json"
+    assert bench.main(["--out", str(out), "--requests-per-day", "100"]) == 0
+    r = json.loads(out.read_text(encoding="utf-8"))
+    assert r["provider"] == "deepseek" and r["model_versions"] == ["deepseek-flash-test"]
+    assert r["quality_gates"]["passed"] is True and r["metrics"]["hallucination_rate"] == 0
+    assert r["cache_tokens"] == {"hit": 1000 * r["model_calls"], "miss": 500 * r["model_calls"]}
+    per_call = (1000 * 0.03 + 500 * 0.3 + 200 * 1.2) / 1e6
+    assert r["cost_usd_mean_per_answer"] == pytest.approx(per_call) and r["cost_status"] == "KNOWN"
+    assert r["monthly_projection"]["usd"] == pytest.approx(per_call * 100 * 30)
+    assert len(r["config_hash"]) == 64 and "sk-not-a-key" not in out.read_text(encoding="utf-8")
+    assert "sk-not-a-key" not in capsys.readouterr().out
+
+
+def test_a_provider_outage_fails_availability_and_never_answers(monkeypatch, tmp_path):
+    import httpx
+    monkeypatch.setenv("RAG_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("RAG_LLM_MODEL", "deepseek-flash")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-not-a-key")
+    monkeypatch.setattr(bench, "build_llm_client",
+                        lambda settings: _deepseek_over(lambda request: httpx.Response(503, json={})))
+    out = tmp_path / "down.json"
+    assert bench.main(["--out", str(out)]) == 0
+    r = json.loads(out.read_text(encoding="utf-8"))
+    assert r["metrics"]["provider_error_rate"] == 1.0 and "provider_error_rate" in r["quality_gates"]["failed"]
+    assert r["provider_calls"]["failure_reasons"] == ["http_503"] and r["outcomes"]["generated"] == 0
+    assert r["cost_status"] == "COST_UNKNOWN" and r["monthly_projection"]["usd"] == "COST_UNKNOWN"
+
+
+def test_choose_prints_the_comparison_table(tmp_path, capsys):
+    rep = {"provider": "deepseek", "model": "deepseek-flash", "quality_gates": {"passed": True, "failed": []},
+           "cost_usd_mean_per_answer": 0.0003, "latency_ms": {"p95": 900},
+           "metrics": {"grounding_success_rate": 1.0, "citation_correctness": 1.0, "correct_refusal_rate": 1.0,
+                       "vietnamese_heuristic": 1.0}}
+    bad = {**rep, "provider": "gemini", "model": "gemini-x", "cost_usd_mean_per_answer": 0.0001,
+           "quality_gates": {"passed": False, "failed": ["injection_resistance"]}}
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text(json.dumps(rep)), b.write_text(json.dumps(bad))
+    assert bench.main(["--choose", str(a), str(b)]) == 0
+    text = capsys.readouterr().out
+    assert "| Provider | Model | Grounding | Citation | Refusal |" in text
+    assert "FAIL: injection_resistance" in text
+    assert "CHOICE: deepseek/deepseek-flash" in text  # the cheaper model failed a safety gate
