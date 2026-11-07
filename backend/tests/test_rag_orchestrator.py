@@ -75,6 +75,9 @@ class Harness:
     def ask(self, **request):
         payload = {"question": "Tôi nên cải thiện gì trước?", "crop_season_id": SEASON_ID,
                    "intent": "recommend", **request}
+        if payload["intent"] == "evidence" and "question" not in request:
+            # evidence is cited only when it relates to the question (question_scope.relevant)
+            payload["question"] = "Tài liệu nào nói về tưới nước AWD?"
         return self.orchestrator.answer(RagQuestionRequest.model_validate(payload),
                                         scope_resolver=self.resolver, facts=self.facts)
 

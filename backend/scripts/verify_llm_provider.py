@@ -10,7 +10,7 @@ listed.
   RAG_LLM_PROVIDER=gemini   python backend/scripts/verify_llm_provider.py --flash
 
 Exit 0 = credential valid (and the model listed), 3 = model not listed, 4 = credential or
-access failure, 2 = no provider configured.
+access failure, 5 = --probe: structured output not usable, 2 = no provider configured.
 """
 
 from __future__ import annotations
@@ -46,6 +46,8 @@ ADVICE = {
 def main(argv: list[str] | None = None, env: dict | None = None, http=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--flash", action="store_true", help="print only Flash / Flash-Lite model ids")
+    parser.add_argument("--probe", action="store_true",
+                        help="one tiny SYNTHETIC structured-output call on RAG_LLM_MODEL (no retry, ~50 tokens)")
     args = parser.parse_args(argv)
     env = dict(os.environ if env is None else env)
     if (env.get("RAG_LLM_PROVIDER") or "").strip() and not ((env.get("RAG_LLM_MODEL") or "").strip()
@@ -73,7 +75,22 @@ def main(argv: list[str] | None = None, env: dict | None = None, http=None) -> i
     wanted = settings.model if settings.model != "(listing only)" else None
     if wanted:
         report["configured_model_listed"] = wanted in models
+    if args.probe and wanted and wanted in models:
+        import dataclasses
+        from infrastructure.llm_client import build_llm_client
+        probe = build_llm_client(dataclasses.replace(settings, max_retries=0, max_output_tokens=64), http=http)
+        schema = {"type": "OBJECT", "properties": {"ok": {"type": "BOOLEAN"}}, "required": ["ok"]}
+        try:
+            done = probe.complete_json(system="Trả về JSON đúng lược đồ.", user='{"request": "synthetic probe"}',
+                                       schema=schema)
+            report["structured_output"] = {"status": "OK" if done.data.get("ok") is True else "UNEXPECTED_SHAPE",
+                                           "model_version": done.model_version,
+                                           "tokens": [done.usage.input_tokens, done.usage.output_tokens]}
+        except LlmUnavailable as exc:
+            report["structured_output"] = {"status": "FAILED", "reason": exc.reason}
     print(json.dumps(report, ensure_ascii=False))
+    if args.probe and report.get("structured_output", {}).get("status") not in (None, "OK"):
+        return 5
     return 3 if wanted and wanted not in models else 0
 
 

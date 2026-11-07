@@ -29,6 +29,7 @@ from .contracts import AnswerGenerator
 from .errors import GenerationUnavailable
 from .intents import GenerationCapability, RagIntent
 from .models import EvidenceChunk, FactKind, GroundedFact
+from .question_scope import TOPICS, question_topics
 
 #: How many retrieved chunks an informational answer cites (the panel lists them).
 MAX_CITED_CHUNKS = 3
@@ -40,6 +41,11 @@ LIMITATION_SYSTEM_COMPOSED = (
 )
 LIMITATION_NO_EVIDENCE = "Chưa có đoạn tài liệu đã duyệt nào khớp với câu hỏi này."
 LIMITATION_NO_CARBON = "Vụ này chưa có kết quả tính phát thải đã lưu."
+ANSWER_OUT_OF_SCOPE = ("Câu hỏi này nằm ngoài phạm vi số liệu đã ghi nhận và tài liệu đã duyệt của vụ "
+                       "(hệ thống không trả lời về thuốc bảo vệ thực vật, thời tiết hay dữ liệu của đơn vị khác).")
+ANSWER_UNCLEAR_TOPIC = ("Chưa xác định được câu hỏi hỏi về số liệu cụ thể nào; dưới đây là tóm tắt số liệu "
+                        "đã ghi nhận của vụ. Có thể hỏi cụ thể về phát thải, sản lượng, nước tưới, phân bón, "
+                        "chi phí hoặc trạng thái.")
 
 _COMPLETENESS_LABELS = {
     "water": "lượng nước tưới",
@@ -59,6 +65,7 @@ class _Answer:
         self.sentences: list[str] = []
         self.fact_refs: list[str] = []
         self.limitations: list[str] = [LIMITATION_SYSTEM_COMPOSED]
+        self.topics: frozenset[str] = frozenset()
 
     def fact(self, fact_id: str) -> GroundedFact | None:
         return self._facts.get(fact_id)
@@ -98,23 +105,57 @@ _SEASON_STATUS_TEXT = {
 
 
 def _explain(answer: _Answer) -> None:
-    if answer.has_value("current.season.status"):
+    """Only the topics the question asks about (all of them for "how is this season doing?");
+    a topic with no recorded value is said to be missing, never skipped silently."""
+    topics = answer.topics or frozenset(TOPICS)
+    if "status" in topics and answer.has_value("current.season.status"):
         status = answer.fact("current.season.status").value  # type: ignore[union-attr]
         answer.say(_SEASON_STATUS_TEXT.get(str(status), f"Trạng thái ghi nhận của vụ: {_p('current.season.status')}."),
                    "current.season.status")
-    if answer.has_value("current.season.ipcc_water_regime"):
-        answer.say(f"Chế độ nước ghi nhận theo phương pháp luận: {_p('current.season.ipcc_water_regime')}.",
-                   "current.season.ipcc_water_regime")
-    if answer.has_value("current.carbon.total_co2e_kg"):
-        answer.say(f"Tổng phát thải khí nhà kính đã tính cho vụ: {_p('current.carbon.total_co2e_kg')}.",
-                   "current.carbon.total_co2e_kg")
-    else:
-        answer.limitations.append(LIMITATION_NO_CARBON)
-    if answer.has_value("current.metrics.co2e_per_kg"):
-        answer.say(f"Cường độ phát thải trên sản lượng: {_p('current.metrics.co2e_per_kg')}.",
-                   "current.metrics.co2e_per_kg")
-    if answer.has_value("current.metrics.yield_kg"):
-        answer.say(f"Sản lượng đã ghi nhận: {_p('current.metrics.yield_kg')}.", "current.metrics.yield_kg")
+    if "water" in topics:
+        if answer.has_value("current.season.ipcc_water_regime"):
+            answer.say(f"Chế độ nước ghi nhận theo phương pháp luận: {_p('current.season.ipcc_water_regime')}.",
+                       "current.season.ipcc_water_regime")
+        if answer.has_value("current.metrics.water_m3"):
+            answer.say(f"Lượng nước tưới đã ghi nhận: {_p('current.metrics.water_m3')}.", "current.metrics.water_m3")
+        elif answer.fact("current.metrics.water_m3") is not None:
+            answer.say("Vụ chưa có đủ số liệu lượng nước tưới đã ghi nhận.", "current.metrics.water_m3")
+    if "carbon" in topics or "mrv" in topics:
+        if answer.has_value("current.carbon.total_co2e_kg"):
+            answer.say(f"Tổng phát thải khí nhà kính đã tính cho vụ: {_p('current.carbon.total_co2e_kg')}.",
+                       "current.carbon.total_co2e_kg")
+        else:
+            answer.limitations.append(LIMITATION_NO_CARBON)
+            if answer.topics:
+                answer.say("Vụ chưa có kết quả tính phát thải đã lưu.")
+        if "carbon" in topics and answer.has_value("current.metrics.co2e_per_kg"):
+            answer.say(f"Cường độ phát thải trên sản lượng: {_p('current.metrics.co2e_per_kg')}.",
+                       "current.metrics.co2e_per_kg")
+    if "mrv" in answer.topics:
+        carbon = answer.fact("current.carbon.total_co2e_kg")
+        if carbon is not None and carbon.provenance.get("mrv_compliant") is True:
+            answer.say("Kết quả phát thải đã lưu được hệ thống đánh dấu đạt yêu cầu MRV.", carbon.fact_id)
+        elif carbon is not None:
+            # corrects a false premise ("why did it pass MRV?") instead of explaining it
+            answer.say("Kết quả phát thải của vụ là ước tính theo hệ số mặc định và chưa đạt yêu cầu MRV.",
+                       carbon.fact_id)
+    if "yield" in topics:
+        if answer.has_value("current.metrics.yield_kg"):
+            answer.say(f"Sản lượng đã ghi nhận: {_p('current.metrics.yield_kg')}.", "current.metrics.yield_kg")
+        elif answer.fact("current.metrics.yield_kg") is not None:
+            answer.say("Vụ chưa ghi nhận sản lượng thu hoạch.", "current.metrics.yield_kg")
+    if "fertilizer" in topics and answer.topics:
+        if answer.has_value("current.metrics.fertilizer_kg"):
+            answer.say(f"Lượng phân bón đã ghi nhận: {_p('current.metrics.fertilizer_kg')}.",
+                       "current.metrics.fertilizer_kg")
+        elif answer.fact("current.metrics.fertilizer_kg") is not None:
+            answer.say("Vụ chưa có đủ số liệu phân bón đã ghi nhận.", "current.metrics.fertilizer_kg")
+    if "cost" in topics and answer.topics:
+        if answer.has_value("current.metrics.cost_per_kg"):
+            answer.say(f"Chi phí trên sản lượng đã ghi nhận: {_p('current.metrics.cost_per_kg')}.",
+                       "current.metrics.cost_per_kg")
+        elif answer.fact("current.metrics.cost_per_kg") is not None:
+            answer.say("Vụ chưa có đủ số liệu chi phí để tính chi phí trên sản lượng.", "current.metrics.cost_per_kg")
     if not answer.sentences:
         answer.say("Vụ này chưa có dữ liệu đã ghi nhận đủ để mô tả.")
 
@@ -190,9 +231,20 @@ class TrustedInformationalComposer:
         compose = _COMPOSERS.get(request.intent)
         if compose is None:
             raise GenerationUnavailable(f"no informational composition for intent {request.intent}")
+        topics, out_of_scope, generic = question_topics(request.question)
+        if out_of_scope:
+            return {"status": "insufficient_evidence", "answer": ANSWER_OUT_OF_SCOPE,
+                    "limitations": [LIMITATION_SYSTEM_COMPOSED]}
         answer = _Answer(request.facts)
+        answer.topics = topics
+        if request.intent is RagIntent.EXPLAIN and not topics and not generic:
+            # In scope but no recognised topic: never a silent generic answer -- say so first,
+            # then summarize (a false refusal of "Vụ này ổn không?" helps nobody).
+            answer.say(ANSWER_UNCLEAR_TOPIC)
         compose(answer)
-        evidence_refs = _cite(answer, request.evidence)
+        # Fact intents answer from the season's recorded data: a document that merely shares a
+        # word with the question is not cited as if it answered it. Only EVIDENCE cites.
+        evidence_refs = _cite(answer, request.evidence) if request.intent is RagIntent.EVIDENCE else []
         if request.intent is RagIntent.EVIDENCE and not evidence_refs:
             return {"status": "insufficient_evidence", "answer": LIMITATION_NO_EVIDENCE,
                     "limitations": [LIMITATION_SYSTEM_COMPOSED]}
