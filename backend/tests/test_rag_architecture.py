@@ -130,12 +130,23 @@ def test_core_recommendation_does_not_depend_on_rag():
 
 
 def test_app_layers_do_not_wire_rag_yet():
-    """V1 is contracts only: no route, service or adapter in the app layers uses
-    the RAG core — neither by any import form nor by a dynamic module string."""
+    """The app layers never use the RAG core directly, by any import form or a dynamic
+    module string. The route (api.py) and the composition root (main.py) reach it only
+    through `rag_qa` (test_app_layers_reach_rag_only_through_rag_qa); service.py and
+    infrastructure/ not at all."""
     for path in [BACKEND / "api.py", BACKEND / "main.py", BACKEND / "service.py",
                  *sorted((BACKEND / "infrastructure").glob("*.py"))]:
         assert not any(_wires_rag(module, names) for module, names, _level in _imports(path)), path.name
         assert "recommendation.rag" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_app_layers_reach_rag_only_through_rag_qa():
+    for path in [BACKEND / "service.py", *sorted((BACKEND / "infrastructure").glob("*.py"))]:
+        modules = {module.split(".")[0] for module, _names, _level in _imports(path)}
+        assert not modules & {"rag_qa", "rag_application"}, path.name
+    for path in (BACKEND / "api.py", BACKEND / "main.py"):
+        modules = {module.split(".")[0] for module, _names, _level in _imports(path)}
+        assert "rag_application" not in modules, path.name
 
 
 _NOT_PRODUCTION = {"tests", "tests_strict", "__pycache__", ".venv", "venv"}

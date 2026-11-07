@@ -33,6 +33,22 @@ Also added: `GET /v1/crop-seasons/{crop_season_id}/recommendations` (list),
 "dismissed"}`, farmer-scope only). See `docs/modules/05-ai-recommendation.md`
 and `docs/M05_RECOMMENDATION_REPORT.md`.
 
+## RAG V1 AI Q&A
+
+`POST /v1/crop-seasons/{crop_season_id}/questions` takes `{question, intent, mode="ask",
+what_if_scenario?}`. It has no organization, farm, tenant or filter field, and unknown fields get
+422. It is ephemeral: nothing is persisted.
+
+- **Scope:** comes only from the caller's JWT. An out-of-scope season is 404 `not_found`.
+- **READ intents** (`explain`, `compare`, `evidence`, `data_gap`): the answer is written by trusted
+  server composition. No model is involved (D8, strategy B).
+- **`recommend` / `what_if`:** need Core V1 write authority on the season, plus a provider
+  configured server-side (`RAG_LLM_*`); without a provider the answer is 503
+  `generation_unavailable`.
+- **Switch:** the route is OFF unless `RAG_QA_ENABLED=true`, and returns 503
+  `backend_not_configured` while off.
+- **Further reading:** `docs/rag/RAG_V1_ARCHITECTURE.md`.
+
 ## M03 supersession
 
 Also added: `POST /v1/crop-seasons/{crop_season_id}/cv/infer` (multipart
@@ -59,6 +75,7 @@ baseline model (MobileNetV2, not field-validated) — see
 | GET | `/v1/crop-seasons/{crop_season_id}/production-batches` | Production Batches | yes |
 | GET | `/v1/crop-seasons/{crop_season_id}/recommendations` | Recommendations | yes |
 | POST | `/v1/crop-seasons/{crop_season_id}/recommendations/generate` | Recommendations | yes |
+| POST | `/v1/crop-seasons/{crop_season_id}/questions` | AI Q&A | yes |
 | GET | `/v1/cv/inferences/{inference_id}` | CV | yes |
 | GET | `/v1/emission-factor-sets` | Emission Factors | yes |
 | GET | `/v1/emission-factor-sets/{emission_factor_set_id}` | Emission Factors | yes |

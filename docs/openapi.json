@@ -1910,6 +1910,80 @@
         ]
       }
     },
+    "/v1/crop-seasons/{crop_season_id}/questions": {
+      "post": {
+        "tags": [
+          "AI Q&A"
+        ],
+        "summary": "Ask Crop Season Question",
+        "description": "Grounded Q&A about one crop season (docs/rag/RAG_V1_ARCHITECTURE.md).\n\nScope comes from the caller's JWT only. READ-tier intents (explain, compare,\nevidence, data_gap) are answered by trusted server composition; recommend and\nwhat_if need Core V1 write authority on the season and a configured provider.\nNothing is persisted. A season outside the caller's scope is 404 `not_found`.",
+        "operationId": "ask_crop_season_question_v1_crop_seasons__crop_season_id__questions_post",
+        "parameters": [
+          {
+            "name": "crop_season_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Crop Season Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RagQuestionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RagQuestionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/v1/crop-seasons/{crop_season_id}/cv/infer": {
       "post": {
         "tags": [
@@ -7303,6 +7377,474 @@
           "status"
         ],
         "title": "ProductionBatchResponse"
+      },
+      "RagAnswerProvenanceResponse": {
+        "properties": {
+          "answer_source": {
+            "type": "string",
+            "enum": [
+              "system_composed",
+              "model_generated"
+            ],
+            "title": "Answer Source"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "llm_calls": {
+            "type": "integer",
+            "title": "Llm Calls"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "persisted": {
+            "type": "boolean",
+            "const": false,
+            "title": "Persisted",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer_source",
+          "llm_calls"
+        ],
+        "title": "RagAnswerProvenanceResponse"
+      },
+      "RagCitationResponse": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "document_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Version"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "chunk_id",
+          "document_id",
+          "title",
+          "source_type"
+        ],
+        "title": "RagCitationResponse"
+      },
+      "RagQuestionRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "explain",
+              "compare",
+              "evidence",
+              "data_gap",
+              "recommend",
+              "what_if"
+            ],
+            "title": "Intent"
+          },
+          "mode": {
+            "type": "string",
+            "const": "ask",
+            "title": "Mode",
+            "default": "ask"
+          },
+          "what_if_scenario": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "awd",
+                  "continuous_flooding"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "What If Scenario"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question",
+          "intent"
+        ],
+        "title": "RagQuestionRequest",
+        "description": "One question about one crop season. There is deliberately no organization,\nfarm, tenant, filter, permission or persistence field: scope comes from the\ncaller's JWT through Core V1 checks, and unknown fields are refused (422)."
+      },
+      "RagQuestionResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "generated",
+              "insufficient_evidence",
+              "needs_clarification"
+            ],
+            "title": "Status"
+          },
+          "intent": {
+            "type": "string",
+            "title": "Intent"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "crop_season_id": {
+            "type": "string",
+            "title": "Crop Season Id"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "answer_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Template"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "recommendations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Recommendations"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/RagCitationResponse"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "trusted_facts": {
+            "items": {
+              "$ref": "#/components/schemas/RagTrustedFactResponse"
+            },
+            "type": "array",
+            "title": "Trusted Facts"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "insufficient_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insufficient Reason"
+          },
+          "signals": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Signals"
+          },
+          "what_if": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "What If"
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/RagAnswerProvenanceResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "intent",
+          "mode",
+          "crop_season_id",
+          "provenance"
+        ],
+        "title": "RagQuestionResponse"
+      },
+      "RagTrustedFactResponse": {
+        "properties": {
+          "fact_id": {
+            "type": "string",
+            "title": "Fact Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "provenance": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Provenance"
+          },
+          "crop_season_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crop Season Id"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Id"
+          },
+          "authoritative": {
+            "type": "boolean",
+            "title": "Authoritative",
+            "default": true
+          },
+          "usage": {
+            "type": "string",
+            "title": "Usage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fact_id",
+          "kind",
+          "source",
+          "usage"
+        ],
+        "title": "RagTrustedFactResponse"
       },
       "RecommendationResponse": {
         "properties": {

@@ -183,6 +183,9 @@ def _run(journey: Journey, fx: dict) -> None:
     assert recs[0]["id"] in j("GET", "/v1/crop-seasons/{crop_season_id}/recommendations", crop_season_id=sid).text
     updated = j("PATCH", "/v1/recommendations/{recommendation_id}", recommendation_id=recs[0]["id"], json={"status": "accepted"})
     assert updated.json()["status"] == "accepted"
+    answer = j("POST", "/v1/crop-seasons/{crop_season_id}/questions", crop_season_id=sid,
+               json={"question": "Vụ này đang thế nào?", "intent": "explain"}).json()
+    assert answer["status"] == "generated" and answer["provenance"]["answer_source"] == "system_composed"
 
     # -- CV --------------------------------------------------------------------------
     from PIL import Image
@@ -286,6 +289,15 @@ def journey():
     cv = CvService(model, {"image_size": 224, "run_name": f"authcov-{run}"}, 0.5, 1.0, cv_meta, PostgresCvRepository(_SETTINGS))
     previous_cv = app.dependency_overrides.get(api._cv_service)
     app.dependency_overrides[api._cv_service] = lambda: cv
+    # RAG Q&A is OFF in main.py unless RAG_QA_ENABLED=true: inject the production service
+    # (real CarbonService, real recommendation write gate, no provider).
+    import main
+    from infrastructure.recommendation_repo import PostgresRecommendationRepository
+    from rag_qa import RagQuestionService
+    rag = RagQuestionService(carbon_service=main._service_singleton,
+                             write_gate=PostgresRecommendationRepository(_SETTINGS).assert_can_write)
+    previous_rag = app.dependency_overrides.get(api._rag_question_service)
+    app.dependency_overrides[api._rag_question_service] = lambda: rag
     fx["cv_version_code"] = cv_meta["version_code"]
     try:
         fx["org"], tokens["manager"] = manager_of(f"{tag}-ORG", "manager")
@@ -302,6 +314,10 @@ def journey():
             app.dependency_overrides.pop(api._cv_service, None)
         else:
             app.dependency_overrides[api._cv_service] = previous_cv
+        if previous_rag is None:
+            app.dependency_overrides.pop(api._rag_question_service, None)
+        else:
+            app.dependency_overrides[api._rag_question_service] = previous_rag
         _cleanup(fx)
 
 

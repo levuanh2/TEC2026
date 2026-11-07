@@ -226,7 +226,15 @@
     "backend/tests/test_route_positive_auth.py",
     "backend/tests/test_route_auth_inventory.py",
     "backend/main.py",
-    "backend/infrastructure/route_freeze.py"
+    "backend/infrastructure/route_freeze.py",
+    "backend/tests/test_rag_architecture.py",
+    "backend/tests/test_rag_questions_route_db.py",
+    "backend/tests/test_rag_retrieval_db.py",
+    "backend/recommendation/rag/intents.py",
+    "backend/recommendation/rag/informational.py",
+    "backend/rag_application.py",
+    "backend/rag_qa.py",
+    "backend/infrastructure/llm_client.py"
   ],
   "route_mutation_allow": [
     "backend/main.py: app = FastAPI(title=\"AgriCarbon API\", version=\"0.2.0\", openapi_tags=OPENAPI_TAGS, lifespan=lifespan)",

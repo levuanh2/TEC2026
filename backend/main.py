@@ -14,6 +14,7 @@ Luồng:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -23,6 +24,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 import api
+import rag_qa
 from carbon import ENGINE_VERSION, ParameterSet
 from infrastructure.api_errors import error_detail
 from infrastructure.auth import SupabaseCropAccessChecker
@@ -197,6 +199,14 @@ if settings.auth_configured and settings.supabase_configured:
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
     _recommendation_service_singleton = RecommendationService(_service_singleton, PostgresRecommendationRepository(settings))
     app.dependency_overrides[api._recommendation_service] = lambda: _recommendation_service_singleton
+
+# RAG V1 AI Q&A: OFF unless RAG_QA_ENABLED=true. READ-tier answers need no provider;
+# recommend/what_if additionally need RAG_LLM_* (infrastructure/llm_client.py).
+if (os.environ.get("RAG_QA_ENABLED", "").strip().lower() == "true"
+        and settings.auth_configured and settings.supabase_db_url and settings.supabase_configured):
+    _rag_question_singleton = rag_qa.build_question_service(
+        carbon_service=_service_singleton, write_gate=PostgresRecommendationRepository(settings).assert_can_write)
+    app.dependency_overrides[api._rag_question_service] = lambda: _rag_question_singleton
 
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
     # Carbon is read through the same service the carbon routes use, so the

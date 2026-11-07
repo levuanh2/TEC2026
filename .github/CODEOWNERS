@@ -67,3 +67,12 @@
 /backend/tests/test_route_auth_inventory.py @levuanh2
 /backend/main.py @levuanh2
 /backend/infrastructure/route_freeze.py @levuanh2
+# RAG V1 Q&A: D8 strategy B guards, caller-bound scope/authorization, provider wiring.
+/backend/tests/test_rag_architecture.py @levuanh2
+/backend/tests/test_rag_questions_route_db.py @levuanh2
+/backend/tests/test_rag_retrieval_db.py @levuanh2
+/backend/recommendation/rag/intents.py @levuanh2
+/backend/recommendation/rag/informational.py @levuanh2
+/backend/rag_application.py @levuanh2
+/backend/rag_qa.py @levuanh2
+/backend/infrastructure/llm_client.py @levuanh2

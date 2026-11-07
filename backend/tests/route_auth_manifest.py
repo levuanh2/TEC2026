@@ -101,6 +101,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/v1/crop-seasons/{crop_season_id}/recommendations/generate"): ok(F, 200, deny=X),
     ("GET", "/v1/crop-seasons/{crop_season_id}/recommendations"): ok(F, 200),
     ("PATCH", "/v1/recommendations/{recommendation_id}"): ok(F, 200, deny=X),
+    # RAG V1 AI Q&A: READ-tier explain answered by trusted composition (no provider in CI).
+    ("POST", "/v1/crop-seasons/{crop_season_id}/questions"): ok(F, 200, deny=X),
 
     # -- CV -----------------------------------------------------------------------
     # CI has no trained checkpoint (ml/runs is not committed); the suite injects an
