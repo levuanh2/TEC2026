@@ -1,3 +1,4 @@
+import { SeasonQuestionPanel, aiQuestionsEnabled } from '../../features/aiQuestions'
 import type { SeasonMetrics } from '../../api/metrics'
 import type { Activity } from '../../types'
 import { date, daysSince, ha } from '../../format'
@@ -164,6 +165,7 @@ function SeasonOverview({ id, ctx, seasonCtx, writeCtx, metrics, activities, mut
       </div>
       <CvPreviewCard season={seasonCtx} seasonId={id} />
       <CvHistorySection seasonId={id} />
+      {aiQuestionsEnabled && <SeasonQuestionPanel seasonId={id} audience="farmer" />}
     </>
   )
 }

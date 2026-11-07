@@ -27,6 +27,7 @@ import {
 import { ActivityTimeline, ActivityCoverage } from '../features/activities'
 import { CarbonPanel } from '../features/carbon'
 import { SeasonMethodologyPanel } from '../features/seasonMethodology'
+import { SeasonQuestionPanel, aiQuestionsEnabled } from '../features/aiQuestions'
 import type { Role } from '../types'
 
 export type SeasonTab = 'overview' | 'activities' | 'performance' | 'carbon' | 'mrv'
@@ -127,6 +128,7 @@ export function SeasonHub({ id, tab, role, organizationId }: { id: string; tab: 
             {tab === 'overview' && (
               <Overview season={season} plot={plot} metrics={metrics} activities={activities} batches={batches} base={base} />
             )}
+            {tab === 'overview' && aiQuestionsEnabled && <SeasonQuestionPanel seasonId={season.id} audience="manager" />}
             {tab === 'activities' && (
               <Section title="Nhật ký hoạt động" description="Ghi nhận canh tác theo nhóm — nhấp để xem chi tiết">
                 <Async state={activities} skeleton="table">
