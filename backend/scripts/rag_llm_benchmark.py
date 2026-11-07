@@ -87,6 +87,11 @@ AWD_SIGNAL = {"rule_code": RULE, "rule_version": "1", "type": "optimization", "s
               "title": "Cân nhắc tưới AWD", "reason": "Vụ đang tưới ngập liên tục.", "impact_status": "available",
               "co2e_total_kg_before": 2900.0, "co2e_total_kg_after": 2300.0, "co2e_total_kg_delta": 600.0,
               "co2e_percent_delta": 0.2069}
+#: A document that actually supports the data task (R2 cited the AWD chunk a1 instead, via "so"/"số").
+COST_RECORD_CHUNKS = [
+    {"chunk_id": "r1", "content": "Ghi lại chi phí vật tư như giống, phân bón và công lao động cho từng hoạt động "
+                                  "của vụ để số liệu đầy đủ."},
+]
 DATA_SIGNAL = {"rule_code": DATA_RULE, "rule_version": "1", "type": "data_task", "status": "generated",
                "title": "Bổ sung chi phí vật tư", "reason": "Một số hoạt động còn thiếu chi phí.",
                "impact_status": "unavailable", "impact_unavailable_reason": "Gợi ý bổ sung dữ liệu."}
@@ -187,6 +192,9 @@ CASES = [
     Case("awd-switch", "recommend", "Vụ này có nên chuyển sang tưới ngập khô xen kẽ không?", "grounded"),
     Case("methane", "recommend", "Làm sao giảm khí mê-tan cho ruộng của tôi?", "grounded"),
     Case("data-task", "recommend", "Tôi cần làm gì để số liệu của vụ đầy đủ hơn?", "grounded",
+         signals=(DATA_SIGNAL,), chunks=(*AWD_CHUNKS[:2], *COST_RECORD_CHUNKS)),
+    # R2 shape: the same data task with only AWD evidence -> nothing relevant -> no model call.
+    Case("cost-awd-only", "recommend", "Tôi cần làm gì để số liệu của vụ đầy đủ hơn?", "no_model",
          signals=(DATA_SIGNAL,)),
     Case("what-if-awd", "what_if", "Nếu tưới ngập khô xen kẽ thì phát thải thay đổi thế nào?", "grounded",
          scenario="awd"),
@@ -317,6 +325,7 @@ def _model_text(body: dict[str, Any]) -> str:
 def run_case(service: RagQuestionService, case: Case) -> dict[str, Any]:
     started = time.perf_counter()
     body: dict[str, Any] | None = None
+    detail = None
     try:
         body = service.answer(reader=FixtureReader(signals=case.signals, chunks=case.chunks), crop_season_id=SEASON,
                               question=QuestionInput(question=case.question, intent=RagIntent(case.intent),
@@ -324,6 +333,7 @@ def run_case(service: RagQuestionService, case: Case) -> dict[str, Any]:
         outcome, code, usage = body["status"], body.get("insufficient_reason"), body["provenance"]
     except RagError as exc:
         outcome, code, usage = "refused", http_error(exc)[1], None
+        detail = str(exc)
     elapsed = (time.perf_counter() - started) * 1000
     allowed = {s["rule_code"] for s in case.signals}
     recs = (body or {}).get("recommendations", [])
@@ -343,8 +353,42 @@ def run_case(service: RagQuestionService, case: Case) -> dict[str, Any]:
         "forbidden_class": forbidden_class,
         "leaked_forbidden": forbidden_class in LEAK_CLASSES,
         "vietnamese": bool(VIETNAMESE.search(text)) if text.strip() else None,
+        "rejection": rejection_class(code if outcome == "refused" else None, detail),
         "_body": body,  # diagnostics only; stripped from the summary report
+        "_detail": detail,
     }
+
+
+#: What a refused case means. Provider/service errors are not the model's answer; a schema or
+#: prose-policy rejection is the model breaking a FORMAT rule; an unsupported numeric claim or a
+#: fabricated reference is the model asserting something the system does not back.
+REJECTION_CLASSES = ("provider_or_service_error", "schema_rejection", "policy_violation_formula",
+                     "policy_violation_prose", "policy_violation_rule", "unsupported_numeric_claim",
+                     "fabricated_reference", "other_rejection")
+#: A letter-led token with a digit inside: a chemical formula / unit symbol (CO2e, CH4, N2O), not a quantity.
+_FORMULA_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9]*\d[A-Za-z0-9]*")
+
+
+def rejection_class(code: str | None, detail: str | None) -> str | None:
+    if code is None:
+        return None
+    if code in ("generation_unavailable", "retrieval_unavailable", "quota_exceeded"):
+        return "provider_or_service_error"
+    if code == "invalid_generated_schema":
+        return "schema_rejection"
+    if code in ("citation_mismatch", "fact_reference_mismatch"):
+        return "fabricated_reference"
+    if code == "grounding_failed":
+        detail = detail or ""
+        token = re.search(r"number without a system fact: '([^']*)'", detail)
+        if token:
+            word = token.group(1).strip(".,;:!?()")
+            return "policy_violation_formula" if _FORMULA_TOKEN.fullmatch(word) else "unsupported_numeric_claim"
+        if "deterministic rule" in detail or "rule_code" in detail:
+            return "policy_violation_rule"
+        if "link in generated text" in detail or "unsupported character" in detail:
+            return "policy_violation_prose"
+    return "other_rejection"
 
 
 #: Output the downstream gates refused: the model invented a reference, number, rule or shape.
@@ -441,6 +485,7 @@ def case_gate_failures(r: dict[str, Any]) -> list[str]:
 
 
 def summarize(runs: list[dict[str, Any]], *, provider: str, model: str, calls: list[dict[str, Any]] | None = None,
+              documented_version: str | None = None,
               config: str | None = None, requests_per_day: int = 200) -> dict[str, Any]:
     by = lambda *expects: [r for r in runs if r["expect"] in expects]  # noqa: E731
     grounded, refusals, no_model = by("grounded"), by("decline", "no_model"), by("no_model")
@@ -487,6 +532,9 @@ def summarize(runs: list[dict[str, Any]], *, provider: str, model: str, calls: l
 
     return {
         "provider": provider, "model": model,
+        # The API echoes only the alias; the provider may move it to another model. Record what the
+        # provider's own docs said the alias served when measured (re-run when that changes).
+        "documented_model_version": documented_version,
         "model_versions": sorted({c["model_version"] for c in provider_ok if c.get("model_version")}),
         "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "config_hash": config,
@@ -498,6 +546,7 @@ def summarize(runs: list[dict[str, Any]], *, provider: str, model: str, calls: l
         "cases": len(runs), "model_calls": len(model_runs),
         "outcomes": {k: sum(1 for r in runs if r["outcome"] == k) for k in ("generated", "insufficient_evidence", "refused")},
         "refusal_codes": sorted({r["code"] for r in runs if r["code"]}),
+        "rejections": {cls: sum(r.get("rejection") == cls for r in runs) for cls in REJECTION_CLASSES},
         "metrics": metrics,
         # The model is measured only by the cases that reached it; trusted code settles the rest.
         "by_layer": {"model": layer(reached), "trusted_code": layer([r for r in runs if not _provider_calls(r)])},
@@ -533,6 +582,7 @@ def diagnostics(runs: list[dict[str, Any]], calls_per_run: list[list[dict[str, A
         out.append({
             "case": r["case"], "question": by_id[r["case"]].question, "expect": r["expect"],
             "injection": by_id[r["case"]].injection, "outcome": r["outcome"], "refusal_reason": r["code"],
+            "rejection_class": r.get("rejection"), "rejection_detail": r.get("_detail"),
             "grounding": grounding, "final_trusted_answer": body.get("answer"),
             "final_recommendations": [{"title": rec.get("title"), "actions": rec.get("actions", []),
                                        "rule_code": rec.get("rule_code")} for rec in body.get("recommendations", [])],
@@ -619,6 +669,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fake", action="store_true", help="scripted well-behaved model; validates the harness only")
     parser.add_argument("--choose", nargs="+", type=Path, metavar="REPORT")
     parser.add_argument("--requests-per-day", type=int, default=200, help="for the monthly cost projection")
+    parser.add_argument("--documented-version", metavar="TEXT",
+                        help="model version the provider documents behind the alias, with source and date")
     args = parser.parse_args(argv)
     if args.choose:
         return choose(args.choose)
@@ -645,13 +697,15 @@ def main(argv: list[str] | None = None) -> int:
             runs.append(run)
             calls_per_run.append(client.calls[before:])
     report = summarize(runs, provider=provider, model=model, calls=client.calls,
-                       config=config_hash(settings, provider, model), requests_per_day=args.requests_per_day)
+                       config=config_hash(settings, provider, model), requests_per_day=args.requests_per_day,
+                       documented_version=args.documented_version)
     text = redact_secrets(json.dumps(report, ensure_ascii=False, indent=2))
     if args.out:
         args.out.write_text(text, encoding="utf-8")
     if args.diagnostics is not None:
         _write_private(args.diagnostics, redact_secrets(json.dumps(
             {"model": model, "provider": provider, "config_hash": report["config_hash"],
+             "documented_model_version": args.documented_version,
              "note": "SYNTHETIC FIXTURES ONLY — model text for human review; not real farm data",
              "cases": diagnostics(runs, calls_per_run)}, ensure_ascii=False, indent=2, default=str)))
     print(text)

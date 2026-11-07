@@ -300,3 +300,48 @@ def test_provider_calls_refused_by_a_gate_still_count_as_model_cases_and_cost(mo
     assert r["tokens"]["input"] == 900 * reaching and r["tokens"]["output"] == 150 * reaching
     assert sorted(r["by_layer"]["model"]["cases"]) == sorted(c.case_id for c in bench.CASES if c.expect != "no_model")
     assert r["metrics"]["hallucination_rate"] > 0 and r["quality_gates"]["passed"] is False
+
+
+# -- R3 preparation: rejection taxonomy, documented version, fixed data-task evidence ------------
+
+@pytest.mark.parametrize(("code", "detail", "expected"), [
+    ("grounding_failed", "number without a system fact: 'CO2e,'", "policy_violation_formula"),
+    ("grounding_failed", "number without a system fact: 'CH4'", "policy_violation_formula"),
+    ("grounding_failed", "number without a system fact: '600'", "unsupported_numeric_claim"),
+    ("grounding_failed", "number without a system fact: '20%'", "unsupported_numeric_claim"),
+    ("grounding_failed", "a generated recommendation must explain an existing deterministic rule",
+     "policy_violation_rule"),
+    ("grounding_failed", "link in generated text: 'www.'", "policy_violation_prose"),
+    ("citation_mismatch", "x", "fabricated_reference"), ("fact_reference_mismatch", "x", "fabricated_reference"),
+    ("invalid_generated_schema", "x", "schema_rejection"),
+    ("generation_unavailable", "http_503", "provider_or_service_error"),
+    (None, None, None),
+])
+def test_rejections_separate_provider_errors_format_breaks_and_unsupported_claims(code, detail, expected):
+    assert bench.rejection_class(code, detail) == expected
+
+
+def test_a_formula_answer_is_counted_as_a_policy_violation_not_a_hallucinated_fact(monkeypatch, tmp_path):
+    _configure(monkeypatch, GateRefusedClient())
+    out = tmp_path / "formula.json"
+    assert bench.main(["--out", str(out)]) == 0
+    r = json.loads(out.read_text(encoding="utf-8"))
+    assert r["rejections"]["policy_violation_formula"] > 0
+    assert r["rejections"]["unsupported_numeric_claim"] == 0 and r["rejections"]["provider_or_service_error"] == 0
+
+
+def test_the_documented_model_version_is_recorded(tmp_path):
+    out, diag = tmp_path / "v.json", tmp_path / "d.json"
+    assert bench.main(["--fake", "--out", str(out), "--diagnostics", str(diag),
+                       "--documented-version", "X-1017 (pricing.md, 2026-11-07)"]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["documented_model_version"] == "X-1017 (pricing.md, 2026-11-07)"
+    assert json.loads(diag.read_text(encoding="utf-8"))["documented_model_version"].startswith("X-1017")
+
+
+def test_the_data_task_cites_the_cost_record_and_the_awd_only_variant_never_reaches_the_model(tmp_path):
+    diag = tmp_path / "d.json"
+    assert bench.main(["--fake", "--diagnostics", str(diag)]) == 0
+    cases = {c["case"]: c for c in json.loads(diag.read_text(encoding="utf-8"))["cases"]}
+    assert cases["data-task"]["citation_ids"] == ["r1"] and cases["data-task"]["outcome"] == "generated"
+    assert cases["cost-awd-only"]["provider_calls"] == 0
+    assert cases["cost-awd-only"]["refusal_reason"] == "no_evidence_retrieved"

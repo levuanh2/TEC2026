@@ -117,26 +117,37 @@ def concepts(*texts: str) -> frozenset[str]:
 
 
 def _word_forms(*texts: str) -> dict[str, set[str]]:
-    """folded distinctive word -> the spellings it was written with (lower-case NFC)."""
-    forms: dict[str, set[str]] = {}
+    """folded distinctive word -> the spellings it was written with (lower-case NFC); a text
+    typed entirely WITHOUT accents contributes the wildcard `None` (its spelling is unknown)."""
+    forms: dict[str, set[str | None]] = {}
     for text in texts:
-        for word in re.findall(r"\w+", unicodedata.normalize("NFC", text or "").lower()):
+        normalized = unicodedata.normalize("NFC", text or "").lower()
+        accentless = fold(normalized) == re.sub(r"\s+", " ", normalized).strip()
+        for word in re.findall(r"\w+", normalized):
             folded = fold(word)
             if len(folded) >= 2 and folded not in STOP_TERMS:
-                forms.setdefault(folded, set()).add(word)
+                forms.setdefault(folded, set()).add(None if accentless else _spelling(word))
     return forms
 
 
+def _spelling(word: str) -> tuple[str, ...]:
+    """A word's accents independent of WHERE the tone mark sits: "hòa" == "hoà", "thủy" == "thuỷ",
+    while "tưới" != "tuổi" and "số" != "so" (different marks)."""
+    decomposed = unicodedata.normalize("NFD", word)
+    marks = sorted(ch for ch in decomposed if unicodedata.category(ch) == "Mn")
+    return (*marks, "đ") if "đ" in word else tuple(marks)
+
+
 def shared_words(question_texts: Iterable[str], body: str) -> frozenset[str]:
-    """Distinctive words the body shares with the question. Accent folding may join two
-    spellings only when one side was written WITHOUT accents (a farmer typing "tuoi"); two
-    different accented words that fold alike ("tưới" / "tuổi", "nước" in "nhà nước" is the same
-    word and still counts) do not match."""
+    """Distinctive words the body shares with the question: the same spelling, or the same word
+    folded when one side is a text typed WITHOUT accents ("lich tuoi" matches "lịch tưới").
+    Inside an accented text an unaccented word is a real word, not a missing accent: "so"
+    (so với) does not match "số" (số liệu), "tưới" does not match "tuổi". Known limit: one
+    spelling with two meanings ("nước" = water / nation) still matches."""
     q, b = _word_forms(*question_texts), _word_forms(body)
     out = set()
     for folded in q.keys() & b.keys():
-        plain = folded in q[folded] or folded in b[folded]
-        if plain or q[folded] & b[folded]:
+        if None in q[folded] or None in b[folded] or (q[folded] & b[folded]):
             out.add(folded)
     return frozenset(out)
 

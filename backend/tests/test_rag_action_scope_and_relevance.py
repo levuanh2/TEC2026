@@ -258,3 +258,71 @@ def test_equal_scores_keep_the_retrieval_order():
     a = public_chunk("e1", title="Tài liệu", section=None, content="Tưới khô xen kẽ giảm mê-tan.")
     b = public_chunk("e2", title="Tài liệu", section=None, content="Tưới khô xen kẽ giảm mê-tan.")
     assert _keep("Tưới khô xen kẽ có giảm mê-tan không?", b, a) == ["e2", "e1"]
+
+
+# -- Flash R2 finding: "so" (so với) admitted an AWD chunk for a cost question ("số liệu") ---------
+
+AWD_A1 = ("Tưới ngập khô xen kẽ là để ruộng khô dần giữa các lần tưới, giúp giảm phát thải khí mê-tan "
+          "so với ngập liên tục.")
+COST_QUESTION = "Tôi cần làm gì để số liệu của vụ đầy đủ hơn?"
+COST_SIGNAL_TEXT = "Bổ sung chi phí vật tư Một số hoạt động còn thiếu chi phí."
+
+
+def _doc(chunk_id, content):
+    return public_chunk(chunk_id, title="Tài liệu", section=None, content=content)
+
+
+def test_a_cost_question_does_not_cite_awd_through_so_and_so():
+    from recommendation.rag.question_scope import shared_words
+    assert shared_words([COST_QUESTION, COST_SIGNAL_TEXT], AWD_A1) == frozenset()
+    assert _keep(COST_QUESTION + " " + COST_SIGNAL_TEXT, _doc("a1", AWD_A1)) == []
+
+
+def test_a_cost_question_finds_the_cost_record_document():
+    records = _doc("r1", "Ghi lại chi phí vật tư như giống, phân bón và công lao động cho từng hoạt động.")
+    assert _keep(COST_QUESTION + " " + COST_SIGNAL_TEXT, _doc("a1", AWD_A1), records) == ["r1"]
+
+
+@pytest.mark.parametrize("question", ["Vụ này có nên chuyển sang tưới ngập khô xen kẽ không?",
+                                      "vu nay co nen chuyen sang tuoi ngap kho xen ke khong"])
+def test_a_valid_awd_question_still_finds_the_awd_document(question):
+    assert _keep(question, _doc("a1", AWD_A1)) == ["a1"]
+
+
+@pytest.mark.parametrize(("question", "body"), [
+    ("Giá thành sản xuất của vụ có cao không?", "Ghi đủ chi phí vật tư để tính đúng."),        # cost concept
+    ("Có nên đốt rơm sau khi gặt không?", "Vùi rơm rạ vào đất thay vì đốt."),                   # straw concept
+    ("Làm sao giảm khí nhà kính?", "Ruộng khô xen kẽ làm lượng CH4 thấp hơn."),                 # ghg concept
+    ("Lịch tưới hợp lý là gì?", "Giữ nước vào giai đoạn trổ bông, sau đó cho ruộng khô dần."),  # water concept
+])
+def test_concepts_admit_equivalent_wording(question, body):
+    assert _keep(question, _doc("c1", body)) == ["c1"]
+
+
+@pytest.mark.parametrize("body", ["Lúa cỏ cần được nhổ bỏ sớm.", "Chính sách hỗ trợ vay vốn cho nông dân.",
+                                  "So với năm trước, giá lúa tăng."])
+def test_an_unrelated_document_is_not_admitted_for_a_cost_question(body):
+    assert _keep(COST_QUESTION + " " + COST_SIGNAL_TEXT, _doc("u1", body)) == []
+
+
+def test_a_cost_question_with_only_awd_evidence_makes_no_model_call():
+    cost = signal_row("data.completeness.cost", type="data_task", title="Bổ sung chi phí vật tư",
+                      reason="Một số hoạt động còn thiếu chi phí.", impact_status="unavailable",
+                      impact_unavailable_reason="Gợi ý bổ sung dữ liệu.", co2e_total_kg_before=None,
+                      co2e_total_kg_after=None, co2e_total_kg_delta=None, co2e_percent_delta=None)
+    h = Harness(signals=[cost], chunks=(public_chunk("a1", content=AWD_A1),))
+    assert h.ask(question=COST_QUESTION).insufficient_reason == "no_evidence_retrieved"
+    assert "generate" not in h.calls
+
+
+def test_tenant_isolation_still_precedes_relevance_for_a_cost_question():
+    foreign = tenant_chunk("x9", organization_id=OTHER_ORG_ID).model_copy(update={"content": AWD_A1})
+    h = Harness(chunks=(foreign,))
+    with pytest.raises(TenantIsolationViolation):
+        h.ask(question=COST_QUESTION)
+
+
+def test_tone_mark_placement_variants_are_the_same_word():
+    from recommendation.rag.question_scope import shared_words
+    assert shared_words(["Hòa nước vào ruộng thủy lợi"], "Hoà nước, thuỷ lợi nội đồng") >= {"hoa", "thuy"}
+    assert shared_words(["Lịch tưới"], "Mạ 15 ngày tuổi") == frozenset()

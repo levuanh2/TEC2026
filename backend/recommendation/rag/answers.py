@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
 from pydantic import model_validator
@@ -21,6 +21,7 @@ from .models import (
     Confidence,
     Contract,
     EvidenceChunk,
+    FactKind,
     GeneratedAnswer,
     GroundedFact,
     Question,
@@ -68,8 +69,16 @@ UNKNOWN_FACTOR_SET_TEXT = "chưa xác định"
 #: How a fact whose authoritative value is None reads — never "0".
 MISSING_FACT_TEXT = "chưa có dữ liệu"
 _BOOLEAN_TEXT = {True: "có", False: "không"}
-#: Dimensionless units: the number is shown alone (no conversion, e.g. never ×100 to "%").
+#: Dimensionless units: the number is shown alone (no conversion), except the audited facts below.
 _UNITLESS = frozenset({"fraction"})
+#: `fraction` facts whose value is a RELATIVE change (share of a baseline: M05
+#: co2e_percent_delta = (before - after) / before) and therefore read as a percentage. Audited
+#: 2026-11-07: the only other `fraction` fact, CV `confidence`, is a probability and stays as is.
+#: A percentage-POINT difference (two percentages subtracted) is not a relative change and must
+#: never be added here; it would need its own unit and wording ("điểm phần trăm").
+PERCENT_CHANGE_FACTS = frozenset({"co2e_percent_delta"})
+#: One decimal, half-up: 0.2069 -> "20,7%". The stored value is never changed.
+_PERCENT_QUANTUM = Decimal("0.1")
 
 
 def _vietnamese_number(value: int | float) -> str:
@@ -78,11 +87,33 @@ def _vietnamese_number(value: int | float) -> str:
     trailing zeros of the fraction (2900.0 -> "2.900") are dropped."""
     if isinstance(value, float) and not math.isfinite(value):
         raise FactReferenceMismatch(f"system fact has a non-finite value: {value!r}")
-    text = format(Decimal(repr(value)) if isinstance(value, float) else Decimal(value), "f")
+    return _vietnamese_decimal(Decimal(repr(value)) if isinstance(value, float) else Decimal(value))
+
+
+def _vietnamese_decimal(number: Decimal) -> str:
+    text = format(number, "f")
     sign, text = ("-", text[1:]) if text.startswith("-") else ("", text)
     whole, _, fraction = text.partition(".")
     fraction = fraction.rstrip("0")
+    if int(whole) == 0 and not fraction:
+        sign = ""  # never "-0"
     return sign + f"{int(whole):,}".replace(",", ".") + ("," + fraction if fraction else "")
+
+
+def format_percent_change(value: int | float) -> str:
+    """A relative-change fraction as a Vietnamese percentage: 0.2069 -> "20,7%", 1 -> "100%",
+    0 -> "0%", -0.05 -> "-5%". Decimal arithmetic, one decimal, half-up; display only."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise FactReferenceMismatch(f"system fact has a non-finite value: {value!r}")
+    exact = Decimal(repr(value)) if isinstance(value, float) else Decimal(value)
+    return _vietnamese_decimal((exact * 100).quantize(_PERCENT_QUANTUM, rounding=ROUND_HALF_UP)) + "%"
+
+
+def is_percent_change(fact: GroundedFact) -> bool:
+    """Only a stored rule signal's audited field (`current.signal.<rule>.co2e_percent_delta`), never a
+    benchmark or other fact whose id merely ends the same way."""
+    return (fact.unit == "fraction" and fact.kind is FactKind.RULE_SIGNAL and fact.fact_id.startswith("current.signal.")
+            and fact.fact_id.rsplit(".", 1)[-1] in PERCENT_CHANGE_FACTS)
 
 
 def format_fact(fact: GroundedFact) -> str:
@@ -94,6 +125,8 @@ def format_fact(fact: GroundedFact) -> str:
         return _BOOLEAN_TEXT[value]
     if isinstance(value, str):
         return value
+    if is_percent_change(fact):
+        return format_percent_change(value)
     number = _vietnamese_number(value)
     return number if not fact.unit or fact.unit in _UNITLESS else f"{number} {fact.unit}"
 
