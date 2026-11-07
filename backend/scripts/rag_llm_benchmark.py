@@ -274,7 +274,7 @@ def config_hash(settings: Any | None, provider: str, model: str) -> str:
               "cases": [c.case_id for c in CASES], "gates": QUALITY_GATES}
     if settings is not None:
         for name in ("base_url", "timeout_seconds", "max_output_tokens", "max_input_chars", "thinking_budget",
-                     "thinking", "max_retries", "price_input_usd_per_mtok", "price_output_usd_per_mtok",
+                     "thinking", "thinking_level", "max_retries", "price_input_usd_per_mtok", "price_output_usd_per_mtok",
                      "price_input_cache_hit_usd_per_mtok"):
             fields[name] = getattr(settings, name)
     return hashlib.sha256(json.dumps(fields, sort_keys=True, default=str).encode()).hexdigest()

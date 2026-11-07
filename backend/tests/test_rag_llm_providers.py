@@ -325,3 +325,21 @@ def test_verify_without_a_deepseek_key_is_a_config_error(capsys):
     assert _verify({"RAG_LLM_PROVIDER": "deepseek", "GEMINI_API_KEY": GKEY},
                    lambda r: httpx.Response(200, json={})) == 4
     assert GKEY not in capsys.readouterr().out
+
+
+def test_gemini_3_thinking_level_and_never_both():
+    import json as _json
+    seen = {}
+
+    def handler(request):
+        seen["body"] = _json.loads(request.content)
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"status": "x"}'}]},
+                                                         "finishReason": "STOP"}], "usageMetadata": {}})
+    s = load_llm_settings({"RAG_LLM_PROVIDER": "gemini", "RAG_LLM_MODEL": "gemini-3.8-flash", "GEMINI_API_KEY": GKEY,
+                           "RAG_LLM_THINKING_LEVEL": "Minimal"})
+    GeminiStructuredClient(s, http=httpx.Client(transport=httpx.MockTransport(handler))).complete_json(
+        system="s", user="u", schema=SCHEMA)
+    assert seen["body"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal"}
+    with pytest.raises(LlmConfigError):
+        load_llm_settings({"RAG_LLM_PROVIDER": "gemini", "RAG_LLM_MODEL": "m", "GEMINI_API_KEY": GKEY,
+                           "RAG_LLM_THINKING_LEVEL": "low", "RAG_LLM_THINKING_BUDGET": "0"})
