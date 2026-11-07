@@ -79,7 +79,13 @@ def test_frozen_holdout_v1_ratchet():
     """Independent holdout (40 questions written WITHOUT seeing the topic lists, run once on
     2026-11-07: relevance 0.675 -> 0.825, refusals 0/10 -> 4/10, injection citations 25 -> 0,
     irrelevant citations 94 -> 7). A ratchet, not a target: do NOT tune keywords on it; add a
-    new holdout instead."""
+    new holdout instead.
+
+    CONTAMINATION NOTE (2026-11-07, Flash R1 remediation): the body-only relevance change first
+    lost the weed document for h26/h27 ("cỏ" folds to the stop word "có"); the `weed` concept
+    in question_scope.CONCEPTS was added AFTER seeing that. v1 is therefore no longer an
+    independent measure for the weed topic: commission an uninspected holdout v2 before
+    claiming READ-relevance gains. Thresholds below are unchanged."""
     FACT = {"carbon": ev.CARBON, "yield": ev.YIELD, "status": ev.STATUS, "water": ev.WATER,
             "fertilizer": ev.FERT_GAP, "cost": "current.metrics.cost_per_kg", "mrv": ev.CARBON, "overall": ev.STATUS}
     DOC = {"awd": "awd", "fertilizer": "fert", "straw": "straw", "weed": "weed", "records": "records", "mrv": "mrv"}

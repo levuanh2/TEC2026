@@ -289,8 +289,14 @@ POST /v1/crop-seasons/{id}/questions (future)  — Depends(_read_repo) caller JW
   8. COMPARE without a comparison fact → insufficient_evidence / no_comparison_basis (no model call)
      RECOMMEND without a stored deterministic (M05) rule outcome → insufficient_evidence /
        no_rule_signal (no retrieval, no model call: a recommendation only explains an existing rule)
+     ACTION question (recommend / what_if) talking to the assistant, or about something no tier
+       answers (pesticide, disease, weather, other tenants, markets; accent-insensitive) →
+       insufficient_evidence / instruction_like_question | out_of_scope_question (no retrieval,
+       no model call; question_scope.action_question_refusal — a first layer, not the boundary)
   9. evidence = retriever.retrieve(build_retrieval_query(...))      → RetrievalUnavailable
      assert_tenant_isolation(evidence, scope)                       → TenantIsolationViolation
+     relevance: instruction-like chunks dropped; a chunk is ADMITTED only by its body (shared
+       words or shared agronomic concept); title/section only rank (orchestrator._relevant_evidence)
  10. no documents + intent needs documents → insufficient_evidence / no_evidence_retrieved
  11. raw = generator.generate(GenerationInput(question, intent, facts=catalog, evidence))
                                                                     → GenerationUnavailable

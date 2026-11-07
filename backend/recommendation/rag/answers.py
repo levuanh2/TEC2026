@@ -29,7 +29,8 @@ from .models import (
 from .prose import validate_placeholder_syntax
 
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
-InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined"]
+InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined",
+                             "out_of_scope_question", "instruction_like_question"]
 
 #: Trusted copy for states no generator is asked about.
 NEEDS_CLARIFICATION_MESSAGE = (
@@ -41,6 +42,15 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
     "no_rule_signal": (
         "Vụ này chưa có khuyến nghị nào do hệ thống quy tắc ghi nhận, nên trợ lý không đưa ra gợi ý hành động."
         " Trợ lý chỉ giải thích khuyến nghị đã có, không tự tạo khuyến nghị mới."
+    ),
+    # Action questions refused before retrieval (question_scope.action_question_refusal).
+    "out_of_scope_question": (
+        "Câu hỏi này nằm ngoài phạm vi trợ lý: hệ thống không tư vấn sâu bệnh, thuốc bảo vệ thực vật, thời tiết"
+        " hay dữ liệu của đơn vị khác. Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
+    ),
+    "instruction_like_question": (
+        "Câu hỏi có nội dung như một mệnh lệnh gửi cho trợ lý nên không được xử lý."
+        " Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
     ),
 }
 
