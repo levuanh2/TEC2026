@@ -165,27 +165,68 @@ def _generation_references(source: str) -> set[str]:
     return found
 
 
-def test_no_answer_generator_is_wired_until_d8_is_closed():
-    """D8 — READ-tier semantic advice gate (REQUIRED BEFORE ANY REAL LLM).
+#: D8 is closed with strategy B (docs/rag/RAG_V1_ARCHITECTURE.md §11): the generation path
+#: may be wired in exactly ONE production module, and the RAG core may hold exactly these
+#: concrete generators -- the trusted READ-tier composer and the capability router.
+D8_COMPOSITION_MODULE = BACKEND / "rag_qa.py"
+D8_CORE_GENERATORS = {("informational.py", "TrustedInformationalComposer"),
+                      ("informational.py", "CapabilityRoutedGenerator")}
 
-    An INFORMATIONAL answer has no recommendation slot, but its free text can
-    still phrase advice ("nên rút nước định kỳ"), and nothing in V1 detects
-    that. So no production module may touch the GENERATION path — implement
-    `AnswerGenerator`, build a `GenerationInput`, wire a `RagOrchestrator` or
-    handle a generated answer — and the RAG core holds no concrete generator.
-    Retrieval and scope adapters (V1.3, `rag_application.py`) are not affected.
-    A real generator lands only together with a closed D8 strategy
-    (docs/rag/RAG_V1_ARCHITECTURE.md §11) and a deliberate change of this
-    test, never by silently plugging into READ generation."""
+
+def test_generation_path_is_wired_only_through_the_d8_composition():
+    """D8 — READ-tier semantic advice gate (closed by strategy B).
+
+    An INFORMATIONAL answer has no recommendation slot, but model-written free
+    text can still phrase advice ("nên rút nước định kỳ"), and no keyword list
+    can detect that. Strategy B removes the free text: READ-tier answers are
+    composed by trusted code (`informational.TrustedInformationalComposer`),
+    and a provider adapter is reachable only for ACTION_PRODUCING intents,
+    i.e. Core V1 WRITE (`CapabilityRoutedGenerator`). This test pins that:
+    * no production module except `rag_qa.py` touches the generation path;
+    * the RAG core holds no concrete generator other than the two above.
+    Widening either set is a deliberate change of D8, never a silent plug-in."""
     assert PRODUCTION_MODULES and BACKEND / "api.py" in PRODUCTION_MODULES
+    assert D8_COMPOSITION_MODULE in PRODUCTION_MODULES
     for path in PRODUCTION_MODULES:
+        if path == D8_COMPOSITION_MODULE:
+            continue
         found = _generation_references(path.read_text(encoding="utf-8"))
-        assert not found, f"{path}: generation path {sorted(found)} before D8"
+        assert not found, f"{path}: generation path {sorted(found)} outside the D8 composition module"
     for path in RAG_MODULES:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.ClassDef) and not any(getattr(b, "id", None) == "Protocol" for b in node.bases):
                 methods = {item.name for item in node.body if isinstance(item, ast.FunctionDef)}
-                assert "generate" not in methods, f"{path.name}: concrete generator {node.name} before D8"
+                if "generate" in methods:
+                    assert (path.name, node.name) in D8_CORE_GENERATORS, f"{path.name}: concrete generator {node.name}"
+
+
+def _orchestrator_generators(source: str) -> list[str]:
+    """For each `RagOrchestrator(...)` call: the callee name of its `generator=` argument."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "RagOrchestrator":
+            generator = next((kw.value for kw in node.keywords if kw.arg == "generator"), None)
+            callee = generator.func if isinstance(generator, ast.Call) else None
+            found.append(getattr(callee, "id", getattr(callee, "attr", "<not a direct call>")))
+    return found
+
+
+def test_every_orchestrator_in_the_composition_routes_by_capability():
+    """READ generation can never be handed to a provider: every orchestrator the
+    composition module builds gets a fresh `CapabilityRoutedGenerator(...)`."""
+    generators = _orchestrator_generators(D8_COMPOSITION_MODULE.read_text(encoding="utf-8"))
+    assert generators and set(generators) == {"CapabilityRoutedGenerator"}, generators
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("RagOrchestrator(retriever=r, generator=CapabilityRoutedGenerator(action=a), what_if=w)",
+     ["CapabilityRoutedGenerator"]),
+    ("RagOrchestrator(retriever=r, generator=llm, what_if=w)", ["<not a direct call>"]),
+    ("rag.RagOrchestrator(retriever=r, generator=LlmActionGenerator(c), what_if=w)", ["LlmActionGenerator"]),
+    ("RagOrchestrator(retriever=r, what_if=w)", ["<not a direct call>"]),
+])
+def test_orchestrator_generator_detection(source, expected):
+    assert _orchestrator_generators(source) == expected
 
 
 @pytest.mark.parametrize("source", [

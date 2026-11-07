@@ -29,7 +29,7 @@ from .models import (
 from .prose import validate_placeholder_syntax
 
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
-InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "generator_declined"]
+InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined"]
 
 #: Trusted copy for states no generator is asked about.
 NEEDS_CLARIFICATION_MESSAGE = (
@@ -38,7 +38,21 @@ NEEDS_CLARIFICATION_MESSAGE = (
 INSUFFICIENT_MESSAGES: dict[str, str] = {
     "no_evidence_retrieved": "Chưa có tài liệu đã duyệt đủ để trả lời câu hỏi này.",
     "no_comparison_basis": "Không có benchmark hoặc vụ đối chiếu đủ điều kiện để so sánh.",
+    "no_rule_signal": (
+        "Vụ này chưa có khuyến nghị nào do hệ thống quy tắc ghi nhận, nên trợ lý không đưa ra gợi ý hành động."
+        " Trợ lý chỉ giải thích khuyến nghị đã có, không tự tạo khuyến nghị mới."
+    ),
 }
+
+#: Trusted limitation added by the orchestrator (never written by a generator) when an
+#: answer uses a Carbon-derived value of a result that is not MRV-compliant. Today every
+#: result is an IPCC Tier 1 default estimate (config/emission_factors.yaml), so an
+#: impact or a total must never read like a verified credit figure.
+LIMITATION_CARBON_ESTIMATE = (
+    "Số liệu phát thải là ước tính của Carbon Engine theo bộ hệ số {version}; "
+    "chưa đạt yêu cầu MRV, không dùng làm số liệu tín chỉ carbon."
+)
+UNKNOWN_FACTOR_SET_TEXT = "chưa xác định"
 
 
 #: How a fact whose authoritative value is None reads — never "0".

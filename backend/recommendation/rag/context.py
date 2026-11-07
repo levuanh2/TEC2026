@@ -83,7 +83,8 @@ class CarbonFacts(Contract):
     calculation_kind: str | None = None
     total_co2e_kg: float | None = None
     water_regime_applied: str | None = None
-    methodology_tier: str | None = None
+    #: The engine reports the IPCC tier as stored by Carbon (an integer today, e.g. 1); kept as-is.
+    methodology_tier: str | int | None = None
     mrv_compliant: bool | None = None
     ef_config_version: str | None = None
     engine_version: str | None = None

@@ -155,3 +155,17 @@ def test_comparison_seasons_carry_their_own_authoritative_metrics():
     assert other.metrics.co2e_per_kg == 0.71
     assert other.metrics.water_per_kg is None
     assert other.organization_id == ORG_ID
+
+
+def test_a_stored_carbon_row_with_an_integer_methodology_tier_is_accepted():
+    """Regression (found by the real positive-auth journey): CarbonService stores the IPCC
+    tier as the engine reports it, an integer (infrastructure/mapping.py). The context picks
+    it as-is instead of failing the whole answer with a 500."""
+    carbon = {"id": str(uuid.uuid4()), "calculation_id": str(uuid.uuid4()), "scenario": "as_recorded",
+              "calculation_kind": "actual", "total_co2e_kg": 2900.0, "methodology_tier": 1, "mrv_compliant": False,
+              "water_regime_applied": "irrigated_continuous_flooding", "engine_version": "0.2.0",
+              "ef_config_version": "0.3.0-ipcc2019-tier1-ar5", "input_hash": "h", "calculated_at": "2026-11-06T10:00:00+00:00",
+              "breakdown": [{"category": "rice_ch4", "gas": "CH4", "source": "engine", "co2e_kg": 2500.0,
+                             "factors_used": {"ef": 1.19}, "provenance": {"doc": "IPCC"}}]}
+    context = build_season_context(scope(), _source(carbon=carbon), mode=RagMode.ASK)
+    assert context.carbon.methodology_tier == 1 and context.carbon.breakdown[0].co2e_kg == 2500.0
