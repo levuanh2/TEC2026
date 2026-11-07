@@ -343,3 +343,23 @@ def test_gemini_3_thinking_level_and_never_both():
     with pytest.raises(LlmConfigError):
         load_llm_settings({"RAG_LLM_PROVIDER": "gemini", "RAG_LLM_MODEL": "m", "GEMINI_API_KEY": GKEY,
                            "RAG_LLM_THINKING_LEVEL": "low", "RAG_LLM_THINKING_BUDGET": "0"})
+
+
+def test_verify_probe_checks_structured_output_once(capsys):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "deepseek-flash"}]})
+        return httpx.Response(200, json={"model": "deepseek-flash-x", "choices": [
+            {"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 40, "completion_tokens": 5}})
+    env = {"RAG_LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": KEY, "DEEPSEEK_MODEL": "deepseek-flash"}
+    assert _verify(env, handler, "--probe") == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["structured_output"]["status"] == "OK" and calls == ["/models", "/chat/completions"]
+    bad = lambda r: (httpx.Response(200, json={"data": [{"id": "deepseek-flash"}]}) if r.url.path.endswith("/models")
+                     else httpx.Response(200, json={"choices": [{"message": {"content": "not json"},
+                                                                 "finish_reason": "stop"}]}))
+    assert _verify(env, bad, "--probe") == 5
