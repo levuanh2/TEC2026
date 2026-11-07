@@ -76,3 +76,4 @@
 /backend/rag_application.py @levuanh2
 /backend/rag_qa.py @levuanh2
 /backend/infrastructure/llm_client.py @levuanh2
+/backend/infrastructure/llm_quota.py @levuanh2

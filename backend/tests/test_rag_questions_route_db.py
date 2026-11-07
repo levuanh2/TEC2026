@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tests.test_rag_retrieval_db import _SETTINGS, env, pytestmark  # noqa: E402,F401  (fixture + local-only guard)
+from tests.test_rag_retrieval_db import _SETTINGS, env, pytestmark, run_token  # noqa: E402,F401  (fixture + local-only guard)
 
 #: A revoked session is rejected like any invalid token (401 `unauthenticated`).
 REVOKED_STATUS = 401
@@ -41,7 +41,8 @@ def http(env):  # noqa: F811
         def ask(who, season_of, **payload):
             headers = {"Authorization": f"Bearer {env['tokens'][who]}"} if who else {}
             return client.post(f"/v1/crop-seasons/{env[f'season_{season_of}']}/questions",
-                               json={"question": "awd", "intent": "explain", **payload}, headers=headers)
+                               json={"question": f"awd {run_token(env)}", "intent": "explain", **payload},
+                               headers=headers)
         yield ask
     finally:
         if previous is None:
@@ -59,9 +60,19 @@ def test_member_gets_a_composed_answer_citing_only_their_scope(http, env):
     response = http("member", "member", intent="evidence")
     body = response.json()
     assert body["status"] == "generated" and body["provenance"]["answer_source"] == "system_composed"
-    cited = _chunks(response)
-    assert cited and env["org_b_doc"] not in cited
-    assert cited <= {env["public"], env["org_a_doc"], env["farm_a_doc"], env["injection"]}
+    citations = response.json()["citations"]
+    own = {c["chunk_id"] for c in citations if c["source_id"] in env["sources"]}
+    assert own and env["org_b_doc"] not in own
+    assert env["injection"] not in own  # an instruction-like chunk is never cited as evidence
+    assert own <= {env["public"], env["org_a_doc"], env["farm_a_doc"], env["injection"]}
+    # The stack is shared: a citation this module did not create must be PUBLIC knowledge.
+    foreign = sorted({c["source_id"] for c in citations if c["source_id"] not in env["sources"]})
+    if foreign:
+        import psycopg
+        with psycopg.connect(_SETTINGS.supabase_db_url) as conn:
+            rows = conn.execute("select visibility, organization_id from public.knowledge_sources"
+                                " where source_id = any(%s)", (foreign,)).fetchall()
+        assert len(rows) == len(foreign) and all(v == "public" and o is None for v, o in rows)
 
 
 def test_answer_never_repeats_injected_chunk_text(http, env):

@@ -140,7 +140,9 @@ GOOD_RECOMMEND = {
 }
 
 
-def _ask(service, intent, *, reader=None, mode=RagMode.ASK, scenario=None, question="Vụ này thế nào?"):
+def _ask(service, intent, *, reader=None, mode=RagMode.ASK, scenario=None, question=None):
+    if question is None:  # an evidence question asks about documents; others about the season
+        question = "Tài liệu nào nói về tưới nước AWD?" if intent == "evidence" else "Vụ này thế nào?"
     return service.answer(reader=reader or Reader(), crop_season_id=SEASON_ID,
                           question=QuestionInput(question=question, intent=RagIntent(intent), mode=mode,
                                                  what_if_scenario=scenario))
