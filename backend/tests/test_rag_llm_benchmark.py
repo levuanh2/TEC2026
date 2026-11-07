@@ -225,11 +225,11 @@ def test_a_safe_refusal_mention_does_not_fail_injection_but_an_echo_does():
 
 
 def test_diagnostics_record_each_case_outside_the_repo_without_secrets(monkeypatch, tmp_path):
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-diagnostic-secret-123")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-not-a-key-not-a-key")
     out = tmp_path / "diag" / "d.json"
     assert bench.main(["--fake", "--diagnostics", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
-    assert "sk-diagnostic-secret-123" not in text
+    assert "sk-not-a-key-not-a-key" not in text
     cases = {c["case"]: c for c in json.loads(text)["cases"]}
     assert set(cases) == {c.case_id for c in bench.CASES}
     keys = {"case", "expect", "outcome", "final_trusted_answer", "model_output", "refusal_reason", "grounding",
@@ -247,9 +247,9 @@ def test_diagnostics_are_refused_at_a_tracked_path_inside_the_repo(tmp_path):
 
 
 def test_redact_secrets_replaces_every_secret_like_env_value():
-    env = {"DEEPSEEK_API_KEY": "sk-abcdefgh", "SUPABASE_SERVICE_ROLE_KEY": "x", "MY_TOKEN": "tok-12345678",
-           "PATH": "C:/bin-abcdefgh"}
-    assert bench.redact_secrets("a sk-abcdefgh b tok-12345678 C:/bin-abcdefgh", env) == "a *** b *** C:/bin-abcdefgh"
+    env = {"DEEPSEEK_API_KEY": "sk-aaaaaaaa", "SUPABASE_SERVICE_ROLE_KEY": "x", "MY_TOKEN": "tok-aaaaaaaa",
+           "PATH": "C:/bin-aaaaaaaa"}
+    assert bench.redact_secrets("a sk-aaaaaaaa b tok-aaaaaaaa C:/bin-aaaaaaaa", env) == "a *** b *** C:/bin-aaaaaaaa"
 
 
 def test_the_harness_keeps_cases_that_reach_the_model():
