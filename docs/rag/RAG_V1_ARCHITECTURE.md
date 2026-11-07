@@ -399,22 +399,34 @@ Authorization runs **before** context loading, what-if, retrieval and generation
   action-producing advice.** Explaining a stored recommendation to a READ caller ("giải thích
   khuyến nghị đã lưu") would need its own structured read-only capability — deferred (D9), not
   opened implicitly through EXPLAIN.
-- **D8 — READ-tier semantic advice gate (OPEN; MUST RESOLVE BEFORE ANY REAL LLM ROUTE).**
-  INFORMATIONAL *free text* can still phrase advice ("Bạn nên rút nước định kỳ."). V1 does not
-  detect that, and no keyword/regex list is used as a security boundary — an LLM can phrase an
-  action in unbounded ways. Before a real generator serves any READ-tier request, V1.4 must
-  choose and implement one strategy, with an evaluation set:
-  - A. constrained informational generation: provider structured output + prompt +
-    post-validation;
-  - B. server-generated informational templates for READ intents (no free-form LLM prose);
-  - C. a semantic policy classifier/guard with an explicit evaluation dataset.
-  Enforced gate today: `test_rag_architecture.py::test_no_answer_generator_is_wired_until_d8_is_closed`
-  fails if any production module touches the **generation path** (`AnswerGenerator`,
-  `GenerationInput`, `RagOrchestrator`, `GeneratedAnswer`/`InformationalAnswer`, in any import or
-  attribute form) or the RAG core holds a concrete `AnswerGenerator`. V1.3 retrieval and scope
-  adapters (`rag_application.py`: `KnowledgeRetriever`, `SeasonScopeResolver`, …) are not
-  affected. Lifting it is a deliberate change made together with closing D8. PR #6 has no route,
-  generator or provider, so D8 is not reachable at runtime.
+- **D8 — READ-tier semantic advice gate: CLOSED with strategy B (V1.4, `feat/rag-v1-d8-generation`).**
+  INFORMATIONAL *free text* written by a model could still phrase advice ("Bạn nên rút nước
+  định kỳ."). No keyword or regex list is used as a security boundary. Strategy B removes that
+  free text instead of trying to detect it:
+  - **READ intents** (explain, compare, evidence, data_gap) are answered by
+    `recommendation/rag/informational.py::TrustedInformationalComposer`. It uses fixed,
+    descriptive Vietnamese sentences, `{{fact:<id>}}` placeholders over INFORMATIONAL_SAFE facts,
+    and citations of retrieved chunks. It never copies the question or any chunk text into the
+    answer, and it calls no model. The output still passes every gate (schema, citations, fact
+    refs, prose policy, intent policy) and the trusted renderer.
+  - **Action intents** (recommend, what_if) need Core V1 WRITE (D1). Only they reach a provider
+    adapter (`rag_qa.LlmActionGenerator` over `infrastructure/llm_client.py`), through
+    `CapabilityRoutedGenerator`, and only when one is configured server-side. An extra
+    structural gate (`rag_qa.assert_recommendations_follow_rules`) requires every generated
+    recommendation to carry the `rule_code` of a deterministic signal the season has. A model can
+    explain and cite the existing M05 recommendations, but cannot open a new topic (pesticide,
+    disease, an invented practice).
+  - Enforced by `test_rag_architecture.py`:
+    - `test_generation_path_is_wired_only_through_the_d8_composition`: only `rag_qa.py` touches
+      the generation path, and the RAG core holds only the two concrete generators above;
+    - `test_every_orchestrator_in_the_composition_routes_by_capability`: every
+      `RagOrchestrator` gets a `CapabilityRoutedGenerator`.
+
+    Behaviour is covered by `test_rag_informational.py` and `test_rag_qa.py`: a provider is never
+    called for READ, ungrounded output is refused.
+  - **Accepted limitation:** READ answers do not paraphrase the question. Model-written READ
+    prose would need strategy C (a semantic guard with its own evaluation set). That is a new
+    decision, not part of V1.4.
 - Permissions never come from the request. A refusal at any level is `RagAccessDenied` → 404
   `not_found` (same as Recommendation/CV: neither scope nor the refusing rule can be probed).
 - The orchestrator rejects a scope whose `crop_season_id` differs from the request.
@@ -634,6 +646,8 @@ Never logged: JWT, passwords, service-role/provider keys, the full prompt, the f
 ## Decisions
 
 Closed:
+- **D8** READ-tier semantic advice gate — closed with strategy B (§11): READ answers are composed by
+  trusted code; a provider only serves WRITE-tier action intents and must cite an existing rule.
 - **D1** Access matrix: READ for EXPLAIN/COMPARE/EVIDENCE/DATA_GAP/UNKNOWN; Core V1 WRITE for
   RECOMMEND, WHAT_IF and `mode=preview`, even with `persist=False`.
 - **D3** `SeasonScopeResolver` port resolves and authorizes scope; adapter deferred to V1.3,
@@ -649,9 +663,6 @@ Closed:
 Open (future, none blocks this skeleton):
 - **D9** Whether READ callers may get an AI explanation of a stored recommendation; if so, a
   separate structured read-only capability/intent — EXPLAIN never carries ACTION_CONTEXT.
-- **D8** READ-tier semantic advice gate: prevent semantic recommendation leakage through
-  INFORMATIONAL free-text generation before enabling a real LLM (§11). **Must be closed before
-  any real generator or route**; enforced by the D8 architecture test.
 - **D2** `CarbonService` hypothetical-input extension (no formula change) for fertilizer/straw/
   pesticide/seed-rate what-ifs — Carbon owner decision.
 - **D5** LLM provider, data residency and cost limits.

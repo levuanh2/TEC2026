@@ -34,6 +34,7 @@ from carbon.errors import (
     MissingActivityDataError,
     MissingEmissionFactorError,
 )
+import rag_qa
 import schemas
 from infrastructure import profiling
 from infrastructure.api_errors import error_detail
@@ -180,6 +181,10 @@ def _recommendation_service() -> RecommendationService:
 
 def _cv_service() -> CvService:
     raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "CV service is not configured."))
+
+
+def _rag_question_service() -> rag_qa.RagQuestionService:
+    raise HTTPException(status_code=503, detail=error_detail("backend_not_configured", "AI Q&A is not enabled."))
 
 
 def _read_or_404(callback):
@@ -804,6 +809,32 @@ def update_recommendation_status(
     return _recommendation_or_http(
         lambda: service.set_status(read_repository=repo, recommendation_id=recommendation_id, status=payload.status)
     )
+
+
+# -- RAG V1 AI Q&A (ephemeral) ----------------------------------------------
+
+@router.post(
+    "/crop-seasons/{crop_season_id}/questions", tags=['AI Q&A'], response_model=schemas.RagQuestionResponse,
+)
+def ask_crop_season_question(
+    crop_season_id: str, payload: schemas.RagQuestionRequest, request: Request,
+    repo: SupabaseReadRepository = Depends(_read_repo),
+    service: rag_qa.RagQuestionService = Depends(_rag_question_service),
+) -> dict[str, Any]:
+    """Grounded Q&A about one crop season (docs/rag/RAG_V1_ARCHITECTURE.md).
+
+    Scope comes from the caller's JWT only. READ-tier intents (explain, compare,
+    evidence, data_gap) are answered by trusted server composition; recommend and
+    what_if need Core V1 write authority on the season and a configured provider.
+    Nothing is persisted. A season outside the caller's scope is 404 `not_found`.
+    """
+    question = rag_qa.QuestionInput(question=payload.question, intent=rag_qa.RagIntent(payload.intent),
+                                    what_if_scenario=payload.what_if_scenario)
+    try:
+        return rag_qa.respond(service, reader=repo, crop_season_id=crop_season_id, question=question,
+                              request_id=getattr(request.state, "request_id", None))
+    except rag_qa.QuestionRefused as exc:
+        raise HTTPException(status_code=exc.status, detail=error_detail(exc.code, exc.message)) from exc
 
 
 # -- M03 CV Farmer integration ---------------------------------------------

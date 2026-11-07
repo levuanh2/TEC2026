@@ -422,6 +422,87 @@ class RecommendationStatusUpdateRequest(BaseModel):
     status: Literal["accepted", "dismissed"]
 
 
+# -- RAG V1 AI Q&A (ephemeral: nothing is persisted) ------------------------
+
+RagIntentName = Literal["explain", "compare", "evidence", "data_gap", "recommend", "what_if"]
+
+
+class RagQuestionRequest(BaseModel):
+    """One question about one crop season. There is deliberately no organization,
+    farm, tenant, filter, permission or persistence field: scope comes from the
+    caller's JWT through Core V1 checks, and unknown fields are refused (422)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    question: str = Field(min_length=1, max_length=2000)
+    intent: RagIntentName
+    mode: Literal["ask"] = "ask"
+    #: Only for intent "what_if": the water-regime scenario to simulate (never persisted).
+    what_if_scenario: Literal["awd", "continuous_flooding"] | None = None
+
+    @model_validator(mode="after")
+    def _scenario_only_for_what_if(self) -> "RagQuestionRequest":
+        if (self.intent == "what_if") != (self.what_if_scenario is not None):
+            raise ValueError("what_if_scenario is required for intent 'what_if' and allowed only there")
+        return self
+
+
+class RagCitationResponse(BaseModel):
+    source_id: str
+    chunk_id: str
+    document_id: str
+    document_version: str | None = None
+    title: str
+    section: str | None = None
+    source_type: str
+    url: str | None = None
+    published_at: date | None = None
+
+
+class RagTrustedFactResponse(BaseModel):
+    fact_id: str
+    kind: str
+    value: str | int | float | bool | None = None
+    unit: str | None = None
+    source: str
+    provenance: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    crop_season_id: str | None = None
+    organization_id: str | None = None
+    authoritative: bool = True
+    usage: str
+
+
+class RagAnswerProvenanceResponse(BaseModel):
+    #: "system_composed" (READ tier, no model) | "model_generated" (WRITE tier only).
+    answer_source: Literal["system_composed", "model_generated"]
+    model: str | None = None
+    llm_calls: int
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
+    persisted: Literal[False] = False
+
+
+class RagQuestionResponse(BaseModel):
+    status: Literal["generated", "insufficient_evidence", "needs_clarification"]
+    intent: str
+    mode: str
+    crop_season_id: str
+    answer: str | None = None
+    answer_template: str | None = None
+    rationale: str | None = None
+    recommendations: list[dict[str, Any]] = Field(default_factory=list)
+    citations: list[RagCitationResponse] = Field(default_factory=list)
+    trusted_facts: list[RagTrustedFactResponse] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    confidence: Literal["low", "medium", "high"] | None = None
+    insufficient_reason: str | None = None
+    signals: list[dict[str, Any]] = Field(default_factory=list)
+    what_if: dict[str, Any] | None = None
+    basis: dict[str, Any] | None = None
+    provenance: RagAnswerProvenanceResponse
+
+
 # -- Organizations --------------------------------------------------------
 
 class OrganizationResponse(BaseModel):

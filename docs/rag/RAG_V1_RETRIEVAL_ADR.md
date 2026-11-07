@@ -235,6 +235,27 @@ tenant documents; the schema and tests cover tenant rows so isolation is proven 
 - Location `backend/infrastructure/rag_scope.py`; the RAG core imports neither Supabase nor psycopg.
   **No schema change.**
 
+### 8.1 V1.3-D implementation (adapters; no generation)
+
+Implemented with one placement change. `infrastructure/` stays free of `recommendation.rag`, which
+`test_rag_architecture.py::test_app_layers_do_not_wire_rag_yet` already requires. So the
+infrastructure layer offers two plain RLS-bound reads on `SupabaseReadRepository`, and the
+mapping into RAG contracts lives in `backend/rag_application.py`:
+
+| Piece | Where | Behaviour |
+|---|---|---|
+| `season_lineage(season_id)` | `infrastructure/read_repo.py` | season → plot → farm (`cooperative_id`) through the caller's JWT. Any hop the caller cannot see raises `ReadNotFoundError` |
+| `knowledge_matches(season_id, query, top_k)` | `infrastructure/read_repo.py` | `rpc match_knowledge_chunks_lexical` with the caller's JWT. No scope, visibility or status argument |
+| `CallerSeasonScopeResolver` | `rag_application.py` | D3. A malformed id is refused before any read. WRITE also runs the recommendation write gate (`PostgresRecommendationRepository.assert_can_write` → `crop_write_authz`). With no gate, WRITE is never granted. Every refusal is `RagAccessDenied` |
+| `LexicalKnowledgeRetriever` | `rag_application.py` | `KnowledgeRetriever`. Relevance cutoff on the RRF `fused_score` (`RetrievalSettings.min_fused_score`, default `0.0` = no cutoff until the DEV calibration of the eval plan). Re-enforces `top_k`, drops duplicate citations, maps rows to `EvidenceChunk`. Chunk text is passed through as untrusted data. A store error is `RetrievalUnavailable` |
+| `RagEvidenceService` | `rag_application.py` | authorize (`required_access(intent, mode)`) → `build_retrieval_query` → retrieve → `assert_tenant_isolation` |
+
+Tests:
+- `tests/test_rag_application.py` (in-memory);
+- `tests/test_rag_retrieval_db.py`: real local stack, real JWTs, production read repository and write gate. It covers same-tenant and cross-tenant retrieval, a foreign season denied before retrieval, review_required/rejected/archived knowledge invisible, prompt injection staying inert, empty evidence, stable citations, a farm viewer and an HTX manager kept at READ, and an ended membership losing tenant knowledge and write.
+
+The corpus there is TEST FIXTURES only; no real source is approved.
+
 ---
 
 ## 9. Migration A — Knowledge lexical foundation (`20261005090000`, local/CI only; NOT applied to hosted)
