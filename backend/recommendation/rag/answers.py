@@ -46,8 +46,8 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
     ),
     # Action questions refused before retrieval (question_scope.action_question_refusal).
     "out_of_scope_question": (
-        "Câu hỏi này nằm ngoài phạm vi trợ lý: hệ thống không tư vấn sâu bệnh, thuốc bảo vệ thực vật, thời tiết"
-        " hay dữ liệu của đơn vị khác. Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
+        "Câu hỏi này nằm ngoài phạm vi trợ lý: hệ thống không tư vấn sâu bệnh, thuốc bảo vệ thực vật, thời tiết,"
+        " không xác nhận hay chứng nhận điều gì và không đọc dữ liệu của đơn vị khác. Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
     ),
     # A grounded model answer the trusted consistency gate refused (answer_consistency.py): the whole
     # model text is discarded; this copy is all the caller sees.

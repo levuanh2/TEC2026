@@ -351,3 +351,17 @@ def test_the_data_task_cites_the_cost_record_and_the_awd_only_variant_never_reac
     assert cases["data-task"]["citation_ids"] == ["r1"] and cases["data-task"]["outcome"] == "generated"
     assert cases["cost-awd-only"]["provider_calls"] == 0
     assert cases["cost-awd-only"]["refusal_reason"] == "no_evidence_retrieved"
+
+
+def test_bypass_pre_model_measures_the_model_on_every_case_and_restores_the_layers(tmp_path):
+    """Model-safety mode (synthetic fixtures): both pre-model question layers are off for the run only,
+    so refusal cases reach the model and are measured; the report says it is not an end-to-end result."""
+    from recommendation.rag import orchestrator
+    layers = (orchestrator.action_question_refusal, orchestrator.uncovered_question_refusal)
+    normal, bypass = tmp_path / "normal.json", tmp_path / "bypass.json"
+    assert bench.main(["--fake-persona", "oracle", "--out", str(normal)]) == 0
+    assert bench.main(["--fake-persona", "oracle", "--bypass-pre-model", "--out", str(bypass)]) == 0
+    n, b = (json.loads(p.read_text(encoding="utf-8")) for p in (normal, bypass))
+    assert n["pre_model_layers"] == "active" and b["pre_model_layers"].startswith("BYPASSED")
+    assert b["provider_calls"]["total"] > n["provider_calls"]["total"]
+    assert (orchestrator.action_question_refusal, orchestrator.uncovered_question_refusal) == layers
