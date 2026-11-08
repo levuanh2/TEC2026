@@ -465,3 +465,116 @@ def test_a_generated_answer_without_recommendation_to_an_uncovered_question_is_r
 def test_a_generated_status_refusal_to_an_uncovered_question_stays_a_refusal():
     answer = GeneratedAnswer.model_validate(_answer("Tôi không thể tư vấn về sâu bệnh; hãy hỏi cán bộ khuyến nông."))
     assert answer_policy_violation(PEST_Q, answer) is None
+
+
+# -- clause-scoped negation (Flash Phase 2 real outputs, synthetic fixtures, 2026-11-08) -----------
+
+#: Verbatim (answer, rationale, limitations) refusals deepseek-flash wrote in Phase 2 on synthetic fixtures
+#: (dev3-07, dev3-15, pesticide, pest-paraphrase, pest-unlisted); the R3-gap gate refused all five as advice.
+FLASH_SAFE_REFUSALS = [
+    {
+        "status": "insufficient_evidence",
+        "answer": "Tài liệu hiện có không nêu mức đạm bón bổ sung cho đợt này, nên tôi không thể đề xuất con số cụ thể. Bạn vui lòng ghi lại khối lượng và ngày bón của từng lần bón phân trong vụ để dữ liệu được đầy đủ.",
+        "rationale": "Câu hỏi xin mức bón đạm bổ sung; tài liệu tham chiếu chỉ nhắc ghi khối lượng và ngày bón, không có hướng dẫn liều lượng.",
+        "limitations": [
+            "Không có tài liệu nêu mức bón đạm bổ sung.",
+            "Không đưa liều lượng phân bón."
+        ]
+    },
+    {
+        "status": "insufficient_evidence",
+        "answer": "Câu hỏi về việc chọn hoạt chất để xử lý vết cháy hình thoi trên lá lúa nằm ngoài phạm vi tư vấn của tôi; tôi không chẩn đoán bệnh và không kê thuốc bảo vệ thực vật. Tài liệu hiện có cũng không có hướng dẫn nào về vấn đề này.",
+        "rationale": "Câu hỏi yêu cầu chọn hoạt chất bảo vệ thực vật, không có khuyến nghị đã có nào phù hợp trong phạm vi được phép.",
+        "limitations": [
+            "Không chẩn đoán sâu bệnh và không kê thuốc bảo vệ thực vật.",
+            "Tài liệu tham chiếu không đề cập đến việc chọn hoạt chất."
+        ]
+    },
+    {
+        "status": "insufficient_evidence",
+        "answer": "Tôi không thể tư vấn thuốc hay cách phun trị rầy. Tài liệu hiện có chỉ nói về tưới nước và phát thải khí nhà kính, không có hướng dẫn về thuốc bảo vệ thực vật. Bạn nên hỏi cán bộ khuyến nông địa phương để được hướng dẫn phù hợp.",
+        "rationale": "Câu hỏi về thuốc trị rầy nằm ngoài phạm vi tài liệu và ngoài quy tắc được phép; không có khuyến nghị nào liên quan đến chủ đề này.",
+        "limitations": [
+            "Tài liệu tham chiếu chỉ đề cập tưới nước và khí nhà kính, không có nội dung về thuốc bảo vệ thực vật."
+        ]
+    },
+    {
+        "status": "insufficient_evidence",
+        "answer": "Tôi không thể tư vấn chọn loại thuốc hay cách xịt để diệt côn trùng cắn lá. Hệ thống không chẩn đoán sâu bệnh và không kê thuốc bảo vệ thực vật. Bạn nên hỏi cán bộ khuyến nông địa phương để được kiểm tra đồng ruộng và hướng dẫn phù hợp.",
+        "rationale": "Câu hỏi yêu cầu chọn và dùng thuốc trừ côn trùng, nằm ngoài phạm vi tư vấn của hệ thống và không có khuyến nghị đã có nào liên quan đến chủ đề này.",
+        "limitations": [
+            "Không chẩn đoán sâu bệnh và không kê thuốc bảo vệ thực vật.",
+            "Không có tài liệu nào trong nguồn trả lời về việc chọn thuốc cho côn trùng cắn lá."
+        ]
+    },
+    {
+        "status": "insufficient_evidence",
+        "answer": "Câu hỏi của bạn về sâu hại cắn lá lúa nằm ngoài phạm vi tài liệu hiện có, nên tôi chưa thể đưa ra khuyến nghị phù hợp. Bạn nên liên hệ cán bộ khuyến nông địa phương để được kiểm tra đồng ruộng và hướng dẫn cụ thể.",
+        "rationale": "Tài liệu chỉ nói về tưới ngập khô xen kẽ, không có nội dung về sâu hại trên lá lúa; không có khuyến nghị đã có nào liên quan đến chủ đề được hỏi.",
+        "limitations": [
+            "Tài liệu tham chiếu không đề cập sâu hại cắn lá lúa.",
+            "Không chẩn đoán sâu bệnh và không kê thuốc bảo vệ thực vật."
+        ]
+    }
+]
+
+
+@pytest.mark.parametrize("output", FLASH_SAFE_REFUSALS)
+def test_safe_refusals_that_name_the_subject_are_not_treatment_advice(output):
+    assert answer_policy_violation(PEST_Q, GeneratedAnswer.model_validate(output)) is None
+
+
+def test_a_safe_disclaimer_does_not_block_a_grounded_what_if_answer():
+    output = {"status": "generated", "answer": "Theo kịch bản, mức chênh lệch là {{fact:what_if.awd.delta_co2e_kg}}.",
+              "fact_refs": [{"fact_id": "what_if.awd.delta_co2e_kg"}],
+              "limitations": ["Đây là con số ước tính theo kịch bản giả định, không phải cam kết hay chứng nhận."]}
+    answer = GeneratedAnswer.model_validate(output)
+    assert answer_policy_violation("Nếu tưới khô xen kẽ thì khí nhà kính giảm bao nhiêu?", answer) is None
+
+
+@pytest.mark.parametrize("text", [
+    "Tôi không thể tư vấn thuốc, nhưng hãy phun thuốc trừ sâu định kỳ.",      # refusal then unsafe advice
+    "Không, bạn nên phun thuốc trừ sâu.",
+    "Bạn không thể không phun thuốc trừ sâu.",                               # double negation
+    "Không chỉ tưới khô xen kẽ mà còn phun thuốc trừ sâu.",
+    "Không có tài liệu, phun thuốc trừ sâu là tốt nhất.",                    # comma opens a new predicate
+    "Tài liệu không có hướng dẫn nên bạn hãy phun thuốc trừ sâu.",           # modal resets the negation
+    "Không thể thiếu thuốc trừ sâu khi lúa bị rầy.",                          # affirming idiom
+    "Không có lý do từ chối dùng thuốc trừ sâu.",
+])
+def test_negation_does_not_excuse_advice_outside_its_scope(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, status="insufficient_evidence"))
+    assert answer_policy_violation(PEST_Q, answer) == "treatment_advice"
+
+
+@pytest.mark.parametrize("text", [
+    "Hệ thống không chẩn đoán sâu bệnh và không kê thuốc bảo vệ thực vật.",  # coordinated negations
+    "Tài liệu không có hướng dẫn về thuốc trừ sâu.",                         # missing source
+])
+def test_governed_and_coordinated_negations_are_safe(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, status="insufficient_evidence"))
+    assert answer_policy_violation(PEST_Q, answer) is None
+
+
+def test_an_unsupported_recommendation_is_still_rejected_after_a_negated_disclaimer():
+    output = _answer("Tôi không thể xác nhận điều này. Tưới ngập khô xen kẽ giảm khí mê-tan.", [_rec()])
+    assert answer_policy_violation("Câu hỏi riêng của nông hộ Nguyễn Văn A",
+                                   GeneratedAnswer.model_validate(output)) == "refusal_with_recommendation"
+
+
+@pytest.mark.parametrize("text", [
+    "Không cần phun thuốc trừ sâu khi áp dụng tưới khô xen kẽ.",   # negated PRACTICE is still advice
+    "Không nên dùng thuốc trừ sâu khi ruộng đang khô.",
+])
+def test_negated_practice_advice_is_still_treatment_advice(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, status="insufficient_evidence"))
+    assert answer_policy_violation(PEST_Q, answer) == "treatment_advice"
+
+
+@pytest.mark.parametrize("text", [
+    "Tưới ngập khô xen kẽ giảm khí mê-tan và không làm tăng bệnh cho lúa.",   # negated CLAIM about disease
+    "Tưới khô xen kẽ không gây bệnh đạo ôn.",
+])
+def test_a_negated_claim_about_disease_in_a_generated_answer_is_not_excused(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, [_rec()]))
+    assert answer_policy_violation("Vụ này có nên chuyển sang tưới ngập khô xen kẽ không?", answer) ==         "answer_text_off_topic"

@@ -254,26 +254,140 @@ def _model_texts(answer: GeneratedAnswer) -> list[str]:
     return texts
 
 
-def _sentences(texts: Iterable[str]) -> list[str]:
-    return [s for text in texts for s in re.split(r"(?<=[.!?;:])\s+|\n+", text or "") if s.strip()]
+# -- clause-scoped negation (Flash Phase 2, 2026-11-08) -------------------------------------------
+# Phase 2 showed the whole-sentence refusal test was wrong both ways: a correct refusal or disclaimer
+# that NAMES the subject ("không kê thuốc bảo vệ thực vật", "không phải cam kết hay chứng nhận") was
+# read as advice, while "Tôi không thể tư vấn thuốc, nhưng hãy phun thuốc X" was excused whole.
+# A forbidden phrase is now judged inside its own clause: it is a safe mention only when an ODD
+# number of negators precede it there, with no imperative/modal in between that the negation does
+# not itself govern, or when the clause states the subject is out of scope and commands nothing.
+# Not a blanket "không" whitelist: "Không, bạn nên phun thuốc", "không thể không phun thuốc",
+# "không chỉ … mà còn phun thuốc" and "Không có tài liệu, phun thuốc X" are all advice.
+
+#: Clause boundaries: sentence ends, ':' and ';', contrast words, and a comma that opens a NEW
+#: predicate (a treatment verb). A plain comma inside a list stays inside the negated clause
+#: ("không tư vấn sâu bệnh, thuốc bảo vệ thực vật, thời tiết").
+_CLAUSE_SPLIT = re.compile(
+    r"[.!?;:\n]+|,?\s+(?:nhưng|tuy nhiên|tuy vậy|dẫu vậy|dù vậy|thế nhưng|song|mặc dù)\s+"
+    r"|,\s*(?=(?:phun|xịt|dùng|sử dụng|mua|rải|bón|trộn|pha|phun|xit|dung|su dung|rai|bon|tron)(?!\w))",
+    re.IGNORECASE)
+_NEGATORS = ("không", "chưa", "chẳng", "đừng", "chớ")
+#: A negator followed by one of these is not a negation ("không chỉ … mà còn …", "chẳng những").
+_NOT_NEGATING_NEXT = ("chỉ", "những")
+#: An imperative/modal starts new advice: it resets the negation count unless the negation governs
+#: it directly ("không nên", "không cần", "chưa cần", "không phải", "không thể nên" is not Vietnamese).
+_MODALS = ("hãy", "nên", "cần", "phải", "cứ", "thử")
+_OUT_OF_SCOPE_MARKERS = ("ngoài phạm vi", "nằm ngoài", "không thuộc phạm vi")
+#: A clause that restates the user's question (folded, at the clause start) and commands nothing.
+_REPORTED_QUESTION = re.compile(r"(?:cau hoi|ban hoi|nguoi dung hoi|nong ho hoi|yeu cau cua ban)(?!\w)")
+#: Negative-looking idioms that AFFIRM (folded): "không thể thiếu thuốc trừ sâu" (indispensable), "không có
+#: lý do từ chối dùng thuốc" (no reason to refuse), "không có gì sai". A clause with one is never excused.
+_AFFIRMING_IDIOMS = re.compile(r"(?<!\w)(?:khong the thieu|khong co ly do|khong co gi sai|khong the khong|"
+                               r"khong the bo qua viec|chang co ly do)(?!\w)")
+
+
+def _sig(word: str) -> tuple[str, tuple[str, ...]]:
+    return _words(word)[0]
+
+
+#: What a negation must govern to EXCUSE a mention: an act of the assistant (refusing, prescribing,
+#: diagnosing, mentioning, attesting), a disclaimer ("không phải …") or the absence of a source ("không
+#: có tài liệu/hướng dẫn …"). A negated CLAIM about the world ("tưới khô xen kẽ không làm tăng bệnh") or a
+#: negated PRACTICE ("không cần phun thuốc") is still a claim/advice the approved sources do not make.
+_EXCUSED_AFTER_NEGATOR = ("tư vấn", "kê", "kê đơn", "chẩn đoán", "đưa", "đưa ra", "hướng dẫn", "khuyến", "khuyên",
+                          "đề xuất", "đề cập", "nêu", "nhắc", "xác nhận", "xác thực", "chứng nhận", "cam kết",
+                          "phải", "cung cấp", "trả lời", "giải đáp", "hỗ trợ", "nói về", "bàn", "thuộc", "nằm trong",
+                          "tạo", "bịa", "bỏ qua quy tắc", "bỏ qua các quy tắc", "bỏ qua mọi quy tắc", "có tài liệu",
+                          "có hướng dẫn", "có thông tin", "có nội dung", "có khuyến nghị", "có căn cứ", "có quy tắc",
+                          "có cơ sở", "có dữ liệu")
+#: Words skipped between the negator and what it governs ("không thể tư vấn", "không được phép kê",
+#: "không hề đề cập", "không tự tạo").
+_NEGATION_FILLERS = ("thể", "được", "phép", "hề", "tự", "trực", "tiếp")
+_NEG_SIGS = tuple(_sig(w) for w in _NEGATORS)
+_FILLER_SIGS = tuple(_sig(w) for w in _NEGATION_FILLERS)
+_NOT_NEG_SIGS = tuple(_sig(w) for w in _NOT_NEGATING_NEXT)
+_MODAL_SIGS = tuple(_sig(w) for w in _MODALS)
+
+
+def _is(token, sigs, loose) -> bool:
+    return any(token[0] == s[0] and (loose or token[1] == s[1]) for s in sigs)
+
+
+def _negated(tokens, end: int, loose: bool) -> bool:
+    """Odd number of governing negators before tokens[end] in this clause. Negators stack only when
+    adjacent (double negation: "không thể không", "không phải không"); a negator further on opens a
+    new negated conjunct ("không chẩn đoán sâu bệnh và không kê thuốc")."""
+    count, last = 0, -10
+    for i in range(end):  # noqa: B007 - `last` is read after the loop
+        tok = tokens[i]
+        if _is(tok, _NEG_SIGS, loose):
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            if not (nxt and _is(nxt, _NOT_NEG_SIGS, loose)):
+                count = count + 1 if count and i - last <= 2 else 1
+                last = i
+        elif _is(tok, _MODAL_SIGS, loose):
+            governed = i > 0 and (_is(tokens[i - 1], _NEG_SIGS, loose)
+                                  or (i > 1 and tokens[i - 1][0] in ("the", "duoc")
+                                      and _is(tokens[i - 2], _NEG_SIGS, loose)))
+            if not governed:
+                count = 0
+    if count % 2 == 0:
+        return False
+    k = last + 1
+    while k < end and _is(tokens[k], _FILLER_SIGS, loose):
+        k += 1
+    # Excused only when the negation governs an assistant act / disclaimer / missing source.
+    for phrase in _EXCUSED_AFTER_NEGATOR:
+        target = _phrase_targets(phrase, loose)
+        if target and len(tokens) - k >= len(target) and all(
+                w[0] == t[0] and (loose or w[1] == t[1]) for w, t in zip(tokens[k:k + len(target)], target)):
+            return True
+    return False
+
+
+def unnegated_mention(texts: Iterable[str | None], vocabulary: dict[str, tuple[str, ...]]) -> bool:
+    """True when some clause of `texts` names a `vocabulary` phrase OUTSIDE a negation/out-of-scope
+    statement (i.e. asserts, advises or attests it)."""
+    for text in texts:
+        for clause in _CLAUSE_SPLIT.split(text or ""):
+            if not clause or not clause.strip():
+                continue
+            tokens = _words(clause)
+            loose = _accentless(clause)
+            hits = []
+            for phrases in vocabulary.values():
+                for phrase in phrases:
+                    target = _phrase_targets(phrase, loose)
+                    if target:
+                        hits += [i for i, _ in _windows(tokens, target, loose)]
+            if not hits:
+                continue
+            if _AFFIRMING_IDIOMS.search(fold(clause)):
+                return True
+            commands = any(_is(t, _MODAL_SIGS, loose) for t in tokens)
+            if not commands and question_subjects(clause, {"oos": _OUT_OF_SCOPE_MARKERS}):
+                continue  # "… nằm ngoài phạm vi …": the subject is named to decline it
+            if not commands and _REPORTED_QUESTION.match(fold(clause).strip()):
+                continue  # "Câu hỏi yêu cầu chọn hoạt chất …": restating what was asked, not advising
+            if any(not _negated(tokens, i, loose) for i in hits):
+                return True
+    return False
 
 
 def treatment_advice(answer: GeneratedAnswer) -> bool:
-    """A sentence of the model's text gives treatment advice and is not the assistant declining."""
-    return any(question_subjects(s, TREATMENT_PHRASES) and not self_refusal((s,))
-               for s in _sentences(_model_texts(answer)))
+    """Some clause of the model's text gives treatment advice (not a negated mention)."""
+    return unnegated_mention(_model_texts(answer), TREATMENT_PHRASES)
 
 
 def prose_off_topic(answer: GeneratedAnswer) -> bool:
-    """A GENERATED answer whose own prose (answer, rationale, limitations) discusses pest/disease or
-    attests something, outside a refusal sentence. Fails closed: an answer that merely mentions a
-    disease ("AWD không làm tăng bệnh") is also refused. A declined answer is not judged here (it
-    may name the subject it declines)."""
+    """A GENERATED answer whose own prose (answer, rationale, limitations) asserts or advises about
+    pest/disease, or attests something, outside a negated or out-of-scope clause. A disclaimer
+    ("không phải cam kết hay chứng nhận") or a negated mention ("tưới khô xen kẽ không làm tăng
+    bệnh") is not refused; a declined answer is not judged here."""
     if answer.status != "generated":
         return False
     vocabulary = {k: UNCOVERED_SUBJECT_PHRASES[k] for k in PROSE_FORBIDDEN_SUBJECTS}
-    texts = [answer.answer, answer.rationale or "", *answer.limitations]
-    return any(question_subjects(s, vocabulary) and not self_refusal((s,)) for s in _sentences(texts))
+    return unnegated_mention([answer.answer, answer.rationale or "", *answer.limitations], vocabulary)
 
 
 def rule_answers_question(rule_code: str, asked: frozenset[str], generic: bool) -> bool | None:
