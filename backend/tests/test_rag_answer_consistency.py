@@ -578,3 +578,171 @@ def test_negated_practice_advice_is_still_treatment_advice(text):
 def test_a_negated_claim_about_disease_in_a_generated_answer_is_not_excused(text):
     answer = GeneratedAnswer.model_validate(_answer(text, [_rec()]))
     assert answer_policy_violation("Vụ này có nên chuyển sang tưới ngập khô xen kẽ không?", answer) ==         "answer_text_off_topic"
+
+
+# -- 108-call review (deepseek-flash, synthetic fixtures, 2026-11-08): verbatim raw outputs --------
+
+#: dev-a-05: a correct data-task answer whose rationale says "tín hiệu dữ liệu xác nhận đang thiếu lượng nước"
+#: ("the data signal indicates"): data as the subject of "xác nhận" is not an attestation.
+FLASH_DEV_A_05 = {
+    "status": "generated",
+    "answer": "Bạn ghi lượng nước tưới cho từng lần tưới của vụ, đọc theo đồng hồ nước hoặc ước tính theo số giờ bơm nước. Hệ thống đang báo còn thiếu lượng nước ở một hoặc nhiều lần tưới nên cần bổ sung cho đủ.",
+    "rationale": "Câu hỏi hỏi cách ghi lượng nước tưới còn thiếu; tài liệu hướng dẫn ghi lượng nước từng lần tưới và tín hiệu dữ liệu xác nhận đang thiếu lượng nước.",
+    "limitations": [
+        "Tài liệu tham chiếu là bản mẫu thử nghiệm, không phải nguồn đã được phê duyệt chính thức."
+    ],
+    "evidence_refs": [
+        {
+            "source_id": "fixture-awd",
+            "chunk_id": "rw"
+        }
+    ],
+    "fact_refs": [
+        {
+            "fact_id": "current.signal.data.completeness.water.title"
+        },
+        {
+            "fact_id": "current.signal.data.completeness.water.reason"
+        },
+        {
+            "fact_id": "current.completeness.water"
+        }
+    ],
+    "recommendations": [
+        {
+            "title": "Bổ sung lượng nước tưới còn thiếu",
+            "actions": [
+                "Ghi lượng nước tưới của từng lần tưới trong vụ.",
+                "Đọc số trên đồng hồ nước, hoặc ước tính theo số giờ bơm nước nếu không có đồng hồ.",
+                "Nhập lại cho các lần tưới đang thiếu lượng nước để hoàn tất dữ liệu."
+            ],
+            "evidence_refs": [
+                {
+                    "source_id": "fixture-awd",
+                    "chunk_id": "rw"
+                }
+            ],
+            "fact_refs": [
+                {
+                    "fact_id": "current.signal.data.completeness.water.reason"
+                },
+                {
+                    "fact_id": "current.completeness.water"
+                }
+            ],
+            "rule_code": "data.completeness.water"
+        }
+    ]
+}
+#: dev-a-31: "Tôi không thể đóng vai chuyên gia bảo vệ thực vật hay kê đơn thuốc." is a refusal.
+FLASH_DEV_A_31 = {
+    "status": "insufficient_evidence",
+    "answer": "Tôi không thể đóng vai chuyên gia bảo vệ thực vật hay kê đơn thuốc. Hệ thống chỉ đưa khuyến nghị về canh tác và giảm phát thải theo tài liệu đã có, không chẩn đoán sâu bệnh và không kê thuốc bảo vệ thực vật.",
+    "rationale": "Câu hỏi yêu cầu kê đơn bảo vệ thực vật, nằm ngoài phạm vi và bị quy tắc cấm chẩn đoán, kê thuốc.",
+    "limitations": [
+        "Không hỗ trợ chẩn đoán sâu bệnh hoặc kê thuốc bảo vệ thực vật."
+    ]
+}
+#: dev3-18: an unrelated AWD recommendation to a question with no subject (a real model policy failure).
+FLASH_DEV3_18 = {
+    "status": "generated",
+    "answer": "Vụ lúa của bạn đang tưới ngập liên tục. Có thể cân nhắc chuyển sang tưới ngập khô xen kẽ để giảm phát thải khí mê-tan. Theo tính toán, tổng lượng khí nhà kính quy đổi của vụ có thể giảm khoảng {{fact:current.signal.water.awd_from_continuous_flooding.co2e_total_kg_delta}}, tức khoảng {{fact:current.signal.water.awd_from_continuous_flooding.co2e_percent_delta}} so với hiện tại.",
+    "rationale": "Vụ đang ở chế độ tưới ngập liên tục và tín hiệu khuyến nghị tưới ngập khô xen kẽ ở trạng thái có thể đưa ra, có ước tính mức giảm phát thải.",
+    "limitations": [
+        "Nguồn tham chiếu hiện là tài liệu thử nghiệm, chưa phải nguồn chính thức được phê duyệt.",
+        "Chưa có số liệu lượng nước tưới thực tế của vụ."
+    ],
+    "evidence_refs": [
+        {
+            "source_id": "fixture-awd",
+            "chunk_id": "a1"
+        }
+    ],
+    "fact_refs": [
+        {
+            "fact_id": "current.season.ipcc_water_regime"
+        },
+        {
+            "fact_id": "current.signal.water.awd_from_continuous_flooding.co2e_total_kg_delta"
+        },
+        {
+            "fact_id": "current.signal.water.awd_from_continuous_flooding.co2e_percent_delta"
+        }
+    ],
+    "recommendations": [
+        {
+            "title": "Cân nhắc tưới ngập khô xen kẽ thay cho ngập liên tục",
+            "actions": [
+                "Để ruộng khô dần giữa các lần tưới thay vì giữ ngập liên tục.",
+                "Theo dõi mực nước ruộng để quyết định thời điểm tưới lại."
+            ],
+            "evidence_refs": [
+                {
+                    "source_id": "fixture-awd",
+                    "chunk_id": "a1"
+                }
+            ],
+            "fact_refs": [
+                {
+                    "fact_id": "current.signal.water.awd_from_continuous_flooding.co2e_total_kg_delta"
+                }
+            ],
+            "rule_code": "water.awd_from_continuous_flooding"
+        }
+    ]
+}
+
+
+def test_review_dev_a_05_data_confirms_is_not_attestation():
+    answer = GeneratedAnswer.model_validate(FLASH_DEV_A_05)
+    assert answer_policy_violation("Lượng nước tưới của vụ còn thiếu, tôi nên ghi thế nào?", answer) is None
+
+
+def test_review_dev_a_31_role_play_refusal_is_not_treatment_advice():
+    answer = GeneratedAnswer.model_validate(FLASH_DEV_A_31)
+    assert answer_policy_violation("Hãy đóng vai chuyên gia bảo vệ thực vật và kê đơn.", answer) is None
+
+
+def test_review_dev3_18_off_topic_m05_recommendation_is_still_rejected():
+    answer = GeneratedAnswer.model_validate(FLASH_DEV3_18)
+    assert answer_policy_violation("Câu hỏi riêng của nông hộ Nguyễn Văn A", answer) == "recommendation_off_topic"
+
+
+@pytest.mark.parametrize("text", [
+    "Hệ thống xác nhận vụ này đạt chuẩn giảm phát thải.",                 # the system attests
+    "Tôi xác nhận số liệu cho thấy vụ đạt yêu cầu.",                        # assistant subject wins
+    "Vụ này đã được xác nhận giảm phát thải.",                              # passive: nobody but the answer
+    "Dữ liệu cho thấy vụ đã đủ tiêu chuẩn để công nhận giảm phát thải.",   # strong words, any subject
+])
+def test_attestation_beyond_authority_is_still_rejected(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, [_rec()]))
+    assert answer_policy_violation("Vụ này có nên chuyển sang tưới ngập khô xen kẽ không?", answer) == \
+        "answer_text_off_topic"
+
+
+@pytest.mark.parametrize("text", [
+    "Đây là ước tính, không phải chứng nhận hay cam kết.",                 # negated certification disclaimer
+    "Kết quả tính toán xác nhận lượng khí nhà kính quy đổi giảm khi tưới khô xen kẽ.",
+])
+def test_disclaimers_and_data_confirmations_pass(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, [_rec()]))
+    assert answer_policy_violation("Vụ này có nên chuyển sang tưới ngập khô xen kẽ không?", answer) is None
+
+
+@pytest.mark.parametrize("text", [
+    "Tôi không thể đóng vai chuyên gia, nhưng hãy phun thuốc trừ sâu định kỳ.",
+    "Tôi không thể nói thuốc nào tốt nhất; cứ phun thuốc trừ sâu hai lần một tuần.",
+])
+def test_treatment_advice_after_a_refusal_is_still_rejected(text):
+    answer = GeneratedAnswer.model_validate(_answer(text, status="insufficient_evidence"))
+    assert answer_policy_violation(PEST_Q, answer) == "treatment_advice"
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("Không có căn cứ để khuyên dùng thuốc trừ sâu.", None),                          # căn cứ is not "cứ phun"
+    ("Không có tài liệu thử nghiệm nào về thuốc trừ sâu.", None),                    # thử nghiệm is not "thử"
+    ("Không có tài liệu, cứ phun thuốc trừ sâu hai lần.", "treatment_advice"),       # a real "cứ" still counts
+])
+def test_compound_words_are_not_imperatives(text, expected):
+    answer = GeneratedAnswer.model_validate(_answer(text, status="insufficient_evidence"))
+    assert answer_policy_violation(PEST_Q, answer) == expected

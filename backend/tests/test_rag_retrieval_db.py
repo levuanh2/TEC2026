@@ -89,6 +89,28 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     ids[key] = chunk_id
 
 
+def _supersede(conn, ids, approver, key, content):
+    """Source `key` (its v1 approved, then archived as superseded) gets a v2 that is approved: the one
+    approved version per document (knowledge_documents_one_approved)."""
+    now = datetime.now(timezone.utc)
+    source_id = f"rq-{ids['run']}-{key.replace('_', '-')}"
+    doc = conn.execute(
+        "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+        " chunker_version, license_basis)"
+        " values (%s, 'doc', 'v2', %s, 'vi', %s, %s, %s, %s, 'p', 'n', 'c', 'official_publication') returning id",
+        (source_id, FIXTURE + key + " v2", f"https://example.invalid/{key}/v2",
+         f"knowledge-artifacts/{_sha(source_id + 'v2')}/doc.md", _sha(source_id + "v2"),
+         _sha("n" + source_id + "v2"))).fetchone()[0]
+    chunk_id = _sha(source_id + "v2" + content)[:20]
+    conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
+                 " content_sha256) values (%s, %s, 0, %s, %s, %s)",
+                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
+    conn.execute("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = %s,"
+                 " review_note = 'fixture v2' where id = %s", (approver, now, doc))
+    ids[key + "_v2"] = chunk_id
+
+
 def _tenant(conn, ids, run, name, org, *, org_role="farmer", farm_role="owner", farm=None):
     """A user's membership, and (for farm roles) an own farm/plot/season unless `farm` is given."""
     one = lambda sql, p=(): conn.execute(sql, p).fetchone()[0]  # noqa: E731
@@ -157,6 +179,10 @@ def env():
             _knowledge(conn, ids, approver, "archived_src", "nguồn awd đã lưu trữ",
                        source_status="archived", document_status="approved")
             _knowledge(conn, ids, approver, "injection", INJECTION)
+            # Superseded: v1 approved then archived, v2 approved (source integrity: only the current version).
+            _knowledge(conn, ids, approver, "superseded", "phiên bản awd cũ đã bị thay thế",
+                       source_status="approved", document_status="archived")
+            _supersede(conn, ids, approver, "superseded", "phiên bản awd mới đang hiệu lực")
             conn.commit()
         yield ids
     finally:
@@ -254,6 +280,13 @@ def test_a_season_of_another_tenant_is_denied_before_retrieval(env):
 @pytest.mark.parametrize("key", ["pending", "rejected", "archived_doc", "archived_src"])
 def test_unapproved_rejected_and_archived_knowledge_is_invisible(env, key):
     assert env[key] not in _chunk_ids(_evidence(env, "member", "member"))
+
+
+def test_a_superseded_version_is_never_cited_only_the_current_approved_one(env):
+    result = _evidence(env, "member", "member")
+    assert env["superseded"] not in _chunk_ids(result)
+    current = [c for c in result.evidence if c.chunk_id == env["superseded_v2"]]
+    assert current and current[0].document_version == "v2"
 
 
 def test_injected_instructions_are_plain_evidence_and_change_no_filter(env):

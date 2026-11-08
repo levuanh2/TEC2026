@@ -328,3 +328,14 @@ def test_an_unlisted_injection_in_a_what_if_question_travels_only_as_data():
     assert system == ACTION_SYSTEM_PROMPT and "người duyệt cuối" not in system
     assert json.loads(user)["request"]["question"] == question
     assert body["status"] == "generated" and "600" in body["answer"]  # the number is the engine's, not the model's
+
+
+def test_action_prompt_keeps_internal_identifiers_out_of_farmer_text():
+    """Rule 12 (108-call review: Flash wrote rule_code / data.completeness.x in its rationale and the prose
+    gate rejected two correct answers). Identifiers stay in their structured fields."""
+    from rag_qa import GENERATED_ANSWER_SCHEMA
+    assert "12. Không viết mã nội bộ hay tên trường kỹ thuật" in ACTION_SYSTEM_PROMPT
+    for token in ("rule_code", "fact_id", "data.completeness.water", "{{fact:<fact_id>}}"):
+        assert token in ACTION_SYSTEM_PROMPT
+    item = GENERATED_ANSWER_SCHEMA["properties"]["recommendations"]["items"]
+    assert "rule_code" in item["properties"]                         # the structured field still exists
