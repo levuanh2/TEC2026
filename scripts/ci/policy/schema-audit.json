@@ -263,6 +263,15 @@
    ],
    "security_definer": true
   },
+  "private.readable_crop_ids()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.set_updated_at()": {
    "config": [
     "search_path=\"\""
@@ -630,7 +639,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "private.user_can_read_batch(production_batch_id)",
+   "using": "(production_batch_id IN ( SELECT private.readable_batch_ids() AS readable_batch_ids))",
    "with_check": null
   },
   "carbon_calculations.carbon_calculations_select_crop_season": {
@@ -639,7 +648,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "private.user_can_read_crop(crop_season_id)",
+   "using": "(crop_season_id IN ( SELECT private.readable_crop_ids() AS readable_crop_ids))",
    "with_check": null
   },
   "crop_seasons.crop_seasons_insert": {
@@ -1188,7 +1197,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((deleted_at IS NULL) AND private.user_can_read_crop(crop_season_id))",
+   "using": "((deleted_at IS NULL) AND (crop_season_id IN ( SELECT private.readable_crop_ids() AS readable_crop_ids)))",
    "with_check": null
   },
   "production_batches.production_batches_update": {
