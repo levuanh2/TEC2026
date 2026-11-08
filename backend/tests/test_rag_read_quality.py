@@ -109,10 +109,12 @@ def test_frozen_holdout_v1_ratchet():
 
 def test_frozen_holdout_files_are_unchanged():
     """READ v2 and ACTION v1 were frozen by sha256 before the implementation was evaluated on them
-    (docs/rag/RAG_V15_EVAL_PLAN.md). Editing them makes a new version, never a silent change."""
+    (docs/rag/RAG_V15_EVAL_PLAN.md). Editing them makes a new version, never a silent change.
+    ACTION v1 was then used to close the R3 gaps (2026-11-08), so it is DEV now: renamed
+    rag_action_dev_v2.json, bytes unchanged, still pinned so its history stays checkable."""
     import hashlib
     frozen = {"rag_read_holdout_v2.json": "57684eced9b393e3fb967181c16a815a6fe037d1d72768c226d3e4ba7bbc6731",
-              "rag_action_holdout_v1.json": "614b5b236bca0df40f344b75c100e7af97dc1e3364b62e04d8a8d6557ed6b5d3"}
+              "rag_action_dev_v2.json": "614b5b236bca0df40f344b75c100e7af97dc1e3364b62e04d8a8d6557ed6b5d3"}
     for name, digest in frozen.items():
         raw = (Path(__file__).parent / "fixtures" / name).read_bytes().replace(b"\r\n", b"\n")
         assert hashlib.sha256(raw).hexdigest() == digest, name

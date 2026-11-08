@@ -18,7 +18,7 @@ from typing import TypeVar
 
 from pydantic import ValidationError
 
-from .answer_consistency import answer_policy_violation
+from .answer_consistency import answer_policy_violation, uncovered_question_refusal
 from .answers import (
     INSUFFICIENT_MESSAGES,
     LIMITATION_CARBON_ESTIMATE,
@@ -94,7 +94,9 @@ class RagOrchestrator:
             # retrieval and any model call: a question addressed to the assistant, or about
             # something no tier answers, is refused by trusted code. A first layer only
             # (question_scope.OUT_OF_SCOPE); the provider prompt, rule_code and grounding follow.
-            refusal = action_question_refusal(request.question)
+            # Second layer: a subject no stored rule covers (answer_consistency's closed vocabulary,
+            # the same one the post-generation gate uses) cannot be answered by any recommendation.
+            refusal = action_question_refusal(request.question) or uncovered_question_refusal(request.question)
             if refusal is not None:
                 return _insufficient(request, intent, context, signals, None, refusal)
 
@@ -123,8 +125,9 @@ class RagOrchestrator:
             _parse(raw, capability), intent=intent, evidence=evidence, facts=catalog, rule_codes=context.signal_rule_codes,
         )
         if capability is GenerationCapability.ACTION_PRODUCING:
-            # Trusted consistency gate (answer_consistency.py): a refusal that still advises, or a
-            # recommendation whose rule is not about what was asked, discards the WHOLE model answer.
+            # Trusted consistency gate (answer_consistency.py): a refusal that still advises, a
+            # recommendation whose rule is not about what was asked, or treatment advice in the
+            # model's text discards the WHOLE model answer.
             violation = answer_policy_violation(request.question, generated)
             if violation is not None:
                 result = _insufficient(request, intent, context, signals, what_if, "answer_policy_rejected")

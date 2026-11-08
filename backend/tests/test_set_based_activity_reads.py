@@ -174,6 +174,10 @@ from pathlib import Path  # noqa: E402
 _REPO = Path(__file__).resolve().parents[2]
 _UP = _REPO / "supabase/migrations/20261104090000_set_based_activity_read_policies.sql"
 _DOWN = _REPO / "supabase/rollbacks/20261104090000_set_based_activity_read_policies.down.sql"
+# 20261105090000's carbon_calculations_select uses readable_batch_ids(): rollbacks
+# run newest first, so that one is undone before this one and redone after.
+_LATER_UP = _REPO / "supabase/migrations/20261105090000_set_based_batch_carbon_read_policies.sql"
+_LATER_DOWN = _REPO / "supabase/rollbacks/20261105090000_set_based_batch_carbon_read_policies.down.sql"
 
 
 def _snapshot(rx):
@@ -190,6 +194,7 @@ def test_rollback_restores_the_per_row_policies_with_the_same_access_and_reappli
     """down.sql then the migration again, inside the (rolled back) test transaction."""
     with_set = _snapshot(rx)
 
+    rx.cur.execute(_LATER_DOWN.read_text(encoding="utf-8"))
     rx.cur.execute(_DOWN.read_text(encoding="utf-8"))
     quals = _select_quals(rx)
     assert set(quals) == {"activities", *DETAIL_TABLES}
@@ -199,6 +204,7 @@ def test_rollback_restores_the_per_row_policies_with_the_same_access_and_reappli
     assert _snapshot(rx) == with_set
 
     rx.cur.execute(_UP.read_text(encoding="utf-8"))
+    rx.cur.execute(_LATER_UP.read_text(encoding="utf-8"))
     quals = _select_quals(rx)
     assert all("readable_batch_ids" in q and "user_can_read_batch" not in q for q in quals.values()), quals
     assert _snapshot(rx) == with_set
