@@ -49,7 +49,7 @@ DOMAIN_SUBJECTS = frozenset({"water", "emission", "fertilizer", "cost", "yield"}
 #: "tưới" never matches "tuổi"); a question typed entirely without accents is matched folded.
 SUBJECT_PHRASES: dict[str, tuple[str, ...]] = {
     "water": ("tưới", "nước tưới", "lượng nước", "mực nước", "ngập", "khô xen kẽ", "ướt khô", "rút nước",
-              "phơi ruộng", "thủy lợi", "awd"),
+              "phơi ruộng", "thủy lợi", "awd", "bơm nước", "tháo nước", "giữ nước", "cấp nước", "thoát nước"),
     "emission": ("phát thải", "khí nhà kính", "mê-tan", "mê tan", "metan", "methane", "carbon", "các-bon",
                  "cacbon", "co2", "co2e", "ch4", "giảm khí"),
     "fertilizer": ("phân bón", "bón phân", "bón", "phân đạm", "đạm", "urê", "ure", "npk", "kali", "lân"),
@@ -70,23 +70,32 @@ NOT_DATA_PHRASES = ("bón bổ sung", "bón thêm", "tưới bổ sung", "tướ
 UNCOVERED_SUBJECT_PHRASES: dict[str, tuple[str, ...]] = {
     "pest_disease": ("côn trùng", "sâu bệnh", "sâu cuốn lá", "sâu đục thân", "sâu non", "sâu keo", "sâu hại",
                      "sâu phao", "bọ trĩ", "bọ xít", "bọ rùa", "nhện", "rệp", "bướm", "châu chấu", "rầy", "chuột",
-                     "ốc bươu", "oc buou", "ốc", "dịch hại", "bệnh", "nấm", "đốm", "lem lép", "đạo ôn", "khô vằn",
+                     "ốc bươu", "oc buou", "ốc", "con ốc", "ốc ăn", "ốc phá", "dịch hại", "bệnh", "nấm",
+                     "nhiễm nấm", "bị nấm", "đốm", "lem lép", "đạo ôn", "khô vằn",
                      "bạc lá", "vàng lùn", "lùn xoắn", "vi khuẩn", "vi rút", "virus", "chữa", "chữa trị",
                      "điều trị", "triệu chứng", "thuốc", "thuoc nao", "loai thuoc", "mua thuoc", "hoạt chất",
                      "kháng sinh", "phun", "xịt", "diệt", "trừ sâu", "vôi"),
     "straw": ("rơm", "rơm rạ", "đốt rơm"),
     "weed": ("cỏ dại", "lúa cỏ", "lúa ma"),
-    "other_agronomy": ("nhiễm mặn", "độ mặn", "xâm nhập mặn", "nhiễm phèn", "phèn", "giống lúa", "chọn giống",
-                       "mật độ sạ", "sạ dày"),
-    "credit_market": ("tín chỉ", "đạt chuẩn", "mrv", "bán", "thị trường", "giá bán", "hồ sơ tín chỉ",
+    # Salinity changes what irrigation advice is safe (AWD can draw salt in): no stored rule covers it.
+    # Seed variety, sowing density and acid soil are NOT here: "giống lúa này có hợp AWD không" is an
+    # AWD question (agy review 2026-11-08); a pure seed question names no covered subject anyway.
+    "other_agronomy": ("nhiễm mặn", "độ mặn", "xâm nhập mặn"),
+    # Bare "bán" is not here: "bán lúa xong cần ghi số liệu gì" is a records question.
+    "credit_market": ("tín chỉ", "đạt chuẩn", "mrv", "thị trường", "giá bán", "bán tín chỉ", "hồ sơ tín chỉ",
                       "hồ sơ chứng nhận"),
     # The assistant attests nothing: no certificate, confirmation, guarantee or judgement that a
     # practice the farmer describes is correct; and a lender's or appraiser's request is not a
     # farming question. Accent-free "co dung" (có dùng) / "dung ky thuat" (dùng kỹ thuật) are
     # legitimate requests, so the correctness phrases match only WITH accents (see AMBIGUOUS_FOLDS).
-    "attestation": ("xác nhận", "xác thực", "chứng nhận", "chứng thực", "cam kết", "bảo lãnh", "bảo đảm",
-                    "giải ngân", "ngân hàng", "thẩm định", "bảo hiểm", "khoản vay", "vay vốn", "đúng kỹ thuật",
-                    "có đúng", "sai kỹ thuật"),
+    # "Làm sao tưới đúng kỹ thuật" is a how-to question; only a request to JUDGE the farmer's own
+    # practice ("như vậy có đúng kỹ thuật không") is attestation. "đủ điều kiện" is absent: "ruộng có
+    # đủ điều kiện áp dụng AWD không" is a legitimate suitability question.
+    "attestation": ("xác nhận", "xác thực", "chứng nhận", "chứng thực", "công nhận", "nghiệm thu",
+                    "đủ tiêu chuẩn", "đạt tiêu chuẩn", "cam kết", "bảo lãnh", "giải ngân", "ngân hàng",
+                    "thẩm định", "bảo hiểm", "khoản vay", "vay vốn", "có đúng kỹ thuật", "đúng kỹ thuật không",
+                    "đúng kỹ thuật chưa", "như vậy có đúng", "làm vậy có đúng", "vậy có đúng không",
+                    "sai kỹ thuật"),
     "coercion": ("bằng không", "không cần hệ thống", "tự tính", "bịa", "không giới hạn", "bỏ giới hạn", "admin",
                  "override", "quản trị viên", "nhà phát triển", "developer", "quên hết", "kê đơn"),
 }
@@ -97,8 +106,13 @@ UNCOVERED_SUBJECT_PHRASES: dict[str, tuple[str, ...]] = {
 AMBIGUOUS_FOLDS = frozenset({"ban", "oc", "thuoc", "chua", "nam", "lan", "dam", "tien", "von", "vay", "dung", "co",
                              "sai", "giong", "man", "bon", "phen"})
 #: Phrases matched only in an accented question: their accent-free spelling is a legitimate request
-#: ("dung ky thuat awd" = "dùng kỹ thuật AWD", use the AWD technique).
-ACCENTED_ONLY = frozenset({"đúng kỹ thuật", "có đúng", "sai kỹ thuật", "liều lượng", "liều dùng"})
+#: ("co dung ky thuat awd" = "có dùng kỹ thuật AWD", do I use the AWD technique). A residual: an
+#: accent-free request to judge a practice is not recognised (documented in RAG_V15_EVAL_PLAN.md).
+ACCENTED_ONLY = frozenset({"có đúng kỹ thuật", "đúng kỹ thuật không", "đúng kỹ thuật chưa", "như vậy có đúng",
+                           "làm vậy có đúng", "vậy có đúng không", "sai kỹ thuật", "liều lượng", "liều dùng"})
+#: Multi-word phrases made only of ambiguous folds whose accent-free spelling has no common other
+#: reading ("vay von" is not "vậy vốn" in practice): matched loose despite AMBIGUOUS_FOLDS.
+LOOSE_OK = frozenset({"vay vốn"})
 
 #: Words a "what should I do for this season" request is made of, WITH accents. A RECOMMEND/WHAT_IF
 #: question made ONLY of these words names no other subject, so any stored rule may answer it
@@ -126,7 +140,7 @@ _SELF_REFUSAL = re.compile(
     r"(?:toi|tro ly|he thong|chung toi|em|chung em|minh)\s+(?:khong the|khong|chua the|xin phep khong|tu choi)\s+"
     r"(?:tu van|huong dan|ke|dua ra|khuyen|cung cap|tra loi|xac nhan|chan doan|chi dinh|goi y)"
     r"|(?:khong the|chua the|xin phep khong|xin loi,? (?:toi )?khong the|rat tiec,? (?:toi )?khong the|tu choi)\s+"
-    r"(?:tu van|huong dan|khuyen|goi y|chi dinh|ke don|chan doan|tra loi cau hoi)"
+    r"(?:tu van|huong dan|khuyen|goi y|chi dinh|ke don|chan doan|tra loi|giai dap|xac nhan)"
     r"|ngoai pham vi|khong thuoc pham vi|khong duoc phep tu van|khong nam trong pham vi)(?!\w)"
 )
 
@@ -140,8 +154,14 @@ TREATMENT_PHRASES: dict[str, tuple[str, ...]] = {
                   "hãy xịt"),
 }
 
+#: Subjects a GENERATED answer's own prose may not discuss outside a refusal sentence: disease and
+#: pest handling, and attestation ("đã đủ điều kiện để công nhận …"). The rules explain irrigation
+#: and records only (agy review 2026-11-08: "điều trị đạo ôn bằng vôi bột" passed the phrase list).
+PROSE_FORBIDDEN_SUBJECTS = ("pest_disease", "attestation")
+
 POLICY_REASONS = ("refusal_with_recommendation", "recommendation_off_topic", "unknown_rule_subject",
-                  "treatment_advice")
+                  "treatment_advice", "answer_text_off_topic", "recommendation_text_off_topic",
+                  "uncovered_question_answered")
 
 
 def _words(text: str) -> list[tuple[str, tuple[str, ...]]]:
@@ -165,7 +185,8 @@ def _windows(words, phrase_words, loose):
 
 def _phrase_targets(phrase: str, loose: bool):
     target = _words(phrase)
-    if loose and (phrase in ACCENTED_ONLY or all(t[0] in AMBIGUOUS_FOLDS for t in target)):
+    if loose and (phrase in ACCENTED_ONLY
+                  or (phrase not in LOOSE_OK and all(t[0] in AMBIGUOUS_FOLDS for t in target))):
         return None  # cannot be told apart from a common word without accents
     return target
 
@@ -243,6 +264,18 @@ def treatment_advice(answer: GeneratedAnswer) -> bool:
                for s in _sentences(_model_texts(answer)))
 
 
+def prose_off_topic(answer: GeneratedAnswer) -> bool:
+    """A GENERATED answer whose own prose (answer, rationale, limitations) discusses pest/disease or
+    attests something, outside a refusal sentence. Fails closed: an answer that merely mentions a
+    disease ("AWD không làm tăng bệnh") is also refused. A declined answer is not judged here (it
+    may name the subject it declines)."""
+    if answer.status != "generated":
+        return False
+    vocabulary = {k: UNCOVERED_SUBJECT_PHRASES[k] for k in PROSE_FORBIDDEN_SUBJECTS}
+    texts = [answer.answer, answer.rationale or "", *answer.limitations]
+    return any(question_subjects(s, vocabulary) and not self_refusal((s,)) for s in _sentences(texts))
+
+
 def rule_answers_question(rule_code: str, asked: frozenset[str], generic: bool) -> bool | None:
     """True when a stored rule answers what was asked; None when the rule has no declared subject."""
     subjects = RULE_SUBJECTS.get(rule_code)
@@ -261,15 +294,20 @@ def answer_policy_violation(question: str, answer: GeneratedAnswer) -> str | Non
     """None when the answer is consistent; otherwise a sanitized reason code (POLICY_REASONS)."""
     if treatment_advice(answer):
         return "treatment_advice"
+    if answer.recommendations and self_refusal((answer.answer, answer.rationale)):
+        return "refusal_with_recommendation"  # the R3 shape: named first, it is the precise diagnosis
+    if prose_off_topic(answer):
+        return "answer_text_off_topic"
+    declined_in_words = not answer.recommendations and self_refusal((answer.answer, answer.rationale))
+    if answer.status == "generated" and not declined_in_words and uncovered_subjects(question):
+        # The question is (also) about something no rule covers: no generated answer at all, with or
+        # without a recommendation (normally refused before the model; this is the second line).
+        return "recommendation_off_topic" if answer.recommendations else "uncovered_question_answered"
     if not answer.recommendations:
         return None
-    if self_refusal((answer.answer, answer.rationale)):
-        return "refusal_with_recommendation"
-    if uncovered_subjects(question):
-        return "recommendation_off_topic"  # the question is (also) about something no rule covers
     if any(question_subjects(text, UNCOVERED_SUBJECT_PHRASES)
            for rec in answer.recommendations for text in (rec.title, *rec.actions)):
-        return "recommendation_off_topic"  # the recommendation's own text leaves the rule's subject
+        return "recommendation_text_off_topic"  # the recommendation's own text leaves the rule's subject
     generic = is_generic_action_question(question)
     asked = question_subjects(question)
     for rec in answer.recommendations:

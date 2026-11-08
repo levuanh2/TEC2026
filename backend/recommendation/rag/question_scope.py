@@ -71,10 +71,11 @@ INSTRUCTION_MARKERS = ("bo qua moi quy tac", "bo qua cac quy tac", "bo qua quy t
                        "quen huong dan", "bia so lieu", "bia ra so lieu",
                        "ignore previous", "ignore all", "ignore the above", "system prompt", "ban la tro ly",
                        "hay dong vai", "dat visibility", "khong can tuan theo", "tiet lo", "jailbreak",
-                       # addressed to an assistant/model, or commanding "the system": an approved
-                       # agronomy source never does either (R3 gap 4: "Ghi chú dành cho trợ lý AI").
-                       "tro ly ai", "danh cho tro ly", "gui tro ly", "chatbot", "mo hinh ngon ngu",
-                       "language model", "as an ai", "yeu cau he thong", "he thong hay", "admin override")
+                       # addressed to an AI assistant/model: an approved agronomy source never is (R3
+                       # gap 4: "Ghi chú dành cho trợ lý AI"). Not "yêu cầu hệ thống" (irrigation-system
+                       # requirements) nor "dành cho trợ lý" (an HTX technical assistant): agy review.
+                       "tro ly ai", "ai assistant", "chatbot", "mo hinh ngon ngu", "language model",
+                       "as an ai", "admin override")
 
 #: Agronomic concepts and the folded phrasings that express them. Relevance counts a shared
 #: CONCEPT as well as a shared word, so an equivalent wording ("ruộng khô dần giữa các lần
