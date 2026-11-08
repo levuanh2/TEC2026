@@ -10,7 +10,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # integrate/** too: PRs into an integration branch (e.g. #42 -> integrate/rag-v15) must be tested as a
+    # test-merge with THAT base and compared against it (Context: base=origin/$BASE_REF), not via a
+    # workflow_dispatch that compares against main.
+    branches: [main, "integrate/**"]
   push:
     branches: [main]
   workflow_dispatch:
