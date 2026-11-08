@@ -237,7 +237,10 @@
     "backend/rag_application.py",
     "backend/rag_qa.py",
     "backend/infrastructure/llm_client.py",
-    "backend/infrastructure/llm_quota.py"
+    "backend/infrastructure/llm_quota.py",
+    "backend/recommendation/rag/answer_consistency.py",
+    "backend/recommendation/rag/question_scope.py",
+    "backend/recommendation/rag/orchestrator.py"
   ],
   "route_mutation_allow": [
     "backend/main.py: app = FastAPI(title=\"AgriCarbon API\", version=\"0.2.0\", openapi_tags=OPENAPI_TAGS, lifespan=lifespan)",
