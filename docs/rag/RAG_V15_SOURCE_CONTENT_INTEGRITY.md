@@ -102,3 +102,20 @@ Only `approved` is retrievable (unchanged rule); `quarantined` is never retrieva
 3. DB tests (local isolated stack, CI) for every refusal above; benchmark fixture for a contradiction pair.
 4. Runbook: expert checklist, quarantine triggers, revocation steps.
 5. Hosted application only after the first real corpus acceptance gate (`RAG_V1_INGESTION` §8).
+
+## 6. Status of dev3-01 and implementation milestones
+
+**dev3-01 is an UNRESOLVED source-content integrity failure.** This PR adds a design and characterization
+tests that *demonstrate* the gap. Nothing here detects, blocks or fixes a poisoned approved chunk. The test
+`test_trusted_path_accepts_a_poisoned_but_structurally_valid_citation_today` passing means "the gap is still
+there", not "safe". Every milestone needs its own owner approval; none touches hosted Supabase until M6.
+
+| # | Milestone | Deliverable | Exit criteria (offline/local first) |
+|---|---|---|---|
+| M1 | Status model | migration (local only): `expert_review`, `quarantined`; `knowledge_status_events` append-only; retrieval still `approved` only | DB tests: quarantined/expert_review chunks never retrieved; status change without an event row refused; existing approval guards unchanged |
+| M2 | Evidence + two-person rule | `knowledge_approval_records` (checklist, references, rationale); guard: approver ≠ uploader ≠ expert reviewer; approval without a record refused | DB tests for each refusal; an LLM-produced record cannot set `approved` (no service path writes status from model output) |
+| M3 | Version and effective dates | `effective_from/to`, `supersedes`; approval refused when expired or when the superseded version is still approved; scheduled expiry → quarantine | DB tests + a local job dry run |
+| M4 | Claim extraction + contradiction check | deterministic extractor (numbers+units, stage, water level, days, rates, factors) into `knowledge_claims`; contradiction report between approved/candidate chunks | fixture pair with contradicting claims flagged; `poisoned_claim` flagged against the reference registry (M5); false-positive budget measured on the real corpus candidates |
+| M5 | Trusted reference registry | versioned file of canonical values (Carbon Engine MRV/IPCC factors, ministry AWD parameters) with source + tolerance | registry values traced to approved artifacts; a mismatch blocks approval until the expert records a justification |
+| M6 | Quarantine + revocation runbook | trigger list, steps, exposure query (retrieval logs by chunk_id), re-evaluation + regression run before re-approval | tabletop on local stack: revoke a chunk, show retrieval stops and exposure window is listed; owner-approved hosted migration only after this |
+| M7 | Flip the characterization | update `test_rag_source_integrity_gap.py`: a contradicted/quarantined poisoned chunk is not retrievable; benchmark `poisoned_claim` case becomes a refusal | only with M1–M5 merged; dev3-01 re-run on a frozen set is the evidence, not the unit test |
