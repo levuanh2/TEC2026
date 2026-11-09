@@ -143,8 +143,21 @@ def _read(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def section_labels(p) -> dict[str, str]:
+    """How each chunk's section is printed. Public documents print the heading path as before.
+    A tenant document's headings are tenant-private text (a farm, a household, a plot), so they
+    are replaced by their position among the document's distinct sections. No hash: short
+    headings are easy to guess from one. Only the printout changes; the plan, chunk ids and
+    hashes are untouched."""
+    paths = list(dict.fromkeys(c.section_path for c in p.chunks if c.section_path))
+    if p.source.visibility == "public":
+        return {s: s for s in paths}
+    return {s: f"(section {i} of {len(paths)}, heading withheld: tenant document)" for i, s in enumerate(paths, 1)}
+
+
 def summary(p, *, mode: str, target: str | None = None, result=None) -> str:
     d = p.document
+    shown = section_labels(p)
     lines = [
         f"mode               {mode}" + (f" (target {target})" if target else ""),
         f"identity           {d.source_id}/{d.document_id}@{d.document_version}",
@@ -158,7 +171,7 @@ def summary(p, *, mode: str, target: str | None = None, result=None) -> str:
         f"chunks             {len(p.chunks)}",
     ]
     lines += [f"  {c.ordinal:>4}  {c.chunk_id}  {c.tokens:>4} tok  p{c.page_from or '-'}-{c.page_to or '-'}  "
-              f"{c.section_path or '(no section)'}" for c in p.chunks]
+              f"{shown[c.section_path] if c.section_path else '(no section)'}" for c in p.chunks]
     warnings = list(p.warnings) + environment_warnings(p)
     lines += [f"warning            {w}" for w in warnings] or ["warnings           none"]
     if result is not None:
