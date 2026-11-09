@@ -77,3 +77,10 @@
 /backend/rag_qa.py @levuanh2
 /backend/infrastructure/llm_client.py @levuanh2
 /backend/infrastructure/llm_quota.py @levuanh2
+# RAG answer-path safety gates: pre-model question refusals (question_scope), the
+# post-generation consistency/treatment/prose gate (answer_consistency) and the
+# orchestrator that wires them in. answer_consistency.py reaches main with the
+# integrate/rag-v15 -> main merge; the rule is inert until the file exists.
+/backend/recommendation/rag/answer_consistency.py @levuanh2
+/backend/recommendation/rag/question_scope.py @levuanh2
+/backend/recommendation/rag/orchestrator.py @levuanh2
