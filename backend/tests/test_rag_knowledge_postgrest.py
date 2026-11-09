@@ -17,7 +17,6 @@ import hashlib
 import json
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,6 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from infrastructure.config import load_settings  # noqa: E402
+from tests.knowledge_status_paths import bring  # noqa: E402
 
 _SETTINGS = load_settings()
 _DB_URL = _SETTINGS.supabase_db_url
@@ -49,18 +49,12 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
                source_status="approved", document_status="approved"):
     """One source + version + chunk in the given statuses (operator path, table owner); records
     the source for cleanup and the chunk id under ids[key]."""
-    now = datetime.now(timezone.utc)
     source_id = f"kn-{ids['run']}-{key.replace('_', '-')}"
     ids["sources"].append(source_id)
-    ever_approved = source_status in ("approved", "archived")
     conn.execute(
-        "insert into public.knowledge_sources (source_id, title, owner, source_type, visibility,"
-        " organization_id, status, approved_by, approved_at, review_note)"
-        " values (%s, %s, 'Test publisher', 'guideline', %s, %s, %s, %s, %s, %s)",
-        (source_id, FIXTURE + key, visibility, org, "approved" if ever_approved else source_status,
-         approver if ever_approved else None, now if ever_approved else None, "fixture" if ever_approved else None))
-    if source_status == "archived":           # archived only ever follows an approval
-        conn.execute("update public.knowledge_sources set status = 'archived' where source_id = %s", (source_id,))
+        "insert into public.knowledge_sources (source_id, title, owner, source_type, visibility, organization_id)"
+        " values (%s, %s, 'Test publisher', 'guideline', %s, %s)", (source_id, FIXTURE + key, visibility, org))
+    bring(conn, "source", source_id, source_status, approver=approver)          # M1: audited path
     # ingestion order: insert the version open for review, add its chunk, then approve/reject/archive
     doc = conn.execute(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
@@ -72,11 +66,7 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     chunk_id = _sha(source_id + content)[:20]
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
                  " values (%s, %s, 0, %s, %s)", (doc, chunk_id, FIXTURE + content, _sha(content)))
-    if document_status in ("approved", "archived"):
-        conn.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
-                     " approved_at = %s, review_note = 'fixture' where id = %s", (approver, now, doc))
-    if document_status not in ("approved", "review_required"):
-        conn.execute("update public.knowledge_documents set status = %s where id = %s", (document_status, doc))
+    bring(conn, "document", doc, document_status, approver=approver)       # via expert_review (D3)
     ids[key] = chunk_id
 
 
@@ -266,9 +256,11 @@ def test_a_chunk_delete_cannot_race_an_approval():
                 outcome["result"] = exc.sqlstate
 
         with psycopg.connect(_DB_URL) as approver, psycopg.connect(_DB_URL, autocommit=True) as watch:
-            approver.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
-                             " approved_at = now(), review_note = 'fixture' where source_id = %s",
-                             (ids["users"]["approver"], source_id))
+            # M1: the review in flight is review_required -> expert_review -> approved, two audited
+            # transitions in the approver's open transaction (the content is frozen from expert_review)
+            doc = approver.execute("select id from public.knowledge_documents where source_id = %s",
+                                   (source_id,)).fetchone()[0]
+            bring(approver, "document", doc, "approved", approver=ids["users"]["approver"])
             deleter = threading.Thread(target=delete_chunk)
             deleter.start()
             deadline = time.monotonic() + 10
@@ -285,7 +277,7 @@ def test_a_chunk_delete_cannot_race_an_approval():
         with psycopg.connect(_DB_URL) as conn:
             assert conn.execute("select count(*) from public.knowledge_chunks where chunk_id = %s",
                                 (ids["race"],)).fetchone()[0] == 1
-            assert conn.execute("select status from public.knowledge_documents where source_id = %s",
+            assert conn.execute("select status::text from public.knowledge_documents where source_id = %s",
                                 (source_id,)).fetchone()[0] == "approved"
     finally:
         _cleanup(admin, ids)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import unicodedata
 import uuid
@@ -31,6 +32,7 @@ BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
 from infrastructure.config import load_settings  # noqa: E402
+from tests.knowledge_status_paths import DOCUMENT_PATH, SOURCE_PATH, TRANSITION  # noqa: E402,F401
 
 psycopg = pytest.importorskip("psycopg", reason="psycopg is required for the RLS tests.")
 
@@ -40,6 +42,8 @@ pytestmark = pytest.mark.skipif(not _DB_URL, reason="SUPABASE_DB_URL is not conf
 RPC = "select * from public.match_knowledge_chunks_lexical(%s, %s, %s)"
 FIXTURE = "TEST FIXTURE — NOT A REAL APPROVED SOURCE. "
 CHECK_VIOLATION, UNIQUE_VIOLATION, PERMISSION_DENIED = "23514", "23505", "42501"
+INVALID_PARAMETER = "22023"
+# M1 (20261110090100): every status change is a controlled, audited transition (shared paths).
 NOW = datetime.now(timezone.utc)
 
 
@@ -112,18 +116,15 @@ class Tx:
     # -- knowledge fixtures (operator path: table owner, no RLS) ------------------------------
 
     def source(self, *, visibility="public", org=None, farm=None, status="approved", source_id=None):
-        """`archived` is reached the legal way: approved, then archived."""
+        """Inserted `review_required` (M1: every row starts there), then brought to `status` by the
+        legal controlled transitions (SOURCE_PATH), each writing its audit event."""
         source_id = source_id or f"kn-{uuid.uuid4().hex[:10]}"
-        approved = status in ("approved", "archived")
         self.cur.execute(
             "insert into public.knowledge_sources (source_id, title, owner, source_type, authority, visibility,"
-            " organization_id, farm_id, status, approved_by, approved_at, review_note)"
-            " values (%s, %s, 'Test publisher', 'guideline', 'official', %s, %s, %s, %s, %s, %s, %s)",
-            (source_id, FIXTURE + source_id, visibility, org, farm, "approved" if approved else status,
-             self.approver if approved else None, NOW if approved else None,
-             "fixture: publisher verified" if approved else None))
-        if status == "archived":
-            self.cur.execute("update public.knowledge_sources set status = 'archived' where source_id = %s", (source_id,))
+            " organization_id, farm_id) values (%s, %s, 'Test publisher', 'guideline', 'official', %s, %s, %s)",
+            (source_id, FIXTURE + source_id, visibility, org, farm))
+        for frm, to in SOURCE_PATH[status]:
+            self.transition("source", source_id, frm, to, "fixture: publisher verified")
         return source_id
 
     def document(self, source_id, *, status="approved", version="v1", document_id="doc",
@@ -142,14 +143,47 @@ class Tx:
         return doc
 
     def settle(self):
-        """Operator approval step: approve (then archive) or reject the filled fixture versions."""
+        """Operator review step for the filled fixture versions: the legal controlled path to the
+        target status (DOCUMENT_PATH, e.g. review_required -> expert_review -> approved)."""
         pending, self.pending = self.pending, {}
         for doc, status in pending.items():
-            if status in ("approved", "archived"):
-                self.cur.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
-                                 " approved_at = %s, review_note = 'fixture' where id = %s", (self.approver, NOW, doc))
-            if status != "approved":
-                self.cur.execute("update public.knowledge_documents set status = %s where id = %s", (status, doc))
+            for frm, to in DOCUMENT_PATH[status]:
+                self.transition("document", doc, frm, to, "fixture")
+
+    def transition(self, kind, key, frm, to, reason="fixture", approver=None):
+        """One controlled transition (fixture setup: must succeed). An approval names tx.approver."""
+        approver = approver or (self.approver if to == "approved" else None)
+        self.cur.execute(TRANSITION[kind], (key, frm, to, reason, approver))
+        return self.cur.fetchone()[0]
+
+    def transit(self, kind, key, frm, to, reason="reviewed", approver=None, *, name_approver=True):
+        """('ok', event_id) or ('err', sqlstate) for one controlled transition, savepoint-isolated, as
+        the operator. An approval names tx.approver unless `name_approver` is False."""
+        self.settle()
+        if approver is None and name_approver and to == "approved":
+            approver = self.approver
+        self.cur.execute("savepoint t")
+        try:
+            self.cur.execute(TRANSITION[kind], (key, frm, to, reason, approver))
+            event = self.cur.fetchone()[0]
+            self.cur.execute("release savepoint t")
+            return ("ok", event)
+        except psycopg.Error as exc:
+            self.cur.execute("rollback to savepoint t")
+            return ("err", exc.sqlstate)
+
+    def status_of(self, kind, key):
+        table, column = ("knowledge_sources", "source_id") if kind == "source" else ("knowledge_documents", "id")
+        self.cur.execute(f"select status::text from public.{table} where {column} = %s", (key,))
+        return self.cur.fetchone()[0]
+
+    def events(self, kind, key):
+        """(from, to, reason, stated_approver) of every audit event of one row, in order."""
+        column = "source_id" if kind == "source" else "document_pk"
+        self.cur.execute("select from_status::text, to_status::text, reason, stated_approver"
+                         f" from public.knowledge_status_events where entity_type = %s and {column} = %s order by id",
+                         (kind, key))
+        return self.cur.fetchall()
 
     def chunk(self, document_pk, content, *, ordinal=0, section=None, extra=None):
         chunk_id = _sha(f"{document_pk}|{ordinal}|{content}")[:20]
@@ -259,38 +293,68 @@ def test_lexical_indexes_exist_and_no_ann_index(tx):
 # ------------------------------------------------------------------ approval invariants
 
 def test_approved_source_needs_approver_time_and_review_note(tx):
+    """M1: an approval is a controlled transition. It needs a named approver and a reason (the
+    review note); the database sets approved_at itself. A row can never be INSERTed approved, not
+    even with a complete record."""
     base = ("insert into public.knowledge_sources (source_id, title, owner, source_type, visibility, status,"
             " approved_by, approved_at, review_note) values (%s, 't', 'o', 'guideline', 'public', 'approved', %s, %s, %s)")
     assert tx.operator(base, ("kn-s1", None, NOW, "note")) == ("err", CHECK_VIOLATION)
     assert tx.operator(base, ("kn-s2", tx.approver, None, "note")) == ("err", CHECK_VIOLATION)
     assert tx.operator(base, ("kn-s3", tx.approver, NOW, "  ")) == ("err", CHECK_VIOLATION)
-    assert tx.operator(base, ("kn-s4", tx.approver, NOW, "verified")) == ("ok", None)
+    assert tx.operator(base, ("kn-s4", tx.approver, NOW, "verified")) == ("err", CHECK_VIOLATION)   # D2: starts draft
+    src = tx.source(status="review_required")
+    assert tx.transit("source", src, "review_required", "approved", name_approver=False) == ("err", INVALID_PARAMETER)
+    assert tx.transit("source", src, "review_required", "approved", reason="  ") == ("err", INVALID_PARAMETER)
+    assert tx.transit("source", src, "review_required", "approved", reason=None) == ("err", INVALID_PARAMETER)
+    assert tx.status_of("source", src) == "review_required" and tx.events("source", src) == []
+    assert tx.transit("source", src, "review_required", "approved", reason="publisher verified")[0] == "ok"
+    tx.cur.execute("select approved_by, approved_at is not null, review_note from public.knowledge_sources"
+                   " where source_id = %s", (src,))
+    assert tx.cur.fetchone() == (tx.approver, True, "publisher verified")
 
 
-@pytest.mark.parametrize(("license_basis", "reference", "approver", "approved_at", "note", "expected"), [
-    ("unknown", None, True, True, "reviewed", CHECK_VIOLATION),
-    ("official_publication", None, False, True, "reviewed", CHECK_VIOLATION),
-    ("official_publication", None, True, False, "reviewed", CHECK_VIOLATION),
-    ("official_publication", None, True, True, None, CHECK_VIOLATION),
-    ("official_publication", None, True, True, "  ", CHECK_VIOLATION),
-    ("open_license", None, True, True, "reviewed", CHECK_VIOLATION),
-    ("written_permission", " ", True, True, "reviewed", CHECK_VIOLATION),
-    ("open_license", "CC BY 4.0", True, True, "reviewed", None),
-    ("official_publication", None, True, True, "reviewed", None),
-    ("public_domain", None, True, True, "reviewed", None),
+@pytest.mark.parametrize(("license_basis", "reference", "approver", "note", "expected"), [
+    ("unknown", None, True, "reviewed", CHECK_VIOLATION),
+    ("official_publication", None, False, "reviewed", INVALID_PARAMETER),
+    ("official_publication", None, True, None, INVALID_PARAMETER),
+    ("official_publication", None, True, "  ", INVALID_PARAMETER),
+    ("open_license", None, True, "reviewed", CHECK_VIOLATION),
+    ("written_permission", " ", True, "reviewed", CHECK_VIOLATION),
+    ("open_license", "CC BY 4.0", True, "reviewed", None),
+    ("official_publication", None, True, "reviewed", None),
+    ("public_domain", None, True, "reviewed", None),
 ])
 def test_approved_document_needs_approver_time_note_and_known_license(tx, license_basis, reference, approver,
-                                                                        approved_at, note, expected):
+                                                                        note, expected):
+    """The approval CHECK (approver, time, note, known license, reference) still holds; the
+    approval itself is the controlled expert_review -> approved transition (D2, D3), and a refused
+    approval leaves the version in expert_review with no approval event."""
     src = tx.source()
-    result = tx.operator(
-        "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
-        " chunker_version, license_basis, license_reference, status, approved_by, approved_at, review_note)"
-        " values (%s, 'doc', 'v1', 't', 'vi', 'https://example.invalid/d', %s, %s, %s, 'p', 'n', 'c', %s, %s,"
-        " 'approved', %s, %s, %s)",
-        (src, artifact_ref(_sha("a")), _sha("a"), _sha("b"), license_basis, reference, tx.approver if approver else None,
-         NOW if approved_at else None, note))
-    assert result == (("ok", None) if expected is None else ("err", expected))
+    doc = tx.document(src, status="expert_review", license_basis=license_basis, reference=reference)
+    result = tx.transit("document", doc, "expert_review", "approved", reason=note, name_approver=approver)
+    if expected is None:
+        assert result[0] == "ok"
+        tx.cur.execute("select approved_by, approved_at is not null, review_note from public.knowledge_documents"
+                       " where id = %s", (doc,))
+        assert tx.cur.fetchone() == (tx.approver, True, note)
+    else:
+        assert result == ("err", expected)
+        assert tx.status_of("document", doc) == "expert_review"
+        assert [e[1] for e in tx.events("document", doc)] == ["expert_review"]
+
+
+def test_a_document_version_is_never_inserted_in_a_later_status(tx):
+    src = tx.source()
+    sql = ("insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+           " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+           " chunker_version, license_basis, status, approved_by, approved_at, review_note)"
+           " values (%s, %s, 'v1', 't', 'vi', 'https://example.invalid/d', %s, %s, %s, 'p', 'n', 'c',"
+           " 'official_publication', %s, %s, %s, %s)")
+    for i, status in enumerate(("approved", "expert_review", "rejected", "quarantined", "archived")):
+        approved = status in ("approved", "quarantined", "archived")
+        assert tx.operator(sql, (src, f"d{i}", artifact_ref(_sha(f"a{i}")), _sha(f"a{i}"), _sha(f"b{i}"), status,
+                                 tx.approver if approved else None, NOW if approved else None,
+                                 "reviewed" if approved else None)) == ("err", CHECK_VIOLATION), status
 
 
 def test_document_needs_an_official_url_or_an_artifact_reference(tx):
@@ -306,23 +370,27 @@ def test_document_needs_an_official_url_or_an_artifact_reference(tx):
 
 def test_one_approved_version_per_document(tx):
     src = tx.source()
-    tx.document(src, version="v1")
-    assert tx.operator(
-        "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-        " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
-        " chunker_version, license_basis, status, approved_by, approved_at, review_note)"
-        " values (%s, 'doc', 'v2', 't', 'vi', 'https://example.invalid/v2', %s, %s, %s, 'p', 'n', 'c',"
-        " 'official_publication', 'approved', %s, now(), 'reviewed')",
-        (src, artifact_ref(_sha("v2")), _sha("v2"), _sha("nv2"), tx.approver)
-    ) == ("err", UNIQUE_VIOLATION)
-    # a new review_required version coexists with the approved one
-    tx.document(src, version="v2", status="review_required")
-    # approving it archives v1 in the same transaction (operator workflow)
-    assert tx.operator("update public.knowledge_documents set status = 'archived'"
-                       " where source_id = %s and document_version = 'v1'", (src,)) == ("ok", None)
-    assert tx.operator("update public.knowledge_documents set status = 'approved', approved_by = %s,"
-                       " approved_at = now(), license_basis = 'official_publication', review_note = 'reviewed'"
-                       " where source_id = %s and document_version = 'v2'", (tx.approver, src)) == ("ok", None)
+    v1 = tx.document(src, version="v1")
+    # a new version coexists with the approved one while it is reviewed ...
+    v2 = tx.document(src, version="v2", status="expert_review")
+    # ... but cannot be approved beside it, and the refused approval writes no event
+    assert tx.transit("document", v2, "expert_review", "approved") == ("err", UNIQUE_VIOLATION)
+    assert [e[1] for e in tx.events("document", v2)] == ["expert_review"]
+    # approving it archives v1 in the same transaction (operator workflow): two explicit transitions
+    assert tx.transit("document", v1, "approved", "archived", reason="superseded by v2")[0] == "ok"
+    assert tx.transit("document", v2, "expert_review", "approved")[0] == "ok"
+    assert (tx.status_of("document", v1), tx.status_of("document", v2)) == ("archived", "approved")
+
+
+def test_a_quarantined_version_does_not_block_its_replacement(tx):
+    """D1: recovery from quarantine is a NEW version. The quarantined one is not `approved`, so the
+    replacement can be approved while it is still quarantined, then the old one is archived."""
+    src = tx.source()
+    v1 = tx.document(src, version="v1", status="quarantined")
+    v2 = tx.document(src, version="v2", status="expert_review")
+    assert tx.transit("document", v2, "expert_review", "approved", reason="corrected edition")[0] == "ok"
+    assert tx.transit("document", v1, "quarantined", "archived", reason="replaced by v2")[0] == "ok"
+    assert (tx.status_of("document", v1), tx.status_of("document", v2)) == ("archived", "approved")
 
 
 def test_same_document_id_may_exist_in_two_sources(tx):
@@ -349,8 +417,7 @@ def test_source_scope_is_immutable(tx):
                        " where source_id = %s", (src,)) == ("err", CHECK_VIOLATION)
     assert tx.operator("update public.knowledge_sources set organization_id = %s where source_id = %s",
                        (tx.org_b, src)) == ("err", CHECK_VIOLATION)
-    assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
-                       (src,)) == ("ok", None)
+    assert tx.transit("source", src, "approved", "archived", reason="withdrawn")[0] == "ok"
 
 
 # ------------------------------------------------------------------ immutability
@@ -367,7 +434,7 @@ def test_document_identity_and_provenance_are_immutable(tx):
                           ("review_note", "rewritten explanation"), ("review_note", None)):
         assert tx.operator(f"update public.knowledge_documents set {column} = %s where id = %s",
                            (value, doc)) == ("err", CHECK_VIOLATION), column
-    assert tx.operator("update public.knowledge_documents set status = 'archived' where id = %s", (doc,)) == ("ok", None)
+    assert tx.transit("document", doc, "approved", "archived", reason="withdrawn")[0] == "ok"
     assert tx.operator("delete from public.knowledge_documents where id = %s", (doc,)) == ("err", CHECK_VIOLATION)
 
 
@@ -380,6 +447,21 @@ def test_unapproved_version_may_be_completed_and_deleted(tx):
     assert tx.operator("delete from public.knowledge_documents where id = %s", (doc,)) == ("ok", None)
 
 
+def test_content_is_frozen_once_a_version_enters_expert_review(tx):
+    """M1: the content an expert reviews is exactly what gets approved. From expert_review on, no chunk
+    can be added or deleted. Rejecting the version sends it back to a draft where cleanup is allowed."""
+    doc = tx.document(tx.source(), status="review_required")
+    chunk = tx.chunk(doc, "awd passage under review")
+    assert tx.transit("document", doc, "review_required", "expert_review")[0] == "ok"
+    assert tx.operator("delete from public.knowledge_chunks where document_pk = %s", (doc,)) == ("err", CHECK_VIOLATION)
+    assert tx.operator("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
+                       " values (%s, %s, 9, 'slipped in', %s)", (doc, "e" * 20, _sha("e"))) == ("err", CHECK_VIOLATION)
+    tx.cur.execute("select count(*) from public.knowledge_chunks where chunk_id = %s", (chunk,))
+    assert tx.cur.fetchone()[0] == 1
+    assert tx.transit("document", doc, "expert_review", "rejected", reason="needs a corrected edition")[0] == "ok"
+    assert tx.operator("delete from public.knowledge_chunks where document_pk = %s", (doc,)) == ("ok", None)
+
+
 def test_chunks_are_never_edited_and_approved_ones_never_deleted(tx):
     doc = tx.document(tx.source())
     tx.chunk(doc, "awd content")
@@ -388,7 +470,7 @@ def test_chunks_are_never_edited_and_approved_ones_never_deleted(tx):
     assert tx.operator("delete from public.knowledge_chunks where document_pk = %s", (doc,)) == ("err", CHECK_VIOLATION)
 
 
-@pytest.mark.parametrize("status", ["approved", "archived", "rejected"])
+@pytest.mark.parametrize("status", ["approved", "archived", "rejected", "expert_review", "quarantined"])
 def test_chunks_cannot_be_added_to_a_closed_version(tx, status):
     doc = tx.document(tx.source(), status=status)
     tx.chunk(doc, "original passage")
@@ -402,67 +484,118 @@ def test_an_approved_version_cannot_be_reopened_for_more_chunks(tx):
     tx.chunk(doc, "original passage")
     tx.settle()
     assert tx.operator("update public.knowledge_documents set status = 'review_required' where id = %s",
-                       (doc,)) == ("err", CHECK_VIOLATION)
+                       (doc,)) == ("err", PERMISSION_DENIED)                      # D2: never a direct update
+    assert tx.transit("document", doc, "approved", "review_required") == ("err", CHECK_VIOLATION)   # nor a transition
     assert tx.operator("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
                        " values (%s, %s, 9, 'injected passage', %s)", (doc, "f" * 20, _sha("i"))) == ("err", CHECK_VIOLATION)
 
 
 # ------------------------------------------------------------------ status lifecycle (monotonic once approved)
 
-LIFECYCLE = [
-    ("review_required", "rejected", True),
-    ("rejected", "review_required", True),
-    ("review_required", "approved", True),
-    ("rejected", "approved", True),
-    ("approved", "archived", True),
-    ("review_required", "archived", False),       # archived only ever follows an approval
-    ("rejected", "archived", False),
-    ("approved", "review_required", False),
-    ("approved", "rejected", False),
-    ("archived", "review_required", False),
-    ("archived", "rejected", False),
-    ("archived", "approved", False),
-]
+STATUSES = ("review_required", "expert_review", "rejected", "approved", "quarantined", "archived")
+# The ONLY transitions M1 allows (migration 20261110090100, D1-D3); every other pair is refused.
+ALLOWED = {
+    "document": {("review_required", "expert_review"), ("review_required", "rejected"),
+                 ("rejected", "review_required"),
+                 ("expert_review", "approved"), ("expert_review", "rejected"), ("expert_review", "review_required"),
+                 ("approved", "quarantined"), ("approved", "archived"),
+                 ("quarantined", "archived")},
+    "source": {("review_required", "rejected"), ("rejected", "review_required"),
+               ("review_required", "approved"), ("rejected", "approved"),
+               ("approved", "quarantined"), ("approved", "archived"),
+               ("quarantined", "archived")},
+}
+REACHABLE = {"document": set(DOCUMENT_PATH), "source": set(SOURCE_PATH)}       # sources never use expert_review
+LIFECYCLE = [(kind, a, b) for kind in ("source", "document") for a in STATUSES for b in STATUSES
+             if a != b and a in REACHABLE[kind]]
 
 
 def _lifecycle_row(tx, kind, status):
     """A source, or a version under an approved source, brought to `status` by the legal path."""
     if kind == "source":
-        return "knowledge_sources", "source_id", tx.source(status=status)
+        return tx.source(status=status)
     doc = tx.document(tx.source(), status=status)
     tx.settle()
-    return "knowledge_documents", "id", doc
+    return doc
 
 
-def _set_status(tx, table, key_column, key, target):
-    """The operator step to `target`; a first approval writes the approval record with it."""
-    if target == "approved":
-        return tx.operator(f"update public.{table} set status = 'approved', approved_by = coalesce(approved_by, %s),"
-                           f" approved_at = coalesce(approved_at, now()), review_note = coalesce(review_note, 'reviewed')"
-                           f" where {key_column} = %s", (tx.approver, key))
-    return tx.operator(f"update public.{table} set status = %s where {key_column} = %s", (target, key))
+@pytest.mark.parametrize(("kind", "current", "target"), LIFECYCLE, ids=[f"{k}:{a}->{b}" for k, a, b in LIFECYCLE])
+def test_status_lifecycle_is_the_m1_matrix(tx, kind, current, target):
+    """Every from/to pair: an allowed one succeeds with exactly one matching event; any other is
+    refused, the row keeps its status and no event is written."""
+    key = _lifecycle_row(tx, kind, current)
+    before = tx.events(kind, key)
+    result = tx.transit(kind, key, current, target, reason=f"matrix {current}->{target}")
+    if (current, target) in ALLOWED[kind]:
+        assert result[0] == "ok", result
+        assert tx.status_of(kind, key) == target
+        assert tx.events(kind, key) == before + [(current, target, f"matrix {current}->{target}",
+                                                  tx.approver if target == "approved" else None)]
+    else:
+        assert result == ("err", CHECK_VIOLATION)
+        assert tx.status_of(kind, key) == current and tx.events(kind, key) == before
 
 
-@pytest.mark.parametrize("kind", ["source", "document"])
-@pytest.mark.parametrize(("current", "target", "allowed"), LIFECYCLE, ids=[f"{a}->{b}" for a, b, _ in LIFECYCLE])
-def test_status_lifecycle_is_monotonic_once_approved(tx, kind, current, target, allowed):
-    table, key_column, key = _lifecycle_row(tx, kind, current)
-    assert _set_status(tx, table, key_column, key, target) == (("ok", None) if allowed else ("err", CHECK_VIOLATION))
-    tx.cur.execute(f"select status::text from public.{table} where {key_column} = %s", (key,))
-    assert tx.cur.fetchone()[0] == (target if allowed else current)
+@pytest.mark.parametrize(("kind", "current", "target"),
+                         [(k, a, b) for k in ALLOWED for a, b in sorted(ALLOWED[k])],
+                         ids=[f"{k}:{a}->{b}" for k in ALLOWED for a, b in sorted(ALLOWED[k])])
+def test_a_direct_status_update_is_refused_even_for_an_allowed_transition(tx, kind, current, target):
+    """D2: the operator / table owner cannot flip a status with UPDATE, not even along the matrix,
+    so no status change can escape the audit log. service_role is refused the same way (below)."""
+    key = _lifecycle_row(tx, kind, current)
+    table, column = ("knowledge_sources", "source_id") if kind == "source" else ("knowledge_documents", "id")
+    extra = ", approved_by = %s, approved_at = now(), review_note = 'direct'" if target == "approved" else ""
+    params = (target, tx.approver, key) if target == "approved" else (target, key)
+    assert tx.operator(f"update public.{table} set status = %s{extra} where {column} = %s", params) \
+        == ("err", PERMISSION_DENIED)
+    assert tx.status_of(kind, key) == current
+
+
+def test_a_document_cannot_skip_expert_review(tx):
+    """D3: review_required -> approved is refused for a document version (it was allowed before M1),
+    and so is rejected -> approved; the source flow keeps its direct approval."""
+    doc = tx.document(tx.source(), status="review_required")
+    assert tx.transit("document", doc, "review_required", "approved") == ("err", CHECK_VIOLATION)
+    rejected = tx.document(tx.source(), status="rejected", document_id="rej")
+    assert tx.transit("document", rejected, "rejected", "approved") == ("err", CHECK_VIOLATION)
+    assert tx.events("document", doc) == []
+    src = tx.source(status="review_required")
+    assert tx.transit("source", src, "review_required", "approved")[0] == "ok"
+    assert tx.transit("source", tx.source(status="review_required"), "review_required", "expert_review") \
+        == ("err", CHECK_VIOLATION)
+
+
+def test_a_stale_or_unknown_transition_writes_nothing(tx):
+    doc = tx.document(tx.source(), status="expert_review")
+    assert tx.transit("document", doc, "review_required", "expert_review") == ("err", CHECK_VIOLATION)   # stale `from`
+    assert tx.transit("document", uuid.uuid4(), "review_required", "expert_review") == ("err", "P0002")
+    assert tx.transit("source", "kn-does-not-exist", "review_required", "approved") == ("err", "P0002")
+    assert tx.transit("document", doc, "expert_review", "expert_review") == ("err", CHECK_VIOLATION)      # no-op
+    assert tx.transit("document", doc, "expert_review", "rejected", approver=tx.approver) == ("err", INVALID_PARAMETER)
+    assert tx.transit("document", doc, "expert_review", "rejected", reason="x" * 2001) == ("err", INVALID_PARAMETER)
+    assert [e[1] for e in tx.events("document", doc)] == ["expert_review"]
 
 
 @pytest.mark.parametrize("kind", ["source", "document"])
 def test_approved_then_rejected_then_approved_stops_at_the_first_step(tx, kind):
-    """No stale approval record can stand for a later approval decision."""
-    table, key_column, key = _lifecycle_row(tx, kind, "approved")
-    tx.cur.execute(f"select approved_by, approved_at, review_note from public.{table} where {key_column} = %s", (key,))
+    """No stale approval record can stand for a later approval decision; quarantine (D1) keeps the
+    original record unchanged and never leads back to approved."""
+    table, column = ("knowledge_sources", "source_id") if kind == "source" else ("knowledge_documents", "id")
+    key = _lifecycle_row(tx, kind, "approved")
+    tx.cur.execute(f"select approved_by, approved_at, review_note from public.{table} where {column} = %s", (key,))
     record = tx.cur.fetchone()
     for detour in ("rejected", "review_required"):
-        assert _set_status(tx, table, key_column, key, detour) == ("err", CHECK_VIOLATION)
+        assert tx.transit(kind, key, "approved", detour) == ("err", CHECK_VIOLATION)
+    assert tx.transit(kind, key, "approved", "quarantined", reason="contradicted by a newer source")[0] == "ok"
+    for back in ("approved", "review_required", "rejected", "expert_review"):
+        assert tx.transit(kind, key, "quarantined", back) == ("err", CHECK_VIOLATION), back
     tx.cur.execute(f"select status::text, approved_by, approved_at, review_note from public.{table}"
-                   f" where {key_column} = %s", (key,))
-    assert tx.cur.fetchone() == ("approved", *record)
+                   f" where {column} = %s", (key,))
+    assert tx.cur.fetchone() == ("quarantined", *record)
+    assert tx.transit(kind, key, "quarantined", "archived", reason="withdrawn")[0] == "ok"
+    tx.cur.execute(f"select status::text, approved_by, approved_at, review_note from public.{table}"
+                   f" where {column} = %s", (key,))
+    assert tx.cur.fetchone() == ("archived", *record)
 
 
 def test_no_approval_record_ahead_of_the_approval(tx):
@@ -470,19 +603,24 @@ def test_no_approval_record_ahead_of_the_approval(tx):
     pre-written record that a later status flip would turn into an approval."""
     insert_source = ("insert into public.knowledge_sources (source_id, title, owner, source_type, visibility, status,"
                      " approved_by, approved_at, review_note) values (%s, 't', 'o', 'guideline', 'public', %s, %s, %s, 'n')")
-    for status in ("review_required", "rejected", "archived"):
+    for status in ("review_required", "rejected", "archived", "quarantined"):
         assert tx.operator(insert_source, (f"kn-pre-{status[:3]}", status, tx.approver, NOW)) == ("err", CHECK_VIOLATION)
-    # a draft cannot be archived either -- with or without a (partial) record
+    # a draft cannot be archived either -- with or without a (partial) record: never directly (D2) ...
     for record in ("approved_by = %s", "approved_by = %s, approved_at = now()"):
         src = tx.source(status="review_required")
         assert tx.operator(f"update public.knowledge_sources set status = 'archived', {record} where source_id = %s",
-                           (tx.approver, src)) == ("err", CHECK_VIOLATION)
+                           (tx.approver, src)) == ("err", PERMISSION_DENIED)
+    # ... and not through a transition: archived only ever follows an approval
+    assert tx.transit("source", tx.source(status="review_required"), "review_required", "archived") \
+        == ("err", CHECK_VIOLATION)
     src = tx.source(status="review_required")
     assert tx.operator("update public.knowledge_sources set approved_by = %s, approved_at = now() where source_id = %s",
                        (tx.approver, src)) == ("err", CHECK_VIOLATION)
-    doc = tx.document(tx.source(), status="review_required")
-    assert tx.operator("update public.knowledge_documents set approved_by = %s, approved_at = now() where id = %s",
-                       (tx.approver, doc)) == ("err", CHECK_VIOLATION)
+    for status in ("review_required", "expert_review"):                 # an expert_review version has no record yet
+        doc = tx.document(tx.source(), status=status)
+        tx.settle()
+        assert tx.operator("update public.knowledge_documents set approved_by = %s, approved_at = now() where id = %s",
+                           (tx.approver, doc)) == ("err", CHECK_VIOLATION), status
     assert tx.operator(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
         " official_url, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
@@ -499,14 +637,15 @@ def test_a_correction_is_a_new_version_through_the_normal_flow(tx):
     src = tx.source()
     v1 = tx.document(src, version="v1")
     old_chunk = tx.chunk(v1, "awd guidance first edition")
-    v2 = tx.document(src, version="v2", status="review_required")
+    v2 = tx.document(src, version="v2", status="expert_review")
     new_chunk = tx.chunk(v2, "awd guidance corrected edition")
-    approve_v2 = ("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = now(),"
-                  " review_note = 'corrected edition reviewed' where id = %s")
-    assert tx.operator(approve_v2, (tx.approver, v2)) == ("err", UNIQUE_VIOLATION)
+    tx.settle()                                     # v2 filled while review_required, then sent to expert_review
+    assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50) == [old_chunk]      # expert_review is not retrievable
+    assert tx.transit("document", v2, "expert_review", "approved", reason="corrected edition reviewed") \
+        == ("err", UNIQUE_VIOLATION)
     assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50) == [old_chunk]
-    assert tx.operator("update public.knowledge_documents set status = 'archived' where id = %s", (v1,)) == ("ok", None)
-    assert tx.operator(approve_v2, (tx.approver, v2)) == ("ok", None)
+    assert tx.transit("document", v1, "approved", "archived", reason="superseded by v2")[0] == "ok"
+    assert tx.transit("document", v2, "expert_review", "approved", reason="corrected edition reviewed")[0] == "ok"
     assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50) == [new_chunk]
     tx.cur.execute("select d.document_version, d.status::text from public.knowledge_chunks c"
                    " join public.knowledge_documents d on d.id = c.document_pk where c.chunk_id = %s", (old_chunk,))
@@ -519,14 +658,13 @@ def test_approved_source_provenance_is_frozen_but_can_be_archived(tx):
                           ("authority", "internal"), ("approved_by", tx.member), ("review_note", "rewritten")):
         assert tx.operator(f"update public.knowledge_sources set {column} = %s where source_id = %s",
                            (value, src)) == ("err", CHECK_VIOLATION), column
-    assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
-                       (src,)) == ("ok", None)
+    assert tx.transit("source", src, "approved", "archived", reason="withdrawn")[0] == "ok"
     pending = tx.source(status="review_required")
     assert tx.operator("update public.knowledge_sources set owner = 'Corrected publisher' where source_id = %s",
                        (pending,)) == ("ok", None)
 
 
-@pytest.mark.parametrize("target", ["approved", "review_required", "rejected"])
+@pytest.mark.parametrize("target", ["approved", "review_required", "rejected", "expert_review", "quarantined"])
 def test_archiving_is_final(tx, target):
     """ST2: an archived source or version is never reactivated; its approval record would
     otherwise satisfy every check and make withdrawn knowledge retrievable again."""
@@ -534,19 +672,17 @@ def test_archiving_is_final(tx, target):
     doc = tx.document(src, status="archived")
     chunk = tx.chunk(doc, "withdrawn awd guidance")
     tx.settle()
-    assert tx.operator(f"update public.knowledge_documents set status = '{target}' where id = %s",
-                       (doc,)) == ("err", CHECK_VIOLATION)
+    assert tx.transit("document", doc, "archived", target) == ("err", CHECK_VIOLATION)
+    assert tx.transit("source", src, "approved", "archived", reason="withdrawn")[0] == "ok"
+    assert tx.transit("source", src, "archived", target) == ("err", CHECK_VIOLATION)
     assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
-                       (src,)) == ("ok", None)
-    assert tx.operator(f"update public.knowledge_sources set status = '{target}' where source_id = %s",
-                       (src,)) == ("err", CHECK_VIOLATION)
-    assert tx.operator("update public.knowledge_sources set status = 'archived' where source_id = %s",
-                       (src,)) == ("ok", None)                       # staying archived is fine
+                       (src,)) == ("ok", None)                       # staying archived is fine (not a transition)
+    assert (tx.status_of("source", src), tx.status_of("document", doc)) == ("archived", "archived")
     assert chunk not in tx.rpc_ids(tx.member, tx.season_a, "awd", 50)
 
 
 def test_an_approved_source_is_never_deleted_but_a_draft_one_may_be(tx):
-    for status in ("approved", "archived"):
+    for status in ("approved", "archived", "quarantined"):
         src = tx.source(status=status)
         assert tx.operator("delete from public.knowledge_sources where source_id = %s", (src,)) \
             == ("err", CHECK_VIOLATION), status
@@ -594,7 +730,7 @@ def test_search_normalization(tx, raw, normalized):
 
 # ------------------------------------------------------------------ approval matrix (retrieval)
 
-@pytest.mark.parametrize(("source_status", "document_status", "visible"), [
+RETRIEVAL_MATRIX = [
     ("approved", "approved", True),
     ("review_required", "approved", False),
     ("approved", "review_required", False),
@@ -602,7 +738,15 @@ def test_search_normalization(tx, raw, normalized):
     ("approved", "rejected", False),
     ("archived", "approved", False),
     ("approved", "archived", False),
-])
+    # M1: neither new status is ever retrievable, on the version or on its source
+    ("approved", "expert_review", False),
+    ("approved", "quarantined", False),
+    ("quarantined", "approved", False),             # source quarantine hides its approved versions' chunks
+    ("quarantined", "quarantined", False),
+]
+
+
+@pytest.mark.parametrize(("source_status", "document_status", "visible"), RETRIEVAL_MATRIX)
 def test_only_approved_source_and_approved_version_are_retrievable(tx, source_status, document_status, visible):
     chunk = tx.chunk(tx.document(tx.source(status=source_status), status=document_status), "alternate wetting awd")
     assert (chunk in tx.rpc_ids(tx.member, tx.season_a, "awd")) is visible
@@ -708,10 +852,7 @@ def test_token_minted_while_pending_stays_refused_after_the_change(tx, tenant_co
                      "rpc": {tenant_corpus[k] for k in ("public", "org_a", "farm_a")}}
 
 
-@pytest.mark.parametrize(("source_status", "document_status"), [
-    ("approved", "approved"), ("review_required", "approved"), ("approved", "review_required"),
-    ("rejected", "approved"), ("approved", "rejected"), ("archived", "approved"), ("approved", "archived"),
-])
+@pytest.mark.parametrize(("source_status", "document_status"), [(s, d) for s, d, _ in RETRIEVAL_MATRIX])
 def test_pending_password_change_sees_no_status_combination(tx, source_status, document_status):
     chunk = tx.chunk(tx.document(tx.source(status=source_status), status=document_status), "alternate wetting awd")
     assert tx.rpc_ids(tx.member, tx.season_a, "awd", 50, STALE_TOKEN) == []
@@ -753,9 +894,10 @@ def test_farm_moved_to_another_organization_makes_its_tenant_source_unretrievabl
             assert chunk not in tx.rpc_ids(getattr(tx, who), getattr(tx, season), "awd", 50), (who, season)
         status, rows = tx.as_user(getattr(tx, who), "select 1 from public.knowledge_chunks where chunk_id = %s", (chunk,))
         assert (status, rows) == ("ok", []), who
-    # the stale source can still be archived by the operator
-    assert tx.operator("update public.knowledge_sources set status = 'archived' where farm_id = %s",
-                       (tx.farm_a,)) == ("ok", None)
+    # the stale source can still be archived by the operator (a controlled transition)
+    tx.cur.execute("select source_id from public.knowledge_sources where farm_id = %s", (tx.farm_a,))
+    (stale,), = tx.cur.fetchall()
+    assert tx.transit("source", stale, "approved", "archived", reason="farm moved to another organization")[0] == "ok"
 
 
 # ------------------------------------------------------------------ privileges
@@ -799,12 +941,20 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
     assert {r[0] for r in rows} == {"match_knowledge_chunks_lexical", "knowledge_search_text",
                                     "knowledge_chunks_search_fields", "enforce_knowledge_source_scope",
                                     "enforce_knowledge_document_immutability", "enforce_knowledge_chunk_immutability",
-                                    "knowledge_read_blocked"}
+                                    "knowledge_read_blocked",
+                                    # M1 (20261110090100)
+                                    "knowledge_status_transition_allowed", "knowledge_status_transition_authorized",
+                                    "knowledge_status_events_append_only",
+                                    "knowledge_transition_source", "knowledge_transition_document"}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
-    # The only SECURITY DEFINER is the password-guard wrapper (test_password_guard_is_core_v1s).
-    assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked"}, rows
-    tx.cur.execute("select prosrc from pg_proc where proname = 'match_knowledge_chunks_lexical'")
-    assert "execute" not in tx.cur.fetchone()[0].lower()                     # no dynamic SQL
+    # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s) and the two
+    # M1 transition functions (EXECUTE for service_role only, see test_status_events below).
+    assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
+                                            "knowledge_transition_document"}, rows
+    tx.cur.execute("select proname, prosrc from pg_proc where proname in ('match_knowledge_chunks_lexical',"
+                   " 'knowledge_transition_source', 'knowledge_transition_document')")
+    for name, body in tx.cur.fetchall():                                    # no dynamic SQL
+        assert not re.search(r"\bexecute\b", body.lower()), name
 
 
 def test_rpc_signature_accepts_no_scope_or_status_filter(tx):

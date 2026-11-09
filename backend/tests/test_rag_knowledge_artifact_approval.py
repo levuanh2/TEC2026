@@ -1,6 +1,10 @@
 """ST1-DB (migration 20261006120000): the database refuses to approve a knowledge document
 version that lacks a controlled immutable artifact reference.
 
+M1 (20261110090100): a version is inserted review_required and approved only through the audited
+expert_review -> approved transition. The approval CHECKs below are therefore exercised by that
+transition, and a version can no longer be INSERTed approved.
+
 Real Postgres, one rolled-back transaction per test (the reviewed `Tx` model of
 test_rag_knowledge_storage.py). Synthetic TEST FIXTURE rows only. Skipped without SUPABASE_DB_URL.
 """
@@ -14,29 +18,62 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, NOW, UNIQUE_VIOLATION, _sha, artifact_ref,  # noqa: E402
-                                              pytestmark, tx)
+from tests.knowledge_status_paths import DOCUMENT_PATH, TRANSITION  # noqa: E402
+from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, INVALID_PARAMETER, PERMISSION_DENIED,  # noqa: E402
+                                              UNIQUE_VIOLATION, _sha, artifact_ref, psycopg, pytestmark, tx)
 
 __all__ = ["pytestmark", "tx"]       # the module's environment gate and fixture, reused
 
-INSERT = ("insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-          " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
-          " chunker_version, license_basis, license_reference, status, approved_by, approved_at, review_note)"
-          " values (%s, %s, 'v1', 't', 'vi', %s, %s, %s, %s, 'p', 'n', 'c', %s, %s, %s, %s, %s, %s)")
+DRAFT = ("insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+         " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+         " chunker_version, license_basis, license_reference)"
+         " values (%s, %s, 'v1', 't', 'vi', %s, %s, %s, %s, 'p', 'n', 'c', %s, %s) returning id")
+
+
+def _guarded(tx, work):
+    """('ok', None) or ('err', sqlstate) of `work()`, savepoint-isolated, as the operator."""
+    tx.settle()
+    tx.cur.execute("savepoint a")
+    try:
+        work()
+        tx.cur.execute("release savepoint a")
+        return ("ok", None)
+    except psycopg.Error as exc:
+        tx.cur.execute("rollback to savepoint a")
+        return ("err", exc.sqlstate)
+
+
+def _walk(tx, doc, path, *, approved=True, note="reviewed"):
+    """The audited transitions of `path`; the approval names tx.approver (unless not `approved`)
+    with `note` as its review note."""
+    for frm, to in path:
+        approval = to == "approved"
+        tx.cur.execute(TRANSITION["document"], (doc, frm, to, note if approval else "to expert review",
+                                                tx.approver if approval and approved else None))
 
 
 def _insert(tx, *, artifact, status="approved", url="https://example.invalid/doc", sha=None, license_basis="official_publication",
             reference=None, approved=True, note="reviewed", document_id="doc"):
+    """Insert a draft with these fields and take it to `status` along the audited path."""
     sha = sha or _sha("bytes")
-    return tx.operator(INSERT, (tx.source(), document_id, url, artifact, sha, _sha("normalized"), license_basis, reference,
-                                status, tx.approver if approved else None, NOW if approved else None, note))
+    src = tx.source()
+
+    def work():
+        tx.cur.execute(DRAFT, (src, document_id, url, artifact, sha, _sha("normalized"), license_basis, reference))
+        _walk(tx, tx.cur.fetchone()[0], DOCUMENT_PATH[status], approved=approved, note=note)
+    return _guarded(tx, work)
 
 
 def _approve(tx, doc, **extra):
-    sets = ", ".join(f"{k} = %s" for k in extra)
-    return tx.operator("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = now(),"
-                       " review_note = 'reviewed'" + (f", {sets}" if sets else "") + " where id = %s",
-                       (tx.approver, *extra.values(), doc))
+    """Complete the draft's columns (`extra`), then approve it through expert_review (M1)."""
+    def work():
+        if extra:
+            tx.cur.execute("update public.knowledge_documents set " + ", ".join(f"{k} = %s" for k in extra)
+                           + " where id = %s", (*extra.values(), doc))
+        tx.cur.execute("select status::text from public.knowledge_documents where id = %s", (doc,))
+        path = DOCUMENT_PATH["approved"]
+        _walk(tx, doc, path if tx.cur.fetchone()[0] == "review_required" else path[1:])
+    return _guarded(tx, work)
 
 
 VALID = artifact_ref(_sha("bytes"), "guide")
@@ -109,8 +146,11 @@ def test_approval_with_a_controlled_artifact_and_every_existing_requirement_is_a
 
 
 def test_the_artifact_does_not_relax_the_existing_approval_rules(tx):
-    for change in ({"approved": False}, {"note": "  "}, {"note": None}, {"license_basis": "unknown"},
-                   {"license_basis": "open_license"}, {"license_basis": "written_permission"}):
+    # approver and note are refused by the controlled transition itself (M1), before any UPDATE
+    for change in ({"approved": False}, {"note": "  "}, {"note": None}):
+        assert _insert(tx, artifact=VALID, **change) == ("err", INVALID_PARAMETER), change
+    for change in ({"license_basis": "unknown"}, {"license_basis": "open_license"},
+                   {"license_basis": "written_permission"}):
         assert _insert(tx, artifact=VALID, **change) == ("err", CHECK_VIOLATION), change
     assert _insert(tx, artifact=VALID, license_basis="open_license", reference="CC BY 4.0") == ("ok", None)
     assert _insert(tx, artifact=VALID, sha="not-a-hash") == ("err", CHECK_VIOLATION)
@@ -118,8 +158,9 @@ def test_the_artifact_does_not_relax_the_existing_approval_rules(tx):
 
 def test_an_artifact_without_a_valid_file_sha_is_refused(tx):
     assert _insert(tx, artifact=VALID, sha="not-a-hash") == ("err", CHECK_VIOLATION)
-    assert tx.operator(INSERT, (tx.source(), "no-sha", None, VALID, None, _sha("n"), "official_publication", None,
-                                "approved", tx.approver, NOW, "reviewed")) == ("err", NOT_NULL_VIOLATION)
+    src = tx.source()
+    assert _guarded(tx, lambda: tx.cur.execute(DRAFT, (src, "no-sha", None, VALID, None, _sha("n"),
+                                                       "official_publication", None))) == ("err", NOT_NULL_VIOLATION)
 
 
 # ------------------------------------------------------------------ drafts and the ingestion order
@@ -140,7 +181,7 @@ def test_a_draft_cannot_be_approved_until_it_has_a_controlled_artifact(tx):
     assert _approve(tx, doc, artifact_ref="   ") == ("err", CHECK_VIOLATION)
     assert _approve(tx, doc, artifact_ref="https://example.invalid/d") == ("err", CHECK_VIOLATION)
     assert _approve(tx, doc, artifact_ref=VALID) == ("ok", None)
-    tx.cur.execute("select status, artifact_ref from public.knowledge_documents where id = %s", (doc,))
+    tx.cur.execute("select status::text, artifact_ref from public.knowledge_documents where id = %s", (doc,))
     assert tx.cur.fetchone() == ("approved", VALID)
 
 
@@ -150,23 +191,21 @@ def test_lifecycle_after_approval_is_unchanged(tx):
     doc = tx.document(tx.source())                      # fixture: approved with a valid artifact
     tx.settle()
     for target in ("review_required", "rejected"):
-        assert tx.operator("update public.knowledge_documents set status = %s where id = %s", (target, doc))[0] == "err"
+        assert tx.operator("update public.knowledge_documents set status = %s where id = %s", (target, doc)) \
+            == ("err", PERMISSION_DENIED)                                  # never a direct update (M1)
+        assert tx.transit("document", doc, "approved", target) == ("err", CHECK_VIOLATION)
     assert tx.operator("update public.knowledge_documents set artifact_ref = %s where id = %s",
                        (artifact_ref(_sha("other"), "x"), doc)) == ("err", CHECK_VIOLATION)        # frozen
-    assert tx.operator("update public.knowledge_documents set status = 'archived' where id = %s", (doc,)) == ("ok", None)
-    assert tx.operator("update public.knowledge_documents set status = 'approved' where id = %s", (doc,))[0] == "err"
+    assert tx.transit("document", doc, "approved", "archived", reason="withdrawn")[0] == "ok"
+    assert tx.transit("document", doc, "archived", "approved") == ("err", CHECK_VIOLATION)
 
 
 def test_single_approved_version_is_unchanged(tx):
     src = tx.source()
     tx.document(src, version="v1")
     tx.settle()
-    sql = ("insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-           " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
-           " chunker_version, license_basis, status, approved_by, approved_at, review_note)"
-           " values (%s, 'doc', 'v2', 't', 'vi', null, %s, %s, %s, 'p', 'n', 'c', 'official_publication', 'approved',"
-           " %s, now(), 'reviewed')")
-    assert tx.operator(sql, (src, artifact_ref(_sha("v2")), _sha("v2"), _sha("nv2"), tx.approver)) == ("err", UNIQUE_VIOLATION)
+    v2 = tx.document(src, version="v2", status="expert_review")
+    assert tx.transit("document", v2, "expert_review", "approved") == ("err", UNIQUE_VIOLATION)
 
 
 def test_the_constraint_is_the_migrations_and_nothing_else_changed(tx):

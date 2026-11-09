@@ -23,6 +23,7 @@ import pytest
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
+from tests.knowledge_status_paths import bring, transition  # noqa: E402
 from infrastructure.config import load_settings  # noqa: E402
 
 _SETTINGS = load_settings()
@@ -115,13 +116,16 @@ def _rows(env, p):
 
 
 def _approve(env, p, version="v1"):
+    """The separate operator step (never ingestion), M1-style: the source is approved and the version
+    goes review_required -> expert_review -> approved, each an audited controlled transition."""
     tx = env["tx"]
-    tx.cur.execute("update public.knowledge_sources set status = 'approved', approved_by = %s, approved_at = now(),"
-                   " review_note = 'fixture: publisher verified' where source_id = %s and status <> 'approved'",
-                   (tx.approver, p.source.source_id))
-    tx.cur.execute("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = now(),"
-                   " review_note = 'fixture', license_basis = 'official_publication'"
-                   " where source_id = %s and document_version = %s", (tx.approver, p.source.source_id, version))
+    source_id = p.source.source_id
+    tx.cur.execute("select status::text from public.knowledge_sources where source_id = %s", (source_id,))
+    if tx.cur.fetchone()[0] != "approved":
+        bring(tx.cur, "source", source_id, "approved", approver=tx.approver, reason="fixture: publisher verified")
+    tx.cur.execute("update public.knowledge_documents set license_basis = 'official_publication'"
+                   " where source_id = %s and document_version = %s returning id", (source_id, version))
+    bring(tx.cur, "document", tx.cur.fetchone()[0], "approved", approver=tx.approver, reason="fixture")
 
 
 # ------------------------------------------------------------------ write path
@@ -264,12 +268,15 @@ def test_archived_version_cannot_be_reopened(env):
     p = _plan(env, data, license_basis="official_publication")
     _ingest(env, p, data)
     _approve(env, p)
-    tx.cur.execute("update public.knowledge_documents set status = 'archived' where source_id = %s", (p.source.source_id,))
+    tx.cur.execute("select id from public.knowledge_documents where source_id = %s", (p.source.source_id,))
+    doc = tx.cur.fetchone()[0]
+    transition(tx.cur, "document", doc, "approved", "archived", reason="withdrawn")
     result = _ingest(env, _plan(env, data, license_basis="official_publication"), data)
     assert (result.outcome, result.status) == ("unchanged", "archived")
     for target in ("approved", "review_required"):
         assert tx.operator("update public.knowledge_documents set status = %s where source_id = %s",
-                           (target, p.source.source_id))[0] == "err"
+                           (target, p.source.source_id)) == ("err", "42501")          # never a direct update (M1)
+        assert tx.transit("document", doc, "archived", target) == ("err", "23514")   # archived is final
 
 
 # ------------------------------------------------------------------ atomicity + artifacts
