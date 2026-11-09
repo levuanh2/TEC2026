@@ -1,0 +1,52 @@
+{
+  "schema": "kn-reference-registry-1",
+  "registry_version": "2026-11-09.1",
+  "entries": [
+    {
+      "reference_id": "ref-ch4-awd-not-eliminated",
+      "parameter": "ch4.rice.emission_eliminated",
+      "kind": "qualitative",
+      "assertion_holds": false,
+      "source": {
+        "title": "2019 Refinement to the 2006 IPCC Guidelines for National Greenhouse Gas Inventories, Vol.4, Ch.5 Cropland",
+        "locator": "Table 5.12 (UPDATED), disaggregated column, row 'Multiple drainage periods' (footnote b: includes alternate wetting and drying)",
+        "document_version": "2019",
+        "url": "https://www.ipcc-nggip.iges.or.jp/public/2019rf/pdf/4_Volume4/19R_V4_Ch05_Cropland.pdf",
+        "artifact_sha256": null
+      },
+      "scope": "Irrigated rice under multiple drainage periods including AWD; IPCC Tier 1 default method as used by the AgriCarbon Carbon Engine. Not a country-specific (QĐ 2626 / QĐ 4801) factor.",
+      "stage": null,
+      "rationale": "The scaling factor this pointer resolves to is greater than zero, so the method models AWD as a reduction of field methane, not as its end. A statement that AWD (for one season or otherwise) ends methane emission contradicts it.",
+      "verification": {
+        "status": "engine_config_pointer",
+        "pointer": "backend/config/emission_factors.yaml#factors.ch4_rice.sfw.irrigated_multiple_drainage",
+        "evidence_ref": null,
+        "verified_by": null,
+        "note": "The YAML's status VERIFIED is the project's own citation check; methodology.domain_expert_review is PENDING; no artifact hash or evidence file of the IPCC PDF is recorded here. NOT independently verified."
+      }
+    },
+    {
+      "reference_id": "ref-water-records-required",
+      "parameter": "records.water.not_required",
+      "kind": "qualitative",
+      "assertion_holds": false,
+      "source": {
+        "title": "AgriCarbon deterministic recommendation rules, R3 data completeness",
+        "locator": "backend/recommendation/rules.py: DATA_TASK_RULE_CODE + '.water' (rule_version 1) emits a water data task whenever a season lacks water data",
+        "document_version": "1",
+        "url": null,
+        "artifact_sha256": null
+      },
+      "scope": "Every season assessed by AgriCarbon: water use is an input of the carbon estimate, so water records stay required after adopting AWD.",
+      "stage": null,
+      "rationale": "AgriCarbon's own product rule requires water data for every season. This is project policy, not an external agricultural or MRV authority; an expert must confirm it against the MRV procedure before it is cited as such.",
+      "verification": {
+        "status": "project_policy",
+        "pointer": "backend/recommendation/rules.py#data.completeness.water",
+        "evidence_ref": null,
+        "verified_by": null,
+        "note": "Internal rule. The QĐ 4801/QĐ-BNNMT MRV annex is not available to the project, so no external source is claimed."
+      }
+    }
+  ]
+}
