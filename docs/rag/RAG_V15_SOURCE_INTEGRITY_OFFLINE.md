@@ -115,9 +115,12 @@ Still open (by design or deferred):
 
 ## Next steps (each needs owner approval)
 1. Done as a printed dry-run review aid (`--integrity-review`, above). Follow-ups, each separate:
-   a provenance evidence bundle for `evaluate_provenance()`; a multi-document review run; the
-   existing dry-run summary prints each chunk's `section_path` (heading text) for tenant
-   documents too (pre-existing, left unchanged so the plain dry run stays byte-identical).
+   a provenance evidence bundle for `evaluate_provenance()`; a multi-document review run.
+   Fixed separately: the plan summary (dry run and write mode) printed a tenant document's
+   heading text as `section_path`. It now prints "(section i of n, heading withheld: tenant
+   document)"; public output, the plan, chunk ids and hashes are unchanged
+   (test_knowledge_ingest_tenant_redaction.py). Still printed for tenant documents: the
+   operator-chosen file name (`artifact name`), which is not document content.
 2. M1 (local migration only): `expert_review` / `quarantined` statuses and append-only status
    events, so that a flag can actually stop retrieval.
 3. Numeric registry entries only from independently verified primary artifacts.
