@@ -49,6 +49,40 @@ dev3-01 fixture (`poisoned_claim`): both statements ("AWD for one season ends me
 The clean AWD fixture chunks and a realistic legitimate guidance paragraph yield nothing that
 needs review.
 
+## Operator use: `ingest_knowledge.py --dry-run --integrity-review --as-of YYYY-MM-DD`
+The review aid is printed after the normal dry-run summary (which is unchanged, byte for byte,
+without the flag). It is still a dry run: no database, Storage, network, provider call or status
+write, and findings never change the exit code (0).
+
+```
+python backend/scripts/ingest_knowledge.py --file guide.md --source-id ... --document-id ... \
+    --document-version ... --title ... --language vi --dry-run --integrity-review --as-of 2026-11-09
+```
+
+- `--as-of` is required and strictly `YYYY-MM-DD`; it is never defaulted to today, because the
+  report must name its evaluation date. `--integrity-review` with `--target` (write mode), or
+  `--as-of` without the review, is a usage error (exit 2).
+- The registry is `backend/knowledge/integrity/reference_registry.json`, loaded with the
+  production loader. A missing, unreadable or invalid registry (including synthetic or
+  over-trusted entries) is `refused [registry_invalid]`, exit 1, nothing on stdout: the review is
+  never silently skipped.
+- The report lists review/extractor/registry versions, the registry digest, `as_of`, claim and
+  finding counts, every registry entry with its verification status, and per finding the chunk
+  ids, claim ids with spans, reference ids, detail and the evidence an expert needs. It ends with
+  `provenance = not_evaluated`, `content_correctness = not_assessed`, `decision = none`.
+- **Provenance is `not_evaluated`.** The CLI has no publisher allowlist, independent evidence or
+  evidence files, and `--source-owner` / `--official-url` are operator assertions.
+  `evaluate_provenance()` is not called. Supplying a separate evidence bundle is a follow-up and
+  is not part of this change.
+- Validity periods are `not_evaluated` too (no effective-period context is supplied).
+- A clean run prints `no detected conflicts`, never safe, verified or approved.
+- Output hygiene: claim excerpts are at most 80 characters, never a whole chunk. A `tenant`
+  document prints no excerpt at all, and `unresolved_claim` details do not quote the span.
+- One document version per run: **contradictions with other documents are not checked**, only
+  chunks of this version with each other and with the registry. Because the production registry
+  has no numeric entry, a wrong number (e.g. 1,5 cm instead of 15 cm) is at most an informational
+  `unreferenced_claim`. "No detected conflicts" says nothing about the numbers being correct.
+
 ## Known limits (do not over-read a clean report)
 An independent read-only adversarial review (agy, 2026-11-09, 48 findings) was run against the
 first version. The fixes, each pinned by a regression test in `test_knowledge_integrity.py`:
@@ -79,7 +113,8 @@ Still open (by design or deferred):
   scope; the two-person approval (M2) is the control for that.
 
 ## Next steps (each needs owner approval)
-1. Wire `review()` into the ingestion dry-run report as a printed review aid (it writes no status).
+1. Done as a printed dry-run review aid (`--integrity-review`, above). Follow-ups, each separate:
+   a provenance evidence bundle for `evaluate_provenance()`; a multi-document review run.
 2. M1 (local migration only): `expert_review` / `quarantined` statuses and append-only status
    events, so that a flag can actually stop retrieval.
 3. Numeric registry entries only from independently verified primary artifacts.
