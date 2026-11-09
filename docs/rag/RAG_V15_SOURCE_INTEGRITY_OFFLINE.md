@@ -77,7 +77,8 @@ python backend/scripts/ingest_knowledge.py --file guide.md --source-id ... --doc
 - Validity periods are `not_evaluated` too (no effective-period context is supplied).
 - A clean run prints `no detected conflicts`, never safe, verified or approved.
 - Output hygiene: claim excerpts are at most 80 characters, never a whole chunk. A `tenant`
-  document prints no excerpt at all, and `unresolved_claim` details do not quote the span.
+  document prints no excerpt and no value from a quantity conflict, and `unresolved_claim`
+  details do not quote the span.
 - One document version per run: **contradictions with other documents are not checked**, only
   chunks of this version with each other and with the registry. Because the production registry
   has no numeric entry, a wrong number (e.g. 1,5 cm instead of 15 cm) is at most an informational
@@ -114,7 +115,9 @@ Still open (by design or deferred):
 
 ## Next steps (each needs owner approval)
 1. Done as a printed dry-run review aid (`--integrity-review`, above). Follow-ups, each separate:
-   a provenance evidence bundle for `evaluate_provenance()`; a multi-document review run.
+   a provenance evidence bundle for `evaluate_provenance()`; a multi-document review run; the
+   existing dry-run summary prints each chunk's `section_path` (heading text) for tenant
+   documents too (pre-existing, left unchanged so the plain dry run stays byte-identical).
 2. M1 (local migration only): `expert_review` / `quarantined` statuses and append-only status
    events, so that a flag can actually stop retrieval.
 3. Numeric registry entries only from independently verified primary artifacts.

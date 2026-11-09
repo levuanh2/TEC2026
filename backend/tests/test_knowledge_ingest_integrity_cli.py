@@ -19,10 +19,10 @@ import sys
 from pathlib import Path
 
 import pytest
-
 import scripts.rag_llm_benchmark as bench
 from knowledge.ingest import plan
 from knowledge.models import DocumentSpec, SourceSpec
+
 from scripts import ingest_knowledge as cli
 from tests.fixtures.knowledge import HERE
 
@@ -375,3 +375,37 @@ def test_a_long_span_is_cut_to_a_short_excerpt():
     shown = cli._excerpt(long, True)
     assert len(shown) <= cli._EXCERPT_CHARS + 2 and shown.endswith("…'") and long.text not in shown
     assert cli._excerpt(long, False) == "(excerpt withheld: tenant document)"
+
+
+# ------------------------------------------------------------------ regressions from the agy read-only review
+
+DEPTH_15 = "Rút mực nước xuống 15 cm dưới mặt ruộng rồi tưới lại (TEST FIXTURE)."
+DEPTH_1_5 = "Rút mực nước xuống 1,5 cm dưới mặt ruộng rồi tưới lại (TEST FIXTURE)."
+
+
+def test_a_wrong_number_is_only_caught_against_another_chunk_never_against_the_registry(capsys, tmp_path):
+    """The production registry has no numeric entry: alone, a wrong depth is informational only."""
+    _, alone, _ = _run(capsys, ["--file", str(_doc(tmp_path, [DEPTH_1_5], "alone.md")), *REVIEW, *ARGS])
+    report = _section(alone)
+    assert "findings           1 (needs_expert_review 0; unreferenced_claim 1)" in report
+    assert "result             no detected conflicts (1 informational finding(s) above; " in report
+
+    path = _doc(tmp_path, [DEPTH_15, DEPTH_1_5], "both.md")
+    p = _plan(path)
+    code, out, _ = _run(capsys, ["--file", str(path), *REVIEW, *ARGS])
+    report = _section(out)
+    assert code == 0 and report.count("claim_conflict  NEEDS EXPERT REVIEW") == 1
+    assert f"  chunks           {_chunk_of(p, DEPTH_15)}, {_chunk_of(p, DEPTH_1_5)}" in report
+    assert "water.awd.dry_down_depth: 15 cm vs 1.5 cm" in report
+    assert report.count("unreferenced_claim  informational") == 2
+    assert "1 finding(s) need expert review" in report
+
+
+def test_a_tenant_document_withholds_values_from_quantity_conflicts(capsys, tmp_path):
+    path = _doc(tmp_path, [DEPTH_15, DEPTH_1_5])
+    _, out, _ = _run(capsys, ["--file", str(path), *REVIEW, *ARGS, "--visibility", "tenant", "--organization-id", ORG])
+    report = _section(out)
+    assert "claim_conflict  NEEDS EXPERT REVIEW" in report
+    assert "water.awd.dry_down_depth: values withheld (tenant document)" in report
+    for fragment in ("15 cm", "1.5 cm", "1,5 cm", "dưới mặt ruộng"):
+        assert fragment not in report, fragment

@@ -270,15 +270,23 @@ def integrity_report(p, *, registry, as_of: date) -> str:
                   f"{'/' + c.parameter if c.parameter else ''}  {_excerpt(c, show)}" for c in claims]
         lines += [f"  reference        {r}  ({refs[r].verification_status}; independently verified: "
                   f"{'yes' if refs[r].independently_verified else 'no'})" for r in f.reference_ids]
-        detail = (f"{claims[0].status}: {claims[0].note or 'no comparison possible'}"
-                  if f.finding_type == "unresolved_claim" and claims else f.detail)   # its detail quotes the span
+        if f.finding_type == "unresolved_claim" and claims:      # review's detail quotes the span
+            detail = f"{claims[0].status}: {claims[0].note or 'no comparison possible'}"
+        elif not show and f.finding_type in ("claim_conflict", "reference_conflict") \
+                and any(c.kind == "quantity" for c in claims):      # its detail prints values from the text
+            detail = f"{claims[0].parameter}: values withheld (tenant document); read the spans above locally"
+        else:
+            detail = f.detail
         lines += [f"  detail           {detail}", f"  evidence_needed  {f.evidence_needed}"]
     if needs:
         lines.append(f"result             {len(needs)} finding(s) need expert review (this report makes no "
                      "decision; approval stays a separate operator action)")
+    elif result.findings:
+        lines.append(f"result             no detected conflicts ({len(result.findings)} informational finding(s) "
+                     "above; not safe, not verified, not approved)")
     else:
-        lines.append("result             no detected conflicts (not safe, not verified, not approved: only these "
-                     "deterministic checks found nothing)")
+        lines.append("result             no detected conflicts (not safe, not verified, not approved: these "
+                     "deterministic checks produced no finding)")
     lines += [f"limitation         {text}" for text in _LIMITATIONS]
     lines += ["provenance = not_evaluated", "content_correctness = not_assessed", f"decision = {result.decision}"]
     return "\n".join(lines)
