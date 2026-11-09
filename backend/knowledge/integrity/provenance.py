@@ -10,18 +10,26 @@ Every check yields one outcome:
 A URL, an HTTPS origin, a matching hash or a claimed publisher name is never treated as proof
 of factual correctness: `content_correctness` is always "not_assessed". Content goes through
 claims.py + review.py and, in the end, a human domain expert.
+
+Scope of "verified": this module checks that the RECORDED evidence is complete and consistent.
+The evidence file must be supplied (`evidence_files`), must hash to its evidence_ref, and must not
+be the artifact itself. It does NOT re-run the signature check or re-fetch the second channel; the
+tool or person that produced the evidence file did that, and the approving human reviews that
+file. A dishonest evidence file is therefore out of scope here, and the two-person approval
+(milestone M2) is the control for it.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
 from knowledge.ids import sha256_hex
 from knowledge.models import LICENSE_BASES, LICENSE_NEEDS_REFERENCE
 
-PROVENANCE_CHECKER_VERSION = "kn-provenance-1"
+PROVENANCE_CHECKER_VERSION = "kn-provenance-2"
 
 Outcome = Literal["verified", "missing", "mismatch", "unverified_assertion"]
 EvidenceMethod = Literal["pki_signature", "second_channel_sha256", "operator_assertion"]
@@ -94,25 +102,44 @@ def _host(url: str | None) -> str | None:
     return match.group(1).lower() if match else None
 
 
+def _channel(url: str | None) -> tuple[str, str] | None:
+    """(host, path) with scheme case, default port, query, fragment and trailing slash ignored:
+    two URLs with the same channel are the same download, whatever their spelling."""
+    match = re.match(r"^https://([A-Za-z0-9.-]+)(?::443)?(/[^?#]*)?", url or "", re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).lower(), (match.group(2) or "/").rstrip("/") or "/"
+
+
 def _usable(ev: VerificationEvidence, publisher: TrustedPublisher | None, official_url: str | None,
-            actual_sha256: str) -> bool:
-    """Evidence that can count as independent: it attests THESE bytes, is flagged independent, has a
-    stored evidence file, comes from a channel the allowlist accepts, and is not the artifact's own
-    download URL."""
+            actual_sha256: str, evidence_files: Mapping[str, bytes]) -> bool:
+    """Evidence that can count as independent: it attests THESE bytes, is flagged independent, its
+    evidence file is supplied and hashes to evidence_ref (and is not the artifact itself), it comes
+    from a channel the allowlist accepts, and it is not the artifact's own download channel."""
     if ev.method not in ("pki_signature", "second_channel_sha256") or not ev.independent:
         return False
     if not _SHA256.match(ev.evidence_ref or "") or ev.artifact_sha256 != actual_sha256:
+        return False
+    if ev.evidence_ref == actual_sha256:
+        return False
+    stored = evidence_files.get(ev.evidence_ref)
+    if stored is None or sha256_hex(stored) != ev.evidence_ref:
         return False
     if publisher is None:
         return False
     if ev.method == "pki_signature":
         return ev.attested_by in publisher.signers
-    return _host(ev.attested_by) in publisher.hosts and ev.attested_by != official_url
+    channel = _channel(ev.attested_by)
+    return channel is not None and channel[0] in publisher.hosts and channel != _channel(official_url)
 
 
 def evaluate_provenance(artifact: bytes, claim: ProvenanceClaim, *,
-                        publishers: dict[str, TrustedPublisher], expected_version: str | None = None) -> ProvenanceReport:
-    """Pure: no network. `expected_version` is the version declared elsewhere (ingestion spec)."""
+                        publishers: Mapping[str, TrustedPublisher], evidence_files: Mapping[str, bytes] | None = None,
+                        expected_version: str | None = None) -> ProvenanceReport:
+    """Pure: no network. `evidence_files` maps evidence_ref -> the stored evidence bytes; evidence
+    without its file never counts. `expected_version` is the version declared elsewhere
+    (ingestion spec)."""
+    evidence_files = evidence_files or {}
     actual = sha256_hex(artifact)
     publisher = publishers.get(claim.publisher_id or "")
     checks: list[ProvenanceCheck] = []
@@ -132,7 +159,7 @@ def evaluate_provenance(artifact: bytes, claim: ProvenanceClaim, *,
 
     # 2. Independent binding of these bytes to the publisher (authenticity).
     malformed = [e for e in claim.evidence if e.method not in _METHODS]
-    usable = [e for e in claim.evidence if _usable(e, publisher, claim.official_url, actual)]
+    usable = [e for e in claim.evidence if _usable(e, publisher, claim.official_url, actual, evidence_files)]
     contradicting = [e for e in claim.evidence
                      if e.method in ("pki_signature", "second_channel_sha256") and e.artifact_sha256
                      and e.artifact_sha256 != actual]
@@ -144,7 +171,8 @@ def evaluate_provenance(artifact: bytes, claim: ProvenanceClaim, *,
         add("authenticity", "verified", f"{len(usable)} independent evidence item(s) bind the bytes to the publisher")
     elif claim.evidence:
         add("authenticity", "unverified_assertion",
-            "evidence exists but none is independent, stored, and from an allowlisted channel")
+            "evidence exists but none is independent, supplied with its stored file, and from an allowlisted "
+            "channel other than the download")
     else:
         add("authenticity", "missing", "no verification evidence")
 

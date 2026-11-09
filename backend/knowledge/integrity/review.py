@@ -15,8 +15,12 @@ Comparison rules (conservative: compare only when it is meaningful):
   claim of the same stage, never with a claim of another stage.
 - Two documents with disjoint validity periods, or where one supersedes the other, are not
   compared with each other.
+- Two claims from the same chunk are never compared with each other (split doses, stage
+  sequences). Each is still compared with the registry.
 - Ranges conflict only when they do not overlap. A registry entry widens its range by its
   tolerance.
+- Every registry entry can raise a conflict, whatever its verification status. The finding names
+  that status, and the expert decides how much weight it carries.
 """
 
 from __future__ import annotations
@@ -179,6 +183,8 @@ def review(sources: Sequence[ClaimSource], *, registry: ReferenceRegistry, as_of
     for a, b in pairs:
         if a.parameter != b.parameter or not _stage_ok(a.stage, b.stage):
             continue
+        if (a.document_ref, a.chunk_id) == (b.document_ref, b.chunk_id):
+            continue        # one chunk listing several values (split doses, stage sequences) is not a contradiction
         if a.document_ref != b.document_ref:
             if _periods_disjoint(contexts.get(a.document_ref), contexts.get(b.document_ref)):
                 continue

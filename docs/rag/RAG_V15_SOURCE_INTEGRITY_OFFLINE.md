@@ -50,18 +50,33 @@ The clean AWD fixture chunks and a realistic legitimate guidance paragraph yield
 needs review.
 
 ## Known limits (do not over-read a clean report)
-- **False negatives**: the assertion patterns are a short fixed list. A false statement phrased
-  differently, written without diacritics, or about another subject produces no claim. Numeric
-  checks only cover the parameters in `claims.PARAMETERS`, and only when a registry entry exists,
-  and the production registry has no numeric entries yet. A wrong number with no second source and
-  no reference passes as `unreferenced_claim` (info).
-- **False positives**: cue words are matched per sentence, so a sentence mixing two subjects can
-  attach the wrong parameter. A legitimate document that quotes a false claim in order to refute
-  it ("không đúng rằng AWD hết phát thải") can be flagged. That is acceptable for a review aid,
-  because a person reads every flag.
-- Dates: only `dd/mm/yyyy` and "ngày d tháng m năm yyyy". Numbers: "1.000" is ambiguous on purpose.
-- Provenance does not fetch anything or verify signatures itself. It evaluates evidence that
-  another tool or person recorded (for example the VN Government PKI / pyHanko recipe).
+An independent read-only adversarial review (agy, 2026-11-09, 48 findings) was run against the
+first version. The fixes, each pinned by a regression test in `test_knowledge_integrity.py`:
+diacritic-free text is matched (via a span-preserving fold); temporal "hết vụ", negated "không
+bao giờ bằng 0" and "không phải chỉ ghi" are no longer flagged; more synonyms and inverted
+phrasings are caught ("về 0", "chấm dứt" after the noun, "xóa bỏ hoàn toàn", "bỏ qua việc theo
+dõi", "không bắt buộc", English "stops / reduced to zero"); a ≥ 100 % CH4 reduction counts as
+elimination; cues prefer the number's own clause; bund/pipe lengths are not water depths; values
+in one chunk are not compared with each other; "0.125" and "1,500" are handled; signed depths are
+ambiguous; `/vụ`, `tạ/ha`, `m` and ISO dates are supported; a re-spelled download URL is the same
+channel; evidence needs its stored file and cannot be the artifact itself; independently verified
+registry entries need a URL; the tolerance is bounded.
+
+Still open (by design or deferred):
+- **False negatives**: the assertion patterns remain a short fixed list for two statements. Any
+  other false statement, and paraphrases outside the list, produce no claim. Numeric checks need a
+  registry entry, and the production registry has no numeric entries yet. A wrong number with no
+  second source passes as `unreferenced_claim` (info).
+- **False positives**: conditional or exception statements ("khi trời mưa to … không cần đo mực
+  nước", "lắp cảm biến thì khỏi cần đo thủ công") and quotations of a false claim made in order to
+  refute it are still flagged. A person reads every flag, so this is acceptable for a review aid.
+- Entries of every verification status (including `project_policy`, `unverified`) raise conflicts.
+  The finding names the status and the expert weighs it.
+- Dates: US `mm/dd/yyyy` is read as `dd/mm/yyyy`. Negative ranges are not parsed.
+- Provenance does not fetch anything or verify signatures itself. It checks that the evidence
+  recorded by another tool or person (for example the VN Government PKI / pyHanko recipe) is
+  complete, bound to these bytes and to its stored file. A dishonest evidence file is out of its
+  scope; the two-person approval (M2) is the control for that.
 
 ## Next steps (each needs owner approval)
 1. Wire `review()` into the ingestion dry-run report as a printed review aid (it writes no status).

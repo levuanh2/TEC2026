@@ -138,10 +138,12 @@ def _entry(raw: dict, allow_synthetic: bool) -> ReferenceEntry:
         raise RegistryError(f"{where}: synthetic test fixtures are refused in a production registry")
     pointer, evidence, verifier = ver.get("pointer"), ver.get("evidence_ref"), ver.get("verified_by")
     if status == "independently_verified":
-        if artifact is None or not isinstance(evidence, str) or not _SHA256.match(evidence) \
+        if artifact is None or url is None or not isinstance(evidence, str) or not _SHA256.match(evidence) \
                 or not isinstance(verifier, str) or not verifier.strip():
-            raise RegistryError(f"{where}: independently_verified needs source.artifact_sha256, "
+            raise RegistryError(f"{where}: independently_verified needs source.url, source.artifact_sha256, "
                                 "verification.evidence_ref (sha256) and verification.verified_by")
+        if evidence == artifact:
+            raise RegistryError(f"{where}: evidence_ref must be a separate evidence file, not the artifact itself")
     if status in ("engine_config_pointer", "project_policy") and (not isinstance(pointer, str) or not pointer.strip()):
         raise RegistryError(f"{where}: {status} needs verification.pointer")
 
@@ -166,6 +168,8 @@ def _entry(raw: dict, allow_synthetic: bool) -> ReferenceEntry:
         tolerance = _number(raw, "tolerance", where) if raw.get("tolerance") is not None else 0.0
         if low > high or tolerance < 0:
             raise RegistryError(f"{where}: need value_min <= value_max and tolerance >= 0")
+        if tolerance > max(abs(low), abs(high)):
+            raise RegistryError(f"{where}: tolerance larger than the value itself would silence every conflict")
         if raw.get("assertion_holds") is not None:
             raise RegistryError(f"{where}: a quantity entry has no assertion_holds")
         return ReferenceEntry(**common, value_min=low, value_max=high, unit=unit, tolerance=tolerance)

@@ -43,7 +43,8 @@ def _production_registry():
 ARTIFACT = b"%PDF-1.7 synthetic artifact bytes"
 SHA = sha256_hex(ARTIFACT)
 OTHER_SHA = sha256_hex(b"different bytes")
-EVIDENCE_SHA = sha256_hex(b"stored signature-verification report")
+EVIDENCE_BYTES = b"stored signature-verification report"
+EVIDENCE_SHA = sha256_hex(EVIDENCE_BYTES)
 PUBLISHERS = {"mae-vn": TrustedPublisher("mae-vn", frozenset({"mae.gov.vn", "vanban.chinhphu.vn"}),
                                          frozenset({"CN=Bo Nong nghiep va Moi truong"}))}
 URL = "https://mae.gov.vn/van-ban/qd-1.pdf"
@@ -58,8 +59,10 @@ def _claim(**overrides) -> ProvenanceClaim:
     return ProvenanceClaim(**base)
 
 
-def _prov(claim: ProvenanceClaim, expected_version: str | None = "2026-01"):
-    return evaluate_provenance(ARTIFACT, claim, publishers=PUBLISHERS, expected_version=expected_version)
+def _prov(claim: ProvenanceClaim, expected_version: str | None = "2026-01", evidence_files=None):
+    files = {EVIDENCE_SHA: EVIDENCE_BYTES} if evidence_files is None else evidence_files
+    return evaluate_provenance(ARTIFACT, claim, publishers=PUBLISHERS, evidence_files=files,
+                               expected_version=expected_version)
 
 
 def test_correct_provenance_is_verified_but_content_is_never_assessed():
@@ -106,6 +109,21 @@ def test_unbacked_evidence_never_verifies(evidence):
     report = _prov(_claim(evidence=(evidence,)))
     assert report.outcome("authenticity") == "unverified_assertion"
     assert report.status == "unverified"
+
+
+@pytest.mark.parametrize("url", [URL + "?v=1", URL + "#download", "https://MAE.GOV.VN/van-ban/qd-1.pdf",
+                                 "https://mae.gov.vn:443/van-ban/qd-1.pdf", URL + "/"])
+def test_a_respelled_download_url_is_the_same_channel(url):
+    evidence = VerificationEvidence("second_channel_sha256", url, SHA, True, EVIDENCE_SHA)
+    assert _prov(_claim(evidence=(evidence,))).outcome("authenticity") == "unverified_assertion"
+
+
+def test_evidence_counts_only_with_its_stored_file_and_never_as_the_artifact_itself():
+    assert _prov(_claim(), evidence_files={}).outcome("authenticity") == "unverified_assertion"
+    assert _prov(_claim(), evidence_files={EVIDENCE_SHA: b"tampered"}).outcome("authenticity") == "unverified_assertion"
+    self_ref = VerificationEvidence("pki_signature", "CN=Bo Nong nghiep va Moi truong", SHA, True, SHA)
+    report = _prov(_claim(evidence=(self_ref,)), evidence_files={SHA: ARTIFACT})
+    assert report.outcome("authenticity") == "unverified_assertion" and report.status != "verified"
 
 
 def test_unknown_evidence_method_is_a_mismatch():
@@ -257,6 +275,11 @@ def test_synthetic_entries_are_refused_by_the_production_loader():
     (lambda e: e["source"].update(url="http://insecure.example"), "https"),
     (lambda e: e.update(reference_id="Bad Id"), "reference_id"),
     (lambda e: e.update(stage="harvest-party"), "stage"),
+    (lambda e: e.update(tolerance=999999), "silence every conflict"),
+    (lambda e: (e["verification"].update(status="independently_verified", evidence_ref="a" * 64, verified_by="x"),
+                e["source"].update(artifact_sha256="b" * 64)), "needs source.url"),
+    (lambda e: (e["verification"].update(status="independently_verified", evidence_ref="b" * 64, verified_by="x"),
+                e["source"].update(artifact_sha256="b" * 64, url="https://example.org/a.pdf")), "separate evidence"),
 ])
 def test_registry_validation_fails_closed(mutate, message):
     entry = copy.deepcopy(SYNTH_DEPTH)
@@ -391,3 +414,71 @@ def test_integrity_package_has_no_store_or_status_write_path():
         names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | \
                 {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         assert not names & {"create_version", "approve", "set_status", "archive"}, path.name
+
+
+# ------------------------------------------------------------------ regressions from the agy adversarial review
+
+def _assertions(text: str) -> list[str]:
+    return [c.parameter for c in _claims(text) if c.kind == "assertion"]
+
+
+@pytest.mark.parametrize("text", [
+    "Hết vụ phát thải khí nhà kính sẽ được đo đạc và báo cáo.",
+    "Sau khi hết đợt ngập, phát thải khí nhà kính bắt đầu tăng trở lại.",
+    "Phát thải khí nhà kính trong ruộng lúa ngập nước không bao giờ bằng 0.",
+    "Để triệt tiêu nguồn phát thải khí nhà kính từ rơm rạ, cần xử lý bằng chế phẩm vi sinh.",
+    "The project monitoring period ends before methane emissions peak.",
+    "Không phải chỉ ghi chép mực nước mà nông dân còn phải theo dõi ngày bón phân.",
+    "AWD chưa hết phát thải mê-tan, chỉ giảm.",
+])
+def test_review_false_positives_are_not_assertions(text):
+    assert _assertions(text) == []
+
+
+@pytest.mark.parametrize("text, parameter", [
+    ("Ap dung ngap kho xen ke mot vu la khong con phat thai metan.", "ch4.rice.emission_eliminated"),
+    ("Nong dan khong can ghi chep muc nuoc nua.", "records.water.not_required"),
+    ("Áp dụng kỹ thuật tưới AWD giúp đưa phát thải khí mê-tan về 0.", "ch4.rice.emission_eliminated"),
+    ("Ruộng làm ngập khô xen kẽ một vụ sẽ giảm 100% phát thải khí mê-tan.", "ch4.rice.emission_eliminated"),
+    ("Phát thải khí mê-tan đã hoàn toàn chấm dứt sau một vụ áp dụng AWD.", "ch4.rice.emission_eliminated"),
+    ("Áp dụng AWD một vụ sẽ xóa bỏ hoàn toàn phát thải mê-tan trên đồng ruộng.", "ch4.rice.emission_eliminated"),
+    ("Ruộng lúa làm AWD không còn xuất hiện hiện tượng phát thải khí mê-tan.", "ch4.rice.emission_eliminated"),
+    ("Làm ngập khô xen kẽ thì chẳng còn phát thải mê-tan nữa.", "ch4.rice.emission_eliminated"),
+    ("Methane emissions are reduced to zero after one season of AWD.", "ch4.rice.emission_eliminated"),
+    ("AWD completely stops methane emissions from rice fields.", "ch4.rice.emission_eliminated"),
+    ("Việc ghi chép số liệu nước tưới là hoàn toàn không bắt buộc đối với nông dân.", "records.water.not_required"),
+    ("Bà con có thể bỏ qua việc theo dõi mực nước khi làm AWD.", "records.water.not_required"),
+    ("Nông dân không cần ghi nhật ký tưới trong suốt cả vụ.", "records.water.not_required"),
+])
+def test_review_false_negatives_are_now_caught(text, parameter):
+    assert parameter in _assertions(text)
+    for c in _claims(text):
+        assert text[c.start:c.end] == c.text
+
+
+def test_number_and_unit_regressions():
+    assert _one("Hệ số phát thải 0.125 kgCH4/ha/ngày.").value_min == 0.125
+    assert _one("Bón 1,500 kg/ha phân bón.").status == "ambiguous"        # 1.5 or 1500: never guessed
+    assert _one("Rút mực nước xuống -15 cm dưới mặt ruộng.").status == "ambiguous"
+    c = _one("Bón 120 kg N/ha/vụ.")
+    assert (c.parameter, c.value_min, c.unit) == ("fertilizer.n_rate", 120.0, "kg/ha")
+    assert _one("Năng suất đạt 70 tạ/ha.").value_min == 7000.0
+    assert _one("Giữ mực nước 0,05 m.").value_min == 5.0
+    assert _one("Effective from 2026-04-15.", "date").date_iso == "2026-04-15"
+    assert _one("Lua dat nang suat 6 tan/ha.").parameter == "yield"   # unaccented
+
+
+def test_parameter_assignment_regressions():
+    assert _one("Cần đắp bờ bao cao 30 cm để chủ động giữ nước.").parameter is None
+    assert _one("Ống theo dõi mực nước dài 20 cm được cắm vào ruộng.").parameter is None
+    yields, rate = [c for c in _claims("Năng suất vụ này đạt 6 tấn/ha nhờ bón cân đối 90 kg/ha phân đạm urê.")
+                    if c.kind == "quantity"]
+    assert (yields.parameter, rate.parameter) == ("yield", "fertilizer.n_rate")
+    sequence = [c for c in _claims("Từ giai đoạn đẻ nhánh giữ mực nước 3 cm, đến khi làm đòng tăng lên 5 cm.")
+                if c.kind == "quantity"]
+    assert [c.stage for c in sequence] == ["tillering", "panicle_initiation"]
+
+
+def test_values_listed_in_one_chunk_are_not_contradictions():
+    split = _src("d/a@1", "Bón phân đợt 1 với 40 kg/ha đạm, đợt 2 bón tiếp 60 kg/ha đạm.")
+    assert not review([split], registry=SYNTH, as_of=AS_OF).of_type("claim_conflict")
