@@ -47,7 +47,10 @@ def _roots(path: Path) -> set[str]:
 def test_knowledge_package_has_the_approved_modules():
     names = {p.relative_to(BACKEND / "knowledge").as_posix() for p in KNOWLEDGE}
     assert names == {"__init__.py", "models.py", "normalize.py", "chunking.py", "ids.py", "ports.py", "ingest.py",
-                     "parsers/__init__.py", "parsers/markdown.py", "parsers/text.py", "parsers/pdf.py"}
+                     "parsers/__init__.py", "parsers/markdown.py", "parsers/text.py", "parsers/pdf.py",
+                     # offline source-integrity review aid (pure; never changes a status)
+                     "integrity/__init__.py", "integrity/provenance.py", "integrity/claims.py",
+                     "integrity/references.py", "integrity/review.py"}
 
 
 @pytest.mark.parametrize("path", KNOWLEDGE, ids=lambda p: p.relative_to(BACKEND).as_posix())
