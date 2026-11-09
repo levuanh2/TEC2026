@@ -12,16 +12,26 @@ write mode  stores the original bytes as a controlled artifact (private bucket, 
             addressed, SHA-256 verified -- ST1), then writes source + version + chunks in ONE
             transaction, all `review_required`. --target must name the destination: `local`
             for a 127.0.0.1/localhost stack, else the project ref of SUPABASE_URL/SUPABASE_DB_URL.
+--integrity-review --as-of YYYY-MM-DD   (dry run only)
+            also prints the OFFLINE source-integrity review aid (knowledge/integrity) for the
+            planned chunks against the versioned reference registry: findings for a human
+            expert, never a decision. It writes nothing, calls no provider and does not change
+            the exit code. Provenance is reported as not_evaluated (this CLI has no publisher
+            allowlist or independent evidence). docs/rag/RAG_V15_SOURCE_INTEGRITY_OFFLINE.md.
 There is no approve flag: approval is a separate explicit operator action
 (docs/rag/RAG_V1_INGESTION.md). One file per run; directories are refused. Credentials come
 from the backend settings and are never printed.
-Exit codes: 0 created / unchanged / dry run, 1 refused (conflict, parse, integrity), 2 usage/target.
+Exit codes: 0 created / unchanged / dry run, 1 refused (conflict, parse, integrity, malformed
+reference registry), 2 usage/target.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -32,6 +42,8 @@ from knowledge.ingest import MAX_FILE_BYTES, ingest, plan  # noqa: E402
 from knowledge.models import DocumentSpec, KnowledgeIngestionError, SourceSpec  # noqa: E402
 
 _LOCAL = {"127.0.0.1", "localhost"}
+REGISTRY_FILE = Path(__file__).resolve().parent.parent / "knowledge" / "integrity" / "reference_registry.json"
+_EXCERPT_CHARS = 80
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,7 +68,33 @@ def build_parser() -> argparse.ArgumentParser:
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="no database or Storage access")
     mode.add_argument("--target", help="`local` or the hosted project ref the settings point at")
+    ap.add_argument("--integrity-review", action="store_true",
+                    help="dry run only: also print the offline source-integrity review aid (no decision)")
+    ap.add_argument("--as-of", type=_iso_day, metavar="YYYY-MM-DD",
+                    help="evaluation date of --integrity-review (required with it; never defaulted to today)")
     return ap
+
+
+def _iso_day(value: str) -> date:
+    """Strictly YYYY-MM-DD (date.fromisoformat alone also takes 20261109 and 2026-W45-1)."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise argparse.ArgumentTypeError(f"{value!r} is not YYYY-MM-DD")
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a calendar date") from None
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    ap = build_parser()
+    args = ap.parse_args(argv)
+    if args.integrity_review and not args.dry_run:
+        ap.error("--integrity-review is only valid with --dry-run")
+    if args.integrity_review and args.as_of is None:
+        ap.error("--integrity-review needs an explicit --as-of YYYY-MM-DD (the report records its evaluation date)")
+    if args.as_of is not None and not args.integrity_review:
+        ap.error("--as-of is only used by --integrity-review")
+    return args
 
 
 def target_of(supabase_url: str, db_url: str) -> str | None:
@@ -133,10 +171,138 @@ def summary(p, *, mode: str, target: str | None = None, result=None) -> str:
     return "\n".join(lines)
 
 
+class RegistryLoadError(Exception):
+    """The reference registry could not be read or validated: the review is refused, never skipped."""
+
+
+def load_reference_registry(path: Path | None = None):
+    """The versioned production registry. Any defect fails closed (synthetic entries are refused)."""
+    from knowledge.integrity.references import RegistryError, load_registry
+
+    path = path or REGISTRY_FILE
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return load_registry(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RegistryError) as exc:
+        raise RegistryLoadError(f"{path.name}: {exc}") from None
+
+
+def claim_sources(p) -> list:
+    """One ClaimSource per planned chunk, addressed by the plan's identity and stable chunk ids."""
+    from knowledge.integrity.claims import ClaimSource
+
+    d = p.document
+    ref = f"{d.source_id}/{d.document_id}@{d.document_version}"
+    return [ClaimSource(ref, c.chunk_id, c.content) for c in p.chunks]
+
+
+def _shown(path: Path) -> str:
+    backend = Path(__file__).resolve().parent.parent
+    try:
+        return path.resolve().relative_to(backend).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _excerpt(claim, show: bool) -> str:
+    if not show:
+        return "(excerpt withheld: tenant document)"
+    text = " ".join(claim.text.split())
+    return repr(text if len(text) <= _EXCERPT_CHARS else text[:_EXCERPT_CHARS - 1] + "…")
+
+
+_LIMITATIONS = (
+    "content_correctness is not assessed: a document with no detected conflicts can still be false",
+    "assertions: a short fixed list of two absolute statements; any other false statement yields no claim",
+    "numbers: compared only with a registry entry; the production registry holds no numeric entry, so a "
+    "wrong number with no second source is at most an informational unreferenced_claim",
+    "this run reviews ONE document version: contradictions with other documents are not checked; only "
+    "chunks of this version are compared with each other",
+    "registry entries are project pointers/policy, not independently verified primary sources",
+    "conditional statements and quotations made to refute a claim can be flagged (false positives)",
+    "dev3-01 remains OPEN: nothing here blocks retrieval or changes a knowledge status",
+)
+
+
+def integrity_report(p, *, registry, as_of: date) -> str:
+    """The offline review aid for one plan. Prints identifiers, spans and short excerpts only:
+    never a whole chunk, and no excerpt at all for a tenant document."""
+    from knowledge.integrity.review import review
+
+    result = review(claim_sources(p), registry=registry, as_of=as_of)
+    by_id = {c.claim_id: c for c in result.claims}
+    refs = {e.reference_id: e for e in registry.entries}
+    show = p.source.visibility == "public"
+    kinds = Counter(c.kind for c in result.claims)
+    statuses = Counter(c.status for c in result.claims)
+    types = Counter(f.finding_type for f in result.findings)
+    needs = [f for f in result.findings if f.needs_expert_review]
+
+    def counts(counter: Counter) -> str:
+        return ", ".join(f"{k} {v}" for k, v in sorted(counter.items())) or "none"
+
+    lines = [
+        "",
+        "== integrity review (offline review aid: findings for a human expert, NOT an approval) ==",
+        f"review_version     {result.review_version}",
+        f"claim_extractor    {result.extractor_version}",
+        f"registry_version   {result.registry_version}",
+        f"registry_digest    {result.registry_digest}",
+        f"registry_file      {_shown(REGISTRY_FILE)} ({len(registry.entries)} entries)",
+        f"as_of              {result.as_of}",
+        "provenance         not_evaluated -- this CLI has no publisher allowlist, independent evidence or "
+        "evidence files; --source-owner / --official-url are operator assertions, not verified authenticity",
+        "validity_periods   not_evaluated -- no effective-period context is supplied; dates in the text are "
+        "listed as claims, not applied",
+        f"claims             {len(result.claims)} (kind: {counts(kinds)}; status: {counts(statuses)})",
+        f"findings           {len(result.findings)} (needs_expert_review {len(needs)}; {counts(types)})",
+    ]
+    for e in registry.entries:
+        used = sum(e.reference_id in f.reference_ids for f in result.findings)
+        lines.append(f"reference          {e.reference_id}  verification {e.verification_status}  "
+                     f"independently_verified {'yes' if e.independently_verified else 'no'}  findings {used}")
+    for n, f in enumerate(result.findings, 1):
+        claims = [by_id[i] for i in f.claim_ids]
+        lines.append(f"finding {n:<10} {f.finding_type}  "
+                     f"{'NEEDS EXPERT REVIEW' if f.needs_expert_review else 'informational'}")
+        lines.append(f"  chunks           {', '.join(dict.fromkeys(c.chunk_id for c in claims)) or '-'}")
+        lines += [f"  claim            {c.claim_id}  chunk {c.chunk_id} [{c.start}:{c.end}]  {c.kind}"
+                  f"{'/' + c.parameter if c.parameter else ''}  {_excerpt(c, show)}" for c in claims]
+        lines += [f"  reference        {r}  ({refs[r].verification_status}; independently verified: "
+                  f"{'yes' if refs[r].independently_verified else 'no'})" for r in f.reference_ids]
+        if f.finding_type == "unresolved_claim" and claims:      # review's detail quotes the span
+            detail = f"{claims[0].status}: {claims[0].note or 'no comparison possible'}"
+        elif not show and f.finding_type in ("claim_conflict", "reference_conflict") \
+                and any(c.kind == "quantity" for c in claims):      # its detail prints values from the text
+            detail = f"{claims[0].parameter}: values withheld (tenant document); read the spans above locally"
+        else:
+            detail = f.detail
+        lines += [f"  detail           {detail}", f"  evidence_needed  {f.evidence_needed}"]
+    if needs:
+        lines.append(f"result             {len(needs)} finding(s) need expert review (this report makes no "
+                     "decision; approval stays a separate operator action)")
+    elif result.findings:
+        lines.append(f"result             no detected conflicts ({len(result.findings)} informational finding(s) "
+                     "above; not safe, not verified, not approved)")
+    else:
+        lines.append("result             no detected conflicts (not safe, not verified, not approved: these "
+                     "deterministic checks produced no finding)")
+    lines += [f"limitation         {text}" for text in _LIMITATIONS]
+    lines += ["provenance = not_evaluated", "content_correctness = not_assessed", f"decision = {result.decision}"]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = parse_args(argv)
     path = Path(args.file)
     data = _read(path)
+    registry = None
+    if args.integrity_review:
+        try:
+            registry = load_reference_registry()
+        except RegistryLoadError as exc:
+            print(f"refused [registry_invalid]: {exc}", file=sys.stderr)
+            return 1
     source = SourceSpec(args.source_id, args.source_title, args.source_owner, args.source_type, args.authority,
                         args.visibility, args.organization_id, args.farm_id)
     document = DocumentSpec(args.source_id, args.document_id, args.document_version, args.title, args.language,
@@ -150,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.dry_run:
         print(summary(p, mode="dry-run"))
+        if registry is not None:
+            print(integrity_report(p, registry=registry, as_of=args.as_of))
         return 0
 
     import psycopg
