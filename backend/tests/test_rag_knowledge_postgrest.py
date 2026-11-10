@@ -25,7 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from infrastructure.config import load_settings  # noqa: E402
-from tests.knowledge_status_paths import bring  # noqa: E402
+from tests.knowledge_status_paths import bring, m2_cleanup  # noqa: E402
 
 _SETTINGS = load_settings()
 _DB_URL = _SETTINGS.supabase_db_url
@@ -136,6 +136,7 @@ def _cleanup(admin, ids):
         conn.execute("alter table public.knowledge_chunks disable trigger knowledge_chunks_immutable")
         conn.execute("alter table public.knowledge_documents disable trigger knowledge_documents_immutable")
         conn.execute("alter table public.knowledge_sources disable trigger knowledge_sources_scope")
+        m2_cleanup(conn, ids["sources"])     # M2 evidence + synthetic personnel first (FK-restricted)
         params = {"s": ids["sources"], "o": orgs, "u": users}
         farms = "select id from public.farms where cooperative_id = any(%(o)s::uuid[])"
         plots = f"select id from public.plots where farm_id in ({farms})"
