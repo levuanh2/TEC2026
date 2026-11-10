@@ -173,6 +173,41 @@
    ],
    "security_definer": false
   },
+  "private.knowledge_status_events_append_only()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_status_transition_allowed(text,knowledge_status,knowledge_status)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_status_transition_authorized(text,text,knowledge_status)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_transition_document(uuid,knowledge_status,knowledge_status,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.knowledge_transition_source(text,knowledge_status,knowledge_status,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.max_live_harvested_area(uuid)": {
    "config": [
     "search_path=\"\""
@@ -1434,6 +1469,10 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_status_events": {
+   "enabled": true,
+   "forced": false
+  },
   "mrv_case_batches": {
    "enabled": true,
    "forced": false
@@ -1641,6 +1680,8 @@
   "knowledge_chunks.knowledge_chunks_search_fields": "private.knowledge_chunks_search_fields()",
   "knowledge_documents.knowledge_documents_immutable": "private.enforce_knowledge_document_immutability()",
   "knowledge_sources.knowledge_sources_scope": "private.enforce_knowledge_source_scope()",
+  "knowledge_status_events.knowledge_status_events_append_only": "private.knowledge_status_events_append_only()",
+  "knowledge_status_events.knowledge_status_events_no_truncate": "private.knowledge_status_events_append_only()",
   "mrv_case_batches.audit_change_trg": "audit.capture_change()",
   "mrv_case_batches.validate_mrv_case_batch_trg": "private.validate_mrv_case_batch()",
   "mrv_case_steps.audit_change_trg": "audit.capture_change()",
@@ -1733,6 +1774,7 @@
   "knowledge_documents_one_approved": "CREATE UNIQUE INDEX knowledge_documents_one_approved ON public.knowledge_documents USING btree (source_id, document_id) WHERE (status = 'approved'::knowledge_status)",
   "knowledge_documents_pkey": "CREATE UNIQUE INDEX knowledge_documents_pkey ON public.knowledge_documents USING btree (id)",
   "knowledge_sources_pkey": "CREATE UNIQUE INDEX knowledge_sources_pkey ON public.knowledge_sources USING btree (source_id)",
+  "knowledge_status_events_pkey": "CREATE UNIQUE INDEX knowledge_status_events_pkey ON public.knowledge_status_events USING btree (id)",
   "mrv_case_batches_pkey": "CREATE UNIQUE INDEX mrv_case_batches_pkey ON public.mrv_case_batches USING btree (mrv_case_id, production_batch_id)",
   "mrv_case_steps_pkey": "CREATE UNIQUE INDEX mrv_case_steps_pkey ON public.mrv_case_steps USING btree (mrv_case_id, step_no)",
   "mrv_cases_organization_id_case_code_key": "CREATE UNIQUE INDEX mrv_cases_organization_id_case_code_key ON public.mrv_cases USING btree (organization_id, case_code)",

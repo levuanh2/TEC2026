@@ -41,15 +41,30 @@ reasoning errors (answer-path gates), tenant isolation (RLS, tested).
 
 ## 3. Workflow
 
-States (proposal; `quarantined` and `expert_review` are NEW values needing a migration + owner approval):
+States. `expert_review` and `quarantined` exist since M1 (migrations `20261110090000` + `20261110090100`,
+local/CI only). Owner decisions D1–D3 of 2026-11-10 fixed this diagram:
 
 ```
-review_required --(automated checks pass)--> expert_review --(expert + approver)--> approved
-      |                     |                         |
-      +--> rejected <-------+                         +--> rejected
-approved --(dispute / contradiction / revocation signal)--> quarantined --(re-evaluated)--> approved | archived
+document  review_required --> expert_review --(approver)--> approved --> quarantined --> archived
+               |  ^                |   |                        |
+               v  |                |   +--> review_required     +-----------------------> archived
+             rejected <------------+
+source    review_required <--> rejected;  review_required | rejected --> approved   (no expert_review)
+          approved --> quarantined --> archived;  approved --> archived
 ```
-Only `approved` is retrievable (unchanged rule); `quarantined` is never retrievable (fail closed).
+Only `approved` is retrievable (unchanged rule; RLS and the RPC require it on the version AND its source).
+`expert_review` and `quarantined` are never retrievable (fail closed).
+
+**D1 (2026-11-10) changes the earlier proposal.** Quarantine is one-way: `quarantined -> approved` is not
+allowed. A corrected or re-validated text is ingested as a NEW document version and goes through the whole
+flow. The quarantined version keeps its original approval record unchanged as evidence and is then archived.
+This keeps the rule that an approval record describes exactly one approval decision.
+**D2:** every status change is a controlled transition (`private.knowledge_transition_source` /
+`private.knowledge_transition_document`) that writes one row of the append-only `knowledge_status_events` in
+the same transaction. A direct `UPDATE` of `status` is refused, and rows are inserted `review_required`.
+**D3:** a document version cannot go `review_required -> approved`; it passes `expert_review`. Content is
+frozen from `expert_review` on (no chunk added or deleted). Reaching `approved` through `expert_review`
+records that the stage was completed. It does **not** prove that a qualified expert approved the content.
 
 1. **Authority and authenticity.** Publisher on an allowlist per knowledge class (`RAG_V1_SOURCE_POLICY`
    §2). Artifact fetched from the official HTTPS anchor; where the publisher signs (VN government PKI),
@@ -76,9 +91,10 @@ Only `approved` is retrievable (unchanged rule); `quarantined` is never retrieva
 7. **Quarantine.** Any dispute (farmer/agronomist report, contradiction, reference mismatch, publisher
    withdrawal, signature revocation) moves the version to `quarantined` immediately; retrieval stops; the
    approval record gains the trigger.
-8. **Revocation and re-evaluation.** `quarantined -> approved` only through a new expert review;
-   `quarantined -> archived` for withdrawn/false content. On revocation, list answers logged with that
-   chunk (request ids in logs, no question text) and re-run the regression/benchmark set before re-approval.
+8. **Revocation and re-evaluation.** (Changed by D1.) A quarantined version never returns to `approved`.
+   Re-evaluation produces a NEW version that goes through `review_required -> expert_review -> approved`,
+   and the quarantined one is archived. On revocation, list answers logged with that chunk (request ids in
+   logs, no question text) and re-run the regression/benchmark set before approving the replacement.
 9. **Audit trail for approved chunks.** Per chunk: content_sha256 (exists), document version, approval record
    id, claim ids; append-only event log of status changes (actor, time, reason). Retrieval logs keep chunk
    ids so a revoked chunk's exposure window is measurable.
@@ -112,10 +128,33 @@ there", not "safe". Every milestone needs its own owner approval; none touches h
 
 | # | Milestone | Deliverable | Exit criteria (offline/local first) |
 |---|---|---|---|
-| M1 | Status model | migration (local only): `expert_review`, `quarantined`; `knowledge_status_events` append-only; retrieval still `approved` only | DB tests: quarantined/expert_review chunks never retrieved; status change without an event row refused; existing approval guards unchanged |
+| M1 | Status model | migration (local only): `expert_review`, `quarantined`; `knowledge_status_events` append-only; retrieval still `approved` only | DB tests: quarantined/expert_review chunks never retrieved; status change without an event row refused; existing approval guards unchanged. **Implemented as a Draft PR (2026-11-10), local/CI only, not on hosted**, see below |
 | M2 | Evidence + two-person rule | `knowledge_approval_records` (checklist, references, rationale); guard: approver ≠ uploader ≠ expert reviewer; approval without a record refused | DB tests for each refusal; an LLM-produced record cannot set `approved` (no service path writes status from model output) |
 | M3 | Version and effective dates | `effective_from/to`, `supersedes`; approval refused when expired or when the superseded version is still approved; scheduled expiry → quarantine | DB tests + a local job dry run |
 | M4 | Claim extraction + contradiction check | deterministic extractor (numbers+units, stage, water level, days, rates, factors) into `knowledge_claims`; contradiction report between approved/candidate chunks | fixture pair with contradicting claims flagged; `poisoned_claim` flagged against the reference registry (M5); false-positive budget measured on the real corpus candidates |
 | M5 | Trusted reference registry | versioned file of canonical values (Carbon Engine MRV/IPCC factors, ministry AWD parameters) with source + tolerance | registry values traced to approved artifacts; a mismatch blocks approval until the expert records a justification |
 | M6 | Quarantine + revocation runbook | trigger list, steps, exposure query (retrieval logs by chunk_id), re-evaluation + regression run before re-approval | tabletop on local stack: revoke a chunk, show retrieval stops and exposure window is listed; owner-approved hosted migration only after this |
 | M7 | Flip the characterization | update `test_rag_source_integrity_gap.py`: a contradicted/quarantined poisoned chunk is not retrievable; benchmark `poisoned_claim` case becomes a refusal | only with M1–M5 merged; dev3-01 re-run on a frozen set is the evidence, not the unit test |
+
+### M1 as implemented (2026-11-10, local/CI only, NOT applied to hosted)
+- Migrations `20261110090000_knowledge_status_m1_values.sql` (enum values only; PostgreSQL cannot use a new
+  enum value in the transaction that adds it) and `20261110090100_knowledge_status_lifecycle_m1.sql`
+  (matrix, event log, guard, transition functions, replaced row triggers). Rollback:
+  `supabase/rollbacks/20261110090100_*.down.sql`. It refuses while any row is `expert_review`/`quarantined`
+  and drops the event log, so export it first. The enum values stay.
+- Authorization: the transition functions are SECURITY DEFINER with static SQL, and only `service_role`
+  (and the owner) may EXECUTE them. `authenticated`/`anon` gain nothing. A status change passes the row trigger
+  only if `current_user` is the event log's owner (true inside the functions) AND a transaction-local marker
+  names exactly that row and target. The log has RLS and no policy, `service_role` has SELECT only, and the
+  owner too is refused UPDATE/DELETE/TRUNCATE by trigger.
+- Operator procedure: `docs/rag/RAG_V1_INGESTION.md` §5, "Status transitions".
+- **Temporary limitations of M1 (owner-accepted, closed by later milestones):**
+  - Human identity is not verified. Events record the verified database roles (`actor_session_user`,
+    `actor_role`) and the approver the caller *states* (`stated_approver`). Operators share the
+    `postgres`/`service_role` logins. M2: named operator roles, evidence records, uploader ≠ reviewer ≠ approver.
+  - An owner-level session (`postgres`) could deliberately forge the transition marker, as it could disable
+    a trigger. Ordinary direct updates by it are refused. Pinned by
+    `test_owner_session_marker_forgery_is_the_documented_residual`. M2: a non-owner operator role.
+  - `expert_review` proves only that the stage was passed, not that a qualified expert reviewed the content.
+  - No numeric registry values, no contradiction blocking at approval, no provenance verification, no
+    end-to-end replay. **dev3-01 stays OPEN**, and `test_rag_source_integrity_gap.py` is NOT flipped (M7).

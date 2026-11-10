@@ -5,6 +5,10 @@ Real Postgres, one rolled-back transaction per test (the reviewed `Tx` model of
 test_rag_knowledge_storage.py). Synthetic TEST FIXTURE rows only. Skipped without SUPABASE_DB_URL.
 Refusals are asserted by constraint NAME: a path ST1's grammar accepts but that is not the row's
 own content address must be refused by the ST1.1 constraint itself.
+
+M1 (20261110090100): a version is inserted review_required and approved only through the audited
+expert_review -> approved transition. The constraint refusals below surface from that transition
+with the constraint's own name.
 """
 
 from __future__ import annotations
@@ -18,7 +22,9 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
-from tests.test_rag_knowledge_storage import CHECK_VIOLATION, NOW, _sha, artifact_ref, pytestmark, tx  # noqa: E402
+from tests.knowledge_status_paths import DOCUMENT_PATH, TRANSITION  # noqa: E402
+from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, PERMISSION_DENIED, _sha, artifact_ref,  # noqa: E402
+                                              pytestmark, tx)
 
 __all__ = ["pytestmark", "tx"]       # the module's environment gate and fixture, reused
 
@@ -30,22 +36,18 @@ SHA = _sha("bytes")
 OTHER = _sha("other bytes")
 OWN = f"knowledge-artifacts/{SHA}/guide.pdf"
 
-INSERT = ("insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
-          " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
-          " chunker_version, license_basis, status, approved_by, approved_at, review_note)"
-          " values (%s, %s, 'v1', 't', 'vi', %s, %s, %s, %s, 'p', 'n', 'c', 'official_publication', %s, %s, %s, %s)"
-          " returning id")
-APPROVE = ("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = now(),"
-           " review_note = 'reviewed' where id = %s")
+DRAFT = ("insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+         " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
+         " chunker_version, license_basis)"
+         " values (%s, %s, 'v1', 't', 'vi', %s, %s, %s, %s, 'p', 'n', 'c', 'official_publication') returning id")
 
 
-def _run(tx, sql, params=()):
-    """('ok', first value or None) or ('err', sqlstate, constraint name) -- savepoint-isolated."""
+def _attempt(tx, work):
+    """('ok', work()) or ('err', sqlstate, constraint name) -- savepoint-isolated."""
     tx.settle()
     tx.cur.execute("savepoint b")
     try:
-        tx.cur.execute(sql, params)
-        value = tx.cur.fetchone()[0] if tx.cur.description else None
+        value = work()
         tx.cur.execute("release savepoint b")
         return ("ok", value)
     except psycopg.Error as exc:
@@ -53,10 +55,44 @@ def _run(tx, sql, params=()):
         return ("err", exc.sqlstate, exc.diag.constraint_name)
 
 
+def _run(tx, sql, params=()):
+    """('ok', first value or None) or ('err', sqlstate, constraint name) of one statement."""
+    def work():
+        tx.cur.execute(sql, params)
+        return tx.cur.fetchone()[0] if tx.cur.description else None
+    return _attempt(tx, work)
+
+
+def _walk(tx, doc, path):
+    for frm, to in path:
+        tx.cur.execute(TRANSITION["document"], (doc, frm, to, "reviewed", tx.approver if to == "approved" else None))
+
+
+def _to_approved(tx, doc):
+    tx.cur.execute("select status::text from public.knowledge_documents where id = %s", (doc,))
+    path = DOCUMENT_PATH["approved"]
+    _walk(tx, doc, path if tx.cur.fetchone()[0] == "review_required" else path[1:])
+
+
 def _insert(tx, *, artifact, status="approved", sha=SHA, url="https://example.invalid/doc", document_id="doc", source=None):
-    approved = status == "approved"
-    return _run(tx, INSERT, (source or tx.source(), document_id, url, artifact, sha, _sha("normalized"), status,
-                             tx.approver if approved else None, NOW if approved else None, "reviewed" if approved else None))
+    """A draft with these fields, taken to `status` along the audited path: ('ok', id) or the error."""
+    source = source or tx.source()
+
+    def work():
+        tx.cur.execute(DRAFT, (source, document_id, url, artifact, sha, _sha("normalized")))
+        doc = tx.cur.fetchone()[0]
+        _walk(tx, doc, DOCUMENT_PATH[status])
+        return doc
+    return _attempt(tx, work)
+
+
+def _approve(tx, doc, artifact=None):
+    """Optionally correct the draft's artifact_ref, then approve it through expert_review, in one go."""
+    def work():
+        if artifact is not None:
+            tx.cur.execute("update public.knowledge_documents set artifact_ref = %s where id = %s", (artifact, doc))
+        _to_approved(tx, doc)
+    return _attempt(tx, work)
 
 
 def _statements(path: Path) -> str:
@@ -151,20 +187,21 @@ def test_drafts_are_unchanged(tx, status):
 def test_a_mismatched_draft_cannot_be_approved_until_corrected(tx):
     ok, doc = _insert(tx, artifact=f"knowledge-artifacts/{OTHER}/guide.pdf", status="review_required")
     assert ok == "ok"
-    assert _run(tx, APPROVE, (tx.approver, doc)) == ("err", CHECK_VIOLATION, ST11)
+    assert _approve(tx, doc) == ("err", CHECK_VIOLATION, ST11)
     # artifact_ref is mutable until the first approval (file_sha256 never is)
     assert _run(tx, "update public.knowledge_documents set artifact_ref = %s where id = %s", (OWN, doc)) == ("ok", None)
-    assert _run(tx, APPROVE, (tx.approver, doc)) == ("ok", None)
-    tx.cur.execute("select status, artifact_ref from public.knowledge_documents where id = %s", (doc,))
+    assert _approve(tx, doc) == ("ok", None)
+    tx.cur.execute("select status::text, artifact_ref from public.knowledge_documents where id = %s", (doc,))
     assert tx.cur.fetchone() == ("approved", OWN)
 
 
-def test_correcting_and_approving_in_one_update_is_allowed(tx):
+def test_correcting_and_approving_in_one_transaction_is_allowed(tx):
+    """Under M1 the approval is its own audited step: the correction and the approval run in one
+    transaction (formerly one UPDATE). A wrong correction is refused at the approval."""
     ok, doc = _insert(tx, artifact=None, status="review_required")
     assert ok == "ok"
-    assert _run(tx, APPROVE.replace(" where", ", artifact_ref = %s where"), (tx.approver, f"knowledge-artifacts/{OTHER}/g.pdf", doc)) \
-        == ("err", CHECK_VIOLATION, ST11)
-    assert _run(tx, APPROVE.replace(" where", ", artifact_ref = %s where"), (tx.approver, OWN, doc)) == ("ok", None)
+    assert _approve(tx, doc, artifact=f"knowledge-artifacts/{OTHER}/g.pdf") == ("err", CHECK_VIOLATION, ST11)
+    assert _approve(tx, doc, artifact=OWN) == ("ok", None)
 
 
 def test_lifecycle_after_approval_is_unchanged(tx):
@@ -173,9 +210,11 @@ def test_lifecycle_after_approval_is_unchanged(tx):
     assert _run(tx, "update public.knowledge_documents set artifact_ref = %s where id = %s",
                 (f"knowledge-artifacts/{SHA}/renamed.pdf", doc))[:2] == ("err", CHECK_VIOLATION)   # frozen by the trigger
     for target in ("review_required", "rejected"):
-        assert _run(tx, "update public.knowledge_documents set status = %s where id = %s", (target, doc))[0] == "err"
-    assert _run(tx, "update public.knowledge_documents set status = 'archived' where id = %s", (doc,)) == ("ok", None)
-    assert _run(tx, "update public.knowledge_documents set status = 'approved' where id = %s", (doc,))[0] == "err"
+        assert _run(tx, "update public.knowledge_documents set status = %s where id = %s", (target, doc))[:2] \
+            == ("err", PERMISSION_DENIED)                                   # never a direct update (M1)
+        assert tx.transit("document", doc, "approved", target) == ("err", CHECK_VIOLATION)
+    assert tx.transit("document", doc, "approved", "archived", reason="withdrawn")[0] == "ok"
+    assert tx.transit("document", doc, "archived", "approved") == ("err", CHECK_VIOLATION)
 
 
 # ------------------------------------------------------------------ the migration and its rollback

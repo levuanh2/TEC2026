@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -24,6 +23,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from infrastructure.config import load_settings  # noqa: E402
+from tests.knowledge_status_paths import bring  # noqa: E402
 
 _SETTINGS = load_settings()
 _DB_URL = _SETTINGS.supabase_db_url
@@ -56,18 +56,13 @@ def _sha(text: str) -> str:
 def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=None, farm=None,
                source_status="approved", document_status="approved"):
     """One source + version + chunk (operator path, table owner), in the given statuses."""
-    now = datetime.now(timezone.utc)
     source_id = f"rq-{ids['run']}-{key.replace('_', '-')}"
     ids["sources"].append(source_id)
-    ever_approved = source_status in ("approved", "archived")
     conn.execute(
         "insert into public.knowledge_sources (source_id, title, owner, source_type, visibility,"
-        " organization_id, farm_id, status, approved_by, approved_at, review_note)"
-        " values (%s, %s, 'Test publisher', 'guideline', %s, %s, %s, %s, %s, %s, %s)",
-        (source_id, FIXTURE + key, visibility, org, farm, "approved" if ever_approved else source_status,
-         approver if ever_approved else None, now if ever_approved else None, "fixture" if ever_approved else None))
-    if source_status == "archived":
-        conn.execute("update public.knowledge_sources set status = 'archived' where source_id = %s", (source_id,))
+        " organization_id, farm_id) values (%s, %s, 'Test publisher', 'guideline', %s, %s, %s)",
+        (source_id, FIXTURE + key, visibility, org, farm))
+    bring(conn, "source", source_id, source_status, approver=approver, reason="fixture")   # M1: audited path
     doc = conn.execute(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
         " official_url, artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version,"
@@ -81,18 +76,13 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
                  (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
-    if document_status in ("approved", "archived"):
-        conn.execute("update public.knowledge_documents set status = 'approved', approved_by = %s,"
-                     " approved_at = %s, review_note = 'fixture' where id = %s", (approver, now, doc))
-    if document_status not in ("approved", "review_required"):
-        conn.execute("update public.knowledge_documents set status = %s where id = %s", (document_status, doc))
+    bring(conn, "document", doc, document_status, approver=approver, reason="fixture")   # via expert_review (D3)
     ids[key] = chunk_id
 
 
 def _supersede(conn, ids, approver, key, content):
     """Source `key` (its v1 approved, then archived as superseded) gets a v2 that is approved: the one
     approved version per document (knowledge_documents_one_approved)."""
-    now = datetime.now(timezone.utc)
     source_id = f"rq-{ids['run']}-{key.replace('_', '-')}"
     doc = conn.execute(
         "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
@@ -106,8 +96,7 @@ def _supersede(conn, ids, approver, key, content):
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
                  (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
-    conn.execute("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = %s,"
-                 " review_note = 'fixture v2' where id = %s", (approver, now, doc))
+    bring(conn, "document", doc, "approved", approver=approver, reason="fixture v2")
     ids[key + "_v2"] = chunk_id
 
 
