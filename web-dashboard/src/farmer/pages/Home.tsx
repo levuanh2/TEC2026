@@ -12,6 +12,7 @@ import { useWritableSeason } from '../writeAccess'
 import { NoActiveSeason } from '../StartSeason'
 import { HOME_RECENT, primarySeason, useActivitySummary, useCarbonReadiness, useMetrics, useRecentActivities, useScope, type SeasonCtx } from '../scope'
 import type { ActivitySummary } from '../../api/crops'
+import { FieldBanner } from '../../components/BrandScenery'
 
 /** While the scope itself is loading, dependent sections are still "loading" too. */
 function pending<T>(state: QueryState<T>, scopeLoading: boolean): QueryState<T> {
@@ -59,6 +60,7 @@ export function FarmerHome({ viewer }: { viewer: CurrentUser }) {
 
   return (
     <>
+      <FieldBanner farmer />
       <header className="fw-greet fw-greet--compact">
         <div>
           <p className="fw-greet__hello">{greeting()}{name ? `, ${name}` : ''}</p>

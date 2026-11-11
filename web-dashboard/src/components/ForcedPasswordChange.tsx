@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { replaceTemporaryPassword, signOut } from '../api/auth'
 import { passwordProblems } from '../farmer/ChangePassword'
 import { Notice } from '../ui'
+import { AuthScenery } from './BrandScenery'
 
 /* Forced first login. An account the cooperative provisioned starts with a
  * temporary password the manager has seen; until it is replaced the server
@@ -32,7 +33,7 @@ export function ForcedPasswordChange({ session, done }: { session: Session; done
   }
 
   return (
-    <main className="login">
+    <AuthScenery>
       <section className="login-card" data-testid="forced-password-change">
         <p className="eyebrow">AGRICARBON</p>
         <h1>Đặt mật khẩu của bạn</h1>
@@ -59,6 +60,6 @@ export function ForcedPasswordChange({ session, done }: { session: Session; done
           <button type="button" className="btn btn--ghost" onClick={() => void signOut()} disabled={busy}>Đăng xuất</button>
         </form>
       </section>
-    </main>
+    </AuthScenery>
   )
 }

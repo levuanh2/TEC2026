@@ -1,5 +1,15 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## UI refresh (2026-11-10)
+
+Publishing ownership (2026-11-11): Codex owns the UI refresh files and its report
+while preparing the user-requested commit and push to `chinh-sua-giao-dien`.
+Preserve existing branch history; no force-push, backend edits or deployment.
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/**` (presentation only), `web-dashboard/index.html`, `web-dashboard/public/visuals/**`, `web-dashboard/tests/e2e/visual-refresh.spec.ts`, `docs/UI_REFRESH_2026_11.md` | — (released) | User-authorized coordinated Farmer/Management visual refresh, login artwork, slogan, responsive styling and motion. Preserve API/auth/business behavior. Herdr executable unavailable in this session. | DONE: Vitest 768/768; build PASS; mock Playwright 19/19 including 13 routes × 5 widths, login a11y/keyboard, reduced motion and overlay positioning. Local preview opened; no hosted writes, commit, push or deploy. |
+
 Claude và Codex cùng chạy trong cùng workspace Herdr, cùng làm repo này. Không
 có kênh tự động khác — mọi phối hợp qua Herdr pane messaging + file này.
 

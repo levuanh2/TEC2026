@@ -24,6 +24,7 @@ import {
 import { AccountName, Sidebar } from './components/Sidebar'
 import { useMobileDrawer } from './components/useMobileDrawer'
 import { ForcedPasswordChange } from './components/ForcedPasswordChange'
+import { AuthScenery } from './components/BrandScenery'
 import { prefetchFarmerScope } from './farmer/scope'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -95,9 +96,9 @@ function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void
     }
   }
   return (
-    <main className="login">
-      <section className="login-card">
-        <p className="eyebrow">AGRICARBON</p>
+    <AuthScenery>
+      <section className="login-card login-card--welcome">
+        <p className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</p>
         <h1>Đăng nhập</h1>
         <p>Nhật ký canh tác, hiệu suất tài nguyên và Carbon cho lúa gạo.</p>
         {ended && !error && (
@@ -109,19 +110,20 @@ function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void
         <form onSubmit={submit}>
           <label>
             Email
-            <input name="email" type="email" autoComplete="username" required />
+            <input name="email" type="email" autoComplete="username" placeholder="Nhập địa chỉ email của bạn" required />
           </label>
           <label>
             Mật khẩu
-            <input name="password" type="password" autoComplete="current-password" required />
+            <input name="password" type="password" autoComplete="current-password" placeholder="Nhập mật khẩu" required />
           </label>
           {error && <Notice kind="error">{error}</Notice>}
-          <button className="btn" disabled={busy}>
+          <button className="btn login-submit" disabled={busy} aria-busy={busy}>
+            <Ico name={busy ? 'refresh' : 'denied'} size={17} />
             {busy ? 'Đang đăng nhập…' : ended === 'expired' ? 'Đăng nhập lại' : 'Đăng nhập'}
           </button>
         </form>
       </section>
-    </main>
+    </AuthScenery>
   )
 }
 
