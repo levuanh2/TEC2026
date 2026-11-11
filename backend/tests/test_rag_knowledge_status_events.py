@@ -319,6 +319,8 @@ M1 = ROOT / "supabase/migrations/20261110090100_knowledge_status_lifecycle_m1.sq
 M1_ROLLBACK = ROOT / "supabase/rollbacks/20261110090100_knowledge_status_lifecycle_m1.down.sql"
 M2 = ROOT / "supabase/migrations/20261110120000_knowledge_verified_expert_approval_m2.sql"
 M2_ROLLBACK = ROOT / "supabase/rollbacks/20261110120000_knowledge_verified_expert_approval_m2.down.sql"
+M3 = ROOT / "supabase/migrations/20261111090000_knowledge_effective_dates_m3.sql"
+M3_ROLLBACK = ROOT / "supabase/rollbacks/20261111090000_knowledge_effective_dates_m3.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -341,8 +343,16 @@ def _live_body(tx, name):
 
 
 def test_rollback_restores_migration_a_and_replay_restores_m1(tx):
-    """Rollbacks unwind newest first (M2, then M1); replay applies M1, then M2."""
+    """Rollbacks unwind newest first (M3, M2, then M1); replay applies M1, M2, then M3."""
     tx.settle()
+    tx.cur.execute("savepoint order_check")
+    tx.cur.execute("set local knowledge.m2_rollback_evidence_exported = 'yes'")
+    with pytest.raises(psycopg.errors.RaiseException, match="M3 is installed"):
+        tx.cur.execute(_without_tx_control(M2_ROLLBACK))             # M2 never unwinds under M3
+    tx.cur.execute("rollback to savepoint order_check")
+    tx.cur.execute("set local knowledge.m3_rollback_evidence_exported = 'yes'")
+    tx.cur.execute(_without_tx_control(M3_ROLLBACK))
+    assert _live_body(tx, TRIGGER_FUNCTIONS[1]) == _body_in(M2, TRIGGER_FUNCTIONS[1])   # M3 rollback restores M2 verbatim
     tx.cur.execute("set local knowledge.m2_rollback_evidence_exported = 'yes'")   # the explicit confirmation
     tx.cur.execute(_without_tx_control(M2_ROLLBACK))
     for name in TRIGGER_FUNCTIONS[:2]:                               # M2 rollback restores M1 verbatim
@@ -358,6 +368,8 @@ def test_rollback_restores_migration_a_and_replay_restores_m1(tx):
     tx.cur.execute(M2.read_text(encoding="utf-8"))                   # ... and M2 on top, and it works
     for name in TRIGGER_FUNCTIONS[:2]:
         assert _live_body(tx, name) == _body_in(M2, name), name
+    tx.cur.execute(M3.read_text(encoding="utf-8"))                   # ... and M3 on top
+    assert _live_body(tx, TRIGGER_FUNCTIONS[1]) == _body_in(M3, TRIGGER_FUNCTIONS[1])
     doc = tx.document(tx.source(), status="review_required")
     assert tx.transit("document", doc, "review_required", "expert_review")[0] == "ok"
     assert [e[1] for e in tx.events("document", doc)] == ["expert_review"]

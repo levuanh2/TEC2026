@@ -165,9 +165,9 @@ select entity_type, source_id, document_pk, decided_at from public.knowledge_app
 - No UI/API for reviewers to list their queue or read non-approved drafts (RLS stays approved-only).
   They need an out-of-band artifact channel or a later read RPC.
 - An approved version is replaced in two steps: an operator archives or quarantines the old one, then
-  the approver approves the new one. Retrieval is briefly fail-closed in between. M3 `supersedes` can
-  make this atomic.
-- Effective dates, expiry and supersession are M3. Claims, contradictions and the reference registry are M4/M5.
+  the approver approves the new one. Retrieval is briefly fail-closed in between. M3 `supersedes`
+  makes this atomic (`RAG_V15_M3_EFFECTIVE_DATES.md`).
+- Effective dates, expiry and supersession are M3 (a separate, stacked PR). Claims, contradictions and the reference registry are M4/M5.
 - A registered person's Auth account cannot be deleted (evidence and registry rows reference it,
   `on delete restrict`): revoke the personnel record instead. GoTrue's admin delete then fails.
 - Demo approvals exist only while the owner switch is on, but once made they are retrievable until quarantined.

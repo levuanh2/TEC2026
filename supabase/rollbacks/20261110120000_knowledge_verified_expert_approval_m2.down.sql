@@ -22,6 +22,10 @@ begin
   if exists (select 1 from public.knowledge_documents where status = 'expert_review') then
     raise exception 'M2 rollback refused: document versions are in expert_review; let the reviewer decide or reject them first';
   end if;
+  -- M3 (20261111090000) replaced M2 functions and reads M2 tables: unwind newest first.
+  if to_regclass('public.knowledge_expiry_events') is not null then
+    raise exception 'M2 rollback refused: M3 is installed; run rollbacks/20261111090000_knowledge_effective_dates_m3.down.sql first';
+  end if;
 end;
 $$;
 
