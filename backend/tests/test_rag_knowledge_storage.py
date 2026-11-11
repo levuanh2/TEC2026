@@ -945,6 +945,11 @@ M2_DEMO = {"knowledge_demo_approve_document", "knowledge_demo_approve_source", "
 M3_HELPERS = {"knowledge_policy_time_zone", "knowledge_policy_date", "knowledge_approval_validity", "knowledge_in_force",
               "knowledge_check_supersedes", "knowledge_supersede_for", "knowledge_expiry_events_guard"}
 M3_EXPIRY = {"knowledge_expire_documents", "knowledge_expiry_due"}
+# M4 (20261112090000): claims and contradiction candidates. The two recording functions and the
+# evidence-state reader are SECURITY DEFINER with EXECUTE for service_role only; the rest are internal.
+M4_HELPERS = {"knowledge_claim_evidence_guard", "knowledge_classify_claim_pair"}
+M4_OPERATOR = {"knowledge_record_claims", "knowledge_record_contradiction_candidates",
+               "knowledge_document_evidence_state"}
 
 
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
@@ -970,14 +975,14 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     "knowledge_demo_mode_stamp", "knowledge_demo_reason",
                                     "knowledge_demo_require_enabled", *M2_DEMO,
                                     # ... and the verified-human RPCs (EXECUTE for authenticated only)
-                                    *M2_RPCS, *M3_HELPERS, *M3_EXPIRY}
+                                    *M2_RPCS, *M3_HELPERS, *M3_EXPIRY, *M4_HELPERS, *M4_OPERATOR}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
     # only, see test_rag_knowledge_m2_approval.py). Every internal helper is SECURITY INVOKER.
     assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
                                             "knowledge_transition_document", *M2_RPCS, *M2_DEMO,
-                                            *M3_EXPIRY}, rows
+                                            *M3_EXPIRY, *M4_OPERATOR}, rows
     tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
     for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere

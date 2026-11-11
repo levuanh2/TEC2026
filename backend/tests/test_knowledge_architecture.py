@@ -11,6 +11,7 @@ AST-based, like test_rag_architecture.py:
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ KNOWLEDGE = sorted((BACKEND / "knowledge").rglob("*.py"))
 REPO = BACKEND / "infrastructure" / "knowledge_repo.py"
 ISOLATION = BACKEND / "infrastructure" / "pdf_isolation.py"
 CLI = BACKEND / "scripts" / "ingest_knowledge.py"
+CLAIMS_REPO = BACKEND / "infrastructure" / "knowledge_claims_repo.py"
 
 _STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "json", "math", "re", "typing", "unicodedata",
            "collections", "knowledge"}
@@ -50,7 +52,9 @@ def test_knowledge_package_has_the_approved_modules():
                      "parsers/__init__.py", "parsers/markdown.py", "parsers/text.py", "parsers/pdf.py",
                      # offline source-integrity review aid (pure; never changes a status)
                      "integrity/__init__.py", "integrity/provenance.py", "integrity/claims.py",
-                     "integrity/references.py", "integrity/review.py"}
+                     "integrity/references.py", "integrity/review.py",
+                     # M4: contradiction candidates between stored claims (pure; never changes a status)
+                     "integrity/contradictions.py"}
 
 
 @pytest.mark.parametrize("path", KNOWLEDGE, ids=lambda p: p.relative_to(BACKEND).as_posix())
@@ -90,10 +94,29 @@ def test_ingestion_adapter_only_inserts_and_reads_and_never_approves():
     assert "disable trigger" not in source.lower() and "session_replication_role" not in source
 
 
+def test_claims_adapter_only_reads_and_calls_the_two_recording_functions():
+    """M4 operator path: SELECTs only, and the only functions it calls record claims and candidates
+    or read an evidence state. It never writes a table or a status and never approves or quarantines."""
+    statements = _sql(CLAIMS_REPO)
+    assert statements and {s.split()[0] for s in statements} == {"select"}
+    source = CLAIMS_REPO.read_text(encoding="utf-8").lower()
+    called = set(re.findall(r"private\.(knowledge_\w+)\(", source))
+    assert called == {"knowledge_record_claims", "knowledge_record_contradiction_candidates",
+                      "knowledge_document_evidence_state"}
+    for banned in ("knowledge_transition", "knowledge_demo", "knowledge_expire", "status =", "disable trigger",
+                   "session_replication_role", "set_config", "insert into", "update public", "delete from"):
+        assert banned not in source, banned
+    for path in BACKEND.rglob("*.py"):                                # only the operator CLI and tests import it
+        parts = set(path.relative_to(BACKEND).parts)
+        if {"tests", "scripts", ".venv", "venv"} & parts or path == CLAIMS_REPO:
+            continue
+        assert "knowledge_claims_repo" not in path.read_text(encoding="utf-8"), path.relative_to(BACKEND)
+
+
 def test_no_app_layer_imports_the_ingestion_pipeline():
     production = [p for p in BACKEND.rglob("*.py")
                   if not {"tests", "scripts", "knowledge", ".venv", "venv"} & set(p.relative_to(BACKEND).parts)
-                  and p not in (REPO, ISOLATION)]
+                  and p not in (REPO, ISOLATION, CLAIMS_REPO)]
     for path in production:
         roots = set()
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

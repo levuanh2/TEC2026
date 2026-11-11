@@ -22,7 +22,8 @@ import pytest
 
 from tests import knowledge_status_paths as paths
 from tests.test_rag_knowledge_m2_approval import DEMO_DOC, _demo, as_role, code, draft, m2, owner  # noqa: F401
-from tests.test_rag_knowledge_status_events import M2, M3, M3_ROLLBACK, _body_in, _live_body, _without_tx_control
+from tests.test_rag_knowledge_status_events import (M2, M3, M3_ROLLBACK, _body_in, _live_body, _without_tx_control,
+                                                    unwind_m4)
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, INVALID_PARAMETER, PERMISSION_DENIED,  # noqa: E402
                                               _DB_URL, pytestmark, psycopg, tx)
 
@@ -713,6 +714,7 @@ def test_the_operator_path_still_cannot_approve_and_a_forged_marker_gets_no_wind
 def test_m3_rollback_needs_a_confirmation_and_refuses_while_it_would_republish_expired_guidance(tx, m2):
     _, doc, _ = approved(tx, m2, content="awd rollback expired")
     force(tx, doc, effective_to=today(tx) - DAY)
+    unwind_m4(tx)                                                   # newest first (M4 replaces nothing)
     tx.cur.execute("savepoint rb")
     with pytest.raises(psycopg.errors.RaiseException, match="DROPS the expiry evidence"):
         tx.cur.execute(_without_tx_control(M3_ROLLBACK))
@@ -735,6 +737,7 @@ def test_m3_rollback_needs_a_confirmation_and_refuses_while_it_would_republish_e
 def test_m3_rollback_restores_m2_and_migration_a_verbatim_and_m3_replays(tx, m2):
     _, doc, chunk = approved(tx, m2, content="awd rollback clean")
     tx.settle()
+    unwind_m4(tx)
     tx.cur.execute("set local knowledge.m3_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(M3_ROLLBACK))
     tx.cur.execute("select count(*) from information_schema.columns where table_name = 'knowledge_documents'"

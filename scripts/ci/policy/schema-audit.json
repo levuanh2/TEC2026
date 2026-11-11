@@ -305,6 +305,20 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_claim_evidence_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_classify_claim_pair(bigint,bigint,numeric)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_demo_approve_document(uuid,uuid,text)": {
    "config": [
     "search_path=\"\""
@@ -346,6 +360,13 @@
    ],
    "execute": [],
    "security_definer": false
+  },
+  "private.knowledge_document_evidence_state(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
   },
   "private.knowledge_document_snapshot(uuid)": {
    "config": [
@@ -452,6 +473,20 @@
    "execute": [
     "authenticated"
    ],
+   "security_definer": true
+  },
+  "private.knowledge_record_claims(uuid,text,jsonb)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.knowledge_record_contradiction_candidates(text,jsonb)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": true
   },
   "private.knowledge_registry_admin_actor()": {
@@ -1797,6 +1832,14 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_claims": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_contradiction_candidates": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_documents": {
    "enabled": true,
    "forced": false
@@ -2040,6 +2083,10 @@
   "knowledge_approval_records.knowledge_approval_records_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_chunks.knowledge_chunks_immutable": "private.enforce_knowledge_chunk_immutability()",
   "knowledge_chunks.knowledge_chunks_search_fields": "private.knowledge_chunks_search_fields()",
+  "knowledge_claims.knowledge_claims_guard": "private.knowledge_claim_evidence_guard()",
+  "knowledge_claims.knowledge_claims_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_contradiction_candidates.knowledge_contradiction_candidates_guard": "private.knowledge_claim_evidence_guard()",
+  "knowledge_contradiction_candidates.knowledge_contradiction_candidates_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_documents.knowledge_documents_immutable": "private.enforce_knowledge_document_immutability()",
   "knowledge_expert_reviews.knowledge_expert_reviews_guard": "private.knowledge_evidence_guard()",
   "knowledge_expert_reviews.knowledge_expert_reviews_no_truncate": "private.knowledge_m2_no_truncate()",
@@ -2147,6 +2194,10 @@
   "knowledge_chunks_chunk_key": "CREATE UNIQUE INDEX knowledge_chunks_chunk_key ON public.knowledge_chunks USING btree (document_pk, chunk_id)",
   "knowledge_chunks_ordinal_key": "CREATE UNIQUE INDEX knowledge_chunks_ordinal_key ON public.knowledge_chunks USING btree (document_pk, ordinal)",
   "knowledge_chunks_pkey": "CREATE UNIQUE INDEX knowledge_chunks_pkey ON public.knowledge_chunks USING btree (id)",
+  "knowledge_claims_identity_key": "CREATE UNIQUE INDEX knowledge_claims_identity_key ON public.knowledge_claims USING btree (document_pk, extractor_version, claim_id)",
+  "knowledge_claims_pkey": "CREATE UNIQUE INDEX knowledge_claims_pkey ON public.knowledge_claims USING btree (id)",
+  "knowledge_contradiction_candidates_pair_key": "CREATE UNIQUE INDEX knowledge_contradiction_candidates_pair_key ON public.knowledge_contradiction_candidates USING btree (claim_a, claim_b, analysis_version, policy_date, classification)",
+  "knowledge_contradiction_candidates_pkey": "CREATE UNIQUE INDEX knowledge_contradiction_candidates_pkey ON public.knowledge_contradiction_candidates USING btree (id)",
   "knowledge_documents_identity_key": "CREATE UNIQUE INDEX knowledge_documents_identity_key ON public.knowledge_documents USING btree (source_id, document_id, document_version)",
   "knowledge_documents_one_approved": "CREATE UNIQUE INDEX knowledge_documents_one_approved ON public.knowledge_documents USING btree (source_id, document_id) WHERE (status = 'approved'::knowledge_status)",
   "knowledge_documents_pkey": "CREATE UNIQUE INDEX knowledge_documents_pkey ON public.knowledge_documents USING btree (id)",
