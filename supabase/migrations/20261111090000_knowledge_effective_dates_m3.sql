@@ -24,7 +24,7 @@
 --   * Supersession is atomic: the approval archives the approved version it supersedes in the same
 --     transaction (its own audit event names the successor), so there is neither an overlap nor a
 --     gap. One approved version per (source_id, document_id) stays enforced by the Migration A index.
---     A demo approval (M2 owner switch) replaces only a demo-approved version, never a verified one.
+--     A demo approval (M2 owner switch) supersedes only a demo-approved version, never a verified one.
 --   * The window and the superseded version are frozen from expert_review on and covered by the M2
 --     review snapshot hash: changing them invalidates the evidence exactly like any other metadata.
 --   * Expiry: private.knowledge_expire_documents (EXECUTE service_role only) moves approved versions
@@ -163,7 +163,9 @@ grant execute on function private.knowledge_check_supersedes(text, uuid) to serv
 -- Called by the approval functions (definer context) right before they approve `p_document_pk`:
 -- archives the approved version it supersedes, with its own audit event naming the successor.
 -- Returns that event id, or null when there is nothing to archive. A demo approval (p_demo) refuses
--- to replace a version whose approval is not a demo record.
+-- a superseded version whose approval is not a demo record, whatever its status is now.
+-- A version may have several successors (one text split into two documents): each approval finds
+-- the target either approved (and archives it) or already archived.
 create function private.knowledge_supersede_for(p_document_pk uuid, p_demo boolean)
 returns bigint
 language plpgsql
@@ -180,16 +182,17 @@ begin
   end if;
   select t.status into v_status from public.knowledge_documents t
    where t.id = v_doc.supersedes_document_pk for update;
-  if v_status is distinct from 'approved' then
-    return null;
-  end if;
+  -- whatever the target's status today: a demo version never claims to succeed a verified one
   if p_demo and not exists (
       select 1 from public.knowledge_approval_records a
        where a.entity_type = 'document' and a.document_pk = v_doc.supersedes_document_pk
          and a.decision = 'approve' and a.assurance = 'demo_unverified') then
-    raise exception 'knowledge document %: a demo approval never replaces a version that was not demo-approved'
-      ' (archive it through the operator transition first, or use the verified flow)', p_document_pk
+    raise exception 'knowledge document %: a demo approval never supersedes a version that was not demo-approved'
+      ' (ingest it without the link, or use the verified flow)', p_document_pk
       using errcode = '42501';
+  end if;
+  if v_status is distinct from 'approved' then
+    return null;
   end if;
   return private.knowledge_apply_document_transition(
     v_doc.supersedes_document_pk, 'approved', 'archived',
@@ -718,7 +721,9 @@ security definer
 set search_path = ''
 as $$
   select d.id, d.source_id, d.document_id, d.document_version,
-         case when d.effective_to < t.today then 'effective_to_passed' else 'approval_validity_passed' end,
+         -- the date that passed FIRST is the cause, however late the run is
+         case when d.effective_to < t.today and d.effective_to <= d.approval_expires_on
+              then 'effective_to_passed' else 'approval_validity_passed' end,
          d.effective_to, d.approval_expires_on, t.today
     from public.knowledge_documents d
    cross join (select private.knowledge_policy_date(pg_catalog.now()) as today) t
@@ -729,7 +734,8 @@ $$;
 -- The controlled expiry step: at most p_limit approved versions that are no longer in force go to
 -- `quarantined` (M1 audited transition, one-way), each with its evidence row, in the caller's
 -- transaction. Rows locked by another transaction are skipped (a concurrent run or a concurrent
--- operator transition never double-expires or blocks). Returns how many it quarantined.
+-- operator transition never double-expires or blocks). Returns how many it quarantined. The audit
+-- reason is written in ISO dates whatever the caller's DateStyle.
 create function private.knowledge_expire_documents(p_limit integer default 100)
 returns integer
 language plpgsql
@@ -755,13 +761,17 @@ begin
      limit p_limit
        for update of d skip locked
   loop
-    v_cause := case when v_row.effective_to < v_today then 'effective_to_passed' else 'approval_validity_passed' end;
+    -- the date that passed FIRST is the cause, however late the run is
+    v_cause := case when v_row.effective_to < v_today and v_row.effective_to <= v_row.approval_expires_on
+                    then 'effective_to_passed' else 'approval_validity_passed' end;
     v_event := private.knowledge_apply_document_transition(
       v_row.id, 'approved', 'quarantined',
       'EXPIRED (automatic): ' || case when v_cause = 'effective_to_passed'
-                                      then 'effective_to ' || v_row.effective_to::text
-                                      else 'approval validity ' || v_row.approval_expires_on::text end
-        || ' passed on policy date ' || v_today::text || ' (' || v_zone || '); a new version is required',
+                                      then 'effective_to ' || pg_catalog.to_char(v_row.effective_to, 'YYYY-MM-DD')
+                                      else 'approval validity '
+                                           || pg_catalog.to_char(v_row.approval_expires_on, 'YYYY-MM-DD') end
+        || ' passed on policy date ' || pg_catalog.to_char(v_today, 'YYYY-MM-DD') || ' (' || v_zone
+        || '); a new version is required',
       null);
     perform private.knowledge_m2_set_marker('knowledge_expiry_events');
     insert into public.knowledge_expiry_events (document_pk, source_id, document_id, document_version, cause,

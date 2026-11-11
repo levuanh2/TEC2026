@@ -79,14 +79,18 @@ version is already quarantined or archived, the approval just approves.
 One approved version per `(source_id, document_id)` is still the Migration A unique index: a second
 version without a declared supersession is refused (23505) as before.
 
+A version may have several successors (one text split into two documents): each approval finds the
+target either approved, and archives it, or already archived.
+
 **Demo path.** `private.knowledge_demo_approve_document` follows the same window rules and gets the same
-two-year expiry. It may replace only a version whose approval is itself a demo record; replacing a
-verified (or pre-M2) approved version is refused (42501). The verified flow may replace a demo version.
+two-year expiry. It may supersede only a version whose approval is itself a demo record; naming a
+verified (or pre-M2) version is refused (42501) whatever that version's status is now, so a demo
+version never claims to succeed a verified one. The verified flow may replace a demo version.
 
 ## 6. Expiry
 
 - `private.knowledge_expiry_due()`: the dry run. Lists the approved versions the next run would
-  quarantine, with the cause. Read-only.
+  quarantine, with the cause (the date that passed first, however late the run is). Read-only.
 - `private.knowledge_expire_documents(p_limit default 100, 1–1000)`: moves approved versions that are
   no longer in force to `quarantined` through the M1 audited transition and writes one
   `public.knowledge_expiry_events` row per version (cause, the dates, the policy date and zone, the
@@ -121,8 +125,8 @@ restores verbatim the Migration A policy and retrieval function and the M2 snaps
 every validity window**, so it needs `set local knowledge.m3_rollback_evidence_exported = 'yes'`
 after an export. It refuses while
 
-- an approved version is no longer in force (the rollback would make it retrievable again; run the
-  expiry step first), or
+- an approved version is not in force (the rollback would make it retrievable again; run the expiry
+  step first, and quarantine with the operator transition any version it leaves), or
 - a version is under expert review with a window or a superseded version (its snapshot covers them).
 
 ## 8. Tests

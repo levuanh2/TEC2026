@@ -403,10 +403,10 @@ def test_expiry_quarantines_exactly_the_versions_out_of_force_with_immutable_evi
     assert expire(tx) == 0                                                         # nothing is out of force yet
     force(tx, ended, effective_to=t - DAY)
     force(tx, lapsed, approval_expires_on=t - DAY)
-    force(tx, both, effective_to=t - 2 * DAY, approval_expires_on=t - DAY)
+    force(tx, both, effective_to=t - DAY, approval_expires_on=t - 2 * DAY)        # the approval lapsed FIRST
     status, due = as_role(tx, "service_role", DUE)
     assert status == "ok" and {row for row in due if row[0] in (ended, lapsed, both, last_day, open_ended)} == {
-        (ended, "effective_to_passed"), (lapsed, "approval_validity_passed"), (both, "effective_to_passed")}
+        (ended, "effective_to_passed"), (lapsed, "approval_validity_passed"), (both, "approval_validity_passed")}
     assert tx.status_of("document", ended) == "approved"                           # the dry run changes nothing
     assert expire(tx) == 3
     assert [tx.status_of("document", d) for d in (ended, lapsed, both, last_day, open_ended)] == [
@@ -421,7 +421,10 @@ def test_expiry_quarantines_exactly_the_versions_out_of_force_with_immutable_evi
     assert (cause, eff_to, policy_date, zone, role, frm, to, event_doc, same_xact) == (
         "effective_to_passed", t - DAY, t, ZONE, "service_role", "approved", "quarantined", ended, True)
     assert expires == two_years_after(tx, t)
-    assert reason.startswith("EXPIRED (automatic): effective_to ") and ZONE in reason
+    assert reason == (f"EXPIRED (automatic): effective_to {(t - DAY).isoformat()} passed on policy date"
+                      f" {t.isoformat()} ({ZONE}); a new version is required")
+    tx.cur.execute("select cause from public.knowledge_expiry_events where document_pk = %s", (both,))
+    assert tx.cur.fetchone()[0] == "approval_validity_passed"                      # the date that passed first
     assert ended_chunk not in tx.rpc_ids(tx.member, tx.season_a, "awd expiry ended")
     # M1 decision D1: an expired version never returns; it can only be archived
     assert tx.transit("document", ended, "quarantined", "approved") == ("err", CHECK_VIOLATION)
@@ -431,6 +434,17 @@ def test_expiry_quarantines_exactly_the_versions_out_of_force_with_immutable_evi
 @pytest.mark.parametrize("limit", [None, 0, -1, 1001])
 def test_an_expiry_run_is_bounded(tx, limit):
     assert as_role(tx, "service_role", EXPIRE, (limit,)) == ("err", INVALID_PARAMETER)
+
+
+def test_the_expiry_audit_reason_uses_iso_dates_whatever_the_datestyle(tx, m2):
+    t = today(tx)
+    _, doc, _ = approved(tx, m2, content="awd datestyle")
+    force(tx, doc, approval_expires_on=t - DAY)
+    tx.cur.execute("set local datestyle = 'German, DMY'")
+    assert expire(tx) == 1
+    assert tx.events("document", doc)[-1][2] == (
+        f"EXPIRED (automatic): approval validity {(t - DAY).isoformat()} passed on policy date {t.isoformat()}"
+        f" ({ZONE}); a new version is required")
 
 
 def test_an_expiry_run_stops_at_its_limit(tx, m2):
@@ -628,6 +642,18 @@ def test_supersession_never_crosses_a_scope(tx, m2):
     assert [tx.status_of("document", d) for d in (public_doc, tenant_b_doc)] == ["approved", "approved"]
 
 
+def test_a_version_may_have_two_successors(tx, m2):
+    """One text split into two documents: the first approval archives the old version, the second
+    finds it archived and just approves."""
+    src, old, _ = approved(tx, m2, content="awd split old")
+    part1, _ = version(tx, m2, src, document_id="doc-part1", content="awd split one", supersedes_document_pk=old)
+    part2, _ = version(tx, m2, src, document_id="doc-part2", content="awd split two", supersedes_document_pk=old)
+    approve(tx, m2, part1)
+    approve(tx, m2, part2)
+    assert [tx.status_of("document", d) for d in (old, part1, part2)] == ["archived", "approved", "approved"]
+    assert [e[1] for e in tx.events("document", old)].count("archived") == 1
+
+
 def test_one_approved_version_per_document_still_holds_without_a_declared_supersession(tx, m2):
     src, old, _ = approved(tx, m2, content="awd undeclared old")
     new, _ = version(tx, m2, src, version="v2", content="awd undeclared new")
@@ -651,6 +677,10 @@ def test_a_demo_approval_replaces_a_demo_version_but_never_a_verified_one(tx, m2
     assert as_role(tx, "service_role", DEMO_DOC, (demo_new, tx.approver, "demo two"))[0] == "ok"
     assert (tx.status_of("document", demo_old), tx.status_of("document", demo_new)) == ("archived", "approved")
     assert tx.events("document", demo_old)[-1][2].startswith("DEMO - NOT EXPERT-REVIEWED: superseded by ")
+    # ... nor does a demo version claim to succeed a verified one that is no longer approved
+    tx.transition("document", verified, "approved", "quarantined", "dispute")
+    assert as_role(tx, "service_role", DEMO_DOC, (over_verified, tx.approver, "demo")) == ("err", PERMISSION_DENIED)
+    assert tx.status_of("document", over_verified) == "review_required"
     # the verified flow may replace a demo version
     by_verified, _ = version(tx, m2, src, document_id="doc-demo", version="v3", content="awd demo verified new",
                              supersedes_document_pk=demo_new)

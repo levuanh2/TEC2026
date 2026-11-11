@@ -10,8 +10,10 @@
 -- supersedes_document_pk, approval_expires_on of public.knowledge_documents first, then confirm with
 --   set local knowledge.m3_rollback_evidence_exported = 'yes';
 -- Refuses while
---   * an approved version is no longer in force (rolling back would make it retrievable again: run
---     private.knowledge_expire_documents first), or
+--   * an approved version is not in force (rolling back would make it retrievable again: run
+--     private.knowledge_expire_documents first; a version it does not take, e.g. one whose
+--     effective_from an owner moved into the future, is quarantined with the operator transition
+--     private.knowledge_transition_document(id, 'approved', 'quarantined', reason)), or
 --   * a version is in expert_review with a window or a superseded version (its review snapshot
 --     hashes them; return or decide it first).
 -- The M1 event log keeps the expiry and supersession events as history.
@@ -29,7 +31,8 @@ begin
                 and not private.knowledge_in_force(d.effective_from, d.effective_to, d.approval_expires_on,
                                                    private.knowledge_policy_date(pg_catalog.now()))) then
     raise exception 'M3 rollback refused: approved versions are no longer in force (they would become'
-      ' retrievable again); run private.knowledge_expire_documents first';
+      ' retrievable again); run private.knowledge_expire_documents, then quarantine any version it'
+      ' leaves with private.knowledge_transition_document';
   end if;
   if exists (select 1 from public.knowledge_documents d
               where d.status = 'expert_review'
