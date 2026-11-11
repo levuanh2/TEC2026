@@ -26,9 +26,8 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ingest_knowledge import target_of  # noqa: E402
+from scripts.ingest_knowledge import target_of  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
