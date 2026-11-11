@@ -2,8 +2,9 @@
 
 ## UI refresh (2026-11-10)
 
-Publishing ownership (2026-11-11): Codex owns the UI refresh files and its report
-while preparing the user-requested commit and push to `chinh-sua-giao-dien`.
+Publishing scope (2026-11-11): Codex prepared the UI refresh files and its report
+for the user-requested commit and push to the new branch
+`ui/agricarbon-refresh-2026-11-11` (the latest user request explicitly asks for a new branch).
 Preserve existing branch history; no force-push, backend edits or deployment.
 
 | Files | Owner | Task | Status |
@@ -38,6 +39,8 @@ Không sửa file agent khác đang sở hữu. Trước khi sửa:
 3. Khai báo ownership tại đây trước khi bắt đầu.
 
 ## File ownership (cập nhật liên tục — sửa xong thì release)
+
+| `web-dashboard/src/farmer/FarmerExperience.tsx`, `web-dashboard/src/farmer/font-fix.css` (new), `web-dashboard/index.html` | — (released) | Fix Vietnamese display-font rendering; no edits to dirty colour CSS files. | DONE: 84 source files and 48 route/viewport views scanned, 6 activity dialogs checked, visual desktop/mobile; browser smoke 2 passed, Vitest 153 passed, build passed |
 
 | `backend/api.py`, `backend/main.py`, `backend/schemas.py`, `backend/service.py`, `backend/infrastructure/config.py`, `backend/infrastructure/write_repo.py` (new), `backend/tests/test_activity_writes.py` (new), `supabase/migrations/20260910080441_farmer_web_activity_idempotency.sql`, `docs/FARMER_WEB_WRITE_CONTRACT.md`, `docs/API_CATALOG.md`, `docs/openapi.json` | — (released) | FW-2 Part 1 FastAPI Farmer online activity writes for fertilizer/irrigation/harvest only: authorization, atomic persistence, idempotency and tests. No React write UI. | DONE: backend 165 passed; web 23 passed/build passed; mock Playwright Farmer + Management passed; no hosted mutation or migration deployment. |
 

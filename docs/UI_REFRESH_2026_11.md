@@ -6,7 +6,7 @@ Chỉ thay đổi trình bày React/CSS, nội dung thương hiệu và tài ngu
 Giữ nguyên API, xác thực, phân quyền, cache, thao tác ghi và công thức nghiệp vụ.
 Không thay đổi dependency hoặc lockfile. Lượt thiết kế ngày 10/11 không commit,
 push hay deploy; ngày 11/11 người dùng đã yêu cầu commit và push lên
-`chinh-sua-giao-dien`. Không deploy trong lượt bàn giao này.
+nhánh mới `ui/agricarbon-refresh-2026-11-11`. Không deploy trong lượt bàn giao này.
 
 ## Thiết kế
 
@@ -67,7 +67,12 @@ Không chạy hosted E2E và không ghi dữ liệu lên Supabase.
 
 STATUS: DONE. Đã mở hai tab `/login` và `/farmer` trên trình duyệt.
 Server mock tại cổng 5173 được giữ chạy cho người dùng kiểm thử giao diện.
-Ngày 11/11/2026 người dùng đã duyệt giao diện và yêu cầu đưa lên nhánh
-`chinh-sua-giao-dien`. Nhánh đích còn một bản sửa font từ tháng 9; hợp nhất
+Ngày 11/11/2026 người dùng đã duyệt giao diện và yêu cầu đưa lên nhánh mới
+`ui/agricarbon-refresh-2026-11-11`. Nhánh `chinh-sua-giao-dien` đã tồn tại và
+còn một bản sửa font từ tháng 9; hợp nhất
 lịch sử nhánh với nền `main` mới nhất, giữ Be Vietnam Pro có hỗ trợ tiếng Việt
 và font tải không chặn render của bản hiện tại. Không force-push hoặc deploy.
+
+Đã kiểm tra lại sau hợp nhất ngày 11/11/2026: build PASS, Vitest 768/768,
+Playwright mock 19/19. Lịch sử nhánh giao diện cũ được giữ lại qua merge;
+chỉ nhánh mới được xuất bản, không push thay đổi vào `main` hoặc nhánh cũ.
