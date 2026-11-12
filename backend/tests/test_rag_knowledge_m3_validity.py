@@ -35,7 +35,7 @@ EXPIRE = "select private.knowledge_expire_documents(%s)"
 DUE = "select document_pk, cause from private.knowledge_expiry_due()"
 M3_HELPERS = ("knowledge_policy_time_zone()", "knowledge_policy_date(timestamptz)", "knowledge_approval_validity()",
               "knowledge_in_force(date, date, date, date)", "knowledge_supersede_for(uuid, boolean)",
-              "knowledge_expiry_events_guard()")
+              "knowledge_expiry_events_guard()", "knowledge_check_cross_source_supersession(uuid, jsonb)")
 
 
 def today(tx) -> date:
@@ -688,6 +688,108 @@ def test_a_demo_approval_replaces_a_demo_version_but_never_a_verified_one(tx, m2
     assert (tx.status_of("document", demo_new), tx.status_of("document", by_verified)) == ("archived", "approved")
 
 
+# ------------------------------------------------------------------ cross-source supersession
+
+def authority(target, reference="TEST FIXTURE: repealing decision naming the superseded text"):
+    """The reviewer's recorded authority for replacing `target`, a version of ANOTHER source."""
+    return [*paths.SOURCES_CHECKED, {"reference": reference, "purpose": "cross_source_supersession_authority",
+                                     "supersedes_document_pk": str(target)}]
+
+
+def cross_source(tx, m2, *, source_status="approved", content="awd cross source"):
+    """An approved version of one public source, and an attested version of ANOTHER public source
+    (in `source_status`) that names it as superseded: (old, old_chunk, new, new_chunk)."""
+    _, old, old_chunk = approved(tx, m2, content=content + " old")
+    other = tx.source(status=source_status)
+    new, new_chunk = version(tx, m2, other, content=content + " new", supersedes_document_pk=old)
+    return old, old_chunk, new, new_chunk
+
+
+def recommend(m2, doc, sources=None):
+    review = m2.start(doc)
+    m2.submit(review, sources=sources)
+    return review
+
+
+@pytest.mark.parametrize("source_status", ["review_required", "rejected"])
+def test_a_version_of_an_unapproved_source_never_archives_another_sources_approved_version(tx, m2, source_status):
+    """The gap this closes: sharing a scope is not authority. Even with the reviewer's recorded
+    authority, a source nobody approved cannot retire another source's approved guidance."""
+    old, old_chunk, new, _ = cross_source(tx, m2, source_status=source_status)
+    review = recommend(m2, new, authority(old))
+    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "expert_review")
+    assert [e[1] for e in tx.events("document", old)][-1] == "approved"             # no archive event leaked
+    assert old_chunk in tx.rpc_ids(tx.member, tx.season_a, "awd cross source")       # still served
+    m2.decide(review, tx.approver, "reject")                                        # the way out stays open
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "rejected")
+
+
+@pytest.mark.parametrize("case", ["none", "other_target", "no_purpose"])
+def test_a_cross_source_supersession_needs_the_reviewers_recorded_authority_for_that_version(tx, m2, case):
+    old, old_chunk, new, _ = cross_source(tx, m2)
+    _, bystander, _ = approved(tx, m2, content="awd cross source bystander")
+    sources = {"none": None,
+               "other_target": authority(bystander),
+               "no_purpose": [*paths.SOURCES_CHECKED, {"reference": "x", "supersedes_document_pk": str(old)}]}[case]
+    review = recommend(m2, new, sources)
+    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+    assert [tx.status_of("document", d) for d in (old, bystander, new)] == ["approved", "approved", "expert_review"]
+    assert old_chunk in tx.rpc_ids(tx.member, tx.season_a, "awd cross source")
+
+
+def test_an_authorized_cross_source_supersession_archives_and_the_evidence_names_what_was_replaced(tx, m2):
+    old, old_chunk, new, new_chunk = cross_source(tx, m2)
+    review = recommend(m2, new, authority(old))
+    record = m2.decide(review, tx.approver)
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("archived", "approved")
+    ids = tx.rpc_ids(tx.member, tx.season_a, "awd cross source")
+    assert new_chunk in ids and old_chunk not in ids
+    tx.cur.execute("select d.source_id, d.document_id, d.document_version, d.file_sha256, s.owner, s.authority"
+                   " from public.knowledge_documents d join public.knowledge_sources s on s.source_id = d.source_id"
+                   " where d.id = %s", (old,))
+    src, document_id, document_version, file_sha, source_owner, source_authority = tx.cur.fetchone()
+    expected = {"source_id": src, "document_id": document_id, "document_version": document_version,
+                "file_sha256": file_sha, "source_owner": source_owner, "source_authority": source_authority,
+                "cross_source": True}
+    tx.cur.execute("select a.snapshot -> 'document' -> 'supersedes', r.snapshot -> 'document' -> 'supersedes',"
+                   " r.sources_checked from public.knowledge_approval_records a"
+                   " join public.knowledge_expert_reviews r on r.id = a.review_id where a.id = %s", (record,))
+    approved_snapshot, reviewed_snapshot, sources = tx.cur.fetchone()
+    assert approved_snapshot == reviewed_snapshot == expected                       # both humans saw the target
+    assert {"purpose": "cross_source_supersession_authority", "supersedes_document_pk": str(old)}.items() \
+        <= sources[-1].items()
+
+
+def test_the_cross_source_rule_holds_even_when_the_superseded_version_is_no_longer_approved(tx, m2):
+    """The link is a claim of authority over another source's text, whatever that text's status."""
+    old, _, new, _ = cross_source(tx, m2)
+    tx.transition("document", old, "approved", "quarantined", "dispute")
+    review = recommend(m2, new)
+    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("quarantined", "expert_review")
+
+
+def test_a_same_source_supersession_needs_no_recorded_authority_and_says_so_in_the_snapshot(tx, m2):
+    """Unchanged: a source replaces its own version (same or another document_id) with the plain flow,
+    whatever the source's own status."""
+    src, old, _ = approved(tx, m2, content="awd same source old")
+    new, _ = version(tx, m2, src, document_id="doc-renamed", content="awd same source new",
+                     supersedes_document_pk=old)
+    tx.cur.execute("select private.knowledge_document_snapshot(%s) -> 'document' -> 'supersedes' ->> 'cross_source'",
+                   (new,))
+    assert tx.cur.fetchone()[0] == "false"
+    approve(tx, m2, new)
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("archived", "approved")
+    unvetted = tx.source(status="review_required")
+    first, _ = version(tx, m2, unvetted, content="awd same unvetted one")
+    approve(tx, m2, first)
+    second, _ = version(tx, m2, unvetted, version="v2", content="awd same unvetted two",
+                        supersedes_document_pk=first)
+    approve(tx, m2, second)
+    assert (tx.status_of("document", first), tx.status_of("document", second)) == ("archived", "approved")
+
+
 def test_the_operator_path_still_cannot_approve_and_a_forged_marker_gets_no_window_bypass(tx, m2):
     """M2's rule is untouched: operator and owner logins do not approve, in or out of the window."""
     src = tx.source()
@@ -741,8 +843,9 @@ def test_m3_rollback_restores_m2_and_migration_a_verbatim_and_m3_replays(tx, m2)
                    " and column_name in ('effective_from', 'effective_to', 'supersedes_document_pk', 'approval_expires_on')")
     assert tx.cur.fetchone()[0] == 0
     tx.cur.execute("select to_regclass('public.knowledge_expiry_events'), to_regproc('private.knowledge_expire_documents'),"
-                   " to_regproc('private.knowledge_policy_date'), to_regproc('private.knowledge_supersede_for')")
-    assert tx.cur.fetchone() == (None, None, None, None)
+                   " to_regproc('private.knowledge_policy_date'), to_regproc('private.knowledge_supersede_for'),"
+                   " to_regproc('private.knowledge_check_cross_source_supersession')")
+    assert tx.cur.fetchone() == (None, None, None, None, None)
     assert _live_body(tx, "enforce_knowledge_document_immutability") == _body_in(M2, "enforce_knowledge_document_immutability")
     tx.cur.execute("select pg_get_functiondef('public.match_knowledge_chunks_lexical(uuid, text, integer)'::regprocedure)"
                    " || (select qual from pg_policies where policyname = 'knowledge_documents_select')")

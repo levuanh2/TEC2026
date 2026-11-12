@@ -284,6 +284,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_check_cross_source_supersession(uuid,jsonb)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_check_review_evidence(text,jsonb,jsonb,jsonb,text)": {
    "config": [
     "search_path=\"\""

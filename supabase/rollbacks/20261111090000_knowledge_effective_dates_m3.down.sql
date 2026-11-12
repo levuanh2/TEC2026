@@ -418,6 +418,7 @@ drop function private.knowledge_expiry_due();
 drop table public.knowledge_expiry_events;
 drop function private.knowledge_expiry_events_guard();
 drop function private.knowledge_supersede_for(uuid, boolean);
+drop function private.knowledge_check_cross_source_supersession(uuid, jsonb);
 drop function private.knowledge_check_supersedes(text, uuid);
 
 drop index public.knowledge_documents_supersedes_idx;
