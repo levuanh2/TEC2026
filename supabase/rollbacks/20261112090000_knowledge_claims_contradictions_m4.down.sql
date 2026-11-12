@@ -1,5 +1,6 @@
 -- Rollback for migrations/20261112090000_knowledge_claims_contradictions_m4.sql (RAG V1.5 M4).
--- Not in migrations/: run by hand, in ONE transaction, BEFORE any M3 rollback, then
+-- Not in migrations/: run by hand, in ONE transaction, AFTER the M4.1 rollback (if M4.1 is installed)
+-- and BEFORE any M3 rollback, then
 --   supabase migration repair --status reverted 20261112090000
 --
 -- M4 replaced nothing: this only drops what M4 added. No status, approval, retrieval or expiry
@@ -16,6 +17,10 @@ begin
   if coalesce(current_setting('knowledge.m4_rollback_evidence_exported', true), '') <> 'yes' then
     raise exception 'M4 rollback DROPS the stored claims and contradiction candidates: export them, then'
       ' set local knowledge.m4_rollback_evidence_exported = ''yes''';
+  end if;
+  if to_regclass('public.knowledge_review_read_events') is not null then
+    raise exception 'M4 rollback refused: M4.1 is installed (the reviewer read RPC reads these tables);'
+      ' run supabase/rollbacks/20261112120000_knowledge_review_read_m4_1.down.sql first';
   end if;
 end;
 $$;
