@@ -335,6 +335,30 @@ def test_a_condition_the_entry_does_not_cover_is_out_of_scope_never_a_mismatch()
         load_one(entry(comparison__required_claim_conditions=[]))
     # every outcome that is not a comparison of numbers carries no normalized value and is no mismatch
     assert rn.MISMATCHES == {"outside_printed_range", "differs_from_printed_value"}
+    assert "Unresolved" in rn.compare(claim("999", conditions=("baseline", "stage:tillering")), e).rationale
+
+
+def test_a_recorded_invariance_keeps_a_wrong_number_a_mismatch():
+    """Fail-closed by default must not hide a wrong number forever: when the verifier records, from
+    the source, that the value holds whatever the claim says on an axis, a claim tagged on that axis
+    is still compared, and a wrong number is still a mismatch."""
+    basis = "synthetic: the source states the factor applies to every growth stage"
+    e = load_one(entry(comparison__invariant_condition_axes=["stage"], comparison__invariance_basis=basis))
+    assert e.invariant_condition_axes == {"stage"} and e.invariance_basis == basis
+    wrong = rn.compare(claim("999", conditions=("baseline", "stage:tillering")), e)
+    assert (wrong.outcome, wrong.is_mismatch) == ("outside_printed_range", True)
+    assert rn.compare(claim("2.2", conditions=("baseline", "stage:heading")), e).outcome == "within_printed_range"
+    other_axis = rn.compare(claim("999", conditions=("baseline", "stage:tillering", "soil:acid_sulfate")), e)
+    assert (other_axis.outcome, other_axis.is_mismatch) == ("out_of_scope", False)   # only the recorded axis
+    with pytest.raises(RegistryError, match="need invariance_basis"):
+        load_one(entry(comparison__invariant_condition_axes=["stage"]))
+    with pytest.raises(RegistryError, match="invariance_basis without"):
+        load_one(entry(comparison__invariance_basis=basis))
+    with pytest.raises(RegistryError, match="cannot also be invariant"):          # 'baseline' is required
+        load_one(entry(comparison__invariant_condition_axes=["baseline"], comparison__invariance_basis=basis))
+    with pytest.raises(RegistryError, match="list of condition axes"):
+        load_one(entry(comparison__invariant_condition_axes=["Stage!"], comparison__invariance_basis=basis))
+    assert rn.condition_axis("stage:tillering") == "stage" and rn.condition_axis("baseline") == "baseline"
 
 
 def test_different_quantities_units_scope_or_region_are_never_compared():
@@ -381,3 +405,10 @@ def test_compare_is_deterministic_and_rejects_an_inverted_claim():
     assert rn.compare(claim("2.2", "2.8"), e) == rn.compare(claim("2.2", "2.8"), e)
     with pytest.raises(ValueError):
         rn.compare(claim("3", "2"), e)
+    for bad in ("NaN", "Infinity", "-Infinity"):                                     # never a silent verdict
+        with pytest.raises(ValueError, match="finite"):
+            rn.compare(rn.ClaimValue("ch4.emission_factor", "kgCH4/ha/day", Decimal(bad), Decimal("2.5"),
+                                     frozenset({"baseline"}), "Synthetic Region"), e)
+    with pytest.raises(ValueError, match="finite"):
+        rn.compare(rn.ClaimValue("ch4.emission_factor", "kgCH4/ha/day", 2.5, 2.5,           # a float is refused
+                                 frozenset({"baseline"}), "Synthetic Region"), e)

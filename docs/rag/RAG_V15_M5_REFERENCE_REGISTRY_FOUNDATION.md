@@ -71,6 +71,20 @@ The current M4 extractor emits no `base:` or `quantity:` condition tags, so
 `percent_of_applied_n_to_fraction` cannot fire on any stored claim today. It defines the contract
 an extractor change would have to meet.
 
+**Conditions the entry does not cover.** Condition tags are `axis:value` (`stage:tillering`); a tag
+without `:` is its own axis. A claim that states a tag the entry does not require is `out_of_scope`
+(fail closed: a different situation is not a mismatch), unless the entry lists that axis in
+`comparison.invariant_condition_axes` with `comparison.invariance_basis`, where the source says the
+value holds whatever the claim states on it ("applies to all growth stages"). Then the claim is
+compared and a wrong number is still a mismatch. An axis the entry requires a value on cannot also be
+invariant. The verifier records invariance from the source text; nothing infers it.
+
+Trade-off, stated: the more condition tags an extractor emits, the more claims end `out_of_scope`
+against an entry without recorded invariance. `out_of_scope` is not a pass. A review report must
+show it as unresolved next to the reference, so a poisoned number is never silently cleared.
+
+Claim values must be finite `Decimal`s (a float, NaN or infinity raises).
+
 **Tolerance.** `printed_range` (the range the source prints) or `exact`. The tolerance object takes
 no number: a tolerance the source does not print cannot be entered.
 
@@ -82,7 +96,7 @@ no number: a tolerance the source does not print cannot be entered.
 |---|---|---|
 | `reference_unverified` | no human has verified the entry; checked first, so such an entry never judges a claim | no |
 | `not_comparable` | no rule, or a different parameter or unit | no |
-| `out_of_scope` | the claim does not state the required conditions, states a condition the entry does not cover, or the region differs or is unknown | no |
+| `out_of_scope` | UNRESOLVED, for a human: the claim does not state the required conditions, states a condition on an axis the entry neither requires nor records as invariant, or the region differs or is unknown | no |
 | `within_printed_range` / `equal_to_printed_value` | agrees | no |
 | `outside_printed_range` / `differs_from_printed_value` | disagrees | **yes** |
 

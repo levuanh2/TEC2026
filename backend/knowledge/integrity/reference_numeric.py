@@ -99,6 +99,14 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _DECIMAL = re.compile(r"^-?\d+(\.\d+)?$")
 _HTTPS = re.compile(r"^https://[^\s/]+/\S*$")
 _TAG = re.compile(r"^[a-z0-9][a-z0-9_.:<>=-]{0,79}$")
+_AXIS = re.compile(r"^[a-z0-9][a-z0-9_]{0,39}$")
+
+
+def condition_axis(tag: str) -> str:
+    """The axis of a condition tag: 'stage:tillering' -> 'stage'; a tag without ':' is its own axis."""
+    return tag.split(":", 1)[0]
+
+
 _EVIDENCE_REF = re.compile(r"^docs/rag/reference-evidence/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.md$")
 
 
@@ -141,6 +149,8 @@ class NumericReference:
     claim_unit: str | None
     conversion: str
     required_claim_conditions: frozenset[str]
+    invariant_condition_axes: frozenset[str]   # axes on which the source says the value does not vary
+    invariance_basis: str | None
     tolerance_mode: str
     machine_read: str
     human_status: str
@@ -380,6 +390,20 @@ def _numeric_entry(raw: dict, allow_synthetic: bool) -> NumericReference:
             # one of them into a tag the claim has to state, or its applicability would go unchecked.
             raise RegistryError(f"{where}: a comparable entry needs at least one required_claim_conditions tag; "
                                 "an entry whose applicability cannot be checked uses conversion 'none'")
+    invariant = comparison.get("invariant_condition_axes", [])
+    if not isinstance(invariant, list) or any(not isinstance(a, str) or not _AXIS.match(a) for a in invariant):
+        raise RegistryError(f"{where}: comparison.invariant_condition_axes must be a list of condition axes")
+    invariance_basis = comparison.get("invariance_basis")
+    if invariant:
+        if conversion == NO_CONVERSION:
+            raise RegistryError(f"{where}: conversion 'none' takes no invariant_condition_axes")
+        if set(invariant) & {condition_axis(t) for t in required}:
+            raise RegistryError(f"{where}: an axis the entry requires a value on cannot also be invariant")
+        if not isinstance(invariance_basis, str) or not invariance_basis.strip():
+            raise RegistryError(f"{where}: invariant_condition_axes need invariance_basis: where the source says the "
+                                "value holds whatever the claim states on those axes")
+    elif invariance_basis is not None:
+        raise RegistryError(f"{where}: invariance_basis without invariant_condition_axes")
 
     # -- verification
     verification = _obj(raw, "verification", where)
@@ -410,7 +434,8 @@ def _numeric_entry(raw: dict, allow_synthetic: bool) -> NumericReference:
         numerator=numerator, denominator=denominator, conditions=conditions, region=region, tier=tier, source=source,
         rights_basis=rights_fields[0], rights_reference=rights_fields[1], rights_restrictions=rights_fields[2],
         claim_parameter=claim_parameter, claim_unit=claim_unit, conversion=conversion,
-        required_claim_conditions=frozenset(required), tolerance_mode=mode, machine_read=machine_read,
+        required_claim_conditions=frozenset(required), invariant_condition_axes=frozenset(invariant),
+        invariance_basis=invariance_basis, tolerance_mode=mode, machine_read=machine_read,
         human_status=status, verified_by=verified_by, verified_at=verified_at, evidence_ref=evidence_ref,
         evidence_sha256=evidence_sha,
         limitations=_texts(raw.get("limitations", []), "limitations", where, allow_empty=True), synthetic=synthetic)
@@ -437,6 +462,8 @@ def load_numeric_registry(data: dict, *, allow_synthetic: bool = False) -> Numer
 
 def compare(claim: ClaimValue, entry: NumericReference) -> ReferenceFinding:
     """Compare one claimed value with one reference entry. Deterministic, exact decimal arithmetic."""
+    if not all(isinstance(v, Decimal) and v.is_finite() for v in (claim.value_min, claim.value_max)):
+        raise ValueError("claim values must be finite Decimals")
     if claim.value_min > claim.value_max:
         raise ValueError("claim value_min must not exceed value_max")
 
@@ -462,11 +489,13 @@ def compare(claim: ClaimValue, entry: NumericReference) -> ReferenceFinding:
     missing = sorted(entry.required_claim_conditions - claim.conditions)
     if missing:
         return finding("out_of_scope", f"The claim does not state the conditions this entry applies to: {missing}.")
-    uncovered = sorted(claim.conditions - entry.required_claim_conditions)
+    uncovered = sorted(t for t in claim.conditions - entry.required_claim_conditions
+                       if condition_axis(t) not in entry.invariant_condition_axes)
     if uncovered:
-        # the claim is about a narrower or different situation than the entry describes: a value that
-        # differs there is not a mismatch with this entry
-        return finding("out_of_scope", f"The claim states conditions this entry does not cover: {uncovered}.")
+        # The claim is about a narrower or different situation than the entry describes, and nobody
+        # recorded that the source value holds across it. Not a mismatch: UNRESOLVED, for a human.
+        return finding("out_of_scope", f"The claim states conditions this entry does not cover: {uncovered}. "
+                                       "Unresolved: a human must decide whether the reference applies.")
     if entry.region is not None and claim.region != entry.region:
         return finding("out_of_scope", f"The entry applies to region {entry.region!r}; the claim states "
                                        f"{claim.region!r}.")
