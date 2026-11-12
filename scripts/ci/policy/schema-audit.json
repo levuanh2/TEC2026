@@ -1,5 +1,113 @@
 {
  "functions": {
+  "knowledge_approve_source(text,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_attest_document_upload(uuid,text,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_attest_source_upload(text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_cancel_expert_review(uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_decide_document(uuid,text,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_grant_personnel_role(uuid,text,text,uuid,text,text,text,timestamp with time zone)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_register_personnel(uuid,text,text,text,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_review_snapshot(uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_set_personnel_role_status(uuid,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_set_personnel_status(uuid,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_start_expert_review(uuid,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_submit_expert_review(uuid,text,text,jsonb,jsonb,jsonb,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "match_knowledge_chunks_lexical(uuid,text,integer)": {
    "config": [
     "search_path=\"\""
@@ -148,7 +256,133 @@
    ],
    "security_definer": true
   },
+  "private.knowledge_actor_role(uuid,text,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_apply_document_transition(uuid,knowledge_status,knowledge_status,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_apply_source_transition(text,knowledge_status,knowledge_status,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_check_review_evidence(text,jsonb,jsonb,jsonb,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_chunks_search_fields()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_demo_approve_document(uuid,uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.knowledge_demo_approve_source(text,uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.knowledge_demo_mode_stamp()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_demo_quarantine_all(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.knowledge_demo_reason(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_demo_require_enabled()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_document_snapshot(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_evidence_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_identity_key(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_m2_no_truncate()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_m2_set_marker(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_m2_write_authorized(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_person_identity(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_personnel_guard()": {
    "config": [
     "search_path=\"\""
    ],
@@ -164,6 +398,20 @@
    ],
    "security_definer": true
   },
+  "private.knowledge_registry_admin_actor()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_registry_admin_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_search_text(text)": {
    "config": [
     "search_path=\"\""
@@ -171,6 +419,20 @@
    "execute": [
     "authenticated"
    ],
+   "security_definer": false
+  },
+  "private.knowledge_snapshot_sha256(jsonb)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_source_snapshot(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": false
   },
   "private.knowledge_status_events_append_only()": {
@@ -207,6 +469,13 @@
    ],
    "execute": [],
    "security_definer": true
+  },
+  "private.knowledge_verified_actor()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
   },
   "private.max_live_harvested_area(uuid)": {
    "config": [
@@ -1457,6 +1726,10 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_approval_records": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_chunks": {
    "enabled": true,
    "forced": false
@@ -1465,11 +1738,31 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_expert_reviews": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_personnel": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_personnel_roles": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_registry_admins": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_sources": {
    "enabled": true,
    "forced": false
   },
   "knowledge_status_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_upload_attestations": {
    "enabled": true,
    "forced": false
   },
@@ -1676,12 +1969,25 @@
   "irrigation_events.enforce_detail_season_open_trg": "private.enforce_activity_detail_season_open()",
   "irrigation_events.irrigation_type_trg": "private.enforce_activity_type()",
   "irrigation_events.set_updated_at_trg": "private.set_updated_at()",
+  "knowledge_approval_records.knowledge_approval_records_guard": "private.knowledge_evidence_guard()",
+  "knowledge_approval_records.knowledge_approval_records_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_chunks.knowledge_chunks_immutable": "private.enforce_knowledge_chunk_immutability()",
   "knowledge_chunks.knowledge_chunks_search_fields": "private.knowledge_chunks_search_fields()",
   "knowledge_documents.knowledge_documents_immutable": "private.enforce_knowledge_document_immutability()",
+  "knowledge_expert_reviews.knowledge_expert_reviews_guard": "private.knowledge_evidence_guard()",
+  "knowledge_expert_reviews.knowledge_expert_reviews_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_personnel.knowledge_personnel_guard": "private.knowledge_personnel_guard()",
+  "knowledge_personnel.knowledge_personnel_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_personnel_roles.knowledge_personnel_roles_guard": "private.knowledge_personnel_guard()",
+  "knowledge_personnel_roles.knowledge_personnel_roles_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_registry_admins.knowledge_registry_admins_guard": "private.knowledge_registry_admin_guard()",
+  "knowledge_registry_admins.knowledge_registry_admins_insert_guard": "private.knowledge_registry_admin_guard()",
+  "knowledge_registry_admins.knowledge_registry_admins_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_sources.knowledge_sources_scope": "private.enforce_knowledge_source_scope()",
   "knowledge_status_events.knowledge_status_events_append_only": "private.knowledge_status_events_append_only()",
   "knowledge_status_events.knowledge_status_events_no_truncate": "private.knowledge_status_events_append_only()",
+  "knowledge_upload_attestations.knowledge_upload_attestations_guard": "private.knowledge_evidence_guard()",
+  "knowledge_upload_attestations.knowledge_upload_attestations_no_truncate": "private.knowledge_m2_no_truncate()",
   "mrv_case_batches.audit_change_trg": "audit.capture_change()",
   "mrv_case_batches.validate_mrv_case_batch_trg": "private.validate_mrv_case_batch()",
   "mrv_case_steps.audit_change_trg": "audit.capture_change()",
@@ -1767,14 +2073,26 @@
   "ingestion_batches_pkey": "CREATE UNIQUE INDEX ingestion_batches_pkey ON public.ingestion_batches USING btree (id)",
   "ingestion_source_sha256_uidx": "CREATE UNIQUE INDEX ingestion_source_sha256_uidx ON public.ingestion_batches USING btree (source_sha256) WHERE (source_sha256 IS NOT NULL)",
   "irrigation_events_pkey": "CREATE UNIQUE INDEX irrigation_events_pkey ON public.irrigation_events USING btree (activity_id)",
+  "knowledge_approval_records_pkey": "CREATE UNIQUE INDEX knowledge_approval_records_pkey ON public.knowledge_approval_records USING btree (id)",
+  "knowledge_approval_records_review_key": "CREATE UNIQUE INDEX knowledge_approval_records_review_key ON public.knowledge_approval_records USING btree (review_id)",
   "knowledge_chunks_chunk_key": "CREATE UNIQUE INDEX knowledge_chunks_chunk_key ON public.knowledge_chunks USING btree (document_pk, chunk_id)",
   "knowledge_chunks_ordinal_key": "CREATE UNIQUE INDEX knowledge_chunks_ordinal_key ON public.knowledge_chunks USING btree (document_pk, ordinal)",
   "knowledge_chunks_pkey": "CREATE UNIQUE INDEX knowledge_chunks_pkey ON public.knowledge_chunks USING btree (id)",
   "knowledge_documents_identity_key": "CREATE UNIQUE INDEX knowledge_documents_identity_key ON public.knowledge_documents USING btree (source_id, document_id, document_version)",
   "knowledge_documents_one_approved": "CREATE UNIQUE INDEX knowledge_documents_one_approved ON public.knowledge_documents USING btree (source_id, document_id) WHERE (status = 'approved'::knowledge_status)",
   "knowledge_documents_pkey": "CREATE UNIQUE INDEX knowledge_documents_pkey ON public.knowledge_documents USING btree (id)",
+  "knowledge_expert_reviews_pkey": "CREATE UNIQUE INDEX knowledge_expert_reviews_pkey ON public.knowledge_expert_reviews USING btree (id)",
+  "knowledge_personnel_account_key": "CREATE UNIQUE INDEX knowledge_personnel_account_key ON public.knowledge_personnel USING btree (auth_user_id)",
+  "knowledge_personnel_identity_key": "CREATE UNIQUE INDEX knowledge_personnel_identity_key ON public.knowledge_personnel USING btree (private.knowledge_identity_key(identity_reference)) WHERE (status <> 'revoked'::text)",
+  "knowledge_personnel_pkey": "CREATE UNIQUE INDEX knowledge_personnel_pkey ON public.knowledge_personnel USING btree (id)",
+  "knowledge_personnel_roles_live_key": "CREATE UNIQUE INDEX knowledge_personnel_roles_live_key ON public.knowledge_personnel_roles USING btree (personnel_id, role, scope_visibility, COALESCE(scope_organization_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (status <> 'revoked'::text)",
+  "knowledge_personnel_roles_pkey": "CREATE UNIQUE INDEX knowledge_personnel_roles_pkey ON public.knowledge_personnel_roles USING btree (id)",
+  "knowledge_registry_admins_pkey": "CREATE UNIQUE INDEX knowledge_registry_admins_pkey ON public.knowledge_registry_admins USING btree (auth_user_id)",
   "knowledge_sources_pkey": "CREATE UNIQUE INDEX knowledge_sources_pkey ON public.knowledge_sources USING btree (source_id)",
   "knowledge_status_events_pkey": "CREATE UNIQUE INDEX knowledge_status_events_pkey ON public.knowledge_status_events USING btree (id)",
+  "knowledge_upload_attestations_document_key": "CREATE UNIQUE INDEX knowledge_upload_attestations_document_key ON public.knowledge_upload_attestations USING btree (document_pk) WHERE (entity_type = 'document'::text)",
+  "knowledge_upload_attestations_pkey": "CREATE UNIQUE INDEX knowledge_upload_attestations_pkey ON public.knowledge_upload_attestations USING btree (id)",
+  "knowledge_upload_attestations_source_key": "CREATE UNIQUE INDEX knowledge_upload_attestations_source_key ON public.knowledge_upload_attestations USING btree (source_id) WHERE (entity_type = 'source'::text)",
   "mrv_case_batches_pkey": "CREATE UNIQUE INDEX mrv_case_batches_pkey ON public.mrv_case_batches USING btree (mrv_case_id, production_batch_id)",
   "mrv_case_steps_pkey": "CREATE UNIQUE INDEX mrv_case_steps_pkey ON public.mrv_case_steps USING btree (mrv_case_id, step_no)",
   "mrv_cases_organization_id_case_code_key": "CREATE UNIQUE INDEX mrv_cases_organization_id_case_code_key ON public.mrv_cases USING btree (organization_id, case_code)",

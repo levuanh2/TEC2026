@@ -129,7 +129,7 @@ there", not "safe". Every milestone needs its own owner approval; none touches h
 | # | Milestone | Deliverable | Exit criteria (offline/local first) |
 |---|---|---|---|
 | M1 | Status model | migration (local only): `expert_review`, `quarantined`; `knowledge_status_events` append-only; retrieval still `approved` only | DB tests: quarantined/expert_review chunks never retrieved; status change without an event row refused; existing approval guards unchanged. **Implemented as a Draft PR (2026-11-10), local/CI only, not on hosted**, see below |
-| M2 | Evidence + two-person rule | `knowledge_approval_records` (checklist, references, rationale); guard: approver ≠ uploader ≠ expert reviewer; approval without a record refused | DB tests for each refusal; an LLM-produced record cannot set `approved` (no service path writes status from model output) |
+| M2 | Evidence + two-person rule | `knowledge_approval_records` (checklist, references, rationale); guard: approver ≠ uploader ≠ expert reviewer; approval without a record refused | DB tests for each refusal; an LLM-produced record cannot set `approved` (no service path writes status from model output). **Implemented as a Draft PR (2026-11-10), local/CI only**, see `RAG_V15_M2_VERIFIED_APPROVAL.md` |
 | M3 | Version and effective dates | `effective_from/to`, `supersedes`; approval refused when expired or when the superseded version is still approved; scheduled expiry → quarantine | DB tests + a local job dry run |
 | M4 | Claim extraction + contradiction check | deterministic extractor (numbers+units, stage, water level, days, rates, factors) into `knowledge_claims`; contradiction report between approved/candidate chunks | fixture pair with contradicting claims flagged; `poisoned_claim` flagged against the reference registry (M5); false-positive budget measured on the real corpus candidates |
 | M5 | Trusted reference registry | versioned file of canonical values (Carbon Engine MRV/IPCC factors, ministry AWD parameters) with source + tolerance | registry values traced to approved artifacts; a mismatch blocks approval until the expert records a justification |
@@ -149,7 +149,9 @@ there", not "safe". Every milestone needs its own owner approval; none touches h
   owner too is refused UPDATE/DELETE/TRUNCATE by trigger.
 - Operator procedure: `docs/rag/RAG_V1_INGESTION.md` §5, "Status transitions".
 - **Temporary limitations of M1 (owner-accepted, closed by later milestones):**
-  - Human identity is not verified. Events record the verified database roles (`actor_session_user`,
+  - (Closed by M2, `RAG_V15_M2_VERIFIED_APPROVAL.md`: decisions are made by verified aal2 personnel through
+    authenticated RPCs, with immutable evidence; a forged marker alone no longer approves.) In M1 alone:
+    human identity is not verified. Events record the verified database roles (`actor_session_user`,
     `actor_role`) and the approver the caller *states* (`stated_approver`). Operators share the
     `postgres`/`service_role` logins. M2: named operator roles, evidence records, uploader ≠ reviewer ≠ approver.
   - An owner-level session (`postgres`) could deliberately forge the transition marker, as it could disable

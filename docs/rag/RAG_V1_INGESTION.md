@@ -229,24 +229,23 @@ Approve only when every row shows `own_content_address` and `object_exists` true
 (download + SHA-256 == `file_sha256`) cannot be done in SQL; it is the CLI's `unchanged` re-run in
 item 2.
 
-**Status transitions (RAG V1.5 M1, migrations `20261110090000` + `20261110090100`; local/CI until a
-hosted gate).** Every status change is ONE call of a controlled transition function. It writes one
+**Status transitions (RAG V1.5 M1 + M2, migrations `20261110090000`, `20261110090100`, `20261110120000`;
+local/CI until a hosted gate).** Every status change is ONE call of a controlled transition function. It writes one
 row of the append-only `public.knowledge_status_events` in the same transaction. A direct
 `UPDATE ... set status = ...` is refused (SQLSTATE 42501), and new rows always start
 `review_required`. Each call names the status the row is expected to be in. A stale expectation (a
 concurrent change) fails and writes nothing.
 
 ```sql
--- source: approve directly (no expert_review for sources); approver = the named human, reason = review note
-select private.knowledge_transition_source(:source_id, 'review_required', 'approved', :note, :approver_uuid);
--- document version (D3): review_required -> expert_review -> approved; content is frozen from expert_review on
-select private.knowledge_transition_document(:doc_id, 'review_required', 'expert_review', :why, null);
-select private.knowledge_transition_document(:doc_id, 'expert_review', 'approved', :note, :approver_uuid);
--- replacing the approved version, in ONE transaction: archive (or quarantine) the old one, then approve the new one
-begin;
+-- M2 (20261110120000): review and approval are VERIFIED HUMAN decisions, made through authenticated aal2
+-- RPCs by registered, distinct personnel (uploader != expert reviewer != approver), never by this login:
+--   public.knowledge_attest_document_upload / knowledge_start_expert_review / knowledge_submit_expert_review
+--   public.knowledge_decide_document / knowledge_approve_source   (see RAG_V15_M2_VERIFIED_APPROVAL.md)
+-- The operator keeps triage and fail-closed moves:
+select private.knowledge_transition_document(:doc_id, 'review_required', 'rejected', :why, null);
+select private.knowledge_transition_document(:doc_id, 'expert_review', 'rejected', :why, null);  -- abandon a review
+-- replacing the approved version: archive (or quarantine) the old one, THEN the approver approves the new one
 select private.knowledge_transition_document(:old_id, 'approved', 'archived', 'superseded by ' || :new_version, null);
-select private.knowledge_transition_document(:new_id, 'expert_review', 'approved', :note, :approver_uuid);
-commit;
 -- dispute / contradiction / revocation: stop retrieval at once, keep the approval record (D1)
 select private.knowledge_transition_document(:doc_id, 'approved', 'quarantined', :why, null);
 -- a quarantined version never returns to approved: ingest the corrected text as a NEW version, then
@@ -256,10 +255,12 @@ select private.knowledge_transition_document(:doc_id, 'quarantined', 'archived',
 Allowed: document `review_required -> expert_review | rejected`, `rejected -> review_required`,
 `expert_review -> approved | rejected | review_required`, `approved -> quarantined | archived`,
 `quarantined -> archived`. Source: `review_required <-> rejected`, `review_required | rejected -> approved`,
-`approved -> quarantined | archived`, `quarantined -> archived`. Anything else is refused (23514). The
-approver uuid is recorded as *stated*: M1 does not verify human identity (operators share the
-`postgres`/service-role logins, and the event records those roles). Named operator roles and evidence
-records are M2 (`RAG_V15_SOURCE_CONTENT_INTEGRITY.md` §6).
+`approved -> quarantined | archived`, `quarantined -> archived`. Anything else is refused (23514). Since
+M2, the operator functions refuse (42501) `-> expert_review`, `-> approved` and
+`expert_review -> review_required` for documents, and `-> approved` for sources, for service_role and the
+owner alike: those go through the verified-human RPCs, which record verified identities and immutable
+evidence. A demo-only, owner-switched path exists for non-production databases
+(`RAG_V15_M2_VERIFIED_APPROVAL.md` §6). It is off by default and labels everything `demo_unverified`.
 
 ## 6. Republish / archive recovery — deferred
 

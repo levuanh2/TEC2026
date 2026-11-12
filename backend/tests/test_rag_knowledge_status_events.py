@@ -20,6 +20,7 @@ import uuid
 
 import pytest
 
+from tests.knowledge_status_paths import M2_OWNED  # noqa: E402
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, PERMISSION_DENIED, TRANSITION, _DB_URL,  # noqa: E402
                                               pytestmark, psycopg, tx)
 
@@ -107,8 +108,11 @@ def test_every_transition_writes_exactly_one_complete_event(tx):
     expected = []
     for kind, key, frm, to in steps:
         identity = ("source", src, None, None, None) if kind == "source" else ("document", d_src, doc, d_id, d_ver)
+        # M2: a human decision runs as the verified person's `authenticated` role (session_user stays the
+        # login); every other transition is the operator's.
+        actor = "authenticated" if (kind, frm, to) in M2_OWNED else login
         expected.append((*identity, frm, to, f"why {frm}->{to}", tx.approver if to == "approved" else None,
-                         login, login, xid, True))
+                         login, actor, xid, True))
     # the document's own source was approved in fixture setup (1 earlier event): keep only ours
     assert [r for r in rows if r[1] == src or r[2] == doc] == expected
 
@@ -193,7 +197,11 @@ def test_a_tenant_member_sees_no_event_of_their_own_organizations_knowledge(tx):
 
 def test_service_role_transitions_are_attributed_to_service_role(tx):
     doc = tx.document(tx.source(), status="review_required")
-    result = _as_role(tx, "service_role", TRANSITION["document"], (doc, "review_required", "expert_review",
+    # M2: service_role cannot start an expert review (a verified human decision) ...
+    assert _as_role(tx, "service_role", TRANSITION["document"], (doc, "review_required", "expert_review",
+                                                                 "service path", None)) == ("err", PERMISSION_DENIED)
+    # ... but keeps the operator transitions, attributed to it
+    result = _as_role(tx, "service_role", TRANSITION["document"], (doc, "review_required", "rejected",
                                                                    "service path", None))
     assert result[0] == "ok", result
     tx.cur.execute(f"select actor_role, reason from {EVENTS} where document_pk = %s", (doc,))
@@ -211,28 +219,46 @@ def test_service_role_cannot_forge_the_transition_marker(tx):
     assert tx.status_of("document", doc) == "review_required" and tx.events("document", doc) == []
 
 
-def test_owner_session_marker_forgery_is_the_documented_residual(tx):
-    """RESIDUAL, documented in the migration header (M2 removes it with a non-owner operator role):
-    a session that IS the owner can deliberately forge the marker, as it could DISABLE TRIGGER. Its
-    ordinary direct UPDATE is refused (test_rag_knowledge_storage). If this ever starts failing
-    because the bypass was closed, flip it to assert the refusal."""
+def test_owner_marker_forgery_no_longer_reaches_a_human_decision(tx):
+    """M2 closed the routine part of the M1 residual: a forged marker alone no longer starts an expert
+    review or approves, because the row trigger also requires this transaction's verified evidence row
+    (test_rag_knowledge_m2_approval.py covers forging that too). Flipped from the M1 residual test."""
+    draft = tx.document(tx.source(), status="review_required")
+    in_review = tx.document(tx.source(), status="expert_review")    # reached legally, via a verified reviewer
+    tx.settle()
+    for doc, target, approved_by in ((draft, "expert_review", None), (in_review, "approved", tx.approver)):
+        before = tx.events("document", doc)
+        tx.cur.execute("savepoint f")
+        tx.cur.execute("select set_config('knowledge.status_transition', %s, true)", (f"document|{doc}|{target}",))
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            tx.cur.execute("update public.knowledge_documents set status = %s, approved_by = %s,"
+                           " approved_at = case when %s::uuid is null then null else now() end,"
+                           " review_note = 'forged' where id = %s", (target, approved_by, approved_by, doc))
+        tx.cur.execute("rollback to savepoint f")
+        assert tx.events("document", doc) == before
+    assert (tx.status_of("document", draft), tx.status_of("document", in_review)) == ("review_required", "expert_review")
+
+
+def test_owner_session_marker_forgery_of_an_operator_transition_is_the_documented_residual(tx):
+    """RESIDUAL (documented in both migration headers): a session that IS the owner can still forge the
+    marker for an operator transition (here a rejection, which fails closed), as it could DISABLE
+    TRIGGER. Its ordinary direct UPDATE is refused (test_rag_knowledge_storage)."""
     doc = tx.document(tx.source(), status="review_required")
     tx.settle()
-    tx.cur.execute("select set_config('knowledge.status_transition', %s, true)", (f"document|{doc}|expert_review",))
-    tx.cur.execute("update public.knowledge_documents set status = 'expert_review' where id = %s", (doc,))
-    assert tx.status_of("document", doc) == "expert_review" and tx.events("document", doc) == []   # unaudited
+    tx.cur.execute("select set_config('knowledge.status_transition', %s, true)", (f"document|{doc}|rejected",))
+    tx.cur.execute("update public.knowledge_documents set status = 'rejected' where id = %s", (doc,))
+    assert tx.status_of("document", doc) == "rejected" and tx.events("document", doc) == []   # unaudited
 
 
-def test_a_caller_named_approver_is_recorded_as_stated(tx):
-    """Human identity is not verified in M1: the approver the caller names is stored as
-    `stated_approver` (and approved_by). The verified fields are the database roles."""
+def test_an_approval_event_names_the_verified_approver(tx):
+    """M2: the approver is the authenticated aal2 caller of public.knowledge_decide_document, never a
+    caller-named uuid; the event's `stated_approver` equals the approval record's verified approver."""
     doc = tx.document(tx.source(), status="expert_review")
     assert tx.transit("document", doc, "expert_review", "approved", approver=tx.manager)[0] == "ok"
-    tx.cur.execute(f"select stated_approver, actor_role from {EVENTS} where document_pk = %s and to_status = 'approved'",
-                   (doc,))
-    approver, role = tx.cur.fetchone()
-    tx.cur.execute("select current_user")
-    assert approver == tx.manager and role == tx.cur.fetchone()[0]
+    tx.cur.execute(f"select e.stated_approver, e.actor_role, a.approver_user_id from {EVENTS} e"
+                   " join public.knowledge_approval_records a on a.status_event_id = e.id"
+                   " where e.document_pk = %s and e.to_status = 'approved'", (doc,))
+    assert tx.cur.fetchone() == (tx.manager, "authenticated", tx.manager)
 
 
 # ------------------------------------------------------------------ concurrency
@@ -258,8 +284,8 @@ def test_concurrent_transitions_serialize_and_the_loser_writes_nothing():
             def race():
                 try:
                     second.execute("set lock_timeout = '20s'")
-                    second.execute("select private.knowledge_transition_source(%s, 'review_required', 'approved',"
-                                   " 'second', %s)", (source_id, _any_user(second)))
+                    second.execute("select private.knowledge_transition_source(%s, 'review_required', 'rejected',"
+                                   " 'second', null)", (source_id,))
                     second.commit()
                     outcome["second"] = "ok"
                 except psycopg.Error as exc:
@@ -285,18 +311,14 @@ def test_concurrent_transitions_serialize_and_the_loser_writes_nothing():
             cleanup.execute("delete from public.knowledge_sources where source_id = %s", (source_id,))
 
 
-def _any_user(conn):
-    row = conn.execute("select id from auth.users limit 1").fetchone()
-    assert row, "the seeded database has users"
-    return row[0]
-
-
 # ------------------------------------------------------------------ rollback and replay
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent.parent
 MIGRATION_A = ROOT / "supabase/migrations/20261005090000_knowledge_retrieval_lexical_foundation.sql"
 M1 = ROOT / "supabase/migrations/20261110090100_knowledge_status_lifecycle_m1.sql"
 M1_ROLLBACK = ROOT / "supabase/rollbacks/20261110090100_knowledge_status_lifecycle_m1.down.sql"
+M2 = ROOT / "supabase/migrations/20261110120000_knowledge_verified_expert_approval_m2.sql"
+M2_ROLLBACK = ROOT / "supabase/rollbacks/20261110120000_knowledge_verified_expert_approval_m2.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -319,15 +341,23 @@ def _live_body(tx, name):
 
 
 def test_rollback_restores_migration_a_and_replay_restores_m1(tx):
+    """Rollbacks unwind newest first (M2, then M1); replay applies M1, then M2."""
     tx.settle()
+    tx.cur.execute("set local knowledge.m2_rollback_evidence_exported = 'yes'")   # the explicit confirmation
+    tx.cur.execute(_without_tx_control(M2_ROLLBACK))
+    for name in TRIGGER_FUNCTIONS[:2]:                               # M2 rollback restores M1 verbatim
+        assert _live_body(tx, name) == _body_in(M1, name), name
     tx.cur.execute(_without_tx_control(M1_ROLLBACK))
     for name in TRIGGER_FUNCTIONS:                                   # verbatim Migration A bodies again
         assert _live_body(tx, name) == _body_in(MIGRATION_A, name), name
     tx.cur.execute("select to_regclass('public.knowledge_status_events'), to_regproc('private.knowledge_transition_document')")
     assert tx.cur.fetchone() == (None, None)
-    tx.cur.execute(M1.read_text(encoding="utf-8"))                   # replay: M1 is back and works
+    tx.cur.execute(M1.read_text(encoding="utf-8"))                   # replay: M1 is back
     for name in TRIGGER_FUNCTIONS:
         assert _live_body(tx, name) == _body_in(M1, name), name
+    tx.cur.execute(M2.read_text(encoding="utf-8"))                   # ... and M2 on top, and it works
+    for name in TRIGGER_FUNCTIONS[:2]:
+        assert _live_body(tx, name) == _body_in(M2, name), name
     doc = tx.document(tx.source(), status="review_required")
     assert tx.transit("document", doc, "review_required", "expert_review")[0] == "ok"
     assert [e[1] for e in tx.events("document", doc)] == ["expert_review"]

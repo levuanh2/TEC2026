@@ -22,7 +22,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
-from tests.knowledge_status_paths import DOCUMENT_PATH, TRANSITION  # noqa: E402
+from tests import knowledge_status_paths as paths  # noqa: E402
+from tests.knowledge_status_paths import DOCUMENT_PATH  # noqa: E402
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, PERMISSION_DENIED, _sha, artifact_ref,  # noqa: E402
                                               pytestmark, tx)
 
@@ -65,7 +66,8 @@ def _run(tx, sql, params=()):
 
 def _walk(tx, doc, path):
     for frm, to in path:
-        tx.cur.execute(TRANSITION["document"], (doc, frm, to, "reviewed", tx.approver if to == "approved" else None))
+        paths.transition(tx.cur, "document", doc, frm, to, reason="reviewed",
+                         approver=tx.approver if to == "approved" else None)
 
 
 def _to_approved(tx, doc):

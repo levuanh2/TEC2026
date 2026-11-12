@@ -18,7 +18,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tests.knowledge_status_paths import DOCUMENT_PATH, TRANSITION  # noqa: E402
+from tests import knowledge_status_paths as paths  # noqa: E402
+from tests.knowledge_status_paths import DOCUMENT_PATH  # noqa: E402
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, INVALID_PARAMETER, PERMISSION_DENIED,  # noqa: E402
                                               UNIQUE_VIOLATION, _sha, artifact_ref, psycopg, pytestmark, tx)
 
@@ -48,8 +49,8 @@ def _walk(tx, doc, path, *, approved=True, note="reviewed"):
     with `note` as its review note."""
     for frm, to in path:
         approval = to == "approved"
-        tx.cur.execute(TRANSITION["document"], (doc, frm, to, note if approval else "to expert review",
-                                                tx.approver if approval and approved else None))
+        paths.transition(tx.cur, "document", doc, frm, to, reason=note if approval else "to expert review",
+                         approver=tx.approver if approval and approved else None)
 
 
 def _insert(tx, *, artifact, status="approved", url="https://example.invalid/doc", sha=None, license_basis="official_publication",

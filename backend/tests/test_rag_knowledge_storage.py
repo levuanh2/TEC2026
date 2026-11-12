@@ -33,6 +33,7 @@ sys.path.insert(0, str(BACKEND))
 
 from infrastructure.config import load_settings  # noqa: E402
 from tests.knowledge_status_paths import DOCUMENT_PATH, SOURCE_PATH, TRANSITION  # noqa: E402,F401
+from tests import knowledge_status_paths as paths  # noqa: E402
 
 psycopg = pytest.importorskip("psycopg", reason="psycopg is required for the RLS tests.")
 
@@ -151,21 +152,21 @@ class Tx:
                 self.transition("document", doc, frm, to, "fixture")
 
     def transition(self, kind, key, frm, to, reason="fixture", approver=None):
-        """One controlled transition (fixture setup: must succeed). An approval names tx.approver."""
+        """One controlled transition (fixture setup: must succeed). An approval names tx.approver.
+        M2-owned steps run through the verified-human RPCs as synthetic fixture personnel."""
         approver = approver or (self.approver if to == "approved" else None)
-        self.cur.execute(TRANSITION[kind], (key, frm, to, reason, approver))
-        return self.cur.fetchone()[0]
+        return paths.transition(self.cur, kind, key, frm, to, reason=reason, approver=approver)
 
     def transit(self, kind, key, frm, to, reason="reviewed", approver=None, *, name_approver=True):
-        """('ok', event_id) or ('err', sqlstate) for one controlled transition, savepoint-isolated, as
-        the operator. An approval names tx.approver unless `name_approver` is False."""
+        """('ok', event_id) or ('err', sqlstate) for one controlled transition along its legal path
+        (the operator function, or for M2-owned steps the verified-human RPCs), savepoint-isolated.
+        An approval names tx.approver unless `name_approver` is False."""
         self.settle()
         if approver is None and name_approver and to == "approved":
             approver = self.approver
         self.cur.execute("savepoint t")
         try:
-            self.cur.execute(TRANSITION[kind], (key, frm, to, reason, approver))
-            event = self.cur.fetchone()[0]
+            event = paths.transition(self.cur, kind, key, frm, to, reason=reason, approver=approver)
             self.cur.execute("release savepoint t")
             return ("ok", event)
         except psycopg.Error as exc:
@@ -934,6 +935,14 @@ def test_client_writes_are_denied(tx):
         assert tx.as_user(tx.manager, sql, params) == ("err", PERMISSION_DENIED), sql
 
 
+M2_RPCS = {"knowledge_register_personnel", "knowledge_grant_personnel_role", "knowledge_set_personnel_status",
+           "knowledge_set_personnel_role_status", "knowledge_attest_document_upload", "knowledge_attest_source_upload",
+           "knowledge_start_expert_review", "knowledge_submit_expert_review", "knowledge_decide_document",
+           "knowledge_approve_source", "knowledge_review_snapshot", "knowledge_cancel_expert_review"}
+# The owner-switched demo path (EXECUTE for service_role only, off by default).
+M2_DEMO = {"knowledge_demo_approve_document", "knowledge_demo_approve_source", "knowledge_demo_quarantine_all"}
+
+
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
     tx.cur.execute("select p.proname, p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%' order by 1")
@@ -945,15 +954,28 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     # M1 (20261110090100)
                                     "knowledge_status_transition_allowed", "knowledge_status_transition_authorized",
                                     "knowledge_status_events_append_only",
-                                    "knowledge_transition_source", "knowledge_transition_document"}
+                                    "knowledge_transition_source", "knowledge_transition_document",
+                                    # M2 (20261110120000): internal helpers (no grant) ...
+                                    "knowledge_m2_write_authorized", "knowledge_m2_set_marker", "knowledge_m2_no_truncate",
+                                    "knowledge_evidence_guard", "knowledge_registry_admin_guard",
+                                    "knowledge_personnel_guard", "knowledge_verified_actor", "knowledge_actor_role",
+                                    "knowledge_person_identity", "knowledge_identity_key", "knowledge_registry_admin_actor",
+                                    "knowledge_document_snapshot", "knowledge_source_snapshot",
+                                    "knowledge_snapshot_sha256", "knowledge_apply_source_transition",
+                                    "knowledge_apply_document_transition", "knowledge_check_review_evidence",
+                                    "knowledge_demo_mode_stamp", "knowledge_demo_reason",
+                                    "knowledge_demo_require_enabled", *M2_DEMO,
+                                    # ... and the verified-human RPCs (EXECUTE for authenticated only)
+                                    *M2_RPCS}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
-    # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s) and the two
-    # M1 transition functions (EXECUTE for service_role only, see test_status_events below).
+    # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
+    # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
+    # only, see test_rag_knowledge_m2_approval.py). Every internal helper is SECURITY INVOKER.
     assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
-                                            "knowledge_transition_document"}, rows
-    tx.cur.execute("select proname, prosrc from pg_proc where proname in ('match_knowledge_chunks_lexical',"
-                   " 'knowledge_transition_source', 'knowledge_transition_document')")
-    for name, body in tx.cur.fetchall():                                    # no dynamic SQL
+                                            "knowledge_transition_document", *M2_RPCS, *M2_DEMO}, rows
+    tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                   " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
+    for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere
         assert not re.search(r"\bexecute\b", body.lower()), name
 
 
