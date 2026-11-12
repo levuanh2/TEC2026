@@ -58,8 +58,8 @@ class AppBottomNavigation extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: const BoxDecoration(
-        color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        gradient: AppGradients.header,
+        border: Border(top: BorderSide(color: AppColors.headerDark)),
       ),
       child: SafeArea(
         top: false,

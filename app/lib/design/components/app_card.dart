@@ -24,17 +24,19 @@ class AppCard extends StatelessWidget {
     this.variant = AppCardVariant.plain,
     this.padding = const EdgeInsets.all(AppSpacing.md),
     this.onTap,
+    this.tone = AppTone.neutral,
   });
 
   final Widget child;
   final AppCardVariant variant;
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
+  final AppTone tone;
 
   @override
   Widget build(BuildContext context) {
     final (bg, border) = switch (variant) {
-      AppCardVariant.plain => (AppColors.surface, AppColors.border),
+      AppCardVariant.plain => (tone.surface, AppColors.border),
       AppCardVariant.highlight => (
           AppColors.primarySurface,
           Colors.transparent
@@ -44,6 +46,9 @@ class AppCard extends StatelessWidget {
 
     return Material(
       color: bg,
+      elevation: 1,
+      shadowColor: AppColors.shadow,
+      surfaceTintColor: Colors.transparent,
       borderRadius: AppRadii.allCard,
       clipBehavior: Clip.antiAlias,
       child: InkWell(

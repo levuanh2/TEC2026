@@ -26,6 +26,8 @@ import { useMobileDrawer } from './components/useMobileDrawer'
 import { ForcedPasswordChange } from './components/ForcedPasswordChange'
 import { AuthScenery } from './components/BrandScenery'
 import { prefetchFarmerScope } from './farmer/scope'
+import { isPublicPath } from './public/routes'
+import { PublicSite } from './public/PublicSite'
 
 const ROLE_LABEL: Record<string, string> = {
   farmer: 'Nông hộ',
@@ -402,9 +404,20 @@ function ViewerUnverified({ failure, onRetry }: { failure: ViewerFailure; onRetr
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppRoot />
+      <AppEntry />
     </QueryClientProvider>
   )
+}
+
+/** Public pages mount without the application's session/read effects. */
+function AppEntry() {
+  const [path, setPath] = useState(location.pathname)
+  useEffect(() => {
+    const update = () => setPath(location.pathname)
+    addEventListener('popstate', update)
+    return () => removeEventListener('popstate', update)
+  }, [])
+  return isPublicPath(path) ? <PublicSite path={path} /> : <AppRoot />
 }
 
 function AppRoot() {

@@ -1,5 +1,24 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## Publish web + Flutter UI (2026-11-12)
+
+User explicitly requested all completed interface changes on a new branch.
+Codex owns final report/ownership updates and `app/.gitignore` (generated Kotlin
+cache only), then commit/push to `ui/agricarbon-web-flutter-2026-11-12`.
+Preserve branch history; no force-push, backend changes or deployment.
+
+## Flutter visual parity (2026-11-12)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `app/lib/design/**`, `app/lib/screens/**`, `app/lib/shell/tabs/**` (presentation only), `app/assets/**` (new), `app/pubspec.yaml` (assets/fonts only), UI verification/preview files in `app/test/` and `app/tool/`, `docs/FLUTTER_UI_REFRESH_2026_11.md` (new) | — (released) | Match AgriCarbon web palette, bundled Vietnamese font, rice artwork, slogan, login, shared surfaces/navigation/cards and gentle accessible motion. Preserve auth, offline writes, synchronization and Carbon/CV logic. Herdr unavailable. | DONE: analyze clean; Flutter tests 483/483; 10 visual tests with bundled fonts, 320–800px login and enlarged text; browser preview build PASS, 0 JS page errors. Android device acceptance not run. |
+
+## Public website (2026-11-12)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/public/**` (new), `web-dashboard/src/App.tsx` (public entry boundary), `web-dashboard/src/routes.ts`, `web-dashboard/index.html`, `web-dashboard/src/components/BrandScenery.tsx` (home link), `web-dashboard/public/downloads/**` (new), `web-dashboard/tests/e2e/public-site.spec.ts` (new), public routing tests, `docs/PUBLIC_WEBSITE_2026_11.md` (new) | — (released) | Public AgriCarbon home before login; platform/services/reports/pricing/news pages. Original design inspired by supplied reference, pricing explicitly unpublished. No backend, auth contract, deployment or Git publishing changes. Herdr unavailable. | DONE: build PASS; Vitest 777/777; Playwright 28/28 (including 9 public-site tests, 35 public route/viewport views, desktop/mobile axe, keyboard, menu, downloads, no private API requests); local preview 5173. |
+
 ## UI refresh (2026-11-10)
 
 Publishing scope (2026-11-11): Codex prepared the UI refresh files and its report

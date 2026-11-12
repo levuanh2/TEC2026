@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Droplets, Leaf, Sprout, Wheat } from 'lucide-react'
+import { Link } from '../ui'
 
 export const BRAND_SLOGAN = 'Số hóa canh tác - Xanh hóa tương lai'
 
@@ -27,6 +28,7 @@ export function AuthScenery({ children }: { children: ReactNode }) {
       </aside>
       <div className="login-workspace">
         {children}
+        <Link to="/" className="login-home">← Về trang chủ AgriCarbon</Link>
         <p className="login-workspace__foot"><Leaf size={14} aria-hidden="true" />{BRAND_SLOGAN}</p>
       </div>
     </main>

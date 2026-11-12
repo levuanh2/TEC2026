@@ -86,22 +86,28 @@ class AppScaffold extends StatelessWidget {
       // mép trên; không để Scaffold tự né bàn phím hai lần.
       resizeToAvoidBottomInset: true,
       floatingActionButton: floatingActionButton,
-      body: Column(
-        children: [
-          if (header != null) header!,
-          Expanded(child: content),
-          if (bottomBar != null)
-            SafeArea(
-              top: false,
-              minimum: const EdgeInsets.fromLTRB(
-                AppSpacing.screenH,
-                AppSpacing.sm,
-                AppSpacing.screenH,
-                AppSpacing.sm,
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          gradient: backgroundColor == null ? AppGradients.workspace : null,
+        ),
+        child: Column(
+          children: [
+            if (header != null) header!,
+            Expanded(child: content),
+            if (bottomBar != null)
+              SafeArea(
+                top: false,
+                minimum: const EdgeInsets.fromLTRB(
+                  AppSpacing.screenH,
+                  AppSpacing.sm,
+                  AppSpacing.screenH,
+                  AppSpacing.sm,
+                ),
+                child: bottomBar!,
               ),
-              child: bottomBar!,
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
