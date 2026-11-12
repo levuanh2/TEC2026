@@ -192,11 +192,34 @@ def test_denied_calls_are_recorded_up_to_a_cap_per_caller_and_hour(tx, m2):
     for _ in range(cap + 5):
         assert read(m2, nobody, doc) == DENIED                                      # the answer never changes
     assert len(audit(tx, nobody)) == cap
+    # the calls above the cap are counted, not dropped: one row for this caller and hour
+    overflow = ("select suppressed_calls, last_at >= first_at, window_start = date_trunc('hour', window_start, 'UTC')"
+                " from public.knowledge_review_read_denied_overflow where caller_user_id = %s")
+    tx.cur.execute(overflow, (nobody,))
+    assert tx.cur.fetchall() == [(5, True, True)]
+    tx.cur.execute("select column_name from information_schema.columns"
+                   " where table_name = 'knowledge_review_read_denied_overflow'")
+    assert {r[0] for r in tx.cur.fetchall()} == {"caller_user_id", "window_start", "suppressed_calls", "first_at", "last_at"}
+    # grow-only, written by the function alone, readable by service_role alone
+    for role, expected in (("anon", False), ("authenticated", False), ("service_role", True)):
+        tx.cur.execute("select has_table_privilege(%s, 'public.knowledge_review_read_denied_overflow', 'select'),"
+                       " has_table_privilege(%s, 'public.knowledge_review_read_denied_overflow',"
+                       " 'insert, update, delete, truncate')", (role, role))
+        assert tx.cur.fetchone() == (expected, False), role
+    for statement in ("update public.knowledge_review_read_denied_overflow set suppressed_calls = 1",
+                      "update public.knowledge_review_read_denied_overflow set suppressed_calls = suppressed_calls + 1",
+                      "delete from public.knowledge_review_read_denied_overflow",
+                      "truncate public.knowledge_review_read_denied_overflow",
+                      "insert into public.knowledge_review_read_denied_overflow (caller_user_id, window_start,"
+                      " suppressed_calls) values (gen_random_uuid(), date_trunc('hour', now(), 'UTC'), 1)"):
+        assert owner(tx, statement) == ("err", PERMISSION_DENIED), statement
     assert read(m2, other, uuid.uuid4()) == DENIED and len(audit(tx, other)) == 1   # the cap is per caller
     reviewer = person(m2, "expert_reviewer")
     for _ in range(3):                                                              # granted reads are always recorded
         assert read(m2, reviewer, doc)["access"] == "granted"
     assert len(audit(tx, reviewer)) == 3
+    tx.cur.execute("select count(*) from public.knowledge_review_read_denied_overflow where caller_user_id <> %s", (nobody,))
+    assert tx.cur.fetchone()[0] == 0                                                # nobody else overflowed
     # the window is rolling: once the recorded denials are older than an hour, recording resumes
     tx.cur.execute("alter table public.knowledge_review_read_events disable trigger knowledge_review_read_events_guard")
     tx.cur.execute("update public.knowledge_review_read_events set recorded_at = recorded_at - interval '61 minutes'"
@@ -301,7 +324,8 @@ def test_m4_1_rollback_needs_a_confirmation_drops_only_its_own_objects_and_repla
     tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("select to_regclass('public.knowledge_review_read_events'), to_regproc('public.knowledge_review_claims'),"
                    " to_regproc('private.knowledge_review_claim_json'), to_regproc('private.knowledge_review_read_denied_cap'),"
+                   " to_regclass('public.knowledge_review_read_denied_overflow'),"
                    " to_regclass('public.knowledge_claims') is not null")
-    assert tx.cur.fetchone() == (None, None, None, None, True)
+    assert tx.cur.fetchone() == (None, None, None, None, None, True)
     tx.cur.execute(M4_1.read_text(encoding="utf-8"))                                # replay
     assert read(m2, reviewer, doc)["access"] == "granted"

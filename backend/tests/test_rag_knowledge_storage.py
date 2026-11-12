@@ -953,7 +953,8 @@ M4_OPERATOR = {"knowledge_record_claims", "knowledge_record_contradiction_candid
                "knowledge_document_evidence_state"}
 # M4.1 (20261112120000): the reviewer read RPC (SECURITY DEFINER, EXECUTE for authenticated only) and its
 # internal JSON helper.
-M4_1_HELPERS = {"knowledge_review_claim_json", "knowledge_review_read_denied_cap"}
+M4_1_HELPERS = {"knowledge_review_claim_json", "knowledge_review_read_denied_cap",
+                "knowledge_review_read_overflow_guard"}
 M4_1_RPCS = {"knowledge_review_claims"}
 
 

@@ -3,8 +3,8 @@
 --   supabase migration repair --status reverted 20261112120000
 --
 -- M4.1 replaced nothing: this only drops what M4.1 added. No status, approval, retrieval, expiry or
--- claim behaviour changes. DROPPING THE TABLE DELETES THE READ AUDIT. Export
--- public.knowledge_review_read_events first, then confirm with
+-- claim behaviour changes. DROPPING THE TABLES DELETES THE READ AUDIT. Export
+-- public.knowledge_review_read_events and public.knowledge_review_read_denied_overflow first, then confirm with
 --   set local knowledge.m4_1_rollback_evidence_exported = 'yes';
 
 begin;
@@ -22,5 +22,7 @@ drop function public.knowledge_review_claims(uuid);
 drop function private.knowledge_review_claim_json(bigint);
 drop function private.knowledge_review_read_denied_cap();
 drop table public.knowledge_review_read_events;
+drop table public.knowledge_review_read_denied_overflow;
+drop function private.knowledge_review_read_overflow_guard();
 
 commit;

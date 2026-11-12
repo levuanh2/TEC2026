@@ -29,12 +29,15 @@
 --     so that the denial itself is audited; the audit row is the same in all three cases (the
 --     requested id as given, no personnel, no counts), and only service_role reads the audit table.
 --   * Denied calls are recorded up to private.knowledge_review_read_denied_cap() (20) rows per
---     caller in any rolling hour. Further denied calls in that hour get the same answer and write
---     nothing, so an account without a role cannot grow the append-only table without bound (at
---     most 20 small rows an hour, and it needs a verified MFA factor to write even one). The cap
---     is counted under a per-caller advisory lock. Granted reads are always recorded: only
---     registered reviewers and approvers can make them. The row holds no text and pins no account
---     (no foreign key on the caller).
+--     caller in any rolling hour, so an account without a role cannot grow the append-only table
+--     without bound (at most 20 small rows an hour, and it needs a verified MFA factor to write
+--     even one). A denied call above the cap gets the same answer and is COUNTED, not dropped:
+--     public.knowledge_review_read_denied_overflow keeps one row per caller and clock hour with the
+--     number of such calls and the first and last time. So probing past the cap stays visible (who,
+--     when, how many); what is not kept is the id each of those calls asked for. The cap is counted
+--     under a per-caller advisory lock. Granted reads are always recorded: only registered
+--     reviewers and approvers can make them. Neither table holds text or pins an account (no
+--     foreign key on the caller).
 --   * Roles are scoped per visibility and organization (M2), not per farm: a reviewer of an
 --     organization reads the claims of every farm of that organization. M4.1 does not widen that.
 
@@ -85,6 +88,55 @@ create trigger knowledge_review_read_events_guard
   for each row execute function private.knowledge_evidence_guard();
 create trigger knowledge_review_read_events_no_truncate
   before truncate on public.knowledge_review_read_events
+  for each statement execute function private.knowledge_m2_no_truncate();
+
+-- Denied calls above the cap: one row per caller and clock hour (UTC), a counter. Not append-only by
+-- row, but it can only be created by the read function and can only grow: the guard below refuses
+-- every other insert, every update that is not "more calls, later last_at", and every delete.
+create table public.knowledge_review_read_denied_overflow (
+  caller_user_id uuid not null,
+  window_start timestamptz not null,
+  suppressed_calls integer not null,
+  first_at timestamptz not null default clock_timestamp(),
+  last_at timestamptz not null default clock_timestamp(),
+  constraint knowledge_review_read_denied_overflow_pkey primary key (caller_user_id, window_start),
+  constraint knowledge_review_read_denied_overflow_chk check (
+    suppressed_calls > 0 and last_at >= first_at
+    and window_start = pg_catalog.date_trunc('hour', window_start, 'UTC'))
+);
+comment on table public.knowledge_review_read_denied_overflow is
+  'M4.1: how many denied reviewer-read calls of one caller in one clock hour were above the recorded cap. '
+  'Holds no document id and no text.';
+alter table public.knowledge_review_read_denied_overflow enable row level security;
+revoke all on public.knowledge_review_read_denied_overflow from public, anon, authenticated, service_role;
+grant select on public.knowledge_review_read_denied_overflow to service_role;
+
+create function private.knowledge_review_read_overflow_guard()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if private.knowledge_m2_write_authorized('knowledge_review_read_denied_overflow') then
+    if tg_op = 'INSERT' and new.suppressed_calls = 1 then
+      return new;
+    end if;
+    if tg_op = 'UPDATE' and new.caller_user_id = old.caller_user_id and new.window_start = old.window_start
+       and new.first_at = old.first_at and new.suppressed_calls = old.suppressed_calls + 1
+       and new.last_at >= old.last_at then
+      return new;
+    end if;
+  end if;
+  raise exception '% is a grow-only counter written by the reviewer read function: % is refused', tg_table_name, tg_op
+    using errcode = '42501';
+end;
+$$;
+revoke all on function private.knowledge_review_read_overflow_guard() from public, anon, authenticated, service_role;
+create trigger knowledge_review_read_denied_overflow_guard
+  before insert or update or delete on public.knowledge_review_read_denied_overflow
+  for each row execute function private.knowledge_review_read_overflow_guard();
+create trigger knowledge_review_read_denied_overflow_no_truncate
+  before truncate on public.knowledge_review_read_denied_overflow
   for each statement execute function private.knowledge_m2_no_truncate();
 
 -- ================================================================== read
@@ -170,6 +222,14 @@ begin
       perform private.knowledge_m2_set_marker('knowledge_review_read_events');
       insert into public.knowledge_review_read_events (caller_user_id, caller_session_id, requested_document_pk, outcome)
       values (v_actor.user_id, v_actor.session_id, p_document_pk, 'denied');
+      perform private.knowledge_m2_set_marker(null);
+    else
+      -- above the cap: counted, one row per caller and clock hour
+      perform private.knowledge_m2_set_marker('knowledge_review_read_denied_overflow');
+      insert into public.knowledge_review_read_denied_overflow as o (caller_user_id, window_start, suppressed_calls)
+      values (v_actor.user_id, pg_catalog.date_trunc('hour', pg_catalog.clock_timestamp(), 'UTC'), 1)
+      on conflict (caller_user_id, window_start)
+      do update set suppressed_calls = o.suppressed_calls + 1, last_at = pg_catalog.clock_timestamp();
       perform private.knowledge_m2_set_marker(null);
     end if;
     return pg_catalog.jsonb_build_object('access', 'denied',

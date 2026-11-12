@@ -92,9 +92,14 @@ the caller may not read. Withheld candidates are not counted in the row.
 ## 6. Known limits
 
 - Denied calls are recorded up to 20 rows per caller in any rolling hour
-  (`private.knowledge_review_read_denied_cap()`); further denied calls in that hour get the same
-  answer and write nothing. This bounds what an account without a role can add to the append-only
-  table, at the price of not recording the calls above the cap. Granted reads are always recorded.
+  (`private.knowledge_review_read_denied_cap()`). A denied call above the cap gets the same answer
+  and is counted in `public.knowledge_review_read_denied_overflow`: one row per caller and clock
+  hour with `suppressed_calls`, `first_at` and `last_at`. The table is grow-only (written by the
+  read function alone; no other insert, no decrease, no delete, no truncate) and readable by
+  `service_role` only. So probing past the cap stays visible (who, when, how many); the id each of
+  those calls asked for is not kept. This bounds what an account without a role can add: 20 rows
+  plus one counter row an hour. The cap value, and whether to keep the cap at all, is an owner
+  decision before any hosted migration. Granted reads are always recorded.
   The count runs under a per-caller advisory lock. There is still no request rate limit: that
   belongs to the API gateway. The row pins no account (no foreign key on the caller).
 - Claim and candidate ids come from global sequences. Gaps between ids exist for many reasons and

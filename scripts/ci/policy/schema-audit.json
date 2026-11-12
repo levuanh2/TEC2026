@@ -533,6 +533,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_review_read_overflow_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_search_text(text)": {
    "config": [
     "search_path=\"\""
@@ -1894,6 +1901,10 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_review_read_denied_overflow": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_review_read_events": {
    "enabled": true,
    "forced": false
@@ -2133,6 +2144,8 @@
   "knowledge_registry_admins.knowledge_registry_admins_guard": "private.knowledge_registry_admin_guard()",
   "knowledge_registry_admins.knowledge_registry_admins_insert_guard": "private.knowledge_registry_admin_guard()",
   "knowledge_registry_admins.knowledge_registry_admins_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_review_read_denied_overflow.knowledge_review_read_denied_overflow_guard": "private.knowledge_review_read_overflow_guard()",
+  "knowledge_review_read_denied_overflow.knowledge_review_read_denied_overflow_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_review_read_events.knowledge_review_read_events_guard": "private.knowledge_evidence_guard()",
   "knowledge_review_read_events.knowledge_review_read_events_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_sources.knowledge_sources_scope": "private.enforce_knowledge_source_scope()",
@@ -2247,6 +2260,7 @@
   "knowledge_personnel_roles_live_key": "CREATE UNIQUE INDEX knowledge_personnel_roles_live_key ON public.knowledge_personnel_roles USING btree (personnel_id, role, scope_visibility, COALESCE(scope_organization_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (status <> 'revoked'::text)",
   "knowledge_personnel_roles_pkey": "CREATE UNIQUE INDEX knowledge_personnel_roles_pkey ON public.knowledge_personnel_roles USING btree (id)",
   "knowledge_registry_admins_pkey": "CREATE UNIQUE INDEX knowledge_registry_admins_pkey ON public.knowledge_registry_admins USING btree (auth_user_id)",
+  "knowledge_review_read_denied_overflow_pkey": "CREATE UNIQUE INDEX knowledge_review_read_denied_overflow_pkey ON public.knowledge_review_read_denied_overflow USING btree (caller_user_id, window_start)",
   "knowledge_review_read_events_pkey": "CREATE UNIQUE INDEX knowledge_review_read_events_pkey ON public.knowledge_review_read_events USING btree (id)",
   "knowledge_sources_pkey": "CREATE UNIQUE INDEX knowledge_sources_pkey ON public.knowledge_sources USING btree (source_id)",
   "knowledge_status_events_pkey": "CREATE UNIQUE INDEX knowledge_status_events_pkey ON public.knowledge_status_events USING btree (id)",
