@@ -1,20 +1,22 @@
 # RAG V1.5 M2 operational hardening (implementation-ready design)
 
-Status: **DESIGN ONLY (2026-11-12). Nothing here is implemented.** No migration, no code, no hosted
-change. Base: `integrate/rag-v15` at `f424fb2` (M1, M2, M3, M4 merged). dev3-01 stays OPEN.
+Status: **DESIGN (refreshed 2026-11-13). Nothing here is implemented in this PR.** No migration, no
+code, no hosted change. Base: `integrate/rag-v15` at `a9bf0e6` (M1, M2, M3, M4, M4.1 merged; #59
+design docs merged as `c4cb1a9`, #60 M4.1 as `a9bf0e6`). All four owner decisions are taken (section
+8). The implementation follows in separate stacked Draft PRs H-a, H-b, H-c. dev3-01 stays OPEN.
 
 Why a design and not a migration in this PR: every change below replaces a function that M2 or M3
 defines (`private.knowledge_transition_source`, `private.knowledge_transition_document`,
 `private.knowledge_demo_approve_*`, `public.match_knowledge_chunks_lexical`,
 `private.knowledge_check_cross_source_supersession`). M4.1 (#60, migration `20261112120000`) is
-still a Draft. A hardening migration must be numbered after it and its rollback must restore the
-bodies that are current at that time, so it is written once #60 is merged or rejected. Section 7
-gives the order.
+merged. Each hardening migration is numbered after it and its rollback restores the bodies that are
+current on `a9bf0e6`. M4.1 replaced none of the functions above, so its merge changes no body this
+design relies on. Section 7 gives the order.
 
 These risks were **acknowledged for integrate-only development and are not accepted for a hosted
 deployment**. H1 to H4 are preconditions of any hosted M2 migration.
 
-## 1. Current state (verified against `f424fb2`)
+## 1. Current state (verified against `f424fb2`; unchanged by M4.1 on `a9bf0e6`)
 
 | # | Fact | Where |
 |---|---|---|
@@ -73,8 +75,7 @@ shared service credential.
 
 1. New role value `archivist` in `knowledge_personnel_roles.role` (scope: visibility and
    organization, as the other roles). Granted by a registry admin like any role.
-   **Owner decision D-H2a:** a separate `archivist` role (recommended: archiving is custodial, not
-   a content judgement), or reuse `approver`.
+   **Owner decision D-H2a (2026-11-12, TAKEN):** a separate `archivist` role.
 
 2. New `public.knowledge_archive_document(p_document_pk, p_snapshot_sha256, p_reason_code,
    p_rationale)` and `public.knowledge_archive_source(...)`, `SECURITY DEFINER`, `EXECUTE` for
@@ -83,8 +84,9 @@ shared service credential.
    - an active `archivist` role for the scope of the source;
    - `p_snapshot_sha256` must equal the current snapshot hash (the human states what they archive);
    - separation of duties: the archivist is not the uploader of that version. **Owner decision
-     D-H2b:** also forbid the approver of that version (recommended for `approved -> archived`;
-     not needed for `quarantined -> archived`);
+     D-H2b (2026-11-12, TAKEN):** the original approver must not archive their own approved version
+     directly (`approved -> archived`). `quarantined -> archived` remains a separate archivist action;
+     supersession archiving stays inside an independently authorized approval;
    - writes an append-only `public.knowledge_archive_records` row (personnel id, role id, user id,
      session id, snapshot, hash, reason code, rationale) and performs the transition.
 
@@ -125,9 +127,13 @@ content from verified content, and the only gate is a typed label.
    - Consequence: on hosted (class `shared`, never changed), demo approval is impossible even if
      someone turns the switch on. Staging shares the hosted database (F7), so staging cannot demo
      approve either. That is intended: an environment label is not a security boundary.
-   - **Owner decision D-H3a:** demos that need approved content run on an isolated project
-     (recommended), or the owner accepts demo content on the shared project with the retrieval
-     separation of 4.2 as the only control.
+   - **Owner decision D-H3a (2026-11-12, TAKEN):** demo-approved content runs ONLY on a physically
+     or logically isolated local or dedicated test database, never on the shared hosted project.
+   - A mutable class row alone does not prove isolation: whoever holds the owner login can set it.
+     H-a therefore adds an independently verifiable gate, checked from outside the database (the
+     deployment's project reference and connection target), and binds the class row to the
+     database it was set on, so a copy of the row does not carry the claim to another database.
+     The H-a document defines both.
 
 ### 4.2 Retrieval separation
 
@@ -189,9 +195,10 @@ Recommended design (C):
    additionally requires that row for exactly this pair and this snapshot hash.
 4. Demo approval: unchanged, never cross-source (F9).
 
-**Owner decision D-H4:** option C (recommended), B, or stay with A for integrate and decide before
-hosted. If no custodian exists for a source, a cross-source replacement of it is impossible; the
-old version can still be quarantined (H1) or archived (H2) on its own evidence.
+**Owner decision D-H4 (2026-11-12, TAKEN):** option C, target-source custodian countersignature.
+A non-empty reference field is not proof of authority. If no custodian exists for a source, a
+cross-source replacement of it is impossible; the old version can still be quarantined (H1) or
+archived (H2) on its own evidence. Publisher identity is a registry row, not the free-text `owner`.
 
 Tests: same publisher unaffected; different publisher without authorization refused at submission
 and at approval; authorization by the reviewer or approver of the replacing version refused;
@@ -208,7 +215,7 @@ custodian of another source refused; stale snapshot refused; record immutable.
 
 ## 7. Delivery order
 
-1. #60 (M4.1) merged or rejected by the owner.
+1. #60 (M4.1) merged: `a9bf0e6` (2026-11-12). Done.
 2. Migration H-a `..._knowledge_m2_hardening_assurance.sql`: 4.1 and 4.2, with rollback. First,
    because it closes the path by which unverified content reaches retrieval.
 3. Migration H-b `..._knowledge_m2_hardening_operator.sql`: H1 and H2.
@@ -219,9 +226,9 @@ custodian of another source refused; stale snapshot refused; record immutable.
 
 ## 8. Owner decisions
 
-| Id | Question | Recommended |
+| Id | Question | Decided 2026-11-12 |
 |---|---|---|
-| D-H2a | `archivist` role or reuse `approver` | separate role |
-| D-H2b | may the approver of a version archive it | no for `approved -> archived` |
-| D-H3a | where demos with approved content run | an isolated project; shared project never demo approves |
-| D-H4 | cross-source authority model | option C |
+| D-H2a | `archivist` role or reuse `approver` | separate `archivist` role |
+| D-H2b | may the approver of a version archive it | no, for direct `approved -> archived` |
+| D-H3a | where demos with approved content run | only an isolated local or dedicated test database; never the shared hosted project |
+| D-H4 | cross-source authority model | option C, target-source custodian countersignature |
