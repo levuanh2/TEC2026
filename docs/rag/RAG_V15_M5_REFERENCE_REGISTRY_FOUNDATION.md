@@ -61,7 +61,9 @@ A claim is compared with an entry only through a rule of `CONVERSION_RULES`.
 | `none` | – | – | – | never compared |
 
 The loader checks that an entry's units fit its rule and that its `required_claim_conditions`
-include the rule's preconditions. Arithmetic is exact (`Decimal`). There is no generic ratio rule,
+include the rule's preconditions and are not empty: a comparable entry turns at least one of its
+`conditions` into a tag the claim has to state (an entry whose applicability cannot be checked
+uses `none`). Arithmetic is exact (`Decimal`). There is no generic ratio rule,
 no N2O to N2O-N rule and no rule for SFw, SFp or CFOA. Adding a rule is a code change with its own
 review and test.
 
@@ -80,7 +82,7 @@ no number: a tolerance the source does not print cannot be entered.
 |---|---|---|
 | `reference_unverified` | no human has verified the entry; checked first, so such an entry never judges a claim | no |
 | `not_comparable` | no rule, or a different parameter or unit | no |
-| `out_of_scope` | the claim does not state the required conditions, or the region differs or is unknown | no |
+| `out_of_scope` | the claim does not state the required conditions, states a condition the entry does not cover, or the region differs or is unknown | no |
 | `within_printed_range` / `equal_to_printed_value` | agrees | no |
 | `outside_printed_range` / `differs_from_printed_value` | disagrees | **yes** |
 

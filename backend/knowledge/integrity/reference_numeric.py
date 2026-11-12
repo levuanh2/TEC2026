@@ -375,6 +375,11 @@ def _numeric_entry(raw: dict, allow_synthetic: bool) -> NumericReference:
             raise RegistryError(f"{where}: rule {rule.name} converts {rule.claim_unit} to {rule.reference_unit} only")
         if not rule.preconditions <= set(required):
             raise RegistryError(f"{where}: rule {rule.name} requires the claim conditions {sorted(rule.preconditions)}")
+        if not required:
+            # `conditions` (the source's words) is never empty; a comparable entry must turn at least
+            # one of them into a tag the claim has to state, or its applicability would go unchecked.
+            raise RegistryError(f"{where}: a comparable entry needs at least one required_claim_conditions tag; "
+                                "an entry whose applicability cannot be checked uses conversion 'none'")
 
     # -- verification
     verification = _obj(raw, "verification", where)
@@ -457,6 +462,11 @@ def compare(claim: ClaimValue, entry: NumericReference) -> ReferenceFinding:
     missing = sorted(entry.required_claim_conditions - claim.conditions)
     if missing:
         return finding("out_of_scope", f"The claim does not state the conditions this entry applies to: {missing}.")
+    uncovered = sorted(claim.conditions - entry.required_claim_conditions)
+    if uncovered:
+        # the claim is about a narrower or different situation than the entry describes: a value that
+        # differs there is not a mismatch with this entry
+        return finding("out_of_scope", f"The claim states conditions this entry does not cover: {uncovered}.")
     if entry.region is not None and claim.region != entry.region:
         return finding("out_of_scope", f"The entry applies to region {entry.region!r}; the claim states "
                                        f"{claim.region!r}.")

@@ -321,6 +321,22 @@ def test_an_unverified_reference_never_produces_a_mismatch():
         assert (f.outcome, f.is_mismatch, f.normalized_min) == ("reference_unverified", False, None)
 
 
+def test_a_condition_the_entry_does_not_cover_is_out_of_scope_never_a_mismatch():
+    """A claim about a narrower or different situation than the entry describes is not judged by it,
+    however far the number is from the reference; and an entry cannot be comparable without at
+    least one machine-checked condition."""
+    e = load_one(entry())
+    for extra in ("stage:tillering", "water:awd", "soil:acid_sulfate"):
+        f = rn.compare(claim("999", conditions=("baseline", extra)), e)
+        assert (f.outcome, f.is_mismatch, f.normalized_min) == ("out_of_scope", False, None)
+        assert extra in f.rationale
+    assert rn.compare(claim("999", conditions=("baseline",)), e).is_mismatch       # exactly the covered conditions
+    with pytest.raises(RegistryError, match="at least one required_claim_conditions tag"):
+        load_one(entry(comparison__required_claim_conditions=[]))
+    # every outcome that is not a comparison of numbers carries no normalized value and is no mismatch
+    assert rn.MISMATCHES == {"outside_printed_range", "differs_from_printed_value"}
+
+
 def test_different_quantities_units_scope_or_region_are_never_compared():
     e = load_one(entry())
     other_unit = rn.compare(claim("999", parameter=_first_parameter("areal_ch4"), unit="kgCH4/ha"), e)
