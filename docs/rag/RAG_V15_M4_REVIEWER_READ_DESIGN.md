@@ -1,6 +1,10 @@
 # RAG V1.5 M4 follow-up: reviewer read access to claims and contradiction candidates (design)
 
-Status: **DESIGN ONLY (2026-11-12). Nothing here is implemented.** No migration, no RPC, no UI.
+Status: **DESIGN (2026-11-12).** The owner approved the interface, the read audit table, access for
+both expert reviewer and approver, and non-blocking behaviour. The implementation is Draft PR #60
+(`docs/rag/RAG_V15_M4_1_REVIEWER_READ.md` there lists where it differs from this design: a denial
+is returned rather than raised so that it can be audited, and public material that is not being
+served is not disclosed to a tenant reviewer). This document itself adds no migration, RPC or UI.
 Depends on M2 (#56), M3 (#57) and M4 (#58), in that order. dev3-01 stays OPEN.
 
 ## 1. Problem

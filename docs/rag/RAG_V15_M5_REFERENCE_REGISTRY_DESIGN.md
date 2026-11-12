@@ -248,3 +248,25 @@ as a mismatch). All are review aids. None changes a status, blocks an approval o
 | QĐ 2626 Appendix III | a first-party copy (browser search of `vbpl.vn`, `vanban.chinhphu.vn`, or a request to the ministry) |
 | QĐ 4801 annex | publication by the ministry, or a copy obtained from it directly |
 | QĐ 4043 | the complete original decision; an expert reading of the straw-timing inconsistency |
+
+## 7. Implementation status (2026-11-12)
+
+Step 1 of section 5.4 (schema 2, loader rules, closed conversion table, `compare`, synthetic
+fixtures) is Draft PR #61, `backend/knowledge/integrity/reference_numeric.py`. It stores **no**
+numeric entry: `reference_registry_numeric.json` is committed empty.
+
+Refinements made there, which this design now follows:
+
+- `source.publisher`, `source.effective_date` (or a stated reason for null) and
+  `source.artifact_bytes` are required, as are `rights.status` (`not_cleared` is refused) and
+  `verification.human.evidence_sha256` for a verified entry.
+- `kgN2O-N/kgN` is a reference-only unit with its own dimension. It is not `percent` and not an M4
+  claim unit; only the rule `percent_of_applied_n_to_fraction` connects them, and only for a claim
+  that states `base:applied_n` and `quantity:n2o_n`. The N2O to N2O-N step (x 28/44) has **no**
+  rule: a claim about N2O mass is out of scope.
+- A `scaling_factor` or `conversion_factor` entry has `unit: null` and the conversion `none`.
+- Findings for the exact mode are `equal_to_printed_value` and `differs_from_printed_value`.
+- A claim that does not state its region is `out_of_scope` for a regional entry.
+
+Steps 2 to 5 are not started. No row of section 3 has been re-checked by a human, and the rights
+question of section 2 is open, so no IPCC value may be entered.
