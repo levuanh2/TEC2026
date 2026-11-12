@@ -21,7 +21,8 @@ from tests.test_rag_knowledge_m2_approval import as_role, code, m2, owner  # noq
 from tests.test_rag_knowledge_m3_validity import approve
 from tests.test_rag_knowledge_m4_claims import DRY_15, DRY_30, active, draft, store
 from tests.test_rag_knowledge_status_events import ROOT, _without_tx_control
-from tests.test_rag_knowledge_storage import PERMISSION_DENIED, _DB_URL, pytestmark, psycopg, tx  # noqa: E402
+from tests.test_rag_knowledge_storage import (INVALID_PARAMETER, PERMISSION_DENIED, _DB_URL, pytestmark,  # noqa: E402
+                                              psycopg, tx)
 
 __all__ = ["pytestmark", "tx", "m2"]
 
@@ -128,6 +129,8 @@ def test_only_a_verified_personal_aal2_session_reaches_the_function(tx, m2):
         assert code(m2.call, reviewer, READ, (doc,), claims=claims) == PERMISSION_DENIED
     assert tx.as_user(tx.member, READ, (doc,)) == ("err", PERMISSION_DENIED)        # signed in, no aal2 session
     assert audit(tx, reviewer) == []                                                # an unverified call records nothing
+    assert code(m2.call, reviewer, READ, (None,)) == INVALID_PARAMETER              # no id is a usage error, not a denial
+    assert audit(tx, reviewer) == []
     assert read(m2, reviewer, doc)["access"] == "granted"
 
 
@@ -252,6 +255,20 @@ def test_a_tenant_reviewer_does_not_see_public_material_that_is_not_served(tx, m
     assert audit(tx, org_a_reviewer)[-1][-1] == 0
     m2.role(org_a_reviewer, "expert_reviewer", "public")
     assert len(read(m2, org_a_reviewer, tenant_doc)["candidates"]) == 1
+
+
+def test_candidates_are_filtered_one_by_one(tx, m2):
+    """One version in two candidates, one readable and one not: exactly the readable one is returned and counted."""
+    _, served, _ = active(tx, m2, DRY_15)
+    hidden, _ = draft(tx, m2, DRY_15.replace("15", "16"))                           # a public draft: not served
+    tenant_doc, _ = draft(tx, m2, DRY_30, src=tx.source(visibility="tenant", org=tx.org_a))
+    assert analyze_document(store(tx), str(tenant_doc)).inserted == 2
+    org_a_reviewer = person(m2, "expert_reviewer", "tenant", tx.org_a)
+    out = read(m2, org_a_reviewer, tenant_doc)
+    assert len(out["candidates"]) == 1 and str(hidden) not in str(out)
+    assert {out["candidates"][0]["claim_a"]["document_pk"], out["candidates"][0]["claim_b"]["document_pk"]} \
+        == {str(served), str(tenant_doc)}
+    assert audit(tx, org_a_reviewer)[-1][-2:] == (len(out["claims"]), 1)
 
 
 # ================================================================== non-blocking
