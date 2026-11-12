@@ -228,6 +228,57 @@ def test_denied_calls_are_recorded_up_to_a_cap_per_caller_and_hour(tx, m2):
     assert read(m2, nobody, doc) == DENIED and len(audit(tx, nobody)) == cap + 1
 
 
+def test_the_denied_cap_bounds_the_audit_and_is_not_a_rate_limit(tx, m2):
+    """Owner decision 2026-11-12: 20 detailed denied rows per caller per rolling hour plus the
+    overflow counter. That bounds the audit; it limits no request. Request limiting is a gateway
+    control, a documented precondition of any hosted migration."""
+    _, doc, _ = active(tx, m2, DRY_15)
+    tx.cur.execute("select private.knowledge_review_read_denied_cap()")
+    cap = tx.cur.fetchone()[0]
+    nobody, _ = m2.user(label="flood")
+    before = state(tx)
+    answers = [read(m2, nobody, doc) for _ in range(3 * cap)]
+    assert answers == [DENIED] * (3 * cap)                         # never refused, never a different answer
+    tx.cur.execute("select (select count(*) from public.knowledge_review_read_events where caller_user_id = %s),"
+                   " (select coalesce(sum(suppressed_calls), 0) from public.knowledge_review_read_denied_overflow"
+                   "  where caller_user_id = %s)", (nobody, nobody))
+    recorded, counted = tx.cur.fetchone()
+    assert (recorded, counted) == (cap, 2 * cap)                   # every call is accounted for: rows + counter
+    reviewer = person(m2, "expert_reviewer")
+    granted = [read(m2, reviewer, doc)["access"] for _ in range(cap + 5)]
+    assert granted == ["granted"] * (cap + 5)                      # granted reads are not capped ...
+    assert len(audit(tx, reviewer)) == cap + 5                     # ... and every one is recorded
+    assert read(m2, nobody, doc) == DENIED                         # a flood changes nobody's answer
+    assert state(tx) == before                                     # and no status, review or approval
+    # the separate control is written down as a hosted precondition, and marked as not met
+    text = (ROOT / "docs/rag/RAG_V15_M4_1_REVIEWER_READ.md").read_text(encoding="utf-8")
+    assert "HOSTED-PRECONDITION: gateway-rate-limit (NOT MET" in text
+    assert "The cap is NOT an API rate limit." in text
+
+
+def test_the_denied_count_is_serialised_per_caller(tx):
+    """What makes the cap hold between two sessions of one caller: the function takes an exclusive
+    transaction-level advisory lock keyed on the caller BEFORE it counts and writes. This checks
+    the lock semantics on a real second connection and the order in the installed function body;
+    it is not an end-to-end race (the suite commits nothing)."""
+    key_sql = "select pg_catalog.hashtextextended('knowledge_review_read_denied:' || %s::text, 0)"
+    tx.cur.execute(key_sql, (str(uuid.uuid4()),))
+    key = tx.cur.fetchone()[0]
+    tx.cur.execute(key_sql, (str(uuid.uuid4()),))
+    other_key = tx.cur.fetchone()[0]
+    tx.cur.execute("select pg_catalog.pg_advisory_xact_lock(%s)", (key,))
+    with psycopg.connect(_DB_URL, autocommit=True) as second:
+        assert second.execute("select pg_catalog.pg_try_advisory_xact_lock(%s)", (key,)).fetchone()[0] is False
+        assert second.execute("select pg_catalog.pg_try_advisory_xact_lock(%s)", (other_key,)).fetchone()[0] is True
+    tx.cur.execute("select prosrc from pg_proc where proname = 'knowledge_review_claims'")
+    body = tx.cur.fetchone()[0]
+    lock = body.index("pg_advisory_xact_lock")
+    count = body.index("select count(*) into v_recent_denials")
+    write = body.index("insert into public.knowledge_review_read_events")
+    assert "'knowledge_review_read_denied:' || v_actor.user_id::text" in body
+    assert lock < count < write                                    # lock, then count, then write
+
+
 @pytest.mark.parametrize("change", ["role_suspended", "person_suspended", "role_revoked"])
 def test_a_role_that_is_no_longer_active_reads_nothing(tx, m2, change):
     _, doc, _ = active(tx, m2, DRY_15)

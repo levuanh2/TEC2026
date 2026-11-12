@@ -98,10 +98,19 @@ the caller may not read. Withheld candidates are not counted in the row.
   read function alone; no other insert, no decrease, no delete, no truncate) and readable by
   `service_role` only. So probing past the cap stays visible (who, when, how many); the id each of
   those calls asked for is not kept. This bounds what an account without a role can add: 20 rows
-  plus one counter row an hour. The cap value, and whether to keep the cap at all, is an owner
-  decision before any hosted migration. Granted reads are always recorded.
-  The count runs under a per-caller advisory lock. There is still no request rate limit: that
-  belongs to the API gateway. The row pins no account (no foreign key on the caller).
+  plus one counter row an hour. Granted reads are always recorded.
+  **Owner decision (2026-11-12):** keep at most 20 detailed denied-read rows per caller within a
+  rolling hour, with the per-caller aggregate overflow counter.
+  The count runs under a per-caller advisory lock, and each statement of the function takes a
+  fresh snapshot under READ COMMITTED (the PostgREST default). A caller that opens its own
+  REPEATABLE READ transaction counts against that transaction's snapshot, so concurrent
+  transactions of ONE caller could each record up to the cap; the bound is then the cap times that
+  caller's concurrent transactions, still finite and still attributed. The row pins no account (no
+  foreign key on the caller).
+- **The cap is NOT an API rate limit.** It bounds audit growth only. A call above the cap is
+  answered exactly like a call below it: the function never refuses, delays or blocks a caller,
+  and it does the same work (identity check, role lookups, one write). Limiting request volume is
+  a separate control that this migration does not provide; see section 6.1.
 - Claim and candidate ids come from global sequences. Gaps between ids exist for many reasons and
   are not attributable to a document, but the ids are not opaque.
 - The RPC does not compare `file_sha256` with the hash confirmed in an open M2 review; the reviewer
@@ -110,6 +119,23 @@ the caller may not read. Withheld candidates are not counted in the row.
 - No web screen. One must go through the web role-verification gate.
 - The M2 operational risks (database-owner trust boundary, service-role archive and quarantine, demo
   approval) are unchanged by M4.1.
+
+### 6.1 Hosted precondition: gateway rate limiting
+
+HOSTED-PRECONDITION: gateway-rate-limit (NOT MET; no hosted migration of M4.1 before it is).
+
+`public.knowledge_review_claims` is callable by every `authenticated` aal2 session through
+PostgREST. Nothing in the database limits how often. Before M4.1 is applied to any hosted project,
+the deployment must have, and must have tested, a request rate limit in front of
+`/rest/v1/rpc/knowledge_review_claims` (API gateway, reverse proxy or the platform's own limiter),
+keyed per authenticated user and per source address. The limit, where it is enforced and the test
+evidence are an owner decision recorded in the hosted migration request; none is chosen here, and
+no hosted configuration was read or changed for this document.
+
+What the database guarantees without it, and what the tests prove
+(`test_the_denied_cap_bounds_the_audit_and_is_not_a_rate_limit`): every call above the cap is still
+answered, in the same shape, and is still counted; granted reads above 20 an hour are all served
+and all recorded. So the database stays correct under a flood, but it does not stop one.
 
 ## 7. Rollback
 
