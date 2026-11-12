@@ -4,7 +4,8 @@
 --   supabase migration repair --status reverted 20261111090000
 --
 -- Restores verbatim: the Migration A document policy and retrieval function, and the M2 snapshot,
--- document row trigger, public.knowledge_decide_document and private.knowledge_demo_approve_document.
+-- document row trigger, public.knowledge_submit_expert_review, public.knowledge_decide_document and
+-- private.knowledge_demo_approve_document.
 -- Drops the M3 functions, public.knowledge_expiry_events and the four M3 columns.
 -- DROPPING THEM DELETES THE EXPIRY EVIDENCE AND EVERY VALIDITY WINDOW: export
 -- public.knowledge_expiry_events and the columns effective_from, effective_to,
@@ -414,6 +415,68 @@ begin
   update public.knowledge_approval_records set status_event_id = v_event where id = v_id;
   perform private.knowledge_m2_set_marker(null);
   return v_id;
+end;
+$$;
+
+create or replace function public.knowledge_submit_expert_review(
+  p_review_id uuid, p_decision text, p_snapshot_sha256 text, p_checklist jsonb, p_sources_checked jsonb,
+  p_findings jsonb, p_rationale text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor record;
+  v_rev record;
+  v_doc record;
+  v_role record;
+  v_event bigint;
+begin
+  select a.user_id, a.session_id into v_actor from private.knowledge_verified_actor() a;
+  select r.* into v_rev from public.knowledge_expert_reviews r where r.id = p_review_id;
+  if not found or v_rev.reviewer_user_id <> v_actor.user_id then
+    raise exception 'review not available: only the reviewer who started it records its decision' using errcode = '42501';
+  end if;
+  select d.status, s.visibility, s.organization_id into v_doc
+    from public.knowledge_documents d join public.knowledge_sources s on s.source_id = d.source_id
+   where d.id = v_rev.document_pk for update of d;
+  -- the reviewer must still be active and qualified for this scope
+  select * into v_role from private.knowledge_actor_role(v_actor.user_id, 'expert_reviewer', v_doc.visibility,
+                                                         v_doc.organization_id);
+  if v_role.role_id is null or v_role.role_id <> v_rev.reviewer_role_id then
+    raise exception 'separation of duties: your expert_reviewer role for this scope is no longer active'
+      using errcode = '42501';
+  end if;
+  if v_rev.decision is not null then
+    raise exception 'review %: its decision is already recorded (evidence is immutable)', p_review_id
+      using errcode = '23514';
+  end if;
+  if v_doc.status <> 'expert_review' or exists (
+      select 1 from public.knowledge_expert_reviews r2
+       where r2.document_pk = v_rev.document_pk and r2.seq > v_rev.seq) then
+    raise exception 'review %: the version is no longer under this review', p_review_id using errcode = '23514';
+  end if;
+  perform private.knowledge_check_review_evidence(p_decision, p_checklist, p_sources_checked, p_findings, p_rationale);
+  if p_snapshot_sha256 is distinct from v_rev.snapshot_sha256
+     or private.knowledge_snapshot_sha256(private.knowledge_document_snapshot(v_rev.document_pk)) <> v_rev.snapshot_sha256 then
+    raise exception 'review %: the reviewed content or metadata changed since the review started (evidence invalid)',
+      p_review_id using errcode = '23514';
+  end if;
+  if p_decision = 'reject' then
+    v_event := private.knowledge_apply_document_transition(v_rev.document_pk, 'expert_review', 'rejected', p_rationale, null);
+  elsif p_decision = 'return' then
+    v_event := private.knowledge_apply_document_transition(v_rev.document_pk, 'expert_review', 'review_required',
+                                                           p_rationale, null);
+  end if;
+  perform private.knowledge_m2_set_marker('knowledge_expert_reviews.decision');
+  update public.knowledge_expert_reviews
+     set decision = p_decision, checklist = p_checklist, sources_checked = p_sources_checked, findings = p_findings,
+         rationale = p_rationale, decided_at = pg_catalog.now(), decision_session_id = v_actor.session_id,
+         decision_event_id = v_event
+   where id = p_review_id;
+  perform private.knowledge_m2_set_marker(null);
+  return p_review_id;
 end;
 $$;
 
