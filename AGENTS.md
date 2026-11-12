@@ -1,5 +1,35 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## Publish web + Flutter UI (2026-11-12)
+
+User explicitly requested all completed interface changes on a new branch.
+Codex owns final report/ownership updates and `app/.gitignore` (generated Kotlin
+cache only), then commit/push to `ui/agricarbon-web-flutter-2026-11-12`.
+Preserve branch history; no force-push, backend changes or deployment.
+
+## Flutter visual parity (2026-11-12)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `app/lib/design/**`, `app/lib/screens/**`, `app/lib/shell/tabs/**` (presentation only), `app/assets/**` (new), `app/pubspec.yaml` (assets/fonts only), UI verification/preview files in `app/test/` and `app/tool/`, `docs/FLUTTER_UI_REFRESH_2026_11.md` (new) | — (released) | Match AgriCarbon web palette, bundled Vietnamese font, rice artwork, slogan, login, shared surfaces/navigation/cards and gentle accessible motion. Preserve auth, offline writes, synchronization and Carbon/CV logic. Herdr unavailable. | DONE: analyze clean; Flutter tests 483/483; 10 visual tests with bundled fonts, 320–800px login and enlarged text; browser preview build PASS, 0 JS page errors. Android device acceptance not run. |
+
+## Public website (2026-11-12)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/public/**` (new), `web-dashboard/src/App.tsx` (public entry boundary), `web-dashboard/src/routes.ts`, `web-dashboard/index.html`, `web-dashboard/src/components/BrandScenery.tsx` (home link), `web-dashboard/public/downloads/**` (new), `web-dashboard/tests/e2e/public-site.spec.ts` (new), public routing tests, `docs/PUBLIC_WEBSITE_2026_11.md` (new) | — (released) | Public AgriCarbon home before login; platform/services/reports/pricing/news pages. Original design inspired by supplied reference, pricing explicitly unpublished. No backend, auth contract, deployment or Git publishing changes. Herdr unavailable. | DONE: build PASS; Vitest 777/777; Playwright 28/28 (including 9 public-site tests, 35 public route/viewport views, desktop/mobile axe, keyboard, menu, downloads, no private API requests); local preview 5173. |
+
+## UI refresh (2026-11-10)
+
+Publishing scope (2026-11-11): Codex prepared the UI refresh files and its report
+for the user-requested commit and push to the new branch
+`ui/agricarbon-refresh-2026-11-11` (the latest user request explicitly asks for a new branch).
+Preserve existing branch history; no force-push, backend edits or deployment.
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/**` (presentation only), `web-dashboard/index.html`, `web-dashboard/public/visuals/**`, `web-dashboard/tests/e2e/visual-refresh.spec.ts`, `docs/UI_REFRESH_2026_11.md` | — (released) | User-authorized coordinated Farmer/Management visual refresh, login artwork, slogan, responsive styling and motion. Preserve API/auth/business behavior. Herdr executable unavailable in this session. | DONE: Vitest 768/768; build PASS; mock Playwright 19/19 including 13 routes × 5 widths, login a11y/keyboard, reduced motion and overlay positioning. Local preview opened; no hosted writes, commit, push or deploy. |
+
 Claude và Codex cùng chạy trong cùng workspace Herdr, cùng làm repo này. Không
 có kênh tự động khác — mọi phối hợp qua Herdr pane messaging + file này.
 
@@ -28,6 +58,8 @@ Không sửa file agent khác đang sở hữu. Trước khi sửa:
 3. Khai báo ownership tại đây trước khi bắt đầu.
 
 ## File ownership (cập nhật liên tục — sửa xong thì release)
+
+| `web-dashboard/src/farmer/FarmerExperience.tsx`, `web-dashboard/src/farmer/font-fix.css` (new), `web-dashboard/index.html` | — (released) | Fix Vietnamese display-font rendering; no edits to dirty colour CSS files. | DONE: 84 source files and 48 route/viewport views scanned, 6 activity dialogs checked, visual desktop/mobile; browser smoke 2 passed, Vitest 153 passed, build passed |
 
 | `backend/api.py`, `backend/main.py`, `backend/schemas.py`, `backend/service.py`, `backend/infrastructure/config.py`, `backend/infrastructure/write_repo.py` (new), `backend/tests/test_activity_writes.py` (new), `supabase/migrations/20260910080441_farmer_web_activity_idempotency.sql`, `docs/FARMER_WEB_WRITE_CONTRACT.md`, `docs/API_CATALOG.md`, `docs/openapi.json` | — (released) | FW-2 Part 1 FastAPI Farmer online activity writes for fertilizer/irrigation/harvest only: authorization, atomic persistence, idempotency and tests. No React write UI. | DONE: backend 165 passed; web 23 passed/build passed; mock Playwright Farmer + Management passed; no hosted mutation or migration deployment. |
 

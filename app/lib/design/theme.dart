@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
-/// Theme dùng chung cho toàn app — Material 3, tông xanh nông nghiệp theo SVG.
-///
-/// Font: SVG dùng "Inter" nhưng KHÔNG kèm file font hợp lệ và không được tải
-/// font lúc chạy → dùng font hệ thống (Roboto trên Android, San Francisco trên
-/// iOS). Chỉ khoá cỡ/nét/chiều cao dòng, để `fontFamily = null`.
+/// Shared Material 3 presentation. Font and artwork are bundled for offline use.
 class AgriCarbonTheme {
   const AgriCarbonTheme._();
 
@@ -32,7 +28,7 @@ class AgriCarbonTheme {
       surface: AppColors.surface,
       onSurface: AppColors.textPrimary,
       onSurfaceVariant: AppColors.textSecondary,
-      outline: AppColors.border,
+      outline: AppColors.controlLine,
       outlineVariant: AppColors.track,
       shadow: Color(0x14000000),
       scrim: Color(0x66000000),
@@ -47,6 +43,7 @@ class AgriCarbonTheme {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: AppBrand.fontFamily,
       colorScheme: scheme,
       scaffoldBackgroundColor: AppColors.background,
       canvasColor: AppColors.background,
@@ -81,8 +78,8 @@ class AgriCarbonTheme {
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm + 2,
         ),
-        border: _fieldBorder(AppColors.border),
-        enabledBorder: _fieldBorder(AppColors.border),
+        border: _fieldBorder(AppColors.controlLine),
+        enabledBorder: _fieldBorder(AppColors.controlLine),
         focusedBorder: _fieldBorder(AppColors.primary, width: 1.6),
         errorBorder: _fieldBorder(AppColors.error),
         focusedErrorBorder: _fieldBorder(AppColors.error, width: 1.6),
@@ -109,7 +106,7 @@ class AgriCarbonTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.textPrimary,
-          side: const BorderSide(color: AppColors.border),
+          side: const BorderSide(color: AppColors.controlLine),
           minimumSize: const Size(kMinTouchTarget, kMinTouchTarget),
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
           textStyle: textTheme.labelLarge,
@@ -151,24 +148,40 @@ class AgriCarbonTheme {
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: AppColors.primary,
       ),
-      navigationBarTheme: NavigationBarThemeData(
+      bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.primarySurface,
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+        shape: RoundedRectangleBorder(
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(AppRadii.xxl)),
+        ),
+      ),
+      pageTransitionsTheme: PageTransitionsTheme(builders: {
+        ...const PageTransitionsTheme().builders,
+        TargetPlatform.android: const _BrandPageTransition(),
+        TargetPlatform.windows: const _BrandPageTransition(),
+        TargetPlatform.linux: const _BrandPageTransition(),
+      }),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: AppColors.brandGold,
         elevation: 0,
-        height: 64,
+        height: 72,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             color: states.contains(WidgetState.selected)
-                ? AppColors.primary
-                : AppColors.textSecondary,
+                ? AppColors.headerDeep
+                : AppColors.onHeaderSecondary,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => textTheme.labelSmall?.copyWith(
             color: states.contains(WidgetState.selected)
-                ? AppColors.primary
-                : AppColors.textSecondary,
+                ? AppColors.brandGold
+                : AppColors.onHeaderSecondary,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -186,6 +199,7 @@ class AgriCarbonTheme {
     TextStyle s(double size, FontWeight weight,
             {Color? color, double height = 1.35}) =>
         TextStyle(
+          fontFamily: AppBrand.fontFamily,
           fontSize: size,
           fontWeight: weight,
           height: height,
@@ -195,10 +209,10 @@ class AgriCarbonTheme {
     return TextTheme(
       // Số liệu "anh hùng" ở màn kết quả carbon (SVG: 42/800).
       displayLarge: s(42, FontWeight.w800, height: 1.1),
-      displayMedium: s(30, FontWeight.w700, height: 1.15),
+      displayMedium: s(30, FontWeight.w700, height: 1.35),
       // Tiêu đề màn trên nền trắng (SVG: 26/750).
-      headlineMedium: s(26, FontWeight.w700, height: 1.2),
-      headlineSmall: s(22, FontWeight.w700, height: 1.2),
+      headlineMedium: s(26, FontWeight.w700, height: 1.4),
+      headlineSmall: s(22, FontWeight.w700, height: 1.4),
       titleLarge: s(18, FontWeight.w700),
       // Tiêu đề khối / section (SVG: 15/700).
       titleMedium: s(15, FontWeight.w700),
@@ -215,16 +229,33 @@ class AgriCarbonTheme {
 
   /// Style chữ trên nền header tối — không nằm trong [TextTheme] vì màu ngược.
   static const TextStyle headerTitle = TextStyle(
+    fontFamily: AppBrand.fontFamily,
     fontSize: 18,
     fontWeight: FontWeight.w700,
     color: AppColors.onHeaderPrimary,
-    height: 1.2,
+    height: 1.4,
   );
 
   static const TextStyle headerSubtitle = TextStyle(
+    fontFamily: AppBrand.fontFamily,
     fontSize: 13,
     fontWeight: FontWeight.w500,
     color: AppColors.onHeaderSecondary,
-    height: 1.2,
+    height: 1.4,
   );
+}
+
+class _BrandPageTransition extends PageTransitionsBuilder {
+  const _BrandPageTransition();
+
+  @override
+  Widget buildTransitions<T>(
+      PageRoute<T> route,
+      BuildContext context,
+      Animation<double> animation,
+      Animation<double> secondaryAnimation,
+      Widget child) {
+    if (MediaQuery.disableAnimationsOf(context)) return child;
+    return FadeTransition(opacity: animation, child: child);
+  }
 }

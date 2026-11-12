@@ -11,6 +11,7 @@ export 'components/app_card.dart';
 export 'components/app_header.dart';
 export 'components/app_scaffold.dart';
 export 'components/buttons.dart';
+export 'components/brand_surfaces.dart';
 export 'components/confirmation_dialog.dart';
 export 'components/metric_card.dart';
 export 'components/offline_banner.dart';

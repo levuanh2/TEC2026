@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import '../tokens.dart';
+import 'brand_surfaces.dart';
 
 /// Thanh header tối theo SVG: nền [AppColors.headerDark], tiêu đề trắng + dòng
 /// mô tả xanh nhạt, chấm trạng thái mạng ở góc phải (tùy chọn).
@@ -34,61 +35,67 @@ class AppHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.headerDark,
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.screenH,
-            AppSpacing.sm,
-            AppSpacing.md,
-            AppSpacing.sm,
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              if (leading != null) ...[
-                leading!,
-                const SizedBox(width: AppSpacing.xs),
-              ] else if (showBackButton) ...[
-                IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  color: AppColors.onHeaderPrimary,
-                  tooltip: 'Quay lại',
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
-                const SizedBox(width: AppSpacing.xxs),
-              ],
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: AgriCarbonTheme.headerTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
+    return DecoratedBox(
+      decoration: const BoxDecoration(gradient: AppGradients.header),
+      child: Material(
+        color: Colors.transparent,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.screenH,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.sm,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (leading != null) ...[
+                  leading!,
+                  const SizedBox(width: AppSpacing.xs),
+                ] else if (showBackButton) ...[
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    color: AppColors.onHeaderPrimary,
+                    tooltip: 'Quay lại',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  const SizedBox(width: AppSpacing.xxs),
+                ] else if (title == 'AgriCarbon') ...[
+                  const BrandMark(size: 36),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        subtitle!,
-                        style: AgriCarbonTheme.headerSubtitle,
+                        title,
+                        style: AgriCarbonTheme.headerTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle!,
+                          style: AgriCarbonTheme.headerSubtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              if (isOnline != null) ...[
-                const SizedBox(width: AppSpacing.xs),
-                _StatusDot(online: isOnline!),
+                if (isOnline != null) ...[
+                  const SizedBox(width: AppSpacing.xs),
+                  _StatusDot(online: isOnline!),
+                ],
+                ...actions,
               ],
-              ...actions,
-            ],
+            ),
           ),
         ),
       ),
@@ -109,7 +116,7 @@ class _StatusDot extends StatelessWidget {
         height: 10,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: online ? AppColors.onHeaderDot : AppColors.warningText,
+          color: online ? AppColors.onHeaderDot : AppColors.brandGold,
         ),
       ),
     );

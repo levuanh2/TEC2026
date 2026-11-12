@@ -97,44 +97,20 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return Scaffold(
-      backgroundColor: AppColors.headerDark,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: AppSpacing.xl),
-                  Text(
-                    'AgriCarbon',
-                    style: text.displayMedium?.copyWith(color: Colors.white),
-                  ),
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    'Theo dõi canh tác',
-                    style: text.bodyLarge
-                        ?.copyWith(color: AppColors.onHeaderSecondary),
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  if (widget.notice == LoginNotice.sessionExpired) ...[
-                    const OfflineBanner(
-                      icon: Icons.lock_clock_outlined,
-                      message:
-                          'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại. '
-                          'Dữ liệu chưa gửi vẫn được giữ trên máy.',
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  _card(context, text),
-                ],
-              ),
+    return BrandAuthFrame(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.notice == LoginNotice.sessionExpired) ...[
+            const OfflineBanner(
+              icon: Icons.lock_clock_outlined,
+              message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại. '
+                  'Dữ liệu chưa gửi vẫn được giữ trên máy.',
             ),
-          ),
-        ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          _card(context, text),
+        ],
       ),
     );
   }
@@ -145,6 +121,11 @@ class _LoginScreenState extends State<LoginScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadii.xxl),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+              color: AppColors.shadow, blurRadius: 24, offset: Offset(0, 6))
+        ],
       ),
       child: AutofillGroup(
         child: Column(
@@ -213,6 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: AppSpacing.lg),
             PrimaryButton(
               label: 'Đăng nhập',
+              icon: Icons.lock_outline,
               loading: _submitting,
               onPressed: _submit,
             ),

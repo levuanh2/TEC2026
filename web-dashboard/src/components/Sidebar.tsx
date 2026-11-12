@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from 'react'
 import { X } from 'lucide-react'
 import { Link } from '../ui'
+import { BrandMark } from './BrandScenery'
 
 /* One sidebar for both roles (Round 4.2). The Farmer shell drew its own copy
  * — 232px against Management's 240px token, a different brand line, a
@@ -56,7 +57,7 @@ export function Sidebar({ className, home, tagline, navLabel, groups, foot, draw
     >
       <div className="sidebar__top">
         <Link to={home} className="brand">
-          AgriCarbon
+          <span className="brand__row"><BrandMark /><span>AgriCarbon</span></span>
           <small>{tagline}</small>
         </Link>
         {drawer && (
@@ -85,6 +86,7 @@ export function Sidebar({ className, home, tagline, navLabel, groups, foot, draw
           </div>
         ))}
       </nav>
+      <div className="sidebar__motto" aria-hidden="true">Số hóa canh tác<br /><span>Xanh hóa tương lai</span></div>
       <div className="sidebar__foot">{foot}</div>
     </aside>
   )

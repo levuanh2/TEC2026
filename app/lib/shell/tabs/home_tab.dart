@@ -137,6 +137,8 @@ class _HomeTabState extends State<HomeTab> {
                 message: s.softError!,
               ),
             ),
+          const BrandEntrance(child: BrandFieldBanner()),
+          const SizedBox(height: AppSpacing.lg),
           _Greeting(snapshot: s),
           const SizedBox(height: AppSpacing.md),
           _ContextCard(snapshot: s, onChange: _a.openContextPicker),
@@ -395,7 +397,8 @@ class _QuickLogGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = AppBreakpoints.quickActionColumns(constraints.maxWidth);
+        final columns = AppBreakpoints.quickActionColumns(
+            constraints.maxWidth / MediaQuery.textScalerOf(context).scale(1));
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -409,6 +412,9 @@ class _QuickLogGrid extends StatelessWidget {
               children: [
                 for (final item in _items)
                   AppCard(
+                    tone: item.activityType == null
+                        ? AppTone.info
+                        : activityTone(item.activityType),
                     onTap: () {
                       final type = item.activityType;
                       if (type == null) {
@@ -419,7 +425,12 @@ class _QuickLogGrid extends StatelessWidget {
                     },
                     child: Row(
                       children: [
-                        Icon(item.icon, color: AppColors.primary),
+                        AppIconTile(
+                            icon: item.icon,
+                            tone: item.activityType == null
+                                ? AppTone.info
+                                : activityTone(item.activityType),
+                            size: 32),
                         const SizedBox(width: AppSpacing.xs),
                         Flexible(
                           child: Text(

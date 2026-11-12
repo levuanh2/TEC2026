@@ -1,4 +1,7 @@
+import { isPublicPath } from './public/routes'
+
 export type RouteName =
+  | 'public'
   | 'login'
   | 'dashboard'
   | 'organizations'
@@ -21,9 +24,10 @@ export type RouteName =
   | 'notFound'
 
 export function routeName(path: string): RouteName {
+  if (isPublicPath(path)) return 'public'
   if (path === '/farmer' || path.startsWith('/farmer/')) return 'farmer'
   if (path === '/login') return 'login'
-  if (path === '/dashboard' || path === '/') return 'dashboard'
+  if (path === '/dashboard') return 'dashboard'
   if (path === '/organizations') return 'organizations'
   if (path === '/performance') return 'performance'
   if (path === '/farms') return 'farms'

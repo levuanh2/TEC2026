@@ -191,3 +191,44 @@
 }
 .skip-link:focus-visible, .skip-link:focus { transform: translateY(0); outline: 2px solid var(--ac-focus); outline-offset: -4px; }
 :where(main):focus { outline: none; }
+
+
+/* User-approved 2026-11 visual palette. Keep in the shared theme so lazy
+ * Farmer CSS cannot reset the palette after the Management shell mounts.
+ * Warning/error/positive roles above retain their established meanings. */
+:root {
+  --ac-paper: #f7faf8;
+  --ac-ground: #f2f7f4;
+  --ac-workspace: #f7faf8;
+  --ac-elevated: #ffffff;
+  --ac-subtle: #edf4ef;
+  --ac-band: #e4eee8;
+  --ac-rule: #d9e5de;
+  --ac-rule-2: #c2d4c8;
+  --ac-ink: #183e32;
+  --ac-ink-2: #365448;
+  --ac-muted: #586d62;
+  --ac-sidebar: #164e3d;
+  --ac-sidebar-2: #103b30;
+  --ac-sidebar-active: #2b6652;
+  --ac-sidebar-marker: #e7cd82;
+  --ac-accent: #23664f;
+  --ac-accent-hover: #194d3c;
+  --ac-cta: #23664f;
+  --ac-cta-hover: #194d3c;
+  --ac-marker: #23664f;
+  --ac-work: #23664f;
+  --ac-work-strong: #1d5944;
+  --ac-work-soft: #e5f1e9;
+  --ac-radius-sm: 10px;
+  --ac-radius: 14px;
+  --ac-radius-lg: 18px;
+  --ac-dur: 180ms;
+  --ac-tint-leaf: #eaf3db;
+  --ac-tint-water: #e4f2f9;
+  --ac-tint-grain: #fff3d8;
+  --ac-tint-carbon: #e0f2ec;
+  --ac-tint-earth: #f5ece1;
+  --ac-tint-info: #edf0fa;
+  --ac-shadow: 0 4px 22px rgb(26 69 47 / 4%);
+}
