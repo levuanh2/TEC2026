@@ -82,6 +82,36 @@ version without a declared supersession is refused (23505) as before.
 A version may have several successors (one text split into two documents): each approval finds the
 target either approved, and archives it, or already archived.
 
+**What is replaced is named in the evidence.** When the link is set, the review snapshot carries a
+`supersedes` object next to `supersedes_document_pk`: the superseded version's `source_id`,
+`document_id`, `document_version`, `file_sha256`, its source's `owner` and `authority`, and
+`cross_source` (true when it belongs to another source). The reviewer and the approver both confirm
+the hash of that snapshot, so neither approves a replacement knowing only a uuid.
+
+**Cross-source supersession needs authority, not just a shared scope.** The same scope says who may
+read both texts. It does not say that one publisher's text may retire another's. Public knowledge is
+one scope, so without a further rule any public source could have another public source's approved
+version archived. When the superseded version belongs to **another source**, the verified approval
+(`private.knowledge_check_cross_source_supersession`, called by `public.knowledge_decide_document`)
+is refused with 23514 unless both hold:
+
+1. **The replacing version's own source is `approved`.** A version of a source that is still
+   `review_required`, or was rejected, quarantined or archived, cannot retire another source's
+   approved guidance. It would not even be served in its place.
+2. **The expert reviewer recorded the authority for exactly this replacement.** One entry of the
+   review's `sources_checked` has `purpose: "cross_source_supersession_authority"`, the superseded
+   version's id as `supersedes_document_pk`, and the `reference` that establishes the authority (for
+   example the repealing decision, or the publisher's own notice).
+
+The rule holds whatever the superseded version's status is now, because the link is a claim of
+authority over another source's text. A refused approval archives nothing; the approver can still
+reject the review. A **same-source** supersession needs none of this and works as before, whatever
+the source's own status.
+
+What this does not do: the database cannot verify that the cited reference really grants the
+authority. Two verified, distinct humans (reviewer and approver) are on immutable record for it. The
+operator who sets the link is not: the link alone archives nothing.
+
 **Demo path.** `private.knowledge_demo_approve_document` follows the same window rules and gets the same
 two-year expiry. It may supersede only a version whose approval is itself a demo record; naming a
 verified (or pre-M2) version is refused (42501) whatever that version's status is now, so a demo
@@ -139,7 +169,10 @@ independent of `TimeZone`/`DateStyle`, invalidated by a changed window); retriev
 an out-of-force approved version before any expiry run; expiry (causes, limit, idempotence, evidence,
 immutability, tenant versions, tenants reading no evidence); a **committed concurrency test** (two
 expiry runs race on one version); supersession (atomic, cross-document, cross-scope refusals, demo
-rules, refused approval archives nothing); rollback refusals, verbatim restore and replay.
+rules, refused approval archives nothing); cross-source supersession (an unapproved or rejected
+replacing source is refused, a missing or mismatched recorded authority is refused, an authorized
+replacement archives and its evidence names the superseded version, same-source is unchanged);
+rollback refusals, verbatim restore and replay.
 
 Time cannot be mocked in PostgreSQL. The tests reach "the day after" by lifting the row trigger inside
 the test transaction and rewriting a date, which only a database owner can do.
@@ -156,6 +189,14 @@ the test transaction and rewriting a date, which only a database owner can do.
 - **Ingestion does not set the M3 columns yet.** `backend/knowledge` has no manifest fields for them;
   an operator sets them with SQL while the version is `review_required`. A follow-up can add them to
   the ingestion manifest.
+- **The demo path keeps its own rule for cross-source links.** A demo approval has no review, so it
+  carries no recorded authority. It still supersedes only a demo-approved version, never a verified
+  one, so it cannot retire trusted guidance. Whether to refuse cross-source demo links entirely is an
+  open owner decision.
+- **Roles are scoped per visibility and organization, not per source.** An approver of the public
+  scope can approve a version of any public source. The cross-source rule adds the reviewer's recorded
+  authority and an approved replacing source on top of that; a per-source or per-publisher approver
+  role would be a registry change (M2), not M3.
 - **The two-year period and the policy zone are constants** in the migration. Changing either is a new
   migration.
 - **The same infrastructure trust boundary as M1/M2.** A database owner can lift triggers or rewrite
