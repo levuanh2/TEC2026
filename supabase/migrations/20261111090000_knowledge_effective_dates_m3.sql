@@ -24,7 +24,13 @@
 --   * Supersession is atomic: the approval archives the approved version it supersedes in the same
 --     transaction (its own audit event names the successor), so there is neither an overlap nor a
 --     gap. One approved version per (source_id, document_id) stays enforced by the Migration A index.
---     A demo approval (M2 owner switch) supersedes only a demo-approved version, never a verified one.
+--     A demo approval (M2 owner switch) supersedes only a demo-approved version OF ITS OWN SOURCE,
+--     never a verified one and never a version of another source.
+--     Superseding a version of ANOTHER source needs more than the shared scope: the replacing
+--     version's source is approved, and the expert review records the authority for exactly that
+--     replacement (private.knowledge_check_cross_source_supersession), checked when the reviewer
+--     recommends approval and again at the approval. The review snapshot names
+--     the superseded version, its artifact hash and its source.
 --   * The window and the superseded version are frozen from expert_review on and covered by the M2
 --     review snapshot hash: changing them invalidates the evidence exactly like any other metadata.
 --   * Expiry: private.knowledge_expire_documents (EXECUTE service_role only) moves approved versions
@@ -174,14 +180,21 @@ as $$
 declare
   v_doc record;
   v_status public.knowledge_status;
+  v_target_source text;
 begin
   select d.source_id, d.document_id, d.document_version, d.supersedes_document_pk into v_doc
     from public.knowledge_documents d where d.id = p_document_pk;
   if v_doc.supersedes_document_pk is null then
     return null;
   end if;
-  select t.status into v_status from public.knowledge_documents t
+  select t.status, t.source_id into v_status, v_target_source from public.knowledge_documents t
    where t.id = v_doc.supersedes_document_pk for update;
+  -- a demo approval has no review, so it carries no recorded authority: it never supersedes a version
+  -- of ANOTHER source, demo-approved or not, whatever that version's status is now
+  if p_demo and v_target_source is distinct from v_doc.source_id then
+    raise exception 'knowledge document %: a demo approval never supersedes a version of another source (%)'
+      ' (use the verified flow)', p_document_pk, v_target_source using errcode = '42501';
+  end if;
   -- whatever the target's status today: a demo version never claims to succeed a verified one
   if p_demo and not exists (
       select 1 from public.knowledge_approval_records a
@@ -204,6 +217,63 @@ end;
 $$;
 revoke all on function private.knowledge_supersede_for(uuid, boolean) from public, anon, authenticated, service_role;
 
+-- Cross-source supersession (the superseded version belongs to ANOTHER source) needs more than the
+-- shared scope: the same scope says who may read both texts, not that one publisher's text may retire
+-- another's. Called by the verified approval, it refuses (23514) unless
+--   * the replacing version's own source is approved (a version of a source nobody vetted, or of a
+--     rejected / quarantined / archived one, must not retire another source's approved guidance: it
+--     would not even be served in its place), and
+--   * the expert reviewer explicitly recorded the authority for exactly this replacement: an entry
+--     of sources_checked with purpose 'cross_source_supersession_authority', the superseded
+--     version's id as 'supersedes_document_pk' and the reference that establishes the authority
+--     (e.g. the repealing decision, or the publisher's own notice).
+-- The approver then confirms the snapshot, which names the superseded version and its source
+-- (private.knowledge_document_snapshot). A same-source supersession needs none of this.
+-- The rule holds whatever the superseded version's status is now: the link is a claim of authority.
+create function private.knowledge_check_cross_source_supersession(p_document_pk uuid, p_sources_checked jsonb)
+returns void
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  v_doc record;
+  v_target_source text;
+begin
+  select d.source_id, d.supersedes_document_pk, s.status as source_status into v_doc
+    from public.knowledge_documents d join public.knowledge_sources s on s.source_id = d.source_id
+   where d.id = p_document_pk;
+  if v_doc.supersedes_document_pk is null then
+    return;
+  end if;
+  select t.source_id into v_target_source from public.knowledge_documents t
+   where t.id = v_doc.supersedes_document_pk;
+  if v_target_source = v_doc.source_id then
+    return;
+  end if;
+  if v_doc.source_status is distinct from 'approved' then
+    raise exception 'knowledge document %: its source % is %, not approved; it cannot supersede a version of'
+      ' another source (%)', p_document_pk, v_doc.source_id, v_doc.source_status, v_target_source
+      using errcode = '23514';
+  end if;
+  if not exists (
+      select 1 from pg_catalog.jsonb_array_elements(
+                      case when pg_catalog.jsonb_typeof(p_sources_checked) = 'array' then p_sources_checked
+                           else '[]'::jsonb end) e
+       where pg_catalog.jsonb_typeof(e) = 'object'
+         and e ->> 'purpose' = 'cross_source_supersession_authority'
+         and e ->> 'supersedes_document_pk' = v_doc.supersedes_document_pk::text
+         and pg_catalog.btrim(coalesce(e ->> 'reference', '')) <> '') then
+    raise exception 'knowledge document %: it supersedes a version of another source (%); the expert review'
+      ' must record the authority for exactly this replacement (sources_checked: purpose'
+      ' cross_source_supersession_authority, supersedes_document_pk %, reference)',
+      p_document_pk, v_target_source, v_doc.supersedes_document_pk using errcode = '23514';
+  end if;
+end;
+$$;
+revoke all on function private.knowledge_check_cross_source_supersession(uuid, jsonb)
+  from public, anon, authenticated, service_role;
+
 -- ================================================================== snapshot (replaced)
 
 create or replace function private.knowledge_document_snapshot(p_document_pk uuid)
@@ -223,7 +293,15 @@ as $$
       -- present only when set, so a version without them hashes exactly as it did under M2.
       || pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
            'effective_from', d.effective_from, 'effective_to', d.effective_to,
-           'supersedes_document_pk', d.supersedes_document_pk)),
+           'supersedes_document_pk', d.supersedes_document_pk,
+           -- what exactly is replaced, in words a reviewer and an approver can check: the superseded
+           -- version's identity and artifact, its source and publisher, and whether that is another source
+           'supersedes', (select pg_catalog.jsonb_build_object(
+              'source_id', t.source_id, 'document_id', t.document_id, 'document_version', t.document_version,
+              'file_sha256', t.file_sha256, 'source_owner', ts.owner, 'source_authority', ts.authority,
+              'cross_source', t.source_id <> d.source_id)
+              from public.knowledge_documents t join public.knowledge_sources ts on ts.source_id = t.source_id
+             where t.id = d.supersedes_document_pk))),
     'source', (select pg_catalog.jsonb_build_object(
       'source_id', s.source_id, 'title', s.title, 'owner', s.owner, 'source_type', s.source_type,
       'authority', s.authority, 'visibility', s.visibility, 'organization_id', s.organization_id,
@@ -385,6 +463,80 @@ begin
 end;
 $$;
 
+-- ================================================================== expert review (replaced)
+
+-- public.knowledge_submit_expert_review: the M2 function plus one step. A reviewer who recommends
+-- approval of a cross-source supersession without the recorded authority (or for a version whose own
+-- source is not approved) is refused HERE, with the review still open, instead of leaving an
+-- immutable recommendation that the approver can only reject.
+create or replace function public.knowledge_submit_expert_review(
+  p_review_id uuid, p_decision text, p_snapshot_sha256 text, p_checklist jsonb, p_sources_checked jsonb,
+  p_findings jsonb, p_rationale text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor record;
+  v_rev record;
+  v_doc record;
+  v_role record;
+  v_event bigint;
+begin
+  select a.user_id, a.session_id into v_actor from private.knowledge_verified_actor() a;
+  select r.* into v_rev from public.knowledge_expert_reviews r where r.id = p_review_id;
+  if not found or v_rev.reviewer_user_id <> v_actor.user_id then
+    raise exception 'review not available: only the reviewer who started it records its decision' using errcode = '42501';
+  end if;
+  select d.status, s.visibility, s.organization_id into v_doc
+    from public.knowledge_documents d join public.knowledge_sources s on s.source_id = d.source_id
+   where d.id = v_rev.document_pk for update of d;
+  -- the reviewer must still be active and qualified for this scope
+  select * into v_role from private.knowledge_actor_role(v_actor.user_id, 'expert_reviewer', v_doc.visibility,
+                                                         v_doc.organization_id);
+  if v_role.role_id is null or v_role.role_id <> v_rev.reviewer_role_id then
+    raise exception 'separation of duties: your expert_reviewer role for this scope is no longer active'
+      using errcode = '42501';
+  end if;
+  if v_rev.decision is not null then
+    raise exception 'review %: its decision is already recorded (evidence is immutable)', p_review_id
+      using errcode = '23514';
+  end if;
+  if v_doc.status <> 'expert_review' or exists (
+      select 1 from public.knowledge_expert_reviews r2
+       where r2.document_pk = v_rev.document_pk and r2.seq > v_rev.seq) then
+    raise exception 'review %: the version is no longer under this review', p_review_id using errcode = '23514';
+  end if;
+  perform private.knowledge_check_review_evidence(p_decision, p_checklist, p_sources_checked, p_findings, p_rationale);
+  -- M3: a recommendation to approve a version that supersedes a version of ANOTHER source is complete only
+  -- with an approved replacing source and the recorded authority. Checked here, where the reviewer can
+  -- still fix it, and again by the approval (defense in depth).
+  if p_decision = 'recommend_approval' then
+    perform private.knowledge_check_cross_source_supersession(v_rev.document_pk, p_sources_checked);
+  end if;
+  if p_snapshot_sha256 is distinct from v_rev.snapshot_sha256
+     or private.knowledge_snapshot_sha256(private.knowledge_document_snapshot(v_rev.document_pk)) <> v_rev.snapshot_sha256 then
+    raise exception 'review %: the reviewed content or metadata changed since the review started (evidence invalid)',
+      p_review_id using errcode = '23514';
+  end if;
+  if p_decision = 'reject' then
+    v_event := private.knowledge_apply_document_transition(v_rev.document_pk, 'expert_review', 'rejected', p_rationale, null);
+  elsif p_decision = 'return' then
+    v_event := private.knowledge_apply_document_transition(v_rev.document_pk, 'expert_review', 'review_required',
+                                                           p_rationale, null);
+  end if;
+  perform private.knowledge_m2_set_marker('knowledge_expert_reviews.decision');
+  update public.knowledge_expert_reviews
+     set decision = p_decision, checklist = p_checklist, sources_checked = p_sources_checked, findings = p_findings,
+         rationale = p_rationale, decided_at = pg_catalog.now(), decision_session_id = v_actor.session_id,
+         decision_event_id = v_event
+   where id = p_review_id;
+  perform private.knowledge_m2_set_marker(null);
+  return p_review_id;
+end;
+$$;
+
 -- ================================================================== approvals (replaced)
 
 -- public.knowledge_decide_document: the M2 function plus one step (the supersession).
@@ -458,6 +610,8 @@ begin
     -- evidence is re-validated: complete, no open blocking finding
     perform private.knowledge_check_review_evidence(v_rev.decision, v_rev.checklist, v_rev.sources_checked,
                                                     v_rev.findings, v_rev.rationale);
+    -- M3: replacing a version of ANOTHER source needs an approved source and the reviewer's recorded authority
+    perform private.knowledge_check_cross_source_supersession(v_rev.document_pk, v_rev.sources_checked);
   end if;
   v_snap := private.knowledge_document_snapshot(v_rev.document_pk);
   if p_snapshot_sha256 is distinct from v_rev.snapshot_sha256
