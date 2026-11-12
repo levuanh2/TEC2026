@@ -321,6 +321,8 @@ M2 = ROOT / "supabase/migrations/20261110120000_knowledge_verified_expert_approv
 M2_ROLLBACK = ROOT / "supabase/rollbacks/20261110120000_knowledge_verified_expert_approval_m2.down.sql"
 M3 = ROOT / "supabase/migrations/20261111090000_knowledge_effective_dates_m3.sql"
 M3_ROLLBACK = ROOT / "supabase/rollbacks/20261111090000_knowledge_effective_dates_m3.down.sql"
+M4 = ROOT / "supabase/migrations/20261112090000_knowledge_claims_contradictions_m4.sql"
+M4_ROLLBACK = ROOT / "supabase/rollbacks/20261112090000_knowledge_claims_contradictions_m4.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -342,9 +344,21 @@ def _live_body(tx, name):
     return tx.cur.fetchone()[0]
 
 
+def unwind_m4(tx):
+    """M4 (claims and contradiction candidates) replaces nothing and unwinds first."""
+    tx.cur.execute("set local knowledge.m4_rollback_evidence_exported = 'yes'")
+    tx.cur.execute(_without_tx_control(M4_ROLLBACK))
+
+
 def test_rollback_restores_migration_a_and_replay_restores_m1(tx):
-    """Rollbacks unwind newest first (M3, M2, then M1); replay applies M1, M2, then M3."""
+    """Rollbacks unwind newest first (M4, M3, M2, then M1); replay applies M1, M2, M3, then M4."""
     tx.settle()
+    tx.cur.execute("savepoint m4_order_check")
+    tx.cur.execute("set local knowledge.m3_rollback_evidence_exported = 'yes'")
+    with pytest.raises(psycopg.errors.RaiseException, match="M4 is installed"):
+        tx.cur.execute(_without_tx_control(M3_ROLLBACK))             # M3 never unwinds under M4
+    tx.cur.execute("rollback to savepoint m4_order_check")
+    unwind_m4(tx)
     tx.cur.execute("savepoint order_check")
     tx.cur.execute("set local knowledge.m2_rollback_evidence_exported = 'yes'")
     with pytest.raises(psycopg.errors.RaiseException, match="M3 is installed"):
@@ -369,6 +383,8 @@ def test_rollback_restores_migration_a_and_replay_restores_m1(tx):
     for name in TRIGGER_FUNCTIONS[:2]:
         assert _live_body(tx, name) == _body_in(M2, name), name
     tx.cur.execute(M3.read_text(encoding="utf-8"))                   # ... and M3 on top
+    assert _live_body(tx, TRIGGER_FUNCTIONS[1]) == _body_in(M3, TRIGGER_FUNCTIONS[1])
+    tx.cur.execute(M4.read_text(encoding="utf-8"))                   # ... and M4 on top (it replaces nothing)
     assert _live_body(tx, TRIGGER_FUNCTIONS[1]) == _body_in(M3, TRIGGER_FUNCTIONS[1])
     doc = tx.document(tx.source(), status="review_required")
     assert tx.transit("document", doc, "review_required", "expert_review")[0] == "ok"

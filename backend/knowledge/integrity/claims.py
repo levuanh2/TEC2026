@@ -2,7 +2,7 @@
 
 What it extracts, each with the exact character span in the chunk content:
 - quantity:  a number or range followed by a known unit ("15 cm", "1,5–2 tấn/ha", "từ 5 đến 7 ngày",
-             "120 kg N/ha/vụ"). The unit is normalized to one canonical unit per dimension (mm, m -> cm;
+             "120 kg N/ha/vụ", "250 kg CH4/ha/vụ", "3,2 tấn CO2e/ha"). The unit is normalized to one canonical unit per dimension (mm, m -> cm;
              tuần -> day; tấn/ha, tạ/ha -> kg/ha). The parameter comes from cue words in the same
              sentence: the nearest cue of a parameter of that dimension wins, and exclusion cues (bund,
              pipe, length) leave it unassigned. Without a parameter the claim stays `ambiguous`. A
@@ -38,7 +38,7 @@ from typing import Literal
 
 from knowledge.ids import sha256_hex
 
-CLAIM_EXTRACTOR_VERSION = "kn-claims-2"
+CLAIM_EXTRACTOR_VERSION = "kn-claims-3"
 
 ClaimKind = Literal["quantity", "date", "stage", "assertion"]
 ClaimStatus = Literal["extracted", "ambiguous", "unsupported"]
@@ -69,12 +69,19 @@ def _rx(pattern: str) -> re.Pattern:
 UNITS: dict[str, str] = {
     "cm": "length", "day": "duration", "kg/ha": "areal_mass", "m3/ha": "areal_volume",
     "percent": "ratio", "kgCH4/ha/day": "emission_rate",
+    # kn-claims-3 (M4): amounts per area, usually per season. The unit names the gas, so they are
+    # never compared with kg/ha of a product or with each other.
+    "kgCH4/ha": "areal_ch4", "kgCO2e/ha": "areal_co2e",
 }
 
 _PER_SEASON = r"(?:\s?/\s?(?:vụ|season|crop))?"
+_CO2E = r"co2\s?-?\s?(?:eq?|tđ|tương đương)"
 # raw unit (regex) -> (canonical unit, factor to canonical)
 _UNIT_FORMS: tuple[tuple[str, str, float], ...] = (
     (r"kg\s?ch4\s?/\s?ha\s?/\s?(?:ngày|day)", "kgCH4/ha/day", 1.0),
+    (rf"kg\s?ch4\s?/\s?ha{_PER_SEASON}", "kgCH4/ha", 1.0),
+    (rf"kg\s?{_CO2E}\s?/\s?ha{_PER_SEASON}", "kgCO2e/ha", 1.0),
+    (rf"(?:tấn|t)\s?{_CO2E}\s?/\s?ha{_PER_SEASON}", "kgCO2e/ha", 1000.0),
     (rf"m(?:3|³)\s?/\s?ha{_PER_SEASON}", "m3/ha", 1.0),
     (rf"tấn\s?/\s?ha{_PER_SEASON}", "kg/ha", 1000.0),
     (rf"tạ\s?/\s?ha{_PER_SEASON}", "kg/ha", 100.0),
@@ -109,6 +116,16 @@ PARAMETERS: dict[str, tuple[str, tuple[tuple[str, ...], ...], tuple[str, ...]]] 
     "yield": ("areal_mass", (("năng suất", "sản lượng", "yield*"),), ()),
     "water.volume": ("areal_volume", (("nước", "water"),), ()),
     "ch4.emission_factor": ("emission_rate", (("mê-tan", "metan", "methane", "ch4"),), ()),
+    # kn-claims-3 (M4). An amount named as a reduction, a saving or a difference is not an emission
+    # level: the exclusion cues leave it ambiguous rather than compare it with one.
+    "ch4.seasonal_emission": ("areal_ch4", (("phát thải", "emission*", "emit*"),),
+                              ("giảm", "reduc*", "tiết kiệm", "chênh lệch", "avoid*", "saving*", "lower*")),
+    "ghg.emission_per_area": ("areal_co2e", (("phát thải", "emission*", "emit*"),),
+                              ("giảm", "reduc*", "tiết kiệm", "chênh lệch", "avoid*", "saving*", "lower*")),
+    "water.drainage_duration": ("duration", (("rút nước", "tháo nước", "phơi ruộng", "drain*", "drying period*"),), ()),
+    "crop.growth_duration": ("duration", (("thời gian sinh trưởng", "growth duration", "growing period*"),), ()),
+    "mrv.monitoring_interval": ("duration", (("quan trắc", "lấy mẫu", "monitor*", "sampling"),
+                                             ("mỗi", "định kỳ", "một lần", "every", "interval*", "once")), ()),
 }
 _TIE_CHARS = 12          # cues this close count as equally near; the earlier (more specific) parameter wins
 

@@ -1,5 +1,6 @@
 -- Rollback for migrations/20261111090000_knowledge_effective_dates_m3.sql (RAG V1.5 M3).
--- Not in migrations/: run by hand, in ONE transaction, BEFORE any M2 rollback, then
+-- Not in migrations/: run by hand, in ONE transaction, AFTER the M4 rollback (if M4 is installed) and
+-- BEFORE any M2 rollback, then
 --   supabase migration repair --status reverted 20261111090000
 --
 -- Restores verbatim: the Migration A document policy and retrieval function, and the M2 snapshot,
@@ -23,6 +24,9 @@ begin;
 
 do $$
 begin
+  if pg_catalog.to_regclass('public.knowledge_claims') is not null then
+    raise exception 'M3 rollback refused: M4 is installed; run rollbacks/20261112090000_knowledge_claims_contradictions_m4.down.sql first';
+  end if;
   if coalesce(current_setting('knowledge.m3_rollback_evidence_exported', true), '') <> 'yes' then
     raise exception 'M3 rollback DROPS the expiry evidence and the validity windows: export them, then'
       ' set local knowledge.m3_rollback_evidence_exported = ''yes''';
