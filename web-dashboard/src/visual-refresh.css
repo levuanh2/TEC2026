@@ -25,8 +25,10 @@ body {
 
 /* A single rail, wordmark and navigation treatment for both roles. */
 .shell .sidebar, .fw-shell > .sidebar {
+  /* The rail is the forest gradient below; its end colour is also the base colour, so the rail stays
+     forest where gradients are not drawn and getComputedStyle reports the real rail colour. */
   background: radial-gradient(ellipse at 0 96%, rgb(147 186 104 / 17%), transparent 45%),
-    linear-gradient(165deg, #205c48, #123f33 70%);
+    linear-gradient(165deg, #205c48, #123f33 70%) #123f33;
   padding-top: 28px;
 }
 .brand__row { display: flex; align-items: center; gap: 10px; }
