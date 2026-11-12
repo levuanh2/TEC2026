@@ -698,49 +698,80 @@ def authority(target, reference="TEST FIXTURE: repealing decision naming the sup
 
 def cross_source(tx, m2, *, source_status="approved", content="awd cross source"):
     """An approved version of one public source, and an attested version of ANOTHER public source
-    (in `source_status`) that names it as superseded: (old, old_chunk, new, new_chunk)."""
+    (in `source_status`) that names it as superseded: (old, old_chunk, new, new_chunk, other_source)."""
     _, old, old_chunk = approved(tx, m2, content=content + " old")
     other = tx.source(status=source_status)
     new, new_chunk = version(tx, m2, other, content=content + " new", supersedes_document_pk=old)
-    return old, old_chunk, new, new_chunk
+    return old, old_chunk, new, new_chunk, other
 
 
-def recommend(m2, doc, sources=None):
-    review = m2.start(doc)
-    m2.submit(review, sources=sources)
-    return review
+def review_state(tx, review):
+    tx.cur.execute("select decision, sources_checked from public.knowledge_expert_reviews where id = %s", (review,))
+    return tx.cur.fetchone()
 
 
 @pytest.mark.parametrize("source_status", ["review_required", "rejected"])
-def test_a_version_of_an_unapproved_source_never_archives_another_sources_approved_version(tx, m2, source_status):
-    """The gap this closes: sharing a scope is not authority. Even with the reviewer's recorded
-    authority, a source nobody approved cannot retire another source's approved guidance."""
-    old, old_chunk, new, _ = cross_source(tx, m2, source_status=source_status)
-    review = recommend(m2, new, authority(old))
-    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+def test_a_version_of_an_unapproved_source_is_not_recommended_to_replace_another_sources_version(tx, m2, source_status):
+    """Sharing a scope is not authority. Even with the recorded authority, a version of a source nobody
+    approved is refused when the reviewer recommends approval, with the review still open."""
+    old, old_chunk, new, _, _ = cross_source(tx, m2, source_status=source_status)
+    review = m2.start(new)
+    assert code(m2.submit, review, sources=authority(old)) == CHECK_VIOLATION
+    assert review_state(tx, review) == (None, None)                                 # nothing was recorded
     assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "expert_review")
-    assert [e[1] for e in tx.events("document", old)][-1] == "approved"             # no archive event leaked
     assert old_chunk in tx.rpc_ids(tx.member, tx.season_a, "awd cross source")       # still served
-    m2.decide(review, tx.approver, "reject")                                        # the way out stays open
-    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "rejected")
+    m2.submit(review, "return", sources=authority(old))                             # the reviewer's way out
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "review_required")
 
 
 @pytest.mark.parametrize("case", ["none", "other_target", "no_purpose"])
-def test_a_cross_source_supersession_needs_the_reviewers_recorded_authority_for_that_version(tx, m2, case):
-    old, old_chunk, new, _ = cross_source(tx, m2)
+def test_a_recommendation_without_the_recorded_authority_is_refused_at_submission_and_can_be_completed(tx, m2, case):
+    """A/B: before this rule the incomplete recommendation was accepted and only the approver refused
+    it, wasting an immutable review. Now the reviewer is told, and completes the same review."""
+    old, old_chunk, new, new_chunk, _ = cross_source(tx, m2)
     _, bystander, _ = approved(tx, m2, content="awd cross source bystander")
     sources = {"none": None,
                "other_target": authority(bystander),
                "no_purpose": [*paths.SOURCES_CHECKED, {"reference": "x", "supersedes_document_pk": str(old)}]}[case]
-    review = recommend(m2, new, sources)
-    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+    review = m2.start(new)
+    assert code(m2.submit, review, sources=sources) == CHECK_VIOLATION
+    assert review_state(tx, review) == (None, None)
     assert [tx.status_of("document", d) for d in (old, bystander, new)] == ["approved", "approved", "expert_review"]
+    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION                  # no recommendation to decide
+    m2.submit(review, sources=authority(old))                                       # same review, completed
+    assert code(m2.submit, review, sources=authority(bystander)) == CHECK_VIOLATION  # a recorded decision is final
+    assert review_state(tx, review)[1][-1]["supersedes_document_pk"] == str(old)
+    m2.decide(review, tx.approver)
+    assert [tx.status_of("document", d) for d in (old, bystander, new)] == ["archived", "approved", "approved"]
+    ids = tx.rpc_ids(tx.member, tx.season_a, "awd cross source")
+    assert new_chunk in ids and old_chunk not in ids
+
+
+def test_reject_and_return_need_no_recorded_authority(tx, m2):
+    old, _, new, _, _ = cross_source(tx, m2)
+    m2.submit(m2.start(new), "reject")
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "rejected")
+
+
+def test_the_approval_checks_the_cross_source_rule_again(tx, m2):
+    """Defense in depth: the reviewer's check is not a substitute for the approver's. The replacing
+    source is quarantined between the recommendation and the approval."""
+    old, old_chunk, new, _, other = cross_source(tx, m2)
+    review = m2.start(new)
+    m2.submit(review, sources=authority(old))
+    tx.transition("source", other, "approved", "quarantined", "dispute after the review")
+    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "expert_review")
+    assert [e[1] for e in tx.events("document", old)][-1] == "approved"             # no archive event leaked
     assert old_chunk in tx.rpc_ids(tx.member, tx.season_a, "awd cross source")
+    m2.decide(review, tx.approver, "reject")                                        # the way out stays open
+    assert (tx.status_of("document", old), tx.status_of("document", new)) == ("approved", "rejected")
 
 
 def test_an_authorized_cross_source_supersession_archives_and_the_evidence_names_what_was_replaced(tx, m2):
-    old, old_chunk, new, new_chunk = cross_source(tx, m2)
-    review = recommend(m2, new, authority(old))
+    old, old_chunk, new, new_chunk, _ = cross_source(tx, m2)
+    review = m2.start(new)
+    m2.submit(review, sources=authority(old))
     record = m2.decide(review, tx.approver)
     assert (tx.status_of("document", old), tx.status_of("document", new)) == ("archived", "approved")
     ids = tx.rpc_ids(tx.member, tx.season_a, "awd cross source")
@@ -763,10 +794,10 @@ def test_an_authorized_cross_source_supersession_archives_and_the_evidence_names
 
 def test_the_cross_source_rule_holds_even_when_the_superseded_version_is_no_longer_approved(tx, m2):
     """The link is a claim of authority over another source's text, whatever that text's status."""
-    old, _, new, _ = cross_source(tx, m2)
+    old, _, new, _, _ = cross_source(tx, m2)
     tx.transition("document", old, "approved", "quarantined", "dispute")
-    review = recommend(m2, new)
-    assert code(m2.decide, review, tx.approver) == CHECK_VIOLATION
+    review = m2.start(new)
+    assert code(m2.submit, review) == CHECK_VIOLATION
     assert (tx.status_of("document", old), tx.status_of("document", new)) == ("quarantined", "expert_review")
 
 
@@ -788,6 +819,33 @@ def test_a_same_source_supersession_needs_no_recorded_authority_and_says_so_in_t
                         supersedes_document_pk=first)
     approve(tx, m2, second)
     assert (tx.status_of("document", first), tx.status_of("document", second)) == ("archived", "approved")
+
+
+def test_a_demo_approval_never_supersedes_a_version_of_another_source(tx, m2):
+    """A demo approval has no review, so no recorded authority: it retires neither verified nor demo
+    guidance of another source, whatever the target's status. Same-source demo succession still works."""
+    _demo(tx, True)
+    _, verified, verified_chunk = approved(tx, m2, content="awd demo cross verified")
+    src_a, src_b = tx.source(), tx.source()
+    demo_a, demo_a_chunk = version(tx, m2, src_a, content="awd demo cross target")
+    assert as_role(tx, "service_role", DEMO_DOC, (demo_a, tx.approver, "demo target"))[0] == "ok"
+    over_demo, _ = version(tx, m2, src_b, content="awd demo cross over demo", supersedes_document_pk=demo_a)
+    over_verified, _ = version(tx, m2, src_b, document_id="doc-2", content="awd demo cross over verified",
+                               supersedes_document_pk=verified)
+    for attempt in (over_demo, over_verified):
+        assert as_role(tx, "service_role", DEMO_DOC, (attempt, tx.approver, "demo")) == ("err", PERMISSION_DENIED)
+        assert tx.status_of("document", attempt) == "review_required"
+    assert [tx.status_of("document", d) for d in (demo_a, verified)] == ["approved", "approved"]
+    ids = tx.rpc_ids(tx.member, tx.season_a, "awd demo cross")
+    assert demo_a_chunk in ids and verified_chunk in ids                            # nothing was retired
+    tx.transition("document", demo_a, "approved", "quarantined", "dispute")         # ... nor once it is gone
+    assert as_role(tx, "service_role", DEMO_DOC, (over_demo, tx.approver, "demo")) == ("err", PERMISSION_DENIED)
+    same, _ = version(tx, m2, src_b, document_id="doc-3", content="awd demo cross same one")
+    assert as_role(tx, "service_role", DEMO_DOC, (same, tx.approver, "demo same one"))[0] == "ok"
+    same_next, _ = version(tx, m2, src_b, document_id="doc-3", version="v2", content="awd demo cross same two",
+                           supersedes_document_pk=same)
+    assert as_role(tx, "service_role", DEMO_DOC, (same_next, tx.approver, "demo same two"))[0] == "ok"
+    assert (tx.status_of("document", same), tx.status_of("document", same_next)) == ("archived", "approved")
 
 
 def test_the_operator_path_still_cannot_approve_and_a_forged_marker_gets_no_window_bypass(tx, m2):
@@ -847,6 +905,10 @@ def test_m3_rollback_restores_m2_and_migration_a_verbatim_and_m3_replays(tx, m2)
                    " to_regproc('private.knowledge_check_cross_source_supersession')")
     assert tx.cur.fetchone() == (None, None, None, None, None)
     assert _live_body(tx, "enforce_knowledge_document_immutability") == _body_in(M2, "enforce_knowledge_document_immutability")
+    m2_text = M2.read_text(encoding="utf-8")
+    body_at = m2_text.index("$$", m2_text.index("create function public.knowledge_submit_expert_review(")) + 2
+    tx.cur.execute("select prosrc from pg_proc where proname = 'knowledge_submit_expert_review'")
+    assert tx.cur.fetchone()[0] == m2_text[body_at:m2_text.index("$$", body_at)]   # M2 submit, verbatim
     tx.cur.execute("select pg_get_functiondef('public.match_knowledge_chunks_lexical(uuid, text, integer)'::regprocedure)"
                    " || (select qual from pg_policies where policyname = 'knowledge_documents_select')")
     assert "effective_" not in tx.cur.fetchone()[0]
