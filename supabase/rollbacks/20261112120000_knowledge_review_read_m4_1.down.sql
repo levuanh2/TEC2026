@@ -20,6 +20,7 @@ $$;
 
 drop function public.knowledge_review_claims(uuid);
 drop function private.knowledge_review_claim_json(bigint);
+drop function private.knowledge_review_read_denied_cap();
 drop table public.knowledge_review_read_events;
 
 commit;

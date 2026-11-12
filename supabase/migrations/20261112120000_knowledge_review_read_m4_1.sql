@@ -28,9 +28,13 @@
 --     another scope, or the caller holds no reviewer or approver role. It is returned, not raised,
 --     so that the denial itself is audited; the audit row is the same in all three cases (the
 --     requested id as given, no personnel, no counts), and only service_role reads the audit table.
---   * Known limit: every call by a signed-in aal2 user writes one small audit row, denied calls
---     included, and the table is append-only. Nothing in the database rate-limits it; that belongs
---     to the API gateway. The row holds no text and pins no account (no foreign key on the caller).
+--   * Denied calls are recorded up to private.knowledge_review_read_denied_cap() (20) rows per
+--     caller in any rolling hour. Further denied calls in that hour get the same answer and write
+--     nothing, so an account without a role cannot grow the append-only table without bound (at
+--     most 20 small rows an hour, and it needs a verified MFA factor to write even one). The cap
+--     is counted under a per-caller advisory lock. Granted reads are always recorded: only
+--     registered reviewers and approvers can make them. The row holds no text and pins no account
+--     (no foreign key on the caller).
 --   * Roles are scoped per visibility and organization (M2), not per farm: a reviewer of an
 --     organization reads the claims of every farm of that organization. M4.1 does not widen that.
 
@@ -85,6 +89,15 @@ create trigger knowledge_review_read_events_no_truncate
 
 -- ================================================================== read
 
+-- How many DENIED calls of one caller are recorded per rolling hour (see the header).
+create function private.knowledge_review_read_denied_cap()
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$ select 20 $$;
+revoke all on function private.knowledge_review_read_denied_cap() from public, anon, authenticated, service_role;
+
 -- One claim as the reviewer sees it: what was read, from exactly which chunk span of which version.
 create function private.knowledge_review_claim_json(p_claim_id bigint)
 returns jsonb
@@ -124,6 +137,7 @@ declare
   v_candidates jsonb;
   v_claim_count integer;
   v_candidate_count integer;
+  v_recent_denials integer;
 begin
   select a.user_id, a.session_id into v_actor from private.knowledge_verified_actor() a;
   if p_document_pk is null then
@@ -145,11 +159,19 @@ begin
     end if;
   end if;
   if v_doc.id is null or v_role.role_id is null then
-    -- one answer and one audit shape, whatever the reason
-    perform private.knowledge_m2_set_marker('knowledge_review_read_events');
-    insert into public.knowledge_review_read_events (caller_user_id, caller_session_id, requested_document_pk, outcome)
-    values (v_actor.user_id, v_actor.session_id, p_document_pk, 'denied');
-    perform private.knowledge_m2_set_marker(null);
+    -- one answer and one audit shape, whatever the reason; at most the cap of rows per caller and hour
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('knowledge_review_read_denied:' || v_actor.user_id::text, 0));
+    select count(*) into v_recent_denials
+      from public.knowledge_review_read_events e
+     where e.caller_user_id = v_actor.user_id and e.outcome = 'denied'
+       and e.recorded_at > pg_catalog.clock_timestamp() - interval '1 hour';
+    if v_recent_denials < private.knowledge_review_read_denied_cap() then
+      perform private.knowledge_m2_set_marker('knowledge_review_read_events');
+      insert into public.knowledge_review_read_events (caller_user_id, caller_session_id, requested_document_pk, outcome)
+      values (v_actor.user_id, v_actor.session_id, p_document_pk, 'denied');
+      perform private.knowledge_m2_set_marker(null);
+    end if;
     return pg_catalog.jsonb_build_object('access', 'denied',
                                          'notice', 'not available for your knowledge role');
   end if;

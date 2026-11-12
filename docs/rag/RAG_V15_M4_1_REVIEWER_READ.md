@@ -72,7 +72,9 @@ owner cannot insert, update, delete or truncate). One row per call that reached 
 It holds no document text and no claim text. Only `service_role` can read it (RLS on, no policy).
 
 **No existence oracle.** A denial is one answer, `{"access": "denied", ...}`, whether the version
-does not exist, is in another scope, or the caller holds no reviewer or approver role. The audit row
+does not exist, is in another scope, or the caller holds no reviewer or approver role. Whether a
+denied call is recorded depends only on how many denials that caller already has in the last hour,
+never on the document. The audit row
 has the same shape in all three cases: the id as requested, no personnel, no counts. The requested
 id has no foreign key, so a row for a missing version is indistinguishable from one for a version
 the caller may not read. Withheld candidates are not counted in the row.
@@ -89,9 +91,12 @@ the caller may not read. Withheld candidates are not counted in the row.
 
 ## 6. Known limits
 
-- Every call by a signed-in aal2 user writes one small audit row, denied calls included. Nothing in
-  the database rate-limits it; that belongs to the API gateway. The row pins no account (no foreign
-  key on the caller).
+- Denied calls are recorded up to 20 rows per caller in any rolling hour
+  (`private.knowledge_review_read_denied_cap()`); further denied calls in that hour get the same
+  answer and write nothing. This bounds what an account without a role can add to the append-only
+  table, at the price of not recording the calls above the cap. Granted reads are always recorded.
+  The count runs under a per-caller advisory lock. There is still no request rate limit: that
+  belongs to the API gateway. The row pins no account (no foreign key on the caller).
 - Claim and candidate ids come from global sequences. Gaps between ids exist for many reasons and
   are not attributable to a document, but the ids are not opaque.
 - The RPC does not compare `file_sha256` with the hash confirmed in an open M2 review; the reviewer

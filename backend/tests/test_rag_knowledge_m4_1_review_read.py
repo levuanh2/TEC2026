@@ -178,6 +178,30 @@ def test_everyone_else_gets_one_denial_whatever_the_reason(tx, m2):
         assert audit(tx, caller) == [("denied", None, False, False, d, None, None) for d in asked]
 
 
+def test_denied_calls_are_recorded_up_to_a_cap_per_caller_and_hour(tx, m2):
+    """An account with no role cannot grow the append-only audit without bound."""
+    _, doc, _ = active(tx, m2, DRY_15)
+    tx.cur.execute("select private.knowledge_review_read_denied_cap()")
+    cap = tx.cur.fetchone()[0]
+    assert cap == 20
+    nobody, _ = m2.user(label="flood")
+    other, _ = m2.user(label="other")
+    for _ in range(cap + 5):
+        assert read(m2, nobody, doc) == DENIED                                      # the answer never changes
+    assert len(audit(tx, nobody)) == cap
+    assert read(m2, other, uuid.uuid4()) == DENIED and len(audit(tx, other)) == 1   # the cap is per caller
+    reviewer = person(m2, "expert_reviewer")
+    for _ in range(3):                                                              # granted reads are always recorded
+        assert read(m2, reviewer, doc)["access"] == "granted"
+    assert len(audit(tx, reviewer)) == 3
+    # the window is rolling: once the recorded denials are older than an hour, recording resumes
+    tx.cur.execute("alter table public.knowledge_review_read_events disable trigger knowledge_review_read_events_guard")
+    tx.cur.execute("update public.knowledge_review_read_events set recorded_at = recorded_at - interval '61 minutes'"
+                   " where caller_user_id = %s", (nobody,))
+    tx.cur.execute("alter table public.knowledge_review_read_events enable trigger knowledge_review_read_events_guard")
+    assert read(m2, nobody, doc) == DENIED and len(audit(tx, nobody)) == cap + 1
+
+
 @pytest.mark.parametrize("change", ["role_suspended", "person_suspended", "role_revoked"])
 def test_a_role_that_is_no_longer_active_reads_nothing(tx, m2, change):
     _, doc, _ = active(tx, m2, DRY_15)
@@ -259,7 +283,8 @@ def test_m4_1_rollback_needs_a_confirmation_drops_only_its_own_objects_and_repla
     tx.cur.execute("set local knowledge.m4_1_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("select to_regclass('public.knowledge_review_read_events'), to_regproc('public.knowledge_review_claims'),"
-                   " to_regproc('private.knowledge_review_claim_json'), to_regclass('public.knowledge_claims') is not null")
-    assert tx.cur.fetchone() == (None, None, None, True)
+                   " to_regproc('private.knowledge_review_claim_json'), to_regproc('private.knowledge_review_read_denied_cap'),"
+                   " to_regclass('public.knowledge_claims') is not null")
+    assert tx.cur.fetchone() == (None, None, None, None, True)
     tx.cur.execute(M4_1.read_text(encoding="utf-8"))                                # replay
     assert read(m2, reviewer, doc)["access"] == "granted"

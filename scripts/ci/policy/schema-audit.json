@@ -526,6 +526,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_review_read_denied_cap()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_search_text(text)": {
    "config": [
     "search_path=\"\""
