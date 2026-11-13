@@ -22,10 +22,10 @@ __all__ = ["pytestmark", "tx", "m2"]
 RECORD = "select private.knowledge_record_citation_event(%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)"
 
 
-def record(tx, season, retrieved, cited, *, request=None, outcome="generated", delivered=True, mode="production",
+def record(tx, season, retrieved, cited, *, request=None, outcome="generated", response_emitted=True, mode="production",
            role="service_role"):
     request = request or str(uuid.uuid4())
-    return request, as_role(tx, role, RECORD, (request, season, mode, outcome, delivered, "complete",
+    return request, as_role(tx, role, RECORD, (request, season, mode, outcome, response_emitted, "complete",
                                                json.dumps(retrieved), json.dumps(cited)))
 
 
@@ -40,10 +40,10 @@ def test_an_event_derives_scope_and_document_identity_and_separates_roles(tx, m2
     tx.cur.execute(ISOLATED)
     request, status = record(tx, tx.season_a, [cited, candidate], [cited])
     assert status[0] == "ok"
-    tx.cur.execute("select organization_id, farm_id, delivered, outcome, retention_until - occurred_at"
+    tx.cur.execute("select organization_id, farm_id, response_emitted, outcome, retention_until - occurred_at"
                    " from public.knowledge_citation_events where request_id = %s", (request,))
-    org, farm, delivered, outcome, retention = tx.cur.fetchone()
-    assert (org, farm, delivered, outcome) == (tx.org_a, tx.farm_a, True, "generated")
+    org, farm, response_emitted, outcome, retention = tx.cur.fetchone()
+    assert (org, farm, response_emitted, outcome) == (tx.org_a, tx.farm_a, True, "generated")
     assert retention.days == 30                                              # the local/CI test value
     tx.cur.execute("select role, chunk_id, document_pk, approval_assurance from public.knowledge_citation_event_chunks"
                    " where request_id = %s order by role, chunk_id", (request,))
@@ -82,13 +82,13 @@ def test_the_log_is_append_only_even_for_the_owner(tx, m2):
     _, chunk = verified_doc(tx, m2, "awd citation append only")
     tx.cur.execute(ISOLATED)
     request, _ = record(tx, tx.season_a, [chunk], [chunk])
-    for sql in ("update public.knowledge_citation_events set delivered = false",
+    for sql in ("update public.knowledge_citation_events set response_emitted = false",
                 "delete from public.knowledge_citation_events", "truncate public.knowledge_citation_events",
                 "update public.knowledge_citation_event_chunks set role = 'cited'",
                 "delete from public.knowledge_citation_event_chunks",
                 "insert into public.knowledge_citation_events (request_id, crop_season_id, organization_id, farm_id,"
-                " retrieval_mode, outcome, delivered, trace_completeness, retention_until)"
-                " select gen_random_uuid(), crop_season_id, organization_id, farm_id, retrieval_mode, outcome, delivered,"
+                " retrieval_mode, outcome, response_emitted, trace_completeness, retention_until)"
+                " select gen_random_uuid(), crop_season_id, organization_id, farm_id, retrieval_mode, outcome, response_emitted,"
                 " trace_completeness, retention_until from public.knowledge_citation_events"):
         # TRUNCATE of the referenced events table is refused by the foreign key (0A000) before the trigger
         assert owner(tx, sql) in (("err", PERMISSION_DENIED), ("err", "0A000")), sql
@@ -138,7 +138,7 @@ def test_retention_purges_only_expired_events_and_records_the_purge(tx, m2):
 
 def test_the_exposure_query_lists_recorded_deliveries_of_a_revoked_chunk(tx, m2):
     """With M6.1 events, the window of M6 becomes a list of recorded deliveries for that chunk: cited
-    answers delivered, and retrieval-only candidates reported separately (not as exposure)."""
+    answers response_emitted, and retrieval-only candidates reported separately (not as exposure)."""
     doc, chunk = verified_doc(tx, m2, "awd citation exposure")
     tx.cur.execute(ISOLATED)
     cited_req, _ = record(tx, tx.season_a, [chunk], [chunk])

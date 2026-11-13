@@ -5,7 +5,7 @@
 -- Depends on H-a (20261113090000).
 --
 -- One event per answered question (request UUID), with the scope DERIVED from the crop season (never
--- supplied by the caller), the retrieval mode, the outcome, whether an answer was delivered, and how
+-- supplied by the caller), the retrieval mode, the outcome, whether the backend emitted a response body (NOT proof that the caller received it), and how
 -- complete the trace is. Chunk rows distinguish what was RETRIEVED from what was CITED; their document
 -- version and approval assurance are DERIVED from the chunk id. No question, answer, prompt, email,
 -- user id, key or secret is stored: there is no column for any of them.
@@ -37,7 +37,7 @@ create table public.knowledge_citation_events (
   farm_id uuid not null,
   retrieval_mode text not null,
   outcome text not null,
-  delivered boolean not null,
+  response_emitted boolean not null,
   trace_completeness text not null,
   retention_until timestamptz not null,
   constraint knowledge_citation_events_mode_chk check (retrieval_mode in ('production', 'demo')),
@@ -45,7 +45,7 @@ create table public.knowledge_citation_events (
     outcome in ('generated', 'insufficient_evidence', 'policy_rejected', 'error')),
   constraint knowledge_citation_events_trace_chk check (
     trace_completeness in ('complete', 'retrieval_unavailable', 'not_reached')),
-  constraint knowledge_citation_events_delivered_chk check (not delivered or outcome <> 'error')
+  constraint knowledge_citation_events_emitted_chk check (not response_emitted or outcome <> 'error')
 );
 create index knowledge_citation_events_scope_idx on public.knowledge_citation_events (organization_id, occurred_at);
 create index knowledge_citation_events_retention_idx on public.knowledge_citation_events (retention_until);
@@ -183,7 +183,7 @@ begin
   select st.retention_days into v_days from private.knowledge_citation_settings st where st.singleton;
   perform private.knowledge_m2_set_marker('knowledge_citation_events');
   insert into public.knowledge_citation_events (request_id, crop_season_id, organization_id, farm_id, retrieval_mode,
-    outcome, delivered, trace_completeness, retention_until)
+    outcome, response_emitted, trace_completeness, retention_until)
   values (p_request_id, p_crop_season_id, v_scope.organization_id, v_scope.farm_id, p_retrieval_mode, p_outcome,
           p_delivered, p_trace_completeness, pg_catalog.now() + pg_catalog.make_interval(days => v_days));
   insert into public.knowledge_citation_event_chunks (request_id, role, chunk_id, document_pk, source_id, document_id,

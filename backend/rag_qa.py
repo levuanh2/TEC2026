@@ -350,7 +350,7 @@ class RagQuestionService:
             body = to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None)
             record_safely(self._citations, lambda: build_event(
                 request_id=_event_id(request_id), crop_season_id=crop_season_id, recorder=recorder, result=result,
-                delivered=True, retrieval_mode="demo" if self._retrieval.include_demo else "production"))
+                response_emitted=True, retrieval_mode="demo" if self._retrieval.include_demo else "production"))
             return body
         except RagError as exc:
             error_code = exc.code

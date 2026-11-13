@@ -10,7 +10,8 @@ An event never carries the question, the answer, a prompt, a user id, an email, 
 `CitationEvent` has no field for any of them. It distinguishes
   * the chunks RETRIEVED for the request (candidates; retrieval alone is not exposure),
   * the chunks actually CITED in the returned answer,
-  * whether an answer was DELIVERED to the caller.
+  * whether the backend EMITTED a response body (`response_emitted`): the log cannot prove that the caller
+    received or read it (a dropped connection or a client error is invisible here).
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class CitationEvent:
     crop_season_id: str
     retrieval_mode: Mode
     outcome: Outcome
-    delivered: bool
+    response_emitted: bool
     trace_completeness: Trace
     retrieved: tuple[str, ...]
     cited: tuple[str, ...]
@@ -45,7 +46,7 @@ class CitationEvent:
         uuid.UUID(self.crop_season_id)
         if not set(self.cited) <= set(self.retrieved):
             raise ValueError("a cited chunk must be one retrieved for this request")
-        if self.delivered and self.outcome == "error":
+        if self.response_emitted and self.outcome == "error":
             raise ValueError("an error delivers no answer")
 
 
@@ -67,7 +68,7 @@ class RecordingRetriever:
 
 
 def build_event(*, request_id: str, crop_season_id: str, recorder: RecordingRetriever | None, result: Any | None,
-                delivered: bool, retrieval_failed: bool = False, retrieval_mode: Mode = "production") -> CitationEvent:
+                response_emitted: bool, retrieval_failed: bool = False, retrieval_mode: Mode = "production") -> CitationEvent:
     """`result` is the trusted RagAnswerResult (None when the request failed before one existed).
     Trace: `complete` when retrieval ran and its chunk ids are known; `retrieval_unavailable` when it
     failed; `not_reached` when the request never retrieved (a deterministic answer or an earlier stop)."""
@@ -86,7 +87,7 @@ def build_event(*, request_id: str, crop_season_id: str, recorder: RecordingRetr
         trace = "not_reached"
     cited = tuple(dict.fromkeys(c.chunk_id for c in (result.evidence if result is not None else ())))
     return CitationEvent(request_id=request_id, crop_season_id=crop_season_id, retrieval_mode=retrieval_mode,
-                         outcome=outcome, delivered=delivered and outcome != "error", trace_completeness=trace,
+                         outcome=outcome, response_emitted=response_emitted and outcome != "error", trace_completeness=trace,
                          retrieved=retrieved, cited=cited)
 
 
@@ -103,7 +104,7 @@ class PostgresCitationSink:
     def record(self, event: CitationEvent) -> None:
         with self._connect() as conn:
             conn.execute(self.SQL, (event.request_id, event.crop_season_id, event.retrieval_mode, event.outcome,
-                                    event.delivered, event.trace_completeness, json.dumps(list(event.retrieved)),
+                                    event.response_emitted, event.trace_completeness, json.dumps(list(event.retrieved)),
                                     json.dumps(list(event.cited))))
 
 

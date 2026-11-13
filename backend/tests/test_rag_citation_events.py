@@ -1,4 +1,4 @@
-"""RAG V1.5 M6.1 citation events, offline half: the event model, the retrieved/cited/delivered
+"""RAG V1.5 M6.1 citation events, offline half: the event model, the retrieved/cited/response_emitted
 distinction, privacy (no content field), and the wiring (no sink = nothing recorded, a failing sink never
 changes the answer). Pure: no database, no network. Every value is a SYNTHETIC TEST FIXTURE."""
 
@@ -30,32 +30,32 @@ def recorder(ids):
 
 def test_the_event_has_no_field_for_content_or_identity():
     names = {f.name for f in dataclasses.fields(ce.CitationEvent)}
-    assert names == {"request_id", "crop_season_id", "retrieval_mode", "outcome", "delivered", "trace_completeness",
+    assert names == {"request_id", "crop_season_id", "retrieval_mode", "outcome", "response_emitted", "trace_completeness",
                      "retrieved", "cited"}
     event = ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=recorder(["c1", "c2"]),
-                           result=result(), delivered=True)
+                           result=result(), response_emitted=True)
     assert SECRET_QUESTION not in repr(event)
 
 
-def test_retrieved_cited_and_delivered_are_distinct():
+def test_retrieved_cited_and_response_emitted_are_distinct():
     event = ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=recorder(["c1", "c2", "c1"]),
-                           result=result(cited=("c1",)), delivered=True)
-    assert (event.retrieved, event.cited, event.delivered, event.trace_completeness) == (("c1", "c2"), ("c1",), True,
+                           result=result(cited=("c1",)), response_emitted=True)
+    assert (event.retrieved, event.cited, event.response_emitted, event.trace_completeness) == (("c1", "c2"), ("c1",), True,
                                                                                           "complete")
     declined = ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=recorder(["c3"]),
-                              result=result("insufficient_evidence", cited=()), delivered=True)
+                              result=result("insufficient_evidence", cited=()), response_emitted=True)
     assert (declined.outcome, declined.retrieved, declined.cited) == ("insufficient_evidence", ("c3",), ())
     rejected = ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=recorder(["c3"]),
-                              result=result("insufficient_evidence", cited=(), rejection="advice"), delivered=True)
+                              result=result("insufficient_evidence", cited=(), rejection="advice"), response_emitted=True)
     assert rejected.outcome == "policy_rejected"
 
 
 def test_trace_completeness():
     no_retrieval = ce.RecordingRetriever(SimpleNamespace(retrieve=lambda q: []))
     assert ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=no_retrieval, result=result(cited=()),
-                          delivered=True).trace_completeness == "not_reached"
+                          response_emitted=True).trace_completeness == "not_reached"
     assert ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=no_retrieval, result=None,
-                          delivered=False, retrieval_failed=True).trace_completeness == "retrieval_unavailable"
+                          response_emitted=False, retrieval_failed=True).trace_completeness == "retrieval_unavailable"
 
 
 def test_a_cited_chunk_must_have_been_retrieved_and_an_error_delivers_nothing():
@@ -76,7 +76,7 @@ def test_no_sink_records_nothing_and_a_failing_sink_never_raises():
         def record(self, event):
             raise RuntimeError("TEST FIXTURE sink down")
     ce.record_safely(Broken(), lambda: ce.build_event(request_id=REQUEST, crop_season_id=SEASON, recorder=None,
-                                                      result=result(cited=()), delivered=True))
+                                                      result=result(cited=()), response_emitted=True))
 
 
 def test_the_question_service_records_only_with_a_sink(monkeypatch):

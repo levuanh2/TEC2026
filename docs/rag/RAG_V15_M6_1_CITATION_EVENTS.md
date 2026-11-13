@@ -25,7 +25,7 @@ One event per answered question, written after the answer was built:
 | `organization_id`, `farm_id` | **derived** from the season in the database | never caller-supplied |
 | `retrieval_mode` | `production` or `demo` | demo only on isolated databases (H-a) |
 | `outcome` | `generated`, `insufficient_evidence`, `policy_rejected` (`error` reserved) | |
-| `delivered` | the response body was returned to the caller | |
+| `response_emitted` | the backend built and returned the response body | **not** proof of receipt: a dropped connection, a proxy or client error is invisible to this log |
 | `trace_completeness` | `complete`, `retrieval_unavailable`, `not_reached` | |
 | chunk rows | `role` = `retrieved` or `cited`, `chunk_id`; **derived**: document pk, source, document id, version, approval assurance | cited is a subset of retrieved |
 
@@ -33,8 +33,8 @@ One event per answered question, written after the answer was built:
 answer, the prompt, the model output, a user id, an email, an API key or any provider secret.
 
 **Three things kept apart:** a chunk RETRIEVED for a request is a candidate, not exposure; a chunk CITED
-in the returned answer; and whether that answer was DELIVERED. Only `cited` + `delivered` is confirmed
-answer exposure.
+in the returned answer; and whether the backend EMITTED that answer. `cited` + `response_emitted` is the strongest evidence this log
+records; it is still not proof that a farmer received or read the answer.
 
 ## 3. Controls
 
@@ -62,8 +62,19 @@ answer exposure.
 ## 4. Exposure with events
 
 `docs/rag/sql/m6_1_citation_exposure.sql` lists, for one chunk id, the recorded requests with
-`exposure = cited` (confirmed, if delivered) or `retrieved_only` (candidate, not exposure). Outside the
+`exposure = cited` (the emitted answer cited it; receipt not proven) or `retrieved_only` (candidate, not exposure). Outside the
 recorded period, only the M6 possible-exposure window is known.
+
+## 4a. Future incident-response export (design only, not implemented)
+
+The shared `service_role` credential is not an authenticated human: reading the log with it identifies no
+responder. A future export would be `public.knowledge_citation_incident_export(chunk_id, organization_id,
+ticket)`, EXECUTE for `authenticated`, requiring a verified aal2 person with a dedicated
+`incident_responder` registry role scoped to the organization (or to public sources), a ticket reference,
+and writing an append-only export audit row (who, when, which chunk, which scope, row count). Output only the
+requested organization's rows (or, for a public chunk, per-organization counts without farm ids), never
+other tenants', with the same `cited` / `retrieved_only` / `response_emitted` columns and no content. Until
+then no client role, cooperative managers included, reads the log.
 
 ## 5. Before any hosted use (owner decisions, none taken)
 
@@ -79,7 +90,7 @@ drops the events and refuses without `set local knowledge.m6_1_rollback_evidence
 
 ## 7. Tests
 
-- `backend/tests/test_rag_citation_events.py` (offline): no content field; retrieved / cited / delivered;
+- `backend/tests/test_rag_citation_events.py` (offline): no content field; retrieved / cited / response emitted;
   outcomes; trace completeness; subset and error rules; no sink records nothing; a failing sink never
   raises; the service default is off.
 - `backend/tests/test_rag_knowledge_m6_1_citation_events.py` (DB): refused on a shared database; derived
