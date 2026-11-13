@@ -45,7 +45,34 @@
    ],
    "security_definer": true
   },
+  "knowledge_bind_source_publisher(text,uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "knowledge_cancel_expert_review(uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_countersign_supersession(uuid,text,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_custodian_snapshot(uuid)": {
    "config": [
     "search_path=\"\""
    ],
@@ -72,7 +99,25 @@
    ],
    "security_definer": true
   },
+  "knowledge_grant_source_custodian(uuid,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "knowledge_register_personnel(uuid,text,text,text,text,uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_register_publisher(text,text,text)": {
    "config": [
     "search_path=\"\""
    ],
@@ -109,6 +154,24 @@
    "security_definer": true
   },
   "knowledge_set_personnel_status(uuid,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_set_publisher_status(uuid,text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
+  "knowledge_set_source_custodian_status(uuid,text,text)": {
    "config": [
     "search_path=\"\""
    ],
@@ -707,6 +770,13 @@
    "security_definer": false
   },
   "private.knowledge_supersede_for(uuid,boolean)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_supersession_conflicts(uuid,uuid)": {
    "config": [
     "search_path=\"\""
    ],
@@ -2027,6 +2097,10 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_publishers": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_registry_admins": {
    "enabled": true,
    "forced": false
@@ -2039,11 +2113,23 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_source_custodians": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_source_publishers": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_sources": {
    "enabled": true,
    "forced": false
   },
   "knowledge_status_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_supersession_authorizations": {
    "enabled": true,
    "forced": false
   },
@@ -2276,6 +2362,8 @@
   "knowledge_personnel.knowledge_personnel_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_personnel_roles.knowledge_personnel_roles_guard": "private.knowledge_personnel_guard()",
   "knowledge_personnel_roles.knowledge_personnel_roles_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_publishers.knowledge_publishers_guard": "private.knowledge_personnel_guard()",
+  "knowledge_publishers.knowledge_publishers_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_registry_admins.knowledge_registry_admins_guard": "private.knowledge_registry_admin_guard()",
   "knowledge_registry_admins.knowledge_registry_admins_insert_guard": "private.knowledge_registry_admin_guard()",
   "knowledge_registry_admins.knowledge_registry_admins_no_truncate": "private.knowledge_m2_no_truncate()",
@@ -2283,10 +2371,16 @@
   "knowledge_review_read_denied_overflow.knowledge_review_read_denied_overflow_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_review_read_events.knowledge_review_read_events_guard": "private.knowledge_evidence_guard()",
   "knowledge_review_read_events.knowledge_review_read_events_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_source_custodians.knowledge_source_custodians_guard": "private.knowledge_personnel_guard()",
+  "knowledge_source_custodians.knowledge_source_custodians_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_source_publishers.knowledge_source_publishers_guard": "private.knowledge_evidence_guard()",
+  "knowledge_source_publishers.knowledge_source_publishers_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_sources.knowledge_sources_scope": "private.enforce_knowledge_source_scope()",
   "knowledge_sources.knowledge_sources_zz_assurance": "private.knowledge_stamp_approval_assurance()",
   "knowledge_status_events.knowledge_status_events_append_only": "private.knowledge_status_events_append_only()",
   "knowledge_status_events.knowledge_status_events_no_truncate": "private.knowledge_status_events_append_only()",
+  "knowledge_supersession_authorizations.knowledge_supersession_authorizations_guard": "private.knowledge_evidence_guard()",
+  "knowledge_supersession_authorizations.knowledge_supersession_authorizations_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_upload_attestations.knowledge_upload_attestations_guard": "private.knowledge_evidence_guard()",
   "knowledge_upload_attestations.knowledge_upload_attestations_no_truncate": "private.knowledge_m2_no_truncate()",
   "mrv_case_batches.audit_change_trg": "audit.capture_change()",
@@ -2399,11 +2493,17 @@
   "knowledge_personnel_pkey": "CREATE UNIQUE INDEX knowledge_personnel_pkey ON public.knowledge_personnel USING btree (id)",
   "knowledge_personnel_roles_live_key": "CREATE UNIQUE INDEX knowledge_personnel_roles_live_key ON public.knowledge_personnel_roles USING btree (personnel_id, role, scope_visibility, COALESCE(scope_organization_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (status <> 'revoked'::text)",
   "knowledge_personnel_roles_pkey": "CREATE UNIQUE INDEX knowledge_personnel_roles_pkey ON public.knowledge_personnel_roles USING btree (id)",
+  "knowledge_publishers_key_uidx": "CREATE UNIQUE INDEX knowledge_publishers_key_uidx ON public.knowledge_publishers USING btree (publisher_key)",
+  "knowledge_publishers_pkey": "CREATE UNIQUE INDEX knowledge_publishers_pkey ON public.knowledge_publishers USING btree (id)",
   "knowledge_registry_admins_pkey": "CREATE UNIQUE INDEX knowledge_registry_admins_pkey ON public.knowledge_registry_admins USING btree (auth_user_id)",
   "knowledge_review_read_denied_overflow_pkey": "CREATE UNIQUE INDEX knowledge_review_read_denied_overflow_pkey ON public.knowledge_review_read_denied_overflow USING btree (caller_user_id, window_start)",
   "knowledge_review_read_events_pkey": "CREATE UNIQUE INDEX knowledge_review_read_events_pkey ON public.knowledge_review_read_events USING btree (id)",
+  "knowledge_source_custodians_active_uidx": "CREATE UNIQUE INDEX knowledge_source_custodians_active_uidx ON public.knowledge_source_custodians USING btree (personnel_id, source_id) WHERE (status <> 'revoked'::text)",
+  "knowledge_source_custodians_pkey": "CREATE UNIQUE INDEX knowledge_source_custodians_pkey ON public.knowledge_source_custodians USING btree (id)",
+  "knowledge_source_publishers_pkey": "CREATE UNIQUE INDEX knowledge_source_publishers_pkey ON public.knowledge_source_publishers USING btree (source_id)",
   "knowledge_sources_pkey": "CREATE UNIQUE INDEX knowledge_sources_pkey ON public.knowledge_sources USING btree (source_id)",
   "knowledge_status_events_pkey": "CREATE UNIQUE INDEX knowledge_status_events_pkey ON public.knowledge_status_events USING btree (id)",
+  "knowledge_supersession_authorizations_pkey": "CREATE UNIQUE INDEX knowledge_supersession_authorizations_pkey ON public.knowledge_supersession_authorizations USING btree (id)",
   "knowledge_upload_attestations_document_key": "CREATE UNIQUE INDEX knowledge_upload_attestations_document_key ON public.knowledge_upload_attestations USING btree (document_pk) WHERE (entity_type = 'document'::text)",
   "knowledge_upload_attestations_pkey": "CREATE UNIQUE INDEX knowledge_upload_attestations_pkey ON public.knowledge_upload_attestations USING btree (id)",
   "knowledge_upload_attestations_source_key": "CREATE UNIQUE INDEX knowledge_upload_attestations_source_key ON public.knowledge_upload_attestations USING btree (source_id) WHERE (entity_type = 'source'::text)",

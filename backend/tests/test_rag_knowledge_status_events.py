@@ -328,6 +328,7 @@ M4_ROLLBACK = ROOT / "supabase/rollbacks/20261112090000_knowledge_claims_contrad
 M4_1_ROLLBACK = ROOT / "supabase/rollbacks/20261112120000_knowledge_review_read_m4_1.down.sql"
 HA_ROLLBACK = ROOT / "supabase/rollbacks/20261113090000_knowledge_m2_hardening_assurance.down.sql"
 HB_ROLLBACK = ROOT / "supabase/rollbacks/20261113120000_knowledge_m2_hardening_operator.down.sql"
+HC_ROLLBACK = ROOT / "supabase/rollbacks/20261113150000_knowledge_m2_hardening_supersession.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -349,8 +350,17 @@ def _live_body(tx, name):
     return tx.cur.fetchone()[0]
 
 
+def unwind_hc(tx):
+    """H-c (custodian countersignature) unwinds before H-b, when it is installed."""
+    tx.cur.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("set local knowledge.hc_rollback_evidence_exported = 'yes'")
+        tx.cur.execute(_without_tx_control(HC_ROLLBACK))
+
+
 def unwind_hb(tx):
-    """H-b (emergency quarantine, archivist archive) unwinds before H-a, when it is installed."""
+    """H-c first, then H-b (emergency quarantine, archivist archive), before H-a, when installed."""
+    unwind_hc(tx)
     tx.cur.execute("select to_regclass('public.knowledge_emergency_actions') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute("set local knowledge.hb_rollback_evidence_exported = 'yes'")

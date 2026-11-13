@@ -18,7 +18,7 @@ import pytest
 from tests import knowledge_status_paths as paths
 from tests.test_rag_knowledge_m2_approval import as_role, code, m2, owner, recommended  # noqa: F401
 from tests.test_rag_knowledge_m3_validity import approve, version
-from tests.test_rag_knowledge_status_events import HB_ROLLBACK, _without_tx_control
+from tests.test_rag_knowledge_status_events import HB_ROLLBACK, _without_tx_control, unwind_hc
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, INVALID_PARAMETER, PERMISSION_DENIED,  # noqa: E402
                                               _DB_URL, pytestmark, psycopg, tx)
 
@@ -297,6 +297,7 @@ def test_without_an_archivist_nothing_is_archived_and_quarantine_still_works(tx,
 def test_rollback_refuses_without_the_evidence_export_and_restores_the_m2_operator_path(tx, m2):
     doc, _ = approved_doc(tx, m2)
     tx.settle()
+    unwind_hc(tx)                                                           # H-c, if installed, goes first
     tx.cur.execute("savepoint rb")
     with pytest.raises(psycopg.errors.RaiseException, match="hb_rollback_evidence_exported"):
         tx.cur.execute(_without_tx_control(HB_ROLLBACK))
@@ -313,6 +314,7 @@ def test_rollback_refuses_without_the_evidence_export_and_restores_the_m2_operat
 
 def test_rollback_restores_the_m2_bodies_verbatim(tx):
     from tests.test_rag_knowledge_status_events import M2
+    unwind_hc(tx)
     tx.cur.execute("set local knowledge.hb_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(HB_ROLLBACK))
     m2_text = M2.read_text(encoding="utf-8").replace("\r\n", "\n")
