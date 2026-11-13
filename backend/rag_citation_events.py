@@ -47,7 +47,7 @@ class CitationEvent:
         if not set(self.cited) <= set(self.retrieved):
             raise ValueError("a cited chunk must be one retrieved for this request")
         if self.response_emitted and self.outcome == "error":
-            raise ValueError("an error delivers no answer")
+            raise ValueError("an error emits no answer")
 
 
 class CitationSink(Protocol):

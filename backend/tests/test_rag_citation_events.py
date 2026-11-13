@@ -58,7 +58,7 @@ def test_trace_completeness():
                           response_emitted=False, retrieval_failed=True).trace_completeness == "retrieval_unavailable"
 
 
-def test_a_cited_chunk_must_have_been_retrieved_and_an_error_delivers_nothing():
+def test_a_cited_chunk_must_have_been_retrieved_and_an_error_emits_nothing():
     with pytest.raises(ValueError):
         ce.CitationEvent(REQUEST, SEASON, "production", "generated", True, "complete", ("c1",), ("c2",))
     with pytest.raises(ValueError):

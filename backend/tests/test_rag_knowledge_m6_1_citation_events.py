@@ -1,6 +1,6 @@
 """RAG V1.5 M6.1 citation events, database half (migration 20261113180000): isolation-gated recording,
 derived scope and document identity, tenant separation, RLS, append-only audit, retention purge, and the
-exposure query that turns a possible exposure window into recorded deliveries.
+exposure query that turns a possible exposure window into recorded response emissions (not proof of receipt).
 
 Every text is a SYNTHETIC TEST FIXTURE; identities are synthetic. One transaction per test, rolled back.
 Skipped without SUPABASE_DB_URL. dev3-01 stays OPEN.
@@ -136,8 +136,8 @@ def test_retention_purges_only_expired_events_and_records_the_purge(tx, m2):
     assert tx.cur.fetchone()[0] >= 1
 
 
-def test_the_exposure_query_lists_recorded_deliveries_of_a_revoked_chunk(tx, m2):
-    """With M6.1 events, the window of M6 becomes a list of recorded deliveries for that chunk: cited
+def test_the_exposure_query_lists_recorded_response_emissions_of_a_revoked_chunk(tx, m2):
+    """With M6.1 events, the window of M6 becomes a list of recorded response emissions for that chunk: cited
     answers response_emitted, and retrieval-only candidates reported separately (not as exposure)."""
     doc, chunk = verified_doc(tx, m2, "awd citation exposure")
     tx.cur.execute(ISOLATED)

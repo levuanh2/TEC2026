@@ -1,4 +1,4 @@
--- RAG V1.5 M6.1: recorded deliveries that involved one chunk_id (docs/rag/RAG_V15_M6_1_CITATION_EVENTS.md).
+-- RAG V1.5 M6.1: recorded response emissions (not proof of receipt) that involved one chunk_id (docs/rag/RAG_V15_M6_1_CITATION_EVENTS.md).
 -- READ-ONLY, service_role or owner. Parameter %(chunk_id)s.
 --
 -- Only requests recorded by the M6.1 prototype appear (local/CI; nothing before it, nothing on a

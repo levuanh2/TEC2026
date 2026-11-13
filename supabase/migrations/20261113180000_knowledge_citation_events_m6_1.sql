@@ -125,7 +125,7 @@ create trigger knowledge_citation_purges_no_truncate
 -- ================================================================== record
 
 -- Called by the backend with the service credential after it answered. Everything except the request
--- id, the season, the mode, the outcome, the delivery flag, the trace completeness and the two lists
+-- id, the season, the mode, the outcome, the response_emitted flag, the trace completeness and the two lists
 -- of chunk ids is derived here.
 create function private.knowledge_record_citation_event(
   p_request_id uuid, p_crop_season_id uuid, p_retrieval_mode text, p_outcome text, p_response_emitted boolean,
