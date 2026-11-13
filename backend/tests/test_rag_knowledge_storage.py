@@ -530,7 +530,8 @@ def test_status_lifecycle_is_the_m1_matrix(tx, kind, current, target):
     if (current, target) in ALLOWED[kind]:
         assert result[0] == "ok", result
         assert tx.status_of(kind, key) == target
-        assert tx.events(kind, key) == before + [(current, target, f"matrix {current}->{target}",
+        assert tx.events(kind, key) == before + [(current, target,
+                                                  paths.event_reason(current, target, f"matrix {current}->{target}"),
                                                   tx.approver if target == "approved" else None)]
     else:
         assert result == ("err", CHECK_VIOLATION)
@@ -963,6 +964,11 @@ HA_DEFINER = {"knowledge_has_real_accounts", "knowledge_live_system_identifier",
               "knowledge_demo_read_enabled"}
 HA_INVOKER = {"knowledge_deployment_guard", "knowledge_declare_isolated_test", "knowledge_declare_shared",
               "knowledge_stamp_approval_assurance", "match_knowledge_chunks_lexical_demo"}
+# H-b (20261113120000): emergency quarantine (EXECUTE for service_role only) and the archivist RPCs
+# (EXECUTE for authenticated only) are SECURITY DEFINER; their input checks are not.
+HB_DEFINER = {"knowledge_emergency_quarantine_document", "knowledge_emergency_quarantine_source",
+              "knowledge_archive_document", "knowledge_archive_source"}
+HB_INVOKER = {"knowledge_emergency_check", "knowledge_archive_check", "knowledge_same_person"}
 
 
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
@@ -989,14 +995,16 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     "knowledge_demo_require_enabled", *M2_DEMO,
                                     # ... and the verified-human RPCs (EXECUTE for authenticated only)
                                     *M2_RPCS, *M3_HELPERS, *M3_EXPIRY, *M4_HELPERS, *M4_OPERATOR,
-                                    *M4_1_HELPERS, *M4_1_RPCS, *HA_DEFINER, *HA_INVOKER}
+                                    *M4_1_HELPERS, *M4_1_RPCS, *HA_DEFINER, *HA_INVOKER,
+                                    *HB_DEFINER, *HB_INVOKER}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
     # only, see test_rag_knowledge_m2_approval.py). Every internal helper is SECURITY INVOKER.
     assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
                                             "knowledge_transition_document", *M2_RPCS, *M2_DEMO,
-                                            *M3_EXPIRY, *M4_OPERATOR, *M4_1_RPCS, *HA_DEFINER}, rows
+                                            *M3_EXPIRY, *M4_OPERATOR, *M4_1_RPCS, *HA_DEFINER,
+                                            *HB_DEFINER}, rows
     tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
     for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere
