@@ -129,6 +129,13 @@ class Reader:
                  "fused_score": 0.03, "chunk_id": key, "content": FIXTURE + content}
                 for _, key, title, section, content in rows[:top_k]]
 
+    def knowledge_evidence_state(self, season_id, chunk_ids, *, demo=False):
+        """M7 E5: the fixture corpus stands for approved knowledge that stays admissible."""
+        from rag_answer_integrity import fixture_evidence_state
+        rows = [{"source_id": f"fx-{key}", "document_id": key, "document_version": "v1", "chunk_id": key,
+                 "content": FIXTURE + content} for key, (_title, _section, content) in CORPUS.items()]
+        return fixture_evidence_state(rows, chunk_ids)
+
 
 class Carbon:
     def stored(self, season_id, scenario):

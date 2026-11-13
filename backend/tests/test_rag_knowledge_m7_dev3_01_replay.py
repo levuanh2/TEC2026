@@ -170,3 +170,68 @@ def test_e7_replay_matrix_dishonest_operator_is_stopped_mistaken_expert_is_not(t
                 "cited": POISON["chunk_id"] in run["cited"] and run["source_integrity_failure"]}
     assert mistaken == {"detected": True, "refused_until_dispositioned": True, "status": "approved",
                         "retrievable": True, "cited": True}, mistaken          # residual: dev3-01 stays OPEN
+
+
+# ================================================================== M7 + E5: the full chain on the real answer path
+
+def test_e5_full_chain_matrix_on_the_real_answer_path(tx, m2):
+    """The frozen dev3-01 fixture through E2 + E7/E7.1 + E5 with the REAL retrieval RPC, the REAL answer-time
+    recheck (both under the member's JWT) and the REAL RagQuestionService with a scripted model that cites the
+    poisoned chunk. Columns: claim detection, independent verification, human review, approval, retrieval,
+    answer-time validation, response outcome. The mistaken-expert row is the open residual (dev3-01 OPEN)."""
+    from recommendation.rag import RagError
+    from tests.test_rag_knowledge_m7_e5_answer_time import ask
+    from tests.test_rag_knowledge_m7_e7_independent_verification import dishonest_report, verdict, verify
+    _, clean = draft(tx, m2, content=CLEAN["content"])
+    review_clean = m2.start(clean)
+    m2.submit(review_clean)
+    m2.decide(review_clean, tx.approver)
+    poison = _poison_version(tx, m2)
+    tx.cur.execute("select d.source_id, c.chunk_id from public.knowledge_chunks c join public.knowledge_documents d"
+                   " on d.id = c.document_pk where d.id = %s", (poison,))
+    src, chunk = tx.cur.fetchone()
+
+    def answer():
+        try:
+            body, reader = ask(tx, (src, chunk))
+            return body["status"], chunk in [c["chunk_id"] for c in body["citations"]], body, reader.rechecks
+        except RagError as exc:
+            return f"refused:{exc.code}", False, None, None
+
+    # -- dishonest operator: omits the dev3-01 claims
+    review = m2.start(poison)
+    report, sha = dishonest_report(tx, m2, poison)
+    m2.dispose(review, sha, None, "report_reviewed")
+    verify(tx, m2, report)
+    status, cited, _, _ = answer()
+    dishonest = {"claims_detected_by_operator": False, "independent_verification": verdict(tx, report)[0],
+                 "review_refused": code(m2.submit, review, integrity=False) == CHECK_VIOLATION,
+                 "approved": tx.status_of("document", poison) == "approved",
+                 "retrievable": chunk in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)],
+                 "response": status, "poison_cited": cited}
+    assert dishonest == {"claims_detected_by_operator": False, "independent_verification": "mismatch",
+                         "review_refused": True, "approved": False, "retrievable": False,
+                         "response": "refused:citation_mismatch", "poison_cited": False}, dishonest
+
+    # -- honest operator, mistaken expert (false_positive with wrong evidence)
+    m2.integrity_report(poison)
+    new_report, new_sha = m2.acknowledge(review)
+    tx.cur.execute("select id from public.knowledge_integrity_findings where report_id = %s and needs_expert_review",
+                   (new_report,))
+    findings = [r[0] for r in tx.cur.fetchall()]
+    for fid in findings:
+        m2.dispose(review, new_sha, fid, "false_positive",
+                   justification="TEST FIXTURE: a MISTAKEN expert judgement, recorded and attributable",
+                   evidence=[{"reference": "TEST FIXTURE wrong reference", "locator": "n/a"}])
+    m2.submit(review)
+    m2.decide(review, tx.approver)
+    status, cited, body, rechecks = answer()
+    mistaken = {"claims_detected": len(findings) >= 1, "independent_verification": verdict(tx, new_report)[0],
+                "approved": tx.status_of("document", poison) == "approved",
+                "retrievable": chunk in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)],
+                "answer_time_rechecked": rechecks == 1,
+                "caveat_shown": any("báo động nhầm" in line for line in body["limitations"]),
+                "response": status, "poison_cited": cited}
+    assert mistaken == {"claims_detected": True, "independent_verification": "reproduced", "approved": True,
+                        "retrievable": True, "answer_time_rechecked": True, "caveat_shown": True,
+                        "response": "generated", "poison_cited": True}, mistaken      # residual: dev3-01 OPEN

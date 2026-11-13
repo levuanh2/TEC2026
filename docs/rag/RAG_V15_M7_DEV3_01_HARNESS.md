@@ -62,8 +62,11 @@ chunks the REAL answer service (`RagQuestionService`) receives.
   automatically (by design: no automatic quarantine). Exclusion depends on a human action.
 - **E4 No real expert identities.** All reviewers, approvers and archivists in tests are synthetic
   fixtures; no qualified human has reviewed the real corpus.
-- **E5 No answer-time content control.** Once a poisoned version is approved and not quarantined, the
-  answer path cites it (the pinned characterization).
+- **E5 PARTIAL in CI (migration 20261114120000), NOT on hosted.** At answer time the cited evidence is
+  re-validated under the caller's JWT (still approved, verified, in force, same version and content hash, retrieved
+  in this request); a version withdrawn, archived, expired or changed mid-request is refused, and findings resolved
+  as false positives are shown as a caveat. It cannot judge truth: an approved poisoned version is still cited
+  (`RAG_V15_M7_E5_ANSWER_TIME_CONTROL.md` §4), so the pinned characterization stands.
 - **E6 No real-model replay.** The dev3-01 replay on the frozen benchmark set with the real model needs a
   paid provider call; not done.
 

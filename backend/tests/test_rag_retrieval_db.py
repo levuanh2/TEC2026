@@ -341,3 +341,22 @@ def test_ended_membership_loses_tenant_knowledge_and_write(env):
     assert {env["org_a_doc"], env["farm_a_doc"]}.isdisjoint(after)
     with pytest.raises(RagAccessDenied):
         _evidence(env, "leaver", "leaver", intent="recommend")
+
+
+# ================================================================== M7 E5: the answer-time recheck over PostgREST
+
+def test_the_answer_time_recheck_over_postgrest_is_scoped_like_retrieval(env):
+    """`SupabaseReadRepository.knowledge_evidence_state` (the production reader, REAL JWT, PostgREST) re-validates
+    cited chunks with retrieval's admissibility: the member's own tenant chunks and public ones come back with a
+    consistent content hash; another tenant's chunk, and everything for a caller who cannot read the season, do
+    not (no existence signal)."""
+    import hashlib
+    wanted = [env["public"], env["org_a_doc"], env["org_b_doc"]]
+    retrieved = {c.chunk_id: c for c in _evidence(env, "member", "member").evidence}
+    rows = _reader(env, "member").knowledge_evidence_state(str(env["season_member"]), wanted)
+    by_id = {r["chunk_id"]: r for r in rows}
+    assert set(by_id) == {env["public"], env["org_a_doc"]}
+    for chunk_id, row in by_id.items():
+        assert row["content_hash_consistent"] is True and row["approval_assurance"] == "verified"
+        assert row["content_sha256"] == hashlib.sha256(retrieved[chunk_id].content.encode()).hexdigest()
+    assert _reader(env, "outsider").knowledge_evidence_state(str(env["season_member"]), wanted) == []

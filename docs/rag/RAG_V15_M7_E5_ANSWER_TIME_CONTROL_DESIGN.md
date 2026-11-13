@@ -1,6 +1,7 @@
 # RAG V1.5 M7 E5: answer-time integrity control (DESIGN, not implemented)
 
-Status: **design only, for an owner decision.** No code, migration or deployment. dev3-01 stays OPEN.
+Status: **design** (#75). **Implemented local/CI only in `RAG_V15_M7_E5_ANSWER_TIME_CONTROL.md`** (migration
+20261114120000); no deployment. dev3-01 stays OPEN.
 
 ## 1. Gap
 

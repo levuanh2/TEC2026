@@ -333,6 +333,7 @@ M6_1_ROLLBACK = ROOT / "supabase/rollbacks/20261113180000_knowledge_citation_eve
 E2_ROLLBACK = ROOT / "supabase/rollbacks/20261113210000_knowledge_integrity_approval_gate_m7_e2.down.sql"
 E7_ROLLBACK = ROOT / "supabase/rollbacks/20261113235900_knowledge_integrity_independent_verification_m7_e7.down.sql"
 E7_1_ROLLBACK = ROOT / "supabase/rollbacks/20261114090000_knowledge_integrity_portable_attestation_m7_e7_1.down.sql"
+E5_ROLLBACK = ROOT / "supabase/rollbacks/20261114120000_knowledge_answer_time_evidence_e5.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -362,8 +363,16 @@ def unwind_m6_1(tx):
         tx.cur.execute(_without_tx_control(M6_1_ROLLBACK))
 
 
+def unwind_e5(tx):
+    """M7 E5 (answer-time evidence check) unwinds first, when it is installed."""
+    tx.cur.execute("select to_regprocedure('public.knowledge_cited_evidence_state(uuid,text[],boolean)') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute(_without_tx_control(E5_ROLLBACK))
+
+
 def unwind_e7_1(tx):
-    """M7 E7.1 (portable attestation) unwinds first, when it is installed."""
+    """E5 first, then M7 E7.1 (portable attestation), when installed."""
+    unwind_e5(tx)
     tx.cur.execute("select to_regnamespace('knowledge_verifier') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute("set local knowledge.e7_1_rollback_confirmed = 'yes'")

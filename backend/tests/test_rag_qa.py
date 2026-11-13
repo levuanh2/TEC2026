@@ -93,6 +93,10 @@ class Reader:
         self.calls.append(("knowledge_matches", query))
         return self.chunks
 
+    def knowledge_evidence_state(self, season_id, chunk_ids, *, demo=False):
+        from rag_answer_integrity import fixture_evidence_state      # M7 E5: the fixture corpus stays admissible
+        return fixture_evidence_state(self.chunks, chunk_ids)
+
 
 class Carbon:
     def __init__(self):

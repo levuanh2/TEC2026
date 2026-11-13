@@ -63,6 +63,15 @@
    ],
    "security_definer": true
   },
+  "knowledge_cited_evidence_state(uuid,text[],boolean)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": false
+  },
   "knowledge_countersign_supersession(uuid,text,text,text)": {
    "config": [
     "search_path=\"\""
@@ -463,6 +472,15 @@
    ],
    "execute": [],
    "security_definer": false
+  },
+  "private.knowledge_cited_resolved_finding_types(uuid,text[])": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
   },
   "private.knowledge_claim_evidence_guard()": {
    "config": [

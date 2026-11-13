@@ -34,6 +34,7 @@ from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
 from infrastructure.read_repo import ReadNotFoundError
 from rag_citation_events import CitationSink, RecordingRetriever, build_event, record_safely
+from rag_answer_integrity import answer_time_evidence_gate
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
     CarbonScenarioWhatIf,
@@ -343,11 +344,19 @@ class RagQuestionService:
                 facts=CallerSeasonFactsSource(reader, self._carbon),
             )
             assert_recommendations_follow_rules(result)
+            # M7 E5: the LAST step before the response body is built. The cited evidence is re-validated under the
+            # caller's JWT; any failing citation discards the whole model answer (a failing recheck raises).
+            result, refused = answer_time_evidence_gate(reader, crop_season_id=crop_season_id, result=result,
+                                                        retrieved=recorder.chunks or (),
+                                                        demo=self._retrieval.include_demo)
             status = result.status
             if result.policy_rejection is not None:
                 error_code = f"policy:{result.policy_rejection}"
-            # A policy-rejected answer is trusted copy even though the provider was called (and paid).
-            body = to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None)
+            elif refused:
+                error_code = "evidence:" + ",".join(sorted({reason for _, reason in refused}))
+            # A policy-rejected or evidence-refused answer is trusted copy even though the provider was called.
+            body = to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None
+                               or bool(refused))
             record_safely(self._citations, lambda: build_event(
                 request_id=_event_id(request_id), crop_season_id=crop_season_id, recorder=recorder, result=result,
                 response_emitted=True, retrieval_mode="demo" if self._retrieval.include_demo else "production"))

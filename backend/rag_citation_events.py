@@ -25,7 +25,8 @@ from typing import Any, Literal, Protocol
 
 logger = logging.getLogger(__name__)
 
-Outcome = Literal["generated", "insufficient_evidence", "policy_rejected", "error"]
+#: `evidence_refused` (M7 E5): the answer-time check refused a cited chunk and the model answer was discarded.
+Outcome = Literal["generated", "insufficient_evidence", "policy_rejected", "evidence_refused", "error"]
 Trace = Literal["complete", "retrieval_unavailable", "not_reached"]
 Mode = Literal["production", "demo"]
 
@@ -60,10 +61,13 @@ class RecordingRetriever:
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.retrieved: list[str] | None = None
+        #: M7 E5: the EvidenceChunks themselves, for the answer-time re-validation (never recorded).
+        self.chunks: tuple[Any, ...] | None = None
 
     def retrieve(self, query: Any) -> Sequence[Any]:
         rows = self._inner.retrieve(query)
         self.retrieved = list(dict.fromkeys(chunk.chunk_id for chunk in rows))
+        self.chunks = tuple(rows)
         return rows
 
 
@@ -76,6 +80,8 @@ def build_event(*, request_id: str, crop_season_id: str, recorder: RecordingRetr
         outcome: Outcome = "error"
     elif getattr(result, "policy_rejection", None) is not None:
         outcome = "policy_rejected"
+    elif getattr(result, "insufficient_reason", None) == "evidence_no_longer_admissible":
+        outcome = "evidence_refused"
     else:
         outcome = "generated" if result.status == "generated" else "insufficient_evidence"
     retrieved: tuple[str, ...] = ()
