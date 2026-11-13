@@ -79,15 +79,33 @@ supersedes a version of another source.
   not verify the outside world.
 - The database owner / superuser boundary of M1/M2 is unchanged (H-b document, section 5).
 
-## 6. Concurrency
+## 6. Concurrency (multi-connection regressions, owner decision 2026-11-13)
 
-The countersignature takes share locks on the successor and target version rows and on the custodian,
-person and publisher rows it relies on. A registry status change waits for an in-flight
-countersignature and vice versa. The approval re-checks everything inside its own transaction while
-it holds the successor row lock (M2), and the target row is locked by the supersession step (M3). No
-dedicated multi-connection race test was added; the re-validation at approval is what makes a
-concurrent revocation harmless (it is tested as a sequential revocation between submission and
-approval).
+The countersignature and the replaced check (now VOLATILE; M3's was STABLE) take **share locks** on the
+custodian, person, binding and publisher rows they rely on. A registry status change takes the row
+lock. So a revocation or suspension and an approval serialize: whoever commits first wins and the
+other sees it (READ COMMITTED re-evaluates the locked row after the wait). Lock order is always
+successor version -> registry rows -> target version (approval) and successor -> target -> registry
+rows (countersignature, share locks only), so the two never form a cycle with each other or with a
+registry update (one row lock).
+
+`backend/tests/test_rag_knowledge_hc_concurrency.py` COMMITS synthetic rows, races two connections and
+removes them (verified: no fixture row is left):
+
+| # | Race | Result |
+|---|---|---|
+| 1 | custodian revocation first, approval waits | approval refused (`23514`), nothing archived |
+| 1' | approval first, revocation waits | approval commits (valid when it committed), revocation applies after |
+| 2 | publisher suspension vs approval, both orders | as 1 / 1' |
+| 3 | publisher suspension vs an in-flight countersignature | suspension waits, then voids every countersignature: the approval is refused |
+| 3' | a rebinding attempt on two connections | refused on both (bindings are immutable) |
+| 4 | two successors, both countersigned, approved concurrently | the second waits on the target row lock; both approved; target archived exactly once |
+| 5 | a countersignature racing an uncommitted chunk insert on the successor | it signs what it can see; once the chunk commits it is stale and the recommendation is refused |
+| 5' | an approval waiting on a target emergency quarantine | after the wait the target is quarantined; nothing is archived, no wrong supersession |
+
+Every wait has a `lock_timeout` of 20 s and every test asserts the waiting transaction really waited.
+No deadlock occurred. Once a version is under expert review both snapshots are immutable (M2/M3
+freeze), so a snapshot cannot go stale while an approval waits; race 5 covers the window before.
 
 ## 7. Rollback
 
