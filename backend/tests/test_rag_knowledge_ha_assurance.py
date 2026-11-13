@@ -299,3 +299,45 @@ def test_no_hosted_config_is_touched_by_the_fixture():
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
     assert _DB_URL and gate.target_refusal(_DB_URL) is None
+
+
+INVENTORY = (ROOT / "docs/rag/sql/ha_legacy_approved_inventory.sql").read_text(encoding="utf-8")
+
+
+def test_the_backfill_invents_nothing_and_unrecorded_is_withheld_everywhere(tx, m2):
+    """Owner decision 2026-11-13: legacy rows stay `unrecorded` (never verified) and are served by no read
+    path; the replayed migration writes no approval record, personnel or provenance; the read-only
+    inventory lists them."""
+    unwind_ha(tx)
+    legacy = tx.document(tx.source(), status="review_required", document_id="doc-legacy-everywhere")
+    legacy_chunk = tx.chunk(legacy, "awd legacy everywhere")
+    tx.cur.execute("alter table public.knowledge_documents disable trigger user")
+    tx.cur.execute("update public.knowledge_documents set status = 'approved', approved_by = %s, approved_at = now(),"
+                   " review_note = 'TEST FIXTURE: approved before M2, no approval record',"
+                   " approval_expires_on = current_date + 30 where id = %s", (tx.approver, legacy))
+    tx.cur.execute("alter table public.knowledge_documents enable trigger user")
+    counts = ("select (select count(*) from public.knowledge_approval_records),"
+              " (select count(*) from public.knowledge_personnel), (select count(*) from public.knowledge_upload_attestations),"
+              " (select count(*) from public.knowledge_status_events)")
+    tx.cur.execute(counts)
+    before = tx.cur.fetchone()
+    tx.cur.execute(_without_tx_control(HA))                                  # replay = the hosted apply
+    tx.cur.execute(counts)
+    assert tx.cur.fetchone() == before                                       # nothing invented
+    assert assurance(tx, "document", legacy) == "unrecorded"
+    tx.cur.execute(INVENTORY)
+    rows = {r[1]: r for r in tx.cur.fetchall()}
+    assert rows[str(legacy)][6] is True                                      # listed, currently_approved
+    # withheld from every read path, also on an isolated database through the demo RPC
+    assert legacy_chunk not in tx.rpc_ids(tx.member, tx.season_a, "awd legacy everywhere")
+    tx.cur.execute(ISOLATED)
+    status, rows = demo_rpc(tx, tx.member, tx.season_a, "awd legacy everywhere")
+    assert status == "ok" and legacy_chunk not in {r[3] for r in rows}
+    for sql, params in (("select count(*) from public.knowledge_documents where id = %s", (legacy,)),
+                        ("select count(*) from public.knowledge_chunks where chunk_id = %s", (legacy_chunk,))):
+        assert tx.as_user(tx.member, sql, params)[1] == [(0,)]
+    tx.cur.execute("select (private.knowledge_document_evidence_state(%s)).*", (legacy,))
+    assert tx.cur.fetchone() == ("inactive", "assurance_unrecorded")
+    # the row cannot be promoted by hand
+    assert owner(tx, "update public.knowledge_documents set approval_assurance = 'verified' where id = %s",
+                 (legacy,)) == ("err", CHECK_VIOLATION)
