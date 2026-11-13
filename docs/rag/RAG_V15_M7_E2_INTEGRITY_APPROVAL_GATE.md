@@ -55,6 +55,17 @@ re-run the extractor; a report is as complete as the claims stored for the snaps
 fabricate a span, downgrade a conflict or skip a stored claim; the owner / superuser boundary of M1-M2 is
 unchanged.
 
+### 3.1 Remaining gap E7: the report producer is trusted
+
+The report is written with the shared operator credential (`service_role`), not by an authenticated person,
+and the database cannot re-run the detection. Whoever holds that credential could run a weaker or patched
+extractor, store fewer claims (or none) for a snapshot, and then record a report that is complete relative to
+those claims, i.e. falsely clean. E2 stops the careless or dishonest REVIEWER (the omission attack of dev3-01);
+it does NOT stop a dishonest or compromised OPERATOR. Mitigations not implemented here (owner decisions):
+protect and rotate the service key and keep it out of interactive use; an independent re-run of the pinned
+extractor by a second party (CI, or a separate operator) whose claim set must match before the report counts;
+moving the deterministic extractor into the database or a signed, attested worker.
+
 ## 4. Dispositions
 
 `public.knowledge_dispose_integrity_finding(review, report_sha256, finding, disposition, justification, evidence)`,
