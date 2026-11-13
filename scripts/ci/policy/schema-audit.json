@@ -418,6 +418,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_citation_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_claim_evidence_guard()": {
    "config": [
     "search_path=\"\""
@@ -653,6 +660,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_purge_citation_events()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.knowledge_read_blocked()": {
    "config": [
     "search_path=\"\""
@@ -660,6 +674,13 @@
    "execute": [
     "authenticated"
    ],
+   "security_definer": true
+  },
+  "private.knowledge_record_citation_event(uuid,uuid,text,text,boolean,text,jsonb,jsonb)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": true
   },
   "private.knowledge_record_claims(uuid,text,jsonb)": {
@@ -2065,6 +2086,18 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_citation_event_chunks": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_citation_events": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_citation_purges": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_claims": {
    "enabled": true,
    "forced": false
@@ -2346,6 +2379,12 @@
   "knowledge_archive_records.knowledge_archive_records_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_chunks.knowledge_chunks_immutable": "private.enforce_knowledge_chunk_immutability()",
   "knowledge_chunks.knowledge_chunks_search_fields": "private.knowledge_chunks_search_fields()",
+  "knowledge_citation_event_chunks.knowledge_citation_event_chunks_guard": "private.knowledge_citation_guard()",
+  "knowledge_citation_event_chunks.knowledge_citation_event_chunks_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_citation_events.knowledge_citation_events_guard": "private.knowledge_citation_guard()",
+  "knowledge_citation_events.knowledge_citation_events_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_citation_purges.knowledge_citation_purges_guard": "private.knowledge_citation_guard()",
+  "knowledge_citation_purges.knowledge_citation_purges_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_claims.knowledge_claims_guard": "private.knowledge_claim_evidence_guard()",
   "knowledge_claims.knowledge_claims_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_contradiction_candidates.knowledge_contradiction_candidates_guard": "private.knowledge_claim_evidence_guard()",
@@ -2475,6 +2514,9 @@
   "knowledge_chunks_chunk_key": "CREATE UNIQUE INDEX knowledge_chunks_chunk_key ON public.knowledge_chunks USING btree (document_pk, chunk_id)",
   "knowledge_chunks_ordinal_key": "CREATE UNIQUE INDEX knowledge_chunks_ordinal_key ON public.knowledge_chunks USING btree (document_pk, ordinal)",
   "knowledge_chunks_pkey": "CREATE UNIQUE INDEX knowledge_chunks_pkey ON public.knowledge_chunks USING btree (id)",
+  "knowledge_citation_event_chunks_pkey": "CREATE UNIQUE INDEX knowledge_citation_event_chunks_pkey ON public.knowledge_citation_event_chunks USING btree (request_id, role, chunk_id)",
+  "knowledge_citation_events_pkey": "CREATE UNIQUE INDEX knowledge_citation_events_pkey ON public.knowledge_citation_events USING btree (request_id)",
+  "knowledge_citation_purges_pkey": "CREATE UNIQUE INDEX knowledge_citation_purges_pkey ON public.knowledge_citation_purges USING btree (id)",
   "knowledge_claims_identity_key": "CREATE UNIQUE INDEX knowledge_claims_identity_key ON public.knowledge_claims USING btree (document_pk, extractor_version, claim_id)",
   "knowledge_claims_pkey": "CREATE UNIQUE INDEX knowledge_claims_pkey ON public.knowledge_claims USING btree (id)",
   "knowledge_contradiction_candidates_pair_key": "CREATE UNIQUE INDEX knowledge_contradiction_candidates_pair_key ON public.knowledge_contradiction_candidates USING btree (claim_a, claim_b, analysis_version, policy_date, classification)",

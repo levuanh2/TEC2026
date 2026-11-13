@@ -329,6 +329,7 @@ M4_1_ROLLBACK = ROOT / "supabase/rollbacks/20261112120000_knowledge_review_read_
 HA_ROLLBACK = ROOT / "supabase/rollbacks/20261113090000_knowledge_m2_hardening_assurance.down.sql"
 HB_ROLLBACK = ROOT / "supabase/rollbacks/20261113120000_knowledge_m2_hardening_operator.down.sql"
 HC_ROLLBACK = ROOT / "supabase/rollbacks/20261113150000_knowledge_m2_hardening_supersession.down.sql"
+M6_1_ROLLBACK = ROOT / "supabase/rollbacks/20261113180000_knowledge_citation_events_m6_1.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -350,8 +351,17 @@ def _live_body(tx, name):
     return tx.cur.fetchone()[0]
 
 
+def unwind_m6_1(tx):
+    """M6.1 (citation events) unwinds first, when it is installed."""
+    tx.cur.execute("select to_regclass('public.knowledge_citation_events') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("set local knowledge.m6_1_rollback_evidence_exported = 'yes'")
+        tx.cur.execute(_without_tx_control(M6_1_ROLLBACK))
+
+
 def unwind_hc(tx):
-    """H-c (custodian countersignature) unwinds before H-b, when it is installed."""
+    """M6.1 first, then H-c (custodian countersignature), before H-b, when installed."""
+    unwind_m6_1(tx)
     tx.cur.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute("set local knowledge.hc_rollback_evidence_exported = 'yes'")
