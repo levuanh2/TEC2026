@@ -5,8 +5,8 @@ import { Link } from '../ui'
 export const BRAND_SLOGAN = 'Số hóa canh tác - Xanh hóa tương lai'
 
 /** Decorative brand artwork; it never represents a user's farm or live data. */
-export function BrandMark() {
-  return <span className="brand-mark" aria-hidden="true"><Sprout size={25} strokeWidth={1.7} /></span>
+export function BrandMark({ className = 'brand-mark' }: { className?: string }) {
+  return <span className={className} aria-hidden="true"><img src="/visuals/agricarbon-logo.png" alt="" width="128" height="128" decoding="async" /></span>
 }
 
 export function AuthScenery({ children }: { children: ReactNode }) {

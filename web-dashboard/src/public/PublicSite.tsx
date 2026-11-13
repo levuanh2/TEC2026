@@ -4,12 +4,13 @@ import { Link } from '../ui'
 import { ARTICLES, FEATURES, SERVICES, type PublicArticle } from './content'
 import { PUBLIC_NAV } from './routes'
 import { PricingTables } from './PricingTables'
+import { BrandMark } from '../components/BrandScenery'
 import './public.css'
 
 const TITLES: Record<string, string> = { '/': 'Số hóa canh tác - Xanh hóa tương lai', '/nen-tang': 'Nền tảng', '/dich-vu': 'Dịch vụ', '/bao-cao': 'Báo cáo & tài liệu', '/bang-gia': 'Bảng giá', '/tin-tuc': 'Tin tức & kiến thức' }
 
 function Logo() {
-  return <Link to="/" className="pub-logo" aria-label="AgriCarbon — Trang chủ"><span className="pub-logo__mark"><Sprout size={27} strokeWidth={1.7} aria-hidden="true" /></span><span>AgriCarbon<small>GẮN KẾT DỮ LIỆU ĐỒNG RUỘNG</small></span></Link>
+  return <Link to="/" className="pub-logo" aria-label="AgriCarbon — Trang chủ"><BrandMark className="pub-logo__mark" /><span>AgriCarbon<small>GẮN KẾT DỮ LIỆU ĐỒNG RUỘNG</small></span></Link>
 }
 
 export function PublicSite({ path }: { path: string }) {

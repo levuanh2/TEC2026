@@ -30,7 +30,8 @@ body {
   padding-top: 28px;
 }
 .brand__row { display: flex; align-items: center; gap: 10px; }
-.brand-mark { display: inline-grid; place-items: center; width: 39px; height: 39px; flex: none; border: 1px solid rgb(255 255 255 / 25%); border-radius: 12px; background: rgb(255 255 255 / 10%); color: #eedaa0; }
+.brand-mark { display: inline-grid; place-items: center; width: 39px; height: 39px; padding: 3px; flex: none; border: 1px solid #dce5d8; border-radius: 12px; background: #fff; }
+.brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; clip-path: inset(2%); }
 .sidebar .brand { padding-bottom: 20px; font-size: 21px; letter-spacing: -.6px; }
 .sidebar .brand small { margin-top: 10px; font-size: 11px; letter-spacing: 0; line-height: 1.6; }
 .sidebar .nav { margin-top: 22px; }

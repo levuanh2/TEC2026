@@ -15,13 +15,20 @@ class BrandMark extends StatelessWidget {
           width: size,
           height: size,
           decoration: BoxDecoration(
-            color: AppColors.headerDark,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(AppRadii.sm),
-            border:
-                Border.all(color: AppColors.brandGold.withValues(alpha: .35)),
+            border: Border.all(color: AppColors.primary.withValues(alpha: .16)),
           ),
-          child: Icon(Icons.spa_outlined,
-              color: AppColors.brandGold, size: size * .6),
+          padding: EdgeInsets.all(size * .075),
+          child: ClipRect(
+            child: Transform.scale(
+              scale: 1.04,
+              child: Image.asset(AppBrand.logoImage,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  excludeFromSemantics: true),
+            ),
+          ),
         ),
       );
 }

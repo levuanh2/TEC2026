@@ -1,5 +1,18 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## Publish supplied logo (2026-11-13)
+
+User requested commit/push of the completed web and Flutter logo changes to
+`ui/agricarbon-web-flutter-2026-11-12`. Codex owns this publication note and
+the logo report publication update. Preserve history; no force-push, deployment
+or local Android execution.
+
+## Supplied brand logo (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| Web shared brand/sidebar/auth/public-header/footer presentation, logo styles, `web-dashboard/public/visuals/agricarbon-logo.png` (new); Flutter BrandMark and logo asset/manifest; logo handoff note | — (released) | Replace the placeholder sprout badge with the supplied green A/rice logo; preserve aspect ratio and use a light backing on dark surfaces. Presentation only; no backend/auth/billing changes, Android execution, publishing or deployment. Herdr unavailable. | DONE: original attachment shared across web/Flutter; web build PASS, Vitest 788/788, Playwright 18/18 at five widths with accessibility checks; desktop/sidebar/mobile login screenshots reviewed. Flutter formatted/source-reviewed only; no local Android execution. |
+
 ## PR #73 CI follow-up (2026-11-13)
 
 | Files | Owner | Task | Status |
