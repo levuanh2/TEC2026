@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../app_services.dart';
 import '../../design/design.dart';
+import '../../screens/pricing_screen.dart';
+import '../../screens/service_plans.dart';
 import '../../services/read_api.dart';
 import '../routes.dart';
 
@@ -152,6 +154,22 @@ class _AccountTabState extends State<AccountTab> {
     await _s.authController.signOut();
   }
 
+  Future<void> _openPricing() async {
+    final choice = await Navigator.of(context).push<ServicePlanSelection>(
+      MaterialPageRoute<ServicePlanSelection>(
+          builder: (_) => const PricingScreen()),
+    );
+    if (!mounted || choice == null) return;
+    if (!_s.authController.isAuthenticated) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      return;
+    }
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      builder: (summaryContext) => PlanSelectionScreen(
+          selection: choice, onDone: () => Navigator.of(summaryContext).pop()),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -208,6 +226,13 @@ class _AccountTabState extends State<AccountTab> {
               title: 'Đổi mật khẩu',
               subtitle: 'Giữ tài khoản an toàn',
               onTap: () => AppRoutes.openChangePassword(context, _s),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _NavRow(
+              icon: Icons.payments_outlined,
+              title: 'Bảng giá dịch vụ',
+              subtitle: 'Gói FREE, PLUS và PRO cho nông hộ và HTX',
+              onTap: _openPricing,
             ),
             const SizedBox(height: AppSpacing.sm),
             _NavRow(

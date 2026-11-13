@@ -86,6 +86,10 @@ export function FarmerAccountPage({ session, viewer }: { session: Session | null
 
       <ChangePasswordSection email={email} />
 
+      <Section title="Gói dịch vụ AgriCarbon" icon="info" description="So sánh gói FREE, PLUS và PRO cho nông hộ và hợp tác xã.">
+        <Link to="/bang-gia" className="fw-btn fw-btn--ghost">Xem bảng giá dịch vụ</Link>
+      </Section>
+
       <Section title="Về dữ liệu của bạn" icon="info" tone="info">
         <div className="fw-card fw-card--pad">
           <ul className="fw-bullets">

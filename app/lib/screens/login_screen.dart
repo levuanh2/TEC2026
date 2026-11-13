@@ -4,6 +4,8 @@ import '../design/design.dart';
 import '../services/auth_actions.dart';
 import '../services/auth_errors.dart';
 import 'forgot_password_screen.dart';
+import 'pricing_screen.dart';
+import 'service_plans.dart';
 
 /// Thông báo một lần hiển thị trên màn đăng nhập.
 enum LoginNotice { none, sessionExpired }
@@ -19,10 +21,14 @@ class LoginScreen extends StatefulWidget {
     super.key,
     required this.actions,
     this.notice = LoginNotice.none,
+    this.selectedPlan,
+    this.onPlanSelected,
   });
 
   final AuthActions actions;
   final LoginNotice notice;
+  final ServicePlanSelection? selectedPlan;
+  final ValueChanged<ServicePlanSelection>? onPlanSelected;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -38,6 +44,17 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _emailError;
   String? _passwordError;
   String? _formError;
+  ServicePlanSelection? _localPlan;
+
+  Future<void> _openPricing() async {
+    final choice = await Navigator.of(context).push<ServicePlanSelection>(
+      MaterialPageRoute<ServicePlanSelection>(
+          builder: (_) => const PricingScreen()),
+    );
+    if (!mounted || choice == null) return;
+    setState(() => _localPlan = choice);
+    widget.onPlanSelected?.call(choice);
+  }
 
   @override
   void dispose() {
@@ -116,6 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _card(BuildContext context, TextTheme text) {
+    final selection = widget.selectedPlan ?? _localPlan;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -134,6 +152,12 @@ class _LoginScreenState extends State<LoginScreen> {
             Text('Đăng nhập', style: text.headlineMedium),
             const SizedBox(height: AppSpacing.xxs),
             Text('Dùng cho nông dân và cán bộ HTX', style: text.bodySmall),
+            if (selection != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                  'Bạn đã chọn gói ${selection.plan.name} — ${selection.audienceLabel}. Đăng nhập để tiếp tục với gói đã chọn.',
+                  style: text.bodyMedium?.copyWith(color: AppColors.primary)),
+            ],
             const SizedBox(height: AppSpacing.lg),
             TextField(
               controller: _emailController,
@@ -205,6 +229,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _submitting ? null : _openForgotPassword,
                 child: const Text('Quên mật khẩu?'),
               ),
+            ),
+            TextButton.icon(
+              onPressed: _submitting ? null : _openPricing,
+              icon: const Icon(Icons.payments_outlined, size: 18),
+              label: const Text('Xem bảng giá dịch vụ'),
             ),
             const SizedBox(height: AppSpacing.xs),
             Center(
