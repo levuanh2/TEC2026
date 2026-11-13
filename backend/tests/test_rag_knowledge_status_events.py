@@ -329,6 +329,7 @@ M4_1_ROLLBACK = ROOT / "supabase/rollbacks/20261112120000_knowledge_review_read_
 HA_ROLLBACK = ROOT / "supabase/rollbacks/20261113090000_knowledge_m2_hardening_assurance.down.sql"
 HB_ROLLBACK = ROOT / "supabase/rollbacks/20261113120000_knowledge_m2_hardening_operator.down.sql"
 HC_ROLLBACK = ROOT / "supabase/rollbacks/20261113150000_knowledge_m2_hardening_supersession.down.sql"
+M6_1_ROLLBACK = ROOT / "supabase/rollbacks/20261113180000_knowledge_citation_events_m6_1.down.sql"
 E2_ROLLBACK = ROOT / "supabase/rollbacks/20261113210000_knowledge_integrity_approval_gate_m7_e2.down.sql"
 E7_ROLLBACK = ROOT / "supabase/rollbacks/20261113235900_knowledge_integrity_independent_verification_m7_e7.down.sql"
 E7_1_ROLLBACK = ROOT / "supabase/rollbacks/20261114090000_knowledge_integrity_portable_attestation_m7_e7_1.down.sql"
@@ -351,6 +352,14 @@ def _body_in(path, name):
 def _live_body(tx, name):
     tx.cur.execute("select prosrc from pg_proc where oid = %s::regprocedure", (f"private.{name}()",))
     return tx.cur.fetchone()[0]
+
+
+def unwind_m6_1(tx):
+    """M6.1 (citation events) unwinds first, when it is installed."""
+    tx.cur.execute("select to_regclass('public.knowledge_citation_events') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("set local knowledge.m6_1_rollback_evidence_exported = 'yes'")
+        tx.cur.execute(_without_tx_control(M6_1_ROLLBACK))
 
 
 def unwind_e7_1(tx):
@@ -380,8 +389,10 @@ def unwind_e2(tx):
 
 
 def unwind_hc(tx):
-    """E2 first, then H-c (custodian countersignature), before H-b, when installed."""
+    """E2 (and E7, E7.1) first, then M6.1 (citation events), then H-c (custodian countersignature), before
+    H-b, when installed: the reverse of the migration versions."""
     unwind_e2(tx)
+    unwind_m6_1(tx)
     tx.cur.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute("set local knowledge.hc_rollback_evidence_exported = 'yes'")

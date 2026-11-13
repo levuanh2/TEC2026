@@ -25,8 +25,9 @@ begin
       ' set local knowledge.ha_rollback_confirmed = ''yes''';
   end if;
   if to_regclass('public.knowledge_emergency_actions') is not null
-     or to_regclass('public.knowledge_supersession_authorizations') is not null then
-    raise exception 'H-a rollback refused: H-b or H-c is installed; roll those back first';
+     or to_regclass('public.knowledge_supersession_authorizations') is not null
+     or to_regclass('public.knowledge_citation_events') is not null then
+    raise exception 'H-a rollback refused: H-b, H-c or M6.1 is installed; roll those back first';
   end if;
   select (select count(*) from public.knowledge_documents where status = 'approved' and approval_assurance = 'demo_unverified')
        + (select count(*) from public.knowledge_sources where status = 'approved' and approval_assurance = 'demo_unverified'),

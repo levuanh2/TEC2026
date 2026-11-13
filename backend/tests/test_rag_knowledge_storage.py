@@ -989,6 +989,10 @@ E7_1_INVOKER = {"knowledge_ed25519_available", "knowledge_ed25519_verify", "know
                 "knowledge_chunk_hash_problem", "knowledge_verifier_caller"}
 E7_INVOKER = {"knowledge_set_integrity_code_digest", "knowledge_verifier_key_guard", "knowledge_claim_set_digest",
               "knowledge_integrity_verification_problem"}
+# M6.1 (20261113180000): the record and purge functions (EXECUTE for service_role only) are SECURITY
+# DEFINER; the append-only guard is not.
+M6_1_DEFINER = {"knowledge_record_citation_event", "knowledge_purge_citation_events"}
+M6_1_INVOKER = {"knowledge_citation_guard"}
 
 
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
@@ -1017,7 +1021,8 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     *M2_RPCS, *M3_HELPERS, *M3_EXPIRY, *M4_HELPERS, *M4_OPERATOR,
                                     *M4_1_HELPERS, *M4_1_RPCS, *HA_DEFINER, *HA_INVOKER,
                                     *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER,
-                                    *E2_DEFINER, *E2_INVOKER, *E7_DEFINER, *E7_INVOKER, *E7_1_INVOKER}
+                                    *E2_DEFINER, *E2_INVOKER, *E7_DEFINER, *E7_INVOKER, *E7_1_INVOKER,
+                                    *M6_1_DEFINER, *M6_1_INVOKER}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
@@ -1025,7 +1030,8 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
     assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
                                             "knowledge_transition_document", *M2_RPCS, *M2_DEMO,
                                             *M3_EXPIRY, *M4_OPERATOR, *M4_1_RPCS, *HA_DEFINER,
-                                            *HB_DEFINER, *HC_DEFINER, *E2_DEFINER, *E7_DEFINER}, rows
+                                            *HB_DEFINER, *HC_DEFINER, *E2_DEFINER, *E7_DEFINER,
+                                            *M6_1_DEFINER}, rows
     tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
     for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere
