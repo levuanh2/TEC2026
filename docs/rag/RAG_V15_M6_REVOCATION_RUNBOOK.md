@@ -55,8 +55,7 @@ reason), `servable_from = max(version approved, source approved)`, `servable_unt
 approved, source left approved)`, the effective dates and approval expiry (listed, not subtracted),
 the approval assurance, and the emergency actions with their references.
 
-This is the interval during which retrieval **could** return the chunk. It is an upper bound of
-exposure. A version approved before M1 has no history: `servable_from` is null ("before the audit
+This is the interval during which retrieval **could** return the chunk: a **possible exposure window**, NOT confirmed user exposure. It identifies no request, no answer and no user, and must never be reported as "N farmers were shown this chunk". Confirmed exposure (a delivered answer that cited the chunk) needs request-level citation records, which do not exist today (section 5). A version approved before M1 has no history: `servable_from` is null ("before the audit
 log").
 
 ## 5. Request-level traceability (NOT supported now: blocker, stated)
