@@ -22,6 +22,8 @@ REPO = BACKEND / "infrastructure" / "knowledge_repo.py"
 ISOLATION = BACKEND / "infrastructure" / "pdf_isolation.py"
 CLI = BACKEND / "scripts" / "ingest_knowledge.py"
 CLAIMS_REPO = BACKEND / "infrastructure" / "knowledge_claims_repo.py"
+#: M7 E7: the independent verifier runner (operator-side, holds its own key); never imported by the app
+VERIFIER = BACKEND / "infrastructure" / "integrity_verifier.py"
 
 _STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "json", "math", "re", "typing", "unicodedata",
            "collections", "decimal", "knowledge"}
@@ -56,7 +58,8 @@ def test_knowledge_package_has_the_approved_modules():
                      # M4: contradiction candidates between stored claims (pure; never changes a status)
                      "integrity/contradictions.py",
                      # M5 foundation: numeric reference entries, closed unit / conversion model (pure)
-                     "integrity/reference_numeric.py", "integrity/conditions.py"}
+                     "integrity/reference_numeric.py", "integrity/conditions.py",
+                     "integrity/report.py", "integrity/verifier.py"}
 
 
 @pytest.mark.parametrize("path", KNOWLEDGE, ids=lambda p: p.relative_to(BACKEND).as_posix())
@@ -103,8 +106,9 @@ def test_claims_adapter_only_reads_and_calls_the_two_recording_functions():
     assert statements and {s.split()[0] for s in statements} == {"select"}
     source = CLAIMS_REPO.read_text(encoding="utf-8").lower()
     called = set(re.findall(r"private\.(knowledge_\w+)\(", source))
+    # M7 E2: the integrity report recorder (operator path, append-only evidence; it never changes a status)
     assert called == {"knowledge_record_claims", "knowledge_record_contradiction_candidates",
-                      "knowledge_document_evidence_state"}
+                      "knowledge_document_evidence_state", "knowledge_record_integrity_report"}
     for banned in ("knowledge_transition", "knowledge_demo", "knowledge_expire", "status =", "disable trigger",
                    "session_replication_role", "set_config", "insert into", "update public", "delete from"):
         assert banned not in source, banned
@@ -118,7 +122,7 @@ def test_claims_adapter_only_reads_and_calls_the_two_recording_functions():
 def test_no_app_layer_imports_the_ingestion_pipeline():
     production = [p for p in BACKEND.rglob("*.py")
                   if not {"tests", "scripts", "knowledge", ".venv", "venv"} & set(p.relative_to(BACKEND).parts)
-                  and p not in (REPO, ISOLATION, CLAIMS_REPO)]
+                  and p not in (REPO, ISOLATION, CLAIMS_REPO, VERIFIER)]
     for path in production:
         roots = set()
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
