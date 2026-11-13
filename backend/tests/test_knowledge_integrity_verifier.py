@@ -154,3 +154,10 @@ def test_the_manifest_digest_moves_with_any_file_runtime_or_extractor_version_an
     assert vf.manifest_digest(files, {**rt, "python": "3.12"}, "kn-claims-1") != base
     assert vf.manifest_digest(files, rt, "kn-claims-2") != base
     assert set(vf.runtime_fingerprint()) == {"implementation", "python", "unicodedata"}
+
+
+def test_canonical_numbers_ignore_the_process_global_decimal_context():
+    import decimal
+    with decimal.localcontext() as ctx:
+        ctx.prec = 2                                                       # another module lowering precision
+        assert vf._num(1234.5678) == "1234.5678" and vf._num("0.000012345") == "0.000012345"
