@@ -342,8 +342,8 @@ begin
    where v_target.id is not null and v_target.source_id <> v_succ.source_id
      and c.source_id = v_target.source_id and c.status = 'active' and p.status = 'active'
      and p.auth_user_id = v_actor.user_id and pub.status = 'active'
-   for share of c, p, pub
-   limit 1;
+   limit 1
+   for share of c, p, b, pub;
   if v_cust.id is null then
     raise exception 'countersignature not available: you are not an active custodian of the superseded source'
       using errcode = '42501';
@@ -408,11 +408,13 @@ $$;
 -- ================================================================== the check (replaced)
 
 -- M3 rules unchanged, plus a valid countersignature (see the header). Called by the reviewer's
--- recommendation and by the approval, so the caller is the person deciding now.
+-- recommendation and by the approval, so the caller is the person deciding now. VOLATILE (M3: stable):
+-- it share-locks the custodian, person, binding and publisher rows it relies on, so a concurrent
+-- revocation or suspension either commits first (and is seen: the approval is refused) or waits for
+-- this transaction to end (the approval was valid when it committed). Never both.
 create or replace function private.knowledge_check_cross_source_supersession(p_document_pk uuid, p_sources_checked jsonb)
 returns void
 language plpgsql
-stable
 set search_path = ''
 as $$
 declare
@@ -465,7 +467,8 @@ begin
      and not private.knowledge_same_person(a.custodian_personnel_id,
                                            private.knowledge_supersession_conflicts(p_document_pk, auth.uid()))
    order by a.recorded_at desc
-   limit 1;
+   limit 1
+   for share of c, p, b, pub;
   if v_ok is null then
     raise exception 'knowledge document %: it supersedes a version of another source (%); that needs a current'
       ' countersignature by an independent, active custodian of % (public.knowledge_countersign_supersession).'
