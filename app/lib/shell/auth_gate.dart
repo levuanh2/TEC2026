@@ -4,22 +4,32 @@ import '../app_services.dart';
 import '../design/design.dart';
 import '../screens/forced_password_change_screen.dart';
 import '../screens/login_screen.dart';
+import '../screens/pricing_screen.dart';
+import '../screens/service_plans.dart';
 import '../screens/reset_password_screen.dart';
 import 'auth_controller.dart';
 import 'home_shell.dart';
 
 /// Chọn màn gốc theo [AuthPhase]. Không điều hướng bằng Navigator — chỉ đổi
 /// subtree khi phase đổi, nên đăng xuất / hết phiên quay về Login tức thì.
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.services});
   final AppServices services;
 
   @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  // In-memory UI intent only: no account write, quota or purchase persistence.
+  ServicePlanSelection? _pendingPlan;
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: services.authController,
+      listenable: widget.services.authController,
       builder: (context, _) {
-        final auth = services.authController;
+        final auth = widget.services.authController;
         switch (auth.phase) {
           case AuthPhase.initializing:
           case AuthPhase.restoringSession:
@@ -37,16 +47,27 @@ class AuthGate extends StatelessWidget {
                 onDone: auth.completePasswordRecovery,
               );
             }
-            return HomeShell(services: services);
+            if (_pendingPlan != null) {
+              return PlanSelectionScreen(
+                  selection: _pendingPlan!,
+                  onDone: () => setState(() => _pendingPlan = null));
+            }
+            return HomeShell(services: widget.services);
           case AuthPhase.signedOut:
-            return LoginScreen(actions: services.authController);
+            return LoginScreen(
+                actions: widget.services.authController,
+                selectedPlan: _pendingPlan,
+                onPlanSelected: (choice) =>
+                    setState(() => _pendingPlan = choice));
           case AuthPhase.sessionExpired:
             return LoginScreen(
-              actions: services.authController,
+              actions: widget.services.authController,
               notice: LoginNotice.sessionExpired,
+              selectedPlan: _pendingPlan,
+              onPlanSelected: (choice) => setState(() => _pendingPlan = choice),
             );
           case AuthPhase.error:
-            return _AuthError(onRetry: services.authController.retry);
+            return _AuthError(onRetry: widget.services.authController.retry);
         }
       },
     );

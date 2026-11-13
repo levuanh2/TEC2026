@@ -1,5 +1,30 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## PR #73 CI follow-up (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `app/test/pricing_selection_test.dart` (new), this ownership record and `docs/PRICING_UI_2026_11.md` (verification update) | — (released) | PR #73's Flutter analyze and 483 tests pass, but changed-line coverage for new pricing UI is 3.6% (required 80%). Add meaningful pricing choice/login/summary tests; validate via GitHub CI. Preserve CI thresholds and runtime behavior; no emulator or local Android execution. | Added 10 widget tests covering 6 choices, cancel, responsive/large text, review and auth/password-gate priority. Formatted/source-reviewed; validation tracked by PR #73 CI. |
+
+## Publish pricing + selection (2026-11-13)
+
+User requested commit/push of the completed web and Android pricing/selection
+changes on the current branch `ui/agricarbon-web-flutter-2026-11-12`.
+Codex owns this publication note and the pricing report update. Keep existing
+history; no force-push, backend changes, deployment or Android execution.
+
+## Pricing selection CTA (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| Web pricing view/data/CSS, `App.tsx` and `routes.ts` (selection entry and login return only), selection view/tests; Flutter pricing/login/account screens, pricing presentation data and `app/lib/shell/auth_gate.dart` (pending choice UI only); `docs/PRICING_UI_2026_11.md` | — (released) | Add per-plan selection/purchase CTAs. Signed-out users enter existing login; retain audience and plan for review after authentication. Reuse existing auth/role verification; no payment, subscription activation, quota, backend or auth service changes. Android source review only, no emulator/build/test. | DONE: web build PASS; Vitest 788/788; public Playwright 10/10 incl. all 6 CTAs × desktop/mobile, auth-return and verification failure. Android formatted and source-reviewed only. |
+
+## Service pricing (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/public/{PublicSite.tsx,PricingTables.tsx,public.css,pricing.ts}` (new pricing view/data), `web-dashboard/src/App.tsx` (pricing link only), `web-dashboard/src/farmer/pages/Account.tsx` (pricing link only), public pricing tests; `app/lib/screens/{pricing_screen.dart,service_plans.dart}` (new), `app/lib/screens/login_screen.dart` and `app/lib/shell/tabs/account_tab.dart` (pricing links only), `docs/PRICING_UI_2026_11.md` (new) | — (released) | Display the two user-supplied pricing tables (Farmer/Cooperative, FREE/PLUS/PRO) on web and Android, replacing unpublished pricing. Presentation only; no billing, quotas, auth or backend changes. Android code review only per user instruction; Herdr unavailable. | DONE: web build PASS; Vitest 777/777; public Playwright 9/9 incl. 5 widths and axe. Android 6 prices/70 text fields aligned, imports/icons reviewed, formatted; no emulator, app execution, APK build or Flutter tests/analyze. |
+
 ## Publish web + Flutter UI (2026-11-12)
 
 User explicitly requested all completed interface changes on a new branch.

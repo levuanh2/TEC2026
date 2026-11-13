@@ -3,6 +3,7 @@ import { ArrowDown, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, Cli
 import { Link } from '../ui'
 import { ARTICLES, FEATURES, SERVICES, type PublicArticle } from './content'
 import { PUBLIC_NAV } from './routes'
+import { PricingTables } from './PricingTables'
 import './public.css'
 
 const TITLES: Record<string, string> = { '/': 'Số hóa canh tác - Xanh hóa tương lai', '/nen-tang': 'Nền tảng', '/dich-vu': 'Dịch vụ', '/bao-cao': 'Báo cáo & tài liệu', '/bang-gia': 'Bảng giá', '/tin-tuc': 'Tin tức & kiến thức' }
@@ -116,12 +117,7 @@ function Resource({ icon, type, title, description, href, label }: { icon: React
 }
 
 function Pricing() {
-  const plans = [
-    { audience: 'Nông hộ', icon: Sprout, title: 'Theo sát mùa vụ', text: 'Dành cho việc ghi chép và đọc dữ liệu tại ruộng.', points: ['Nhật ký theo thửa và vụ', 'Theo dõi tài nguyên đã ghi', 'Xem dữ liệu và khuyến nghị trong phạm vi tài khoản'], to: '/dich-vu#nhat-ky' },
-    { audience: 'Hợp tác xã', icon: Users, title: 'Kết nối nhiều nông hộ', text: 'Dành cho tổ chức điều phối và quản lý dữ liệu.', points: ['Tổng hợp nông hộ, thửa và vụ', 'Theo dõi dữ liệu thiếu và công việc', 'Quản lý hồ sơ MRV theo phân quyền'], to: '/dich-vu#hop-tac-xa' },
-    { audience: 'Đơn vị theo dõi', icon: MapPinned, title: 'Đọc dữ liệu có bối cảnh', text: 'Dành cho đơn vị được cấp quyền tiếp cận dữ liệu.', points: ['Xem dữ liệu theo phạm vi được giao', 'Theo dõi chỉ số và tình trạng hồ sơ', 'Phân biệt kết quả, giới hạn và dữ liệu thiếu'], to: '/nen-tang' },
-  ]
-  return <><PageHeading eyebrow="PHẠM VI SỬ DỤNG & BẢNG GIÁ" title="Giải pháp theo quy mô của bạn." description="Từ một nông hộ đến đơn vị quản lý nhiều mùa vụ, chọn phạm vi sử dụng để tìm hiểu chức năng phù hợp." /><section className="pub-container pub-section"><div className="pub-pricing-status"><span><Leaf size={19} aria-hidden="true" /> Chính sách giá đang được hoàn thiện</span><p>AgriCarbon chưa công bố giá. Các phạm vi bên dưới giúp bạn tìm hiểu chức năng, chưa phải gói dịch vụ thương mại hoặc cam kết cung cấp.</p></div><div className="pub-pricing-grid">{plans.map((plan, index) => <div key={plan.audience} className={`pub-plan${index === 1 ? ' pub-plan--featured' : ''}`}><div className="pub-plan__audience"><plan.icon size={23} aria-hidden="true" /><span>{plan.audience}</span></div><h2>{plan.title}</h2><p>{plan.text}</p><div className="pub-plan__price"><span>Chưa công bố giá</span><small>Thông tin sẽ được cập nhật tại đây</small></div><ul>{plan.points.map((point) => <li key={point}><Check size={16} aria-hidden="true" />{point}</li>)}</ul><Link to={plan.to} className={`pub-button${index === 1 ? '' : ' pub-button--outline'}`}>Xem chức năng phù hợp <ArrowUpRight size={16} aria-hidden="true" /></Link></div>)}</div><div className="pub-pricing-help"><h2>Bạn đã có tài khoản AgriCarbon?</h2><p>Tiếp tục sử dụng không gian đã được cấp quyền cho bạn.</p><Link to="/login" className="pub-text-link">Đăng nhập hệ thống <ArrowRight size={17} aria-hidden="true" /></Link></div></section></>
+  return <><PageHeading eyebrow="BẢNG GIÁ DỊCH VỤ" title="Giải pháp theo quy mô của bạn." description="Chọn gói phù hợp cho nông hộ và hợp tác xã, cùng số hóa canh tác và xanh hóa tương lai." /><div className="pub-container pub-section pub-pricing"><PricingTables /><div className="pub-pricing-help"><h2>Bạn đã có tài khoản AgriCarbon?</h2><p>Tiếp tục sử dụng không gian đã được cấp quyền cho bạn.</p><Link to="/login" className="pub-text-link">Đăng nhập hệ thống <ArrowRight size={17} aria-hidden="true" /></Link></div></div></>
 }
 
 function ArticleCard({ article }: { article: PublicArticle }) {
