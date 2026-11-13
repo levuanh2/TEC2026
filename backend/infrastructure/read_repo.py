@@ -322,6 +322,14 @@ class SupabaseReadRepository:
         return self._select("rpc match_knowledge_chunks_lexical",
                             lambda client: client.rpc("match_knowledge_chunks_lexical", params))
 
+    def knowledge_matches_demo(self, season_id: str, query: str, top_k: int) -> list[dict[str, Any]]:
+        """H-a: `public.match_knowledge_chunks_lexical_demo` under the caller's JWT. The database
+        refuses it (42501) unless it is a verified isolated test database; every row carries
+        `approval_assurance`. Never called unless RetrievalSettings.include_demo is set."""
+        params = {"p_crop_season_id": season_id, "p_query": query, "p_top_k": top_k}
+        return self._select("rpc match_knowledge_chunks_lexical_demo",
+                            lambda client: client.rpc("match_knowledge_chunks_lexical_demo", params))
+
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
         self._one("crop_seasons", season_id)
         rows = self._many("season_recommendations", crop_season_id=season_id)

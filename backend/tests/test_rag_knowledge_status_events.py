@@ -324,6 +324,7 @@ M3_ROLLBACK = ROOT / "supabase/rollbacks/20261111090000_knowledge_effective_date
 M4 = ROOT / "supabase/migrations/20261112090000_knowledge_claims_contradictions_m4.sql"
 M4_ROLLBACK = ROOT / "supabase/rollbacks/20261112090000_knowledge_claims_contradictions_m4.down.sql"
 M4_1_ROLLBACK = ROOT / "supabase/rollbacks/20261112120000_knowledge_review_read_m4_1.down.sql"
+HA_ROLLBACK = ROOT / "supabase/rollbacks/20261113090000_knowledge_m2_hardening_assurance.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -345,9 +346,18 @@ def _live_body(tx, name):
     return tx.cur.fetchone()[0]
 
 
+def unwind_ha(tx):
+    """H-a (demo assurance isolation) unwinds before M4.1. These rollback tests confirm both of its
+    re-exposure checks: they run on synthetic rows inside a rolled-back transaction."""
+    tx.cur.execute("set local knowledge.ha_rollback_confirmed = 'yes'")
+    tx.cur.execute("set local knowledge.ha_rollback_reserve_unrecorded = 'yes'")
+    tx.cur.execute(_without_tx_control(HA_ROLLBACK))
+
+
 def unwind_m4(tx):
-    """M4.1 (reviewer read) and M4 (claims and contradiction candidates) replace nothing and unwind
-    first, newest first: the M4.1 audit table references the M2 registry."""
+    """H-a, then M4.1 (reviewer read) and M4 (claims and contradiction candidates), newest first:
+    the M4.1 audit table references the M2 registry."""
+    unwind_ha(tx)
     tx.cur.execute("set local knowledge.m4_1_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("set local knowledge.m4_rollback_evidence_exported = 'yes'")

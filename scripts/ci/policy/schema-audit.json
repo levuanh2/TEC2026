@@ -126,6 +126,15 @@
    ],
    "security_definer": false
   },
+  "match_knowledge_chunks_lexical_demo(uuid,text,integer)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": false
+  },
   "private.activity_batch_open(uuid)": {
    "config": [
     "search_path=\"\""
@@ -335,6 +344,20 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_declare_isolated_test(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_declare_shared()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_demo_approve_document(uuid,uuid,text)": {
    "config": [
     "search_path=\"\""
@@ -363,6 +386,15 @@
    "execute": [],
    "security_definer": true
   },
+  "private.knowledge_demo_read_enabled()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.knowledge_demo_reason(text)": {
    "config": [
     "search_path=\"\""
@@ -376,6 +408,22 @@
    ],
    "execute": [],
    "security_definer": false
+  },
+  "private.knowledge_deployment_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_deployment_isolated()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
   },
   "private.knowledge_document_evidence_state(uuid)": {
    "config": [
@@ -419,6 +467,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_has_real_accounts()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.knowledge_identity_key(text)": {
    "config": [
     "search_path=\"\""
@@ -432,6 +487,13 @@
    ],
    "execute": [],
    "security_definer": false
+  },
+  "private.knowledge_live_system_identifier()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
   },
   "private.knowledge_m2_no_truncate()": {
    "config": [
@@ -557,6 +619,13 @@
    "security_definer": false
   },
   "private.knowledge_source_snapshot(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_stamp_approval_assurance()": {
    "config": [
     "search_path=\"\""
    ],
@@ -1366,7 +1435,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (status = 'approved'::knowledge_status) AND ((effective_from IS NULL) OR (effective_from <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh'::text))::date)) AND ((effective_to IS NULL) OR (effective_to >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh'::text))::date)) AND (approval_expires_on >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh'::text))::date) AND (EXISTS ( SELECT 1\n   FROM knowledge_sources s\n  WHERE (s.source_id = knowledge_documents.source_id))))",
+   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (status = 'approved'::knowledge_status) AND ((approval_assurance = 'verified'::text) OR ((approval_assurance = 'demo_unverified'::text) AND ( SELECT private.knowledge_demo_read_enabled() AS knowledge_demo_read_enabled))) AND ((effective_from IS NULL) OR (effective_from <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh'::text))::date)) AND ((effective_to IS NULL) OR (effective_to >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh'::text))::date)) AND (approval_expires_on >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh'::text))::date) AND (EXISTS ( SELECT 1\n   FROM knowledge_sources s\n  WHERE (s.source_id = knowledge_documents.source_id))))",
    "with_check": null
   },
   "knowledge_sources.knowledge_sources_select": {
@@ -1375,7 +1444,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (status = 'approved'::knowledge_status) AND ((visibility = 'public'::text) OR ((visibility = 'tenant'::text) AND private.user_is_org_member(organization_id) AND ((farm_id IS NULL) OR (private.user_can_read_farm(farm_id) AND (EXISTS ( SELECT 1\n   FROM farms f\n  WHERE ((f.id = knowledge_sources.farm_id) AND (f.cooperative_id = knowledge_sources.organization_id)))))))))",
+   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (status = 'approved'::knowledge_status) AND ((approval_assurance = 'verified'::text) OR ((approval_assurance = 'demo_unverified'::text) AND ( SELECT private.knowledge_demo_read_enabled() AS knowledge_demo_read_enabled))) AND ((visibility = 'public'::text) OR ((visibility = 'tenant'::text) AND private.user_is_org_member(organization_id) AND ((farm_id IS NULL) OR (private.user_can_read_farm(farm_id) AND (EXISTS ( SELECT 1\n   FROM farms f\n  WHERE ((f.id = knowledge_sources.farm_id) AND (f.cooperative_id = knowledge_sources.organization_id)))))))))",
    "with_check": null
   },
   "mrv_case_batches.mrv_case_batches_delete": {
@@ -2133,6 +2202,7 @@
   "knowledge_contradiction_candidates.knowledge_contradiction_candidates_guard": "private.knowledge_claim_evidence_guard()",
   "knowledge_contradiction_candidates.knowledge_contradiction_candidates_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_documents.knowledge_documents_immutable": "private.enforce_knowledge_document_immutability()",
+  "knowledge_documents.knowledge_documents_zz_assurance": "private.knowledge_stamp_approval_assurance()",
   "knowledge_expert_reviews.knowledge_expert_reviews_guard": "private.knowledge_evidence_guard()",
   "knowledge_expert_reviews.knowledge_expert_reviews_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_expiry_events.knowledge_expiry_events_guard": "private.knowledge_expiry_events_guard()",
@@ -2149,6 +2219,7 @@
   "knowledge_review_read_events.knowledge_review_read_events_guard": "private.knowledge_evidence_guard()",
   "knowledge_review_read_events.knowledge_review_read_events_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_sources.knowledge_sources_scope": "private.enforce_knowledge_source_scope()",
+  "knowledge_sources.knowledge_sources_zz_assurance": "private.knowledge_stamp_approval_assurance()",
   "knowledge_status_events.knowledge_status_events_append_only": "private.knowledge_status_events_append_only()",
   "knowledge_status_events.knowledge_status_events_no_truncate": "private.knowledge_status_events_append_only()",
   "knowledge_upload_attestations.knowledge_upload_attestations_guard": "private.knowledge_evidence_guard()",

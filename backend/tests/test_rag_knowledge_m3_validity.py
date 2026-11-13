@@ -838,7 +838,10 @@ def test_a_demo_approval_never_supersedes_a_version_of_another_source(tx, m2):
         assert tx.status_of("document", attempt) == "review_required"
     assert [tx.status_of("document", d) for d in (demo_a, verified)] == ["approved", "approved"]
     ids = tx.rpc_ids(tx.member, tx.season_a, "awd demo cross")
-    assert demo_a_chunk in ids and verified_chunk in ids                            # nothing was retired
+    assert verified_chunk in ids and demo_a_chunk not in ids     # H-a: production retrieval serves no demo row
+    status, rows = tx.as_user(tx.member, "select chunk_id from public.match_knowledge_chunks_lexical_demo(%s, %s, 50)",
+                              (tx.season_a, "awd demo cross"))
+    assert status == "ok" and demo_a_chunk in {r[0] for r in rows}                  # nothing was retired
     tx.transition("document", demo_a, "approved", "quarantined", "dispute")         # ... nor once it is gone
     assert as_role(tx, "service_role", DEMO_DOC, (over_demo, tx.approver, "demo")) == ("err", PERMISSION_DENIED)
     same, _ = version(tx, m2, src_b, document_id="doc-3", content="awd demo cross same one")
