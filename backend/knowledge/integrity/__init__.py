@@ -6,6 +6,8 @@ pass bytes, texts and already-parsed registry data.
 - provenance.py: evaluates supplied provenance metadata and evidence against artifact bytes.
 - claims.py: conservative, rule-based extraction of checkable statements with exact spans.
 - references.py: the versioned trusted-reference registry format and its validation.
+- reference_numeric.py: M5 foundation. Numeric reference entries (schema 2), a closed unit and
+  conversion model, and the comparison of one claimed value with one entry.
 - review.py: compares claims with each other and with the registry, and lists findings for
   a human expert.
 

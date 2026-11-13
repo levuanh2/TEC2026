@@ -24,7 +24,7 @@ CLI = BACKEND / "scripts" / "ingest_knowledge.py"
 CLAIMS_REPO = BACKEND / "infrastructure" / "knowledge_claims_repo.py"
 
 _STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "json", "math", "re", "typing", "unicodedata",
-           "collections", "knowledge"}
+           "collections", "decimal", "knowledge"}
 _PDF_ONLY = {"pypdf"}
 _FORBIDDEN = {
     "openai", "anthropic", "google", "cohere", "mistralai", "ollama", "langchain", "langchain_core", "llama_index",
@@ -54,7 +54,9 @@ def test_knowledge_package_has_the_approved_modules():
                      "integrity/__init__.py", "integrity/provenance.py", "integrity/claims.py",
                      "integrity/references.py", "integrity/review.py",
                      # M4: contradiction candidates between stored claims (pure; never changes a status)
-                     "integrity/contradictions.py"}
+                     "integrity/contradictions.py",
+                     # M5 foundation: numeric reference entries, closed unit / conversion model (pure)
+                     "integrity/reference_numeric.py"}
 
 
 @pytest.mark.parametrize("path", KNOWLEDGE, ids=lambda p: p.relative_to(BACKEND).as_posix())
