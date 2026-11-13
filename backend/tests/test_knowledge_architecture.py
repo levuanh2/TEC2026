@@ -56,7 +56,7 @@ def test_knowledge_package_has_the_approved_modules():
                      # M4: contradiction candidates between stored claims (pure; never changes a status)
                      "integrity/contradictions.py",
                      # M5 foundation: numeric reference entries, closed unit / conversion model (pure)
-                     "integrity/reference_numeric.py"}
+                     "integrity/reference_numeric.py", "integrity/conditions.py"}
 
 
 @pytest.mark.parametrize("path", KNOWLEDGE, ids=lambda p: p.relative_to(BACKEND).as_posix())
