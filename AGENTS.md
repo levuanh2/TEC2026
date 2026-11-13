@@ -1,5 +1,11 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## Logo PR #76 CI follow-up (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `docs/BRAND_LOGO_2026_11.md`, this ownership note | — (released) | Open logo PR and follow GitHub CI; document the required guarded-manifest commit trailer for the asset-only pubspec change. Preserve CI thresholds/history; no local Android execution or deployment. | PR #76 opened; documentation follow-up carries `CI-Policy-Change` for the asset-only `app/pubspec.yaml` change. Final checks tracked on the PR. No runtime or CI-policy changes. |
+
 ## Publish supplied logo (2026-11-13)
 
 User requested commit/push of the completed web and Flutter logo changes to

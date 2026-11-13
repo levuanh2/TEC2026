@@ -42,6 +42,16 @@ lượng. Bản thử nghiệm được giữ ngoài thư mục tài nguyên ph�
 - Không sửa auth/backend. Sau khi hoàn tất, người dùng yêu cầu commit/push phần
   logo lên nhánh `ui/agricarbon-web-flutter-2026-11-12`; không deploy trong lượt này.
 
+## PR và CI
+
+- PR logo: https://github.com/levuanh2/TEC2026/pull/76, vào `main`.
+- Lượt CI đầu phát hiện khai báo ảnh trong `app/pubspec.yaml` thuộc guarded
+  paths, cần trailer `CI-Policy-Change` trong một commit của PR. Commit bổ sung
+  tài liệu cung cấp lý do: chỉ đăng ký asset logo, không đổi dependency, cấu
+  hình đo coverage hoặc ngưỡng CI. Giữ nguyên lịch sử, không amend/force-push.
+- Kết quả CI cuối cùng xem tại Checks của PR. Không chạy Android cục bộ,
+  không merge hoặc deploy trong lượt mở PR này.
+
 ## Prompt của các bản imagegen thử nghiệm
 
 Built-in, không dùng CLI. Các ảnh thử nghiệm không được tham chiếu bởi ứng dụng.
