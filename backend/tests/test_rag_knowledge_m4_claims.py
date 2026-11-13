@@ -24,7 +24,7 @@ from knowledge.integrity.claims import CLAIM_EXTRACTOR_VERSION
 from knowledge.integrity.contradictions import ANALYSIS_VERSION, Tolerance
 from tests.test_rag_knowledge_m2_approval import as_role, m2, owner  # noqa: F401
 from tests.test_rag_knowledge_m3_validity import DAY, approve, approved, force, today, version, window
-from tests.test_rag_knowledge_status_events import M4_1_ROLLBACK, ROOT, _without_tx_control
+from tests.test_rag_knowledge_status_events import M4_1_ROLLBACK, ROOT, _without_tx_control, unwind_ha
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, INVALID_PARAMETER, PERMISSION_DENIED, RPC,  # noqa: E402
                                               _DB_URL, pytestmark, psycopg, tx)
 
@@ -616,8 +616,9 @@ def test_rollback_order_is_m4_then_m3_and_m4_replays(tx, m2):
     with pytest.raises(psycopg.errors.RaiseException, match="M4.1 is installed"):
         tx.cur.execute(_without_tx_control(M4_ROLLBACK))
     tx.cur.execute("rollback to savepoint rb")
+    unwind_ha(tx)                                                                   # newest first
     tx.cur.execute("set local knowledge.m4_1_rollback_evidence_exported = 'yes'")
-    tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))                              # newest first
+    tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("set local knowledge.m4_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(M4_ROLLBACK))
     tx.cur.execute("select to_regclass('public.knowledge_claims'), to_regclass('public.knowledge_contradiction_candidates'),"

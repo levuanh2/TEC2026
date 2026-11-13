@@ -20,7 +20,7 @@ from infrastructure.knowledge_claims_repo import analyze_document
 from tests.test_rag_knowledge_m2_approval import as_role, code, m2, owner  # noqa: F401
 from tests.test_rag_knowledge_m3_validity import approve
 from tests.test_rag_knowledge_m4_claims import DRY_15, DRY_30, active, draft, store
-from tests.test_rag_knowledge_status_events import ROOT, _without_tx_control
+from tests.test_rag_knowledge_status_events import ROOT, _without_tx_control, unwind_ha
 from tests.test_rag_knowledge_storage import (INVALID_PARAMETER, PERMISSION_DENIED, _DB_URL, pytestmark,  # noqa: E402
                                               psycopg, tx)
 
@@ -371,6 +371,11 @@ def test_m4_1_rollback_needs_a_confirmation_drops_only_its_own_objects_and_repla
     with pytest.raises(psycopg.errors.RaiseException, match="DROPS the reviewer read audit"):
         tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("rollback to savepoint rb")
+    tx.cur.execute("set local knowledge.m4_1_rollback_evidence_exported = 'yes'")
+    with pytest.raises(psycopg.errors.RaiseException, match="H-a is installed"):
+        tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
+    tx.cur.execute("rollback to savepoint rb")
+    unwind_ha(tx)                                                                   # newest first
     tx.cur.execute("set local knowledge.m4_1_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("select to_regclass('public.knowledge_review_read_events'), to_regproc('public.knowledge_review_claims'),"
