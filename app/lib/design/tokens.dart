@@ -85,6 +85,7 @@ class AppBrand {
   static const fontFamily = 'BeVietnamPro';
   static const slogan = 'Số hóa canh tác - Xanh hóa tương lai';
   static const riceImage = 'assets/images/mekong-rice.webp';
+  static const logoImage = 'assets/images/agricarbon-logo.png';
 }
 
 class AppGradients {
