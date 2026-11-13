@@ -128,7 +128,7 @@ create trigger knowledge_citation_purges_no_truncate
 -- id, the season, the mode, the outcome, the delivery flag, the trace completeness and the two lists
 -- of chunk ids is derived here.
 create function private.knowledge_record_citation_event(
-  p_request_id uuid, p_crop_season_id uuid, p_retrieval_mode text, p_outcome text, p_delivered boolean,
+  p_request_id uuid, p_crop_season_id uuid, p_retrieval_mode text, p_outcome text, p_response_emitted boolean,
   p_trace_completeness text, p_retrieved jsonb, p_cited jsonb)
 returns void
 language plpgsql
@@ -185,7 +185,7 @@ begin
   insert into public.knowledge_citation_events (request_id, crop_season_id, organization_id, farm_id, retrieval_mode,
     outcome, response_emitted, trace_completeness, retention_until)
   values (p_request_id, p_crop_season_id, v_scope.organization_id, v_scope.farm_id, p_retrieval_mode, p_outcome,
-          p_delivered, p_trace_completeness, pg_catalog.now() + pg_catalog.make_interval(days => v_days));
+          p_response_emitted, p_trace_completeness, pg_catalog.now() + pg_catalog.make_interval(days => v_days));
   insert into public.knowledge_citation_event_chunks (request_id, role, chunk_id, document_pk, source_id, document_id,
     document_version, approval_assurance)
   select p_request_id, x.role, c.chunk_id, d.id, d.source_id, d.document_id, d.document_version,
