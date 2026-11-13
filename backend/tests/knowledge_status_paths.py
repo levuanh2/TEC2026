@@ -49,6 +49,26 @@ M2_OWNED = {("document", "review_required", "expert_review"), ("document", "expe
             ("document", "expert_review", "review_required"), ("source", "review_required", "approved"),
             ("source", "rejected", "approved")}
 
+#: H-b (20261113120000): quarantine is an emergency action with evidence (service_role / owner), archive a
+#: verified archivist's decision. `transition()` performs them through those functions.
+HB_OWNED = {("document", "approved", "quarantined"), ("source", "approved", "quarantined"),
+            ("document", "approved", "archived"), ("source", "approved", "archived"),
+            ("document", "quarantined", "archived"), ("source", "quarantined", "archived")}
+EMERGENCY = {"document": "select private.knowledge_emergency_quarantine_document(%s, %s, %s, %s)",
+             "source": "select private.knowledge_emergency_quarantine_source(%s, %s, %s, %s)"}
+#: Synthetic operator reference of fixture quarantines (not a real ticket).
+FIXTURE_TICKET = "TEST-FIXTURE-INCIDENT-0000"
+
+def event_reason(frm, to, reason):
+    """The reason `transition()` leaves in knowledge_status_events for this step: H-b prefixes the
+    emergency and archive reasons with their reason code."""
+    if to == "quarantined" and frm == "approved":
+        return f"EMERGENCY operator_error_containment [{FIXTURE_TICKET}]: TEST FIXTURE emergency quarantine: {reason}"[:2000]
+    if to == "archived":
+        return f"ARCHIVE retention_policy: TEST FIXTURE archive rationale: {reason}"[:2000]
+    return reason
+
+
 #: Marks the synthetic auth.sessions / auth.mfa_factors rows these helpers insert (m2_cleanup removes them).
 FIXTURE_TAG = "TEST FIXTURE m2"
 
@@ -76,6 +96,15 @@ def transition(db, kind, key, frm, to, *, reason="fixture", approver=None):
     if (kind, frm, to) in M2_OWNED and (to == "approved") == (approver is not None) \
             and status_of(db, kind, key) == frm:
         return M2.of(db).step(kind, key, frm, to, reason=reason, approver=approver)
+    if (kind, frm, to) in HB_OWNED and approver is None and reason and reason.strip() and len(reason) <= 2000 \
+            and status_of(db, kind, key) == frm:
+        if to == "quarantined":
+            evidence = db.execute(EMERGENCY[kind], (key, "operator_error_containment",
+                                                    f"TEST FIXTURE emergency quarantine: {reason}"[:2000],
+                                                    FIXTURE_TICKET)).fetchone()[0]
+            return db.execute("select status_event_id from public.knowledge_emergency_actions where id = %s",
+                              (evidence,)).fetchone()[0]
+        return M2.of(db).archive(kind, key, reason=reason)
     return db.execute(TRANSITION[kind], (key, frm, to, reason, approver)).fetchone()[0]
 
 
@@ -100,6 +129,8 @@ class M2:
         self.admin = uuid.uuid4()
         self.uploader = uuid.uuid4()
         self.reviewer = uuid.uuid4()
+        self.archivist = uuid.uuid4()
+        self.custodian = uuid.uuid4()
 
     @classmethod
     def of(cls, db) -> "M2":
@@ -251,6 +282,55 @@ class M2:
         return self.call(approver, "select public.knowledge_approve_source(%s, %s, %s)",
                          (source_id, self.snapshot_sha("source", source_id), rationale))[0][0]
 
+    def archive(self, kind, key, *, reason="fixture", archivist=None, reason_code="retention_policy"):
+        """H-b: archive `key` as a synthetic archivist (never its uploader or approver); returns the event id."""
+        archivist = archivist or self.archivist
+        self.role(archivist, "archivist", *self.scope(kind, key))
+        fn = "public.knowledge_archive_document(%s::uuid" if kind == "document" else "public.knowledge_archive_source(%s::text"
+        record = self.call(archivist, f"select {fn}, %s, %s, %s)",
+                           (key, self.snapshot_sha(kind, key), reason_code,
+                            f"TEST FIXTURE archive rationale: {reason}"[:2000]))[0][0]
+        return self.db.execute("select status_event_id from public.knowledge_archive_records where id = %s",
+                               (record,)).fetchone()[0]
+
+    def publisher_for(self, source_id):
+        """H-c: the verified publisher a synthetic registry admin bound `source_id` to (bound if needed)."""
+        row = self.db.execute("select publisher_id from public.knowledge_source_publishers where source_id = %s",
+                              (source_id,)).fetchone()
+        if row:
+            return row[0]
+        self.ensure_admin()
+        publisher = self.call(self.admin, "select public.knowledge_register_publisher(%s, %s, %s)",
+                              (f"test-fixture-{self.tag}-{uuid.uuid4().hex[:8]}", "TEST FIXTURE publisher (synthetic)",
+                               "TEST FIXTURE identity evidence (synthetic)"))[0][0]
+        self.call(self.admin, "select public.knowledge_bind_source_publisher(%s, %s, %s)",
+                  (source_id, publisher, "TEST FIXTURE ownership evidence (synthetic)"))
+        return publisher
+
+    def custody(self, uid, source_id):
+        """H-c: the active custodian assignment of `uid` for `source_id` (granted if needed)."""
+        person = self.person(uid, label="custodian")
+        self.publisher_for(source_id)
+        row = self.db.execute("select id from public.knowledge_source_custodians where personnel_id = %s"
+                              " and source_id = %s and status = 'active'", (person, source_id)).fetchone()
+        if row:
+            return row[0]
+        self.ensure_admin()
+        return self.call(self.admin, "select public.knowledge_grant_source_custodian(%s, %s, %s)",
+                         (person, source_id, "TEST FIXTURE custodian evidence (synthetic)"))[0][0]
+
+    def countersign(self, successor, custodian=None, *, successor_sha=None, target_sha=None):
+        """H-c: a custodian of the superseded version's source countersigns replacing it with `successor`."""
+        custodian = custodian or self.custodian
+        target, target_source = self.db.execute(
+            "select t.id, t.source_id from public.knowledge_documents d join public.knowledge_documents t"
+            " on t.id = d.supersedes_document_pk where d.id = %s", (successor,)).fetchone()
+        self.custody(custodian, target_source)
+        return self.call(custodian, "select public.knowledge_countersign_supersession(%s, %s, %s, %s)",
+                         (successor, successor_sha or self.snapshot_sha("document", successor),
+                          target_sha or self.snapshot_sha("document", target),
+                          "TEST FIXTURE countersignature: the custodian authorizes this replacement"))[0][0]
+
     def step(self, kind, key, frm, to, *, reason, approver):
         """One M2-owned transition; returns its audit event id."""
         if kind == "source":
@@ -283,18 +363,39 @@ M2_EVIDENCE_TRIGGERS = {
 }
 
 
+HC_EVIDENCE_TRIGGERS = {
+    "knowledge_supersession_authorizations": "knowledge_supersession_authorizations_guard",
+    "knowledge_source_custodians": "knowledge_source_custodians_guard",
+    "knowledge_source_publishers": "knowledge_source_publishers_guard",
+    "knowledge_publishers": "knowledge_publishers_guard",
+}
+HB_EVIDENCE_TRIGGERS = {
+    "knowledge_emergency_actions": "knowledge_emergency_actions_guard",
+    "knowledge_archive_records": "knowledge_archive_records_guard",
+}
+
+
 def m2_cleanup(conn, sources):
     """Owner-only teardown for tests that COMMIT synthetic knowledge: removes the M2 evidence of these
     sources (which otherwise blocks deleting them: evidence is immutable and FK-restricted) and the
     synthetic M2 personnel/users of the same fixture tags. Evidence is undeletable by design; a test
     owner lifts that only here, on a local/CI database."""
     sources = list(sources)
+    hb = conn.execute("select to_regclass('public.knowledge_archive_records') is not null").fetchone()[0]
+    hc = conn.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null").fetchone()[0]
+    triggers = dict(M2_EVIDENCE_TRIGGERS, **(HB_EVIDENCE_TRIGGERS if hb else {}), **(HC_EVIDENCE_TRIGGERS if hc else {}))
     tags = [r[0] for r in conn.execute(
         "select distinct substring(p.identity_reference from '^TEST-FIXTURE-M2-([0-9a-f]{8})-')"
         " from public.knowledge_personnel p where p.id in ("
         "  select uploader_personnel_id from public.knowledge_upload_attestations where source_id = any(%(s)s)"
         "  union select reviewer_personnel_id from public.knowledge_expert_reviews where source_id = any(%(s)s)"
-        "  union select approver_personnel_id from public.knowledge_approval_records where source_id = any(%(s)s))",
+        "  union select approver_personnel_id from public.knowledge_approval_records where source_id = any(%(s)s)"
+        + ("  union select archivist_personnel_id from public.knowledge_archive_records where source_id = any(%(s)s)"
+           if hb else "")
+        + ("  union select custodian_personnel_id from public.knowledge_supersession_authorizations"
+           "   where target_source_id = any(%(s)s) or successor_source_id = any(%(s)s)"
+           "  union select personnel_id from public.knowledge_source_custodians where source_id = any(%(s)s)"
+           if hc else "") + ")",
         {"s": sources}).fetchall() if r[0]]
     users = [r[0] for r in conn.execute(
         "select auth_user_id from public.knowledge_personnel where identity_reference like any(%s)",
@@ -303,10 +404,21 @@ def m2_cleanup(conn, sources):
     conn.execute("delete from auth.mfa_factors where user_id = any(%s) and friendly_name like 'TEST FIXTURE totp%%'",
                  (users,))
     conn.execute("delete from auth.sessions where user_id = any(%s) and tag = %s", (users, FIXTURE_TAG))
-    for table, trigger in M2_EVIDENCE_TRIGGERS.items():
+    for table, trigger in triggers.items():
         conn.execute(f"alter table public.{table} disable trigger {trigger}")
     try:
-        for table in ("knowledge_approval_records", "knowledge_expert_reviews", "knowledge_upload_attestations"):
+        if hc:
+            publishers = [r[0] for r in conn.execute(
+                "select publisher_id from public.knowledge_source_publishers where source_id = any(%s)", (sources,))]
+            conn.execute("delete from public.knowledge_supersession_authorizations where target_source_id = any(%(s)s)"
+                         " or successor_source_id = any(%(s)s)", {"s": sources})
+            for table in ("knowledge_source_custodians", "knowledge_source_publishers"):
+                conn.execute(f"delete from public.{table} where source_id = any(%s)", (sources,))
+            conn.execute("delete from public.knowledge_publishers where id = any(%s) and publisher_key like 'test-fixture-%%'"
+                         " and not exists (select 1 from public.knowledge_source_publishers b where b.publisher_id = id)",
+                         (publishers,))
+        for table in (("knowledge_emergency_actions", "knowledge_archive_records") if hb else ()) + (
+                "knowledge_approval_records", "knowledge_expert_reviews", "knowledge_upload_attestations"):
             conn.execute(f"delete from public.{table} where source_id = any(%(s)s)", {"s": sources})
         for tag in tags:
             like = f"TEST-FIXTURE-M2-{tag}-%"
@@ -317,5 +429,5 @@ def m2_cleanup(conn, sources):
                          (f"%TEST-FIXTURE-M2-{tag}",))
             conn.execute("delete from auth.users where email like %s", (f"kn-m2-{tag}-%@agricarbon-test.invalid",))
     finally:
-        for table, trigger in M2_EVIDENCE_TRIGGERS.items():
+        for table, trigger in triggers.items():
             conn.execute(f"alter table public.{table} enable trigger {trigger}")

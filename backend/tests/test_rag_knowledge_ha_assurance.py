@@ -16,7 +16,7 @@ import pytest
 
 from tests.test_rag_knowledge_m2_approval import (DEMO_DOC, DEMO_SRC, ISOLATED, _demo, as_role, m2, owner,  # noqa: F401
                                                   recommended)
-from tests.test_rag_knowledge_status_events import HA_ROLLBACK, ROOT, _without_tx_control, unwind_ha
+from tests.test_rag_knowledge_status_events import HA_ROLLBACK, ROOT, _without_tx_control, unwind_ha, unwind_hb
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, PERMISSION_DENIED, _DB_URL, pytestmark,  # noqa: E402
                                               psycopg, tx)
 
@@ -234,6 +234,7 @@ def test_rollback_refuses_to_re_expose_demo_content_and_replay_backfills_fail_cl
     _, verified_chunk = verified_doc(tx, m2, "awd replay verified")
     _, demo, demo_chunk = demo_doc(tx, "awd replay demo")
     tx.settle()
+    unwind_hb(tx)                                                           # H-b, if installed, goes first
     tx.cur.execute("savepoint rb")
     with pytest.raises(psycopg.errors.RaiseException, match="ha_rollback_confirmed"):
         tx.cur.execute(_without_tx_control(HA_ROLLBACK))

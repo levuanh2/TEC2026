@@ -20,6 +20,7 @@ import uuid
 
 import pytest
 
+from tests import knowledge_status_paths as paths  # noqa: E402
 from tests.knowledge_status_paths import M2_OWNED  # noqa: E402
 from tests.test_rag_knowledge_storage import (CHECK_VIOLATION, PERMISSION_DENIED, TRANSITION, _DB_URL,  # noqa: E402
                                               pytestmark, psycopg, tx)
@@ -109,10 +110,11 @@ def test_every_transition_writes_exactly_one_complete_event(tx):
     for kind, key, frm, to in steps:
         identity = ("source", src, None, None, None) if kind == "source" else ("document", d_src, doc, d_id, d_ver)
         # M2: a human decision runs as the verified person's `authenticated` role (session_user stays the
-        # login); every other transition is the operator's.
-        actor = "authenticated" if (kind, frm, to) in M2_OWNED else login
-        expected.append((*identity, frm, to, f"why {frm}->{to}", tx.approver if to == "approved" else None,
-                         login, actor, xid, True))
+        # login); every other transition is the operator's. H-b: an archive is the archivist's (`authenticated`),
+        # an emergency quarantine the operator's.
+        actor = "authenticated" if (kind, frm, to) in M2_OWNED or to == "archived" else login
+        expected.append((*identity, frm, to, paths.event_reason(frm, to, f"why {frm}->{to}"),
+                         tx.approver if to == "approved" else None, login, actor, xid, True))
     # the document's own source was approved in fixture setup (1 earlier event): keep only ours
     assert [r for r in rows if r[1] == src or r[2] == doc] == expected
 
@@ -325,6 +327,8 @@ M4 = ROOT / "supabase/migrations/20261112090000_knowledge_claims_contradictions_
 M4_ROLLBACK = ROOT / "supabase/rollbacks/20261112090000_knowledge_claims_contradictions_m4.down.sql"
 M4_1_ROLLBACK = ROOT / "supabase/rollbacks/20261112120000_knowledge_review_read_m4_1.down.sql"
 HA_ROLLBACK = ROOT / "supabase/rollbacks/20261113090000_knowledge_m2_hardening_assurance.down.sql"
+HB_ROLLBACK = ROOT / "supabase/rollbacks/20261113120000_knowledge_m2_hardening_operator.down.sql"
+HC_ROLLBACK = ROOT / "supabase/rollbacks/20261113150000_knowledge_m2_hardening_supersession.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -346,9 +350,27 @@ def _live_body(tx, name):
     return tx.cur.fetchone()[0]
 
 
+def unwind_hc(tx):
+    """H-c (custodian countersignature) unwinds before H-b, when it is installed."""
+    tx.cur.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("set local knowledge.hc_rollback_evidence_exported = 'yes'")
+        tx.cur.execute(_without_tx_control(HC_ROLLBACK))
+
+
+def unwind_hb(tx):
+    """H-c first, then H-b (emergency quarantine, archivist archive), before H-a, when installed."""
+    unwind_hc(tx)
+    tx.cur.execute("select to_regclass('public.knowledge_emergency_actions') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("set local knowledge.hb_rollback_evidence_exported = 'yes'")
+        tx.cur.execute(_without_tx_control(HB_ROLLBACK))
+
+
 def unwind_ha(tx):
-    """H-a (demo assurance isolation) unwinds before M4.1. These rollback tests confirm both of its
-    re-exposure checks: they run on synthetic rows inside a rolled-back transaction."""
+    """H-b first, then H-a (demo assurance isolation), before M4.1. These rollback tests confirm both of
+    H-a's re-exposure checks: they run on synthetic rows inside a rolled-back transaction."""
+    unwind_hb(tx)
     tx.cur.execute("set local knowledge.ha_rollback_confirmed = 'yes'")
     tx.cur.execute("set local knowledge.ha_rollback_reserve_unrecorded = 'yes'")
     tx.cur.execute(_without_tx_control(HA_ROLLBACK))
