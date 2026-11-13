@@ -975,6 +975,11 @@ HC_DEFINER = {"knowledge_register_publisher", "knowledge_set_publisher_status", 
               "knowledge_grant_source_custodian", "knowledge_set_source_custodian_status",
               "knowledge_countersign_supersession", "knowledge_custodian_snapshot"}
 HC_INVOKER = {"knowledge_supersession_conflicts"}
+# M7 E2 (20261113210000): report recording (service_role), disposition and report read (authenticated) are
+# SECURITY DEFINER; the policy setter (owner only), the gate and its helpers are not.
+E2_DEFINER = {"knowledge_record_integrity_report", "knowledge_dispose_integrity_finding", "knowledge_review_integrity_report"}
+E2_INVOKER = {"knowledge_set_integrity_policy", "knowledge_integrity_finding_blocking", "knowledge_integrity_current_report",
+              "knowledge_integrity_report_problem", "knowledge_integrity_gate"}
 
 
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
@@ -1002,7 +1007,8 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     # ... and the verified-human RPCs (EXECUTE for authenticated only)
                                     *M2_RPCS, *M3_HELPERS, *M3_EXPIRY, *M4_HELPERS, *M4_OPERATOR,
                                     *M4_1_HELPERS, *M4_1_RPCS, *HA_DEFINER, *HA_INVOKER,
-                                    *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER}
+                                    *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER,
+                                    *E2_DEFINER, *E2_INVOKER}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
@@ -1010,7 +1016,7 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
     assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
                                             "knowledge_transition_document", *M2_RPCS, *M2_DEMO,
                                             *M3_EXPIRY, *M4_OPERATOR, *M4_1_RPCS, *HA_DEFINER,
-                                            *HB_DEFINER, *HC_DEFINER}, rows
+                                            *HB_DEFINER, *HC_DEFINER, *E2_DEFINER}, rows
     tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
     for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere
