@@ -332,15 +332,45 @@ class M2:
         if self.db.execute("select 1 from public.knowledge_integrity_verifications where report_id = %s"
                            " and verdict = 'reproduced'", (report,)).fetchone():
             return None
+        if not self.db.execute("select to_regnamespace('knowledge_verifier') is not null").fetchone()[0]:
+            return None                                                 # E7.1 unwound: nothing can verify
         from infrastructure import integrity_verifier
         key_id, key = test_verifier_key()
         self.ensure_verifier(key_id, key)
-        return integrity_verifier.verify(self.db, self.db, str(report), key, key_id)
+        return self.as_verifier(lambda: integrity_verifier.verify(self.db, self.db, str(report), key, key_id))
+
+    def as_verifier(self, fn):
+        """Run `fn` as the verifier group role (E7.1), savepoint-isolated. In this single-process fixture the test
+        connection impersonates the role; the multi-process test uses a separate login (E7.1 doc section 5)."""
+        self.grant_verifier_to_self()
+        self.db.execute("savepoint as_verifier")
+        try:
+            self.db.execute("set local role knowledge_integrity_verifier")
+            out = fn()
+            self.db.execute("reset role")
+            self.db.execute("release savepoint as_verifier")
+            return out
+        except BaseException:
+            self.db.execute("rollback to savepoint as_verifier")
+            raise
+
+    def grant_verifier_to_self(self):
+        """TEST ONLY: the owner creates the group with ADMIN but no SET option (Postgres 16+), so it cannot
+        impersonate the verifier by default; the fixture grants itself SET inside the test transaction."""
+        if self.db.execute("select to_regrole('knowledge_integrity_verifier') is not null").fetchone()[0] and \
+                not self.db.execute("select pg_has_role(current_user, 'knowledge_integrity_verifier', 'SET')").fetchone()[0]:
+            self.db.execute("grant knowledge_integrity_verifier to current_user")
 
     def ensure_verifier(self, key_id, key):
+        self.grant_verifier_to_self()
         from infrastructure.integrity_verifier import extractor_code_digest, public_key_bytes
         if self.db.execute("select extractor_code_digest from private.knowledge_integrity_policy").fetchone()[0] is None:
             self.db.execute("select private.knowledge_set_integrity_code_digest(%s)", (extractor_code_digest(),))
+        if self.db.execute("select to_regnamespace('knowledge_verifier') is not null").fetchone()[0] and \
+                self.db.execute("select attestation_mode from private.knowledge_integrity_policy").fetchone()[0] is None:
+            mode = "in_database_signature" if self.db.execute("select private.knowledge_ed25519_available()").fetchone()[0] \
+                else "offline_signature_audit"
+            self.db.execute("select private.knowledge_set_attestation_mode(%s)", (mode,))
         if not self.db.execute("select 1 from public.knowledge_integrity_verifier_keys where key_id = %s", (key_id,)).fetchone():
             self.db.execute("select private.knowledge_register_verifier_key(%s, %s, %s)",
                             (key_id, public_key_bytes(key), "TEST FIXTURE verifier (synthetic key, local/CI only)"))

@@ -1,6 +1,6 @@
--- Rollback for migrations/20261113240000_knowledge_integrity_independent_verification_m7_e7.sql (RAG V1.5 M7 E7).
+-- Rollback for migrations/20261113235900_knowledge_integrity_independent_verification_m7_e7.sql (RAG V1.5 M7 E7).
 -- Not in migrations/: run by hand, in ONE transaction, BEFORE the E2 rollback, then
---   supabase migration repair --status reverted 20261113240000
+--   supabase migration repair --status reverted 20261113235900
 -- Restores E2's exact gate: approvals no longer need an independent verification (E7 reopens). It DROPS the
 -- verifications and the verifier key registry, so it refuses without
 --   set local knowledge.e7_rollback_confirmed = 'yes'   (export both tables first)

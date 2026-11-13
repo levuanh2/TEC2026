@@ -26,7 +26,9 @@ CLAIMS_REPO = BACKEND / "infrastructure" / "knowledge_claims_repo.py"
 VERIFIER = BACKEND / "infrastructure" / "integrity_verifier.py"
 
 _STDLIB = {"__future__", "contextlib", "dataclasses", "datetime", "hashlib", "io", "json", "math", "re", "typing", "unicodedata",
-           "collections", "decimal", "knowledge"}
+           "collections", "decimal", "knowledge",
+           # M7 E7.1: integrity/verifier.py reads the interpreter version and implementation for its pin
+           "platform", "sys"}
 _PDF_ONLY = {"pypdf"}
 _FORBIDDEN = {
     "openai", "anthropic", "google", "cohere", "mistralai", "ollama", "langchain", "langchain_core", "llama_index",

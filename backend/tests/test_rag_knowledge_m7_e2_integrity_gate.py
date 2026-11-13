@@ -11,6 +11,7 @@ Skipped without SUPABASE_DB_URL. dev3-01 stays OPEN.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import uuid
@@ -267,7 +268,7 @@ def test_10_a_report_recorded_while_the_approval_waits_is_enforced():
             " 'official_publication') returning id",
             (source_id, f"knowledge-artifacts/{'c' * 64}/d.md", "c" * 64, "d" * 64)).fetchone()[0]
         setup.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
-                      " values (%s, %s, 0, %s, %s)", (doc, uuid.uuid4().hex[:20], POISON["content"], "e" * 64))
+                      " values (%s, %s, 0, %s, %s)", (doc, uuid.uuid4().hex[:20], POISON["content"], hashlib.sha256(POISON["content"].encode()).hexdigest()))
         m.attest("document", doc)
         review = m.start(doc)
         report, sha = m.acknowledge(review)

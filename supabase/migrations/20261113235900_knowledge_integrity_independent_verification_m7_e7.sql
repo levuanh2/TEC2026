@@ -21,7 +21,16 @@
 -- (infrastructure boundary, unchanged). Reproducing the claim set proves the operator did not omit, add or
 -- alter what the pinned extractor finds; it does not prove that the extractor finds every scientific claim.
 
-create extension if not exists pgsodium;
+-- pgsodium is OPTIONAL (E7.1, 20261114090000): Supabase lists it as pending deprecation. When it is installable it
+-- is installed and signatures are verified in the database; otherwise the owner must choose the offline-audit
+-- attestation mode explicitly (E7.1), and until then every verification is refused (fail closed).
+do $pgsodium$
+begin
+  if exists (select 1 from pg_catalog.pg_available_extensions where name = 'pgsodium') then
+    create extension if not exists pgsodium;
+  end if;
+end;
+$pgsodium$;
 
 -- ================================================================== policy: pinned extractor code digest
 

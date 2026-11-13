@@ -189,7 +189,7 @@ class Tx:
     def chunk(self, document_pk, content, *, ordinal=0, section=None, extra=None):
         chunk_id = _sha(f"{document_pk}|{ordinal}|{content}")[:20]
         columns, values = ["document_pk", "chunk_id", "ordinal", "section_path", "content", "content_sha256"], \
-            [document_pk, chunk_id, ordinal, section, FIXTURE + content, _sha(content)]
+            [document_pk, chunk_id, ordinal, section, FIXTURE + content, _sha(FIXTURE + content)]   # E7.1: hash of the STORED text
         for key, value in (extra or {}).items():
             columns.append(key)
             values.append(value)
@@ -980,9 +980,13 @@ HC_INVOKER = {"knowledge_supersession_conflicts"}
 E2_DEFINER = {"knowledge_record_integrity_report", "knowledge_dispose_integrity_finding", "knowledge_review_integrity_report"}
 E2_INVOKER = {"knowledge_set_integrity_policy", "knowledge_integrity_finding_blocking", "knowledge_integrity_current_report",
               "knowledge_integrity_report_problem", "knowledge_integrity_gate"}
-# M7 E7 (20261113240000): verifier-key registration / revocation (owner) and the signed verification record
+# M7 E7 (20261113235900): verifier-key registration / revocation (owner) and the signed verification record
 # (service_role) are SECURITY DEFINER; the digest, the pin setter, the key guard and the check are not.
-E7_DEFINER = {"knowledge_register_verifier_key", "knowledge_revoke_verifier_key", "knowledge_record_integrity_verification"}
+E7_DEFINER = {"knowledge_register_verifier_key", "knowledge_revoke_verifier_key"}
+# M7 E7.1 (20261114090000): the service-role recording RPC is gone; the verifier's two SECURITY DEFINER functions
+# live in the knowledge_verifier schema (test_rag_knowledge_m7_e7_1_portable_attestation.py); these helpers are not.
+E7_1_INVOKER = {"knowledge_ed25519_available", "knowledge_ed25519_verify", "knowledge_set_attestation_mode",
+                "knowledge_chunk_hash_problem", "knowledge_verifier_caller"}
 E7_INVOKER = {"knowledge_set_integrity_code_digest", "knowledge_verifier_key_guard", "knowledge_claim_set_digest",
               "knowledge_integrity_verification_problem"}
 
@@ -1013,7 +1017,7 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     *M2_RPCS, *M3_HELPERS, *M3_EXPIRY, *M4_HELPERS, *M4_OPERATOR,
                                     *M4_1_HELPERS, *M4_1_RPCS, *HA_DEFINER, *HA_INVOKER,
                                     *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER,
-                                    *E2_DEFINER, *E2_INVOKER, *E7_DEFINER, *E7_INVOKER}
+                                    *E2_DEFINER, *E2_INVOKER, *E7_DEFINER, *E7_INVOKER, *E7_1_INVOKER}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated

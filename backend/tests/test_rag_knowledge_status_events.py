@@ -330,7 +330,8 @@ HA_ROLLBACK = ROOT / "supabase/rollbacks/20261113090000_knowledge_m2_hardening_a
 HB_ROLLBACK = ROOT / "supabase/rollbacks/20261113120000_knowledge_m2_hardening_operator.down.sql"
 HC_ROLLBACK = ROOT / "supabase/rollbacks/20261113150000_knowledge_m2_hardening_supersession.down.sql"
 E2_ROLLBACK = ROOT / "supabase/rollbacks/20261113210000_knowledge_integrity_approval_gate_m7_e2.down.sql"
-E7_ROLLBACK = ROOT / "supabase/rollbacks/20261113240000_knowledge_integrity_independent_verification_m7_e7.down.sql"
+E7_ROLLBACK = ROOT / "supabase/rollbacks/20261113235900_knowledge_integrity_independent_verification_m7_e7.down.sql"
+E7_1_ROLLBACK = ROOT / "supabase/rollbacks/20261114090000_knowledge_integrity_portable_attestation_m7_e7_1.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -352,8 +353,17 @@ def _live_body(tx, name):
     return tx.cur.fetchone()[0]
 
 
+def unwind_e7_1(tx):
+    """M7 E7.1 (portable attestation) unwinds first, when it is installed."""
+    tx.cur.execute("select to_regnamespace('knowledge_verifier') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("set local knowledge.e7_1_rollback_confirmed = 'yes'")
+        tx.cur.execute(_without_tx_control(E7_1_ROLLBACK))
+
+
 def unwind_e7(tx):
-    """M7 E7 (independent verification) unwinds first, when it is installed."""
+    """E7.1 first, then M7 E7 (independent verification), when installed."""
+    unwind_e7_1(tx)
     tx.cur.execute("select to_regclass('public.knowledge_integrity_verifications') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute("set local knowledge.e7_rollback_confirmed = 'yes'")

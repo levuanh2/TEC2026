@@ -1,4 +1,4 @@
-"""RAG V1.5 M7 E7 (migration 20261113240000): an integrity report authorizes approval only with an
+"""RAG V1.5 M7 E7 (migration 20261113235900): an integrity report authorizes approval only with an
 independent, signed verification that reproduces the stored claim set from the stored chunk text.
 
 Threat: an operator holding the shared service credential stores fewer claims (here: drops the dev3-01
@@ -63,7 +63,7 @@ def dishonest_report(tx, m2, doc, *, keep=lambda c: c.kind != "assertion"):
 def verify(tx, m2, report, key=None, key_id=None):
     key_id, key = (key_id, key) if key else paths.test_verifier_key()
     m2.ensure_verifier(key_id, key)
-    return iv.verify(tx.cur, tx.cur, str(report), key, key_id)
+    return m2.as_verifier(lambda: iv.verify(tx.cur, tx.cur, str(report), key, key_id))
 
 
 def verdict(tx, report):
@@ -132,7 +132,7 @@ def test_the_service_credential_cannot_forge_or_register_a_verification(tx, m2):
     report, _ = dishonest_report(tx, m2, doc)
     key_id, key = paths.test_verifier_key()
     m2.ensure_verifier(key_id, key)
-    honest = iv.build_statement(tx.cur, str(report), key_id)
+    honest = m2.as_verifier(lambda: iv.build_statement(tx.cur, str(report), key_id))
     # a "reproduced" statement signed by a key nobody registered
     forged = honest.replace('"verdict":"mismatch"', '"verdict":"reproduced"')
     rogue = Ed25519PrivateKey.generate()
@@ -142,12 +142,20 @@ def test_the_service_credential_cannot_forge_or_register_a_verification(tx, m2):
     # the registered key's genuine signature over an EDITED statement
     sig = key.sign(honest.encode())
     assert as_role(tx, "service_role", iv.RECORD, (forged, sig)) == ("err", PERMISSION_DENIED)
+    # E7.1: even a GENUINE signature is refused from the producer's credential (no usage on knowledge_verifier)
+    assert as_role(tx, "service_role", iv.RECORD, (honest, sig)) == ("err", PERMISSION_DENIED)
+    # the same forgeries submitted through the verifier role are refused by the signature check itself
+    assert as_role(tx, "knowledge_integrity_verifier", iv.RECORD, (forged, rogue.sign(forged.encode()))) \
+        == ("err", PERMISSION_DENIED)
+    assert as_role(tx, "knowledge_integrity_verifier", iv.RECORD, (forged, sig)) == ("err", PERMISSION_DENIED)
     # a genuine "reproduced" claim that is false of the stored claims is refused by the database itself
-    assert as_role(tx, "service_role", iv.RECORD, (forged, key.sign(forged.encode()))) == ("err", CHECK_VIOLATION)
-    iv.verify(tx.cur, tx.cur, str(report), key, key_id)              # an honest (mismatch) record exists
+    assert as_role(tx, "knowledge_integrity_verifier", iv.RECORD, (forged, key.sign(forged.encode()))) \
+        == ("err", CHECK_VIOLATION)
+    m2.as_verifier(lambda: iv.verify(tx.cur, tx.cur, str(report), key, key_id))   # an honest (mismatch) record
     # the service role cannot register, revoke or pin; nobody writes the tables directly
     for fn in ("private.knowledge_register_verifier_key(text,bytea,text)", "private.knowledge_revoke_verifier_key(text,text)",
-               "private.knowledge_set_integrity_code_digest(text)", "private.knowledge_set_integrity_policy(text,text,text,text)"):
+               "private.knowledge_set_integrity_code_digest(text)", "private.knowledge_set_integrity_policy(text,text,text,text)",
+               "private.knowledge_set_attestation_mode(text)"):
         tx.cur.execute("select has_function_privilege('service_role', %s, 'execute')", (fn,))
         assert tx.cur.fetchone()[0] is False, fn
     for sql in ("insert into public.knowledge_integrity_verifier_keys (key_id, public_key, label)"
@@ -167,8 +175,8 @@ def test_a_statement_about_another_version_is_refused(tx, m2):
     _, doc_b = draft(tx, m2, content="awd another version e7")
     key_id, key = paths.test_verifier_key()
     m2.ensure_verifier(key_id, key)
-    text = iv.build_statement(tx.cur, str(report_a), key_id).replace(str(doc_a), str(doc_b))
-    assert as_role(tx, "service_role", iv.RECORD, (text, key.sign(text.encode()))) == ("err", CHECK_VIOLATION)
+    text = m2.as_verifier(lambda: iv.build_statement(tx.cur, str(report_a), key_id)).replace(str(doc_a), str(doc_b))
+    assert as_role(tx, "knowledge_integrity_verifier", iv.RECORD, (text, key.sign(text.encode()))) == ("err", CHECK_VIOLATION)
 
 
 # ================================================================== staleness, re-pinning, revocation
@@ -241,13 +249,14 @@ def test_a_key_revocation_and_an_approval_serialize():
             " 'official_publication') returning id",
             (source_id, f"knowledge-artifacts/{'f' * 64}/d.md", "f" * 64, "9" * 64)).fetchone()[0]
         setup.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
-                      " values (%s, %s, 0, 'TEST FIXTURE awd e7 race', %s)", (doc, uuid.uuid4().hex[:20], "8" * 64))
+                      " values (%s, %s, 0, 'TEST FIXTURE awd e7 race', %s)", (doc, uuid.uuid4().hex[:20],
+                                                                  paths_sha("TEST FIXTURE awd e7 race")))
         m.attest("document", doc)
         review = m.start(doc)
         report, sha = m.integrity_report(doc)
         m.dispose(review, sha, None, "report_reviewed")
         m.ensure_verifier(key_id, key)
-        iv.verify(setup, setup, str(report), key, key_id)
+        m.as_verifier(lambda: iv.verify(setup, setup, str(report), key, key_id))
         m.submit(review, integrity=False)
         m.role(approver, "approver")
         snapshot = m.current_review(doc)[3]

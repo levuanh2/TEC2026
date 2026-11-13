@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
+import sys
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
@@ -29,9 +32,15 @@ from knowledge.integrity.claims import CLAIM_EXTRACTOR_VERSION, Claim, ClaimSour
 
 VERIFICATION_FORMAT = "kn-integrity-verification-1"
 #: The code that determines the verifier's claim set and verdict, relative to the `knowledge` package: the
-#: extractor, the claim-id derivation it imports, and this module (canonical form and comparison). Its digest
-#: is pinned by the owner and signed by the verifier; a change to any of them needs a re-pin.
-EXTRACTOR_SOURCES = ("integrity/claims.py", "ids.py", "integrity/verifier.py")
+#: extractor, the claim-id derivation it imports, this module (canonical form, comparison, verdict) and the
+#: package initialisers executed on import. E7.1: this list must equal the project-module import closure of
+#: claims.py and verifier.py (test_knowledge_integrity_verifier.py checks it with the AST), and both modules may
+#: import only STDLIB_IMPORTS from outside the project, so a new dependency cannot slip past the pin.
+EXTRACTOR_SOURCES = ("__init__.py", "ids.py", "integrity/__init__.py", "integrity/claims.py", "integrity/verifier.py")
+#: Standard-library modules the pinned code may import (their behaviour is pinned by RUNTIME below).
+STDLIB_IMPORTS = frozenset({"__future__", "collections.abc", "dataclasses", "datetime", "decimal", "hashlib", "json",
+                            "platform", "re", "sys", "typing", "unicodedata"})
+MANIFEST_FORMAT = "kn-extractor-manifest-1"
 
 
 def _num(value: Any) -> str:
@@ -63,6 +72,22 @@ def claim_record(claim: Claim, chunk_content_sha256: str) -> dict[str, Any]:
             "scope_tags": list(claim.scope)}
 
 
+def runtime_fingerprint() -> dict[str, str]:
+    """The runtime facts that can change extraction while the source stays the same: the interpreter (its `re`
+    engine, str methods, Decimal) and the Unicode database (`unicodedata`, used by claims.py)."""
+    return {"implementation": platform.python_implementation(),
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+            "unicodedata": unicodedata.unidata_version}
+
+
+def manifest_digest(sources: Sequence[tuple[str, bytes]], runtime: Mapping[str, str], extractor_version: str) -> str:
+    """The pinned extractor digest (E7.1): canonical JSON of {format, extractor_version, per-file sha256 of the
+    LF-normalized bytes, runtime}. Sorted keys, so independent of file order and of the checkout's line ends."""
+    body = {"format": MANIFEST_FORMAT, "extractor_version": extractor_version, "runtime": dict(runtime),
+            "files": {name: hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest() for name, data in sources}}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
+
+
 def code_digest(sources: Sequence[tuple[str, bytes]]) -> str:
     """sha256 over (name, LF-normalized source bytes) of the extractor modules, in the given fixed order."""
     h = hashlib.sha256()
@@ -82,17 +107,25 @@ def reextract(document_ref: str, chunks: Sequence[tuple[str, str, str]]) -> list
 def coverage(chunks: Sequence[tuple[str, str, str]], recomputed: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """What the re-extraction did and did not cover, per stored chunk (chunk_id, content, content_sha256).
 
-    Recorded in the signed statement as evidence; it does NOT change the verdict, which is about the claim
-    set only. `chunk_hash_mismatch` names chunks whose stored text does not hash to their stored
-    content_sha256: the database does not bind the two (an ingestion-level gap, documented), and the claims
-    are bound to the stored hash. `chunks_without_claims` are chunks in which the pinned extractor found
-    nothing: either no claim it recognises, or a claim outside its patterns (NOT evidence of clean content)."""
+    Recorded in the signed statement. `chunk_hash_mismatch` names chunks whose stored text does not hash
+    (sha256 of the exact UTF-8 bytes, no normalization) to their stored content_sha256, the contract of
+    knowledge/chunking.py; E7.1 makes any such chunk turn the verdict into `mismatch` (statement()), and the
+    database refuses a "reproduced" statement and the gate for such a version. `chunks_without_claims` are
+    chunks in which the pinned extractor found nothing: no claim it recognises, or a claim outside its
+    patterns (NOT evidence of clean content); they do not change the verdict."""
     with_claims = {c["chunk_id"] for c in recomputed}
+
+    def hash_ok(text: Any, digest: str) -> bool:
+        try:
+            return sha256_hex(text if isinstance(text, str) else "") == digest and isinstance(text, str)
+        except UnicodeEncodeError:                                      # e.g. a lone surrogate: not UTF-8 text
+            return False
+
     return {"chunks_read": len(chunks),
             "chunks_with_claims": sum(1 for cid, _, _ in chunks if cid in with_claims),
             "chunks_without_claims": sorted(cid for cid, _, _ in chunks if cid not in with_claims),
             "empty_chunks": sorted(cid for cid, text, _ in chunks if not (text or "").strip()),
-            "chunk_hash_mismatch": sorted(cid for cid, text, digest in chunks if sha256_hex(text or "") != digest)}
+            "chunk_hash_mismatch": sorted(cid for cid, text, digest in chunks if not hash_ok(text, digest))}
 
 
 def compare(recomputed: Sequence[Mapping[str, Any]], stored: Sequence[Mapping[str, Any]]) -> dict[str, list[str]]:
@@ -108,7 +141,9 @@ def statement(*, report: Mapping[str, Any], key_id: str, recomputed: Sequence[Ma
               extractor_code_digest: str, chunk_coverage: Mapping[str, Any] | None = None) -> str:
     """The exact text the verifier signs (canonical JSON: sorted keys, no whitespace, ASCII)."""
     diff = compare(recomputed, stored)
-    verdict = "reproduced" if not any(diff.values()) and chunks_read == report["chunk_count"] else "mismatch"
+    hash_ok = not (chunk_coverage or {}).get("chunk_hash_mismatch")
+    verdict = ("reproduced" if not any(diff.values()) and chunks_read == report["chunk_count"] and hash_ok
+               else "mismatch")
     body = {
         "format": VERIFICATION_FORMAT, "key_id": key_id, "verdict": verdict,
         "report_id": str(report["id"]), "report_sha256": report["report_sha256"],

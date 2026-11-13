@@ -51,10 +51,13 @@ chunks the REAL answer service (`RagQuestionService`) receives.
   report of the exact snapshot: it must be acknowledged and every needs-review finding resolved with evidence
   (false positive / contextual difference) by the review's verified reviewer, re-checked at approval. The
   dev3-01 state is reachable only through an explicit, recorded human error, which E1/E4 cannot yet prevent.
-- **E7 CLOSED in CI (migration 20261113240000), NOT on hosted.** An approval needs an Ed25519-signed
-  verification by a separately held verifier key that re-read the stored chunks and reproduced the stored claim
-  set; the database checks the signature (pgsodium) and recomputes the digest. Open infrastructure items: pgsodium
-  on hosted (deprecation), verifier key custody and an independent runner (`RAG_V15_M7_E7_INDEPENDENT_VERIFICATION.md` §6).
+- **E7 CLOSED in CI (migrations 20261113235900 + E7.1 20261114090000), NOT on hosted.** An approval needs a
+  verification submitted by the dedicated verifier role (not the producer's credential) that re-read the stored
+  chunks and reproduced the stored claim set under the pinned extractor manifest; the Ed25519 signature is checked
+  in the database when pgsodium is installed, otherwise only under an explicit owner-chosen offline-audit mode; a
+  chunk whose text does not hash to its recorded value blocks verification and the gate. Open infrastructure items:
+  a NON-OWNER producer login (production connects as `postgres`), a separate verifier runner and key custody,
+  the hosted attestation mode (`RAG_V15_M7_E7_1_PORTABLE_ATTESTATION.md` §6).
 - **E3 Detection does not exclude.** A contradiction or reference conflict never quarantines
   automatically (by design: no automatic quarantine). Exclusion depends on a human action.
 - **E4 No real expert identities.** All reviewers, approvers and archivists in tests are synthetic

@@ -75,7 +75,7 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     # this module's chunks above any other committed public knowledge, deterministically.
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
-                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
+                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(FIXTURE + content)))
     bring(conn, "document", doc, document_status, approver=approver, reason="fixture")   # via expert_review (D3)
     ids[key] = chunk_id
 
@@ -95,7 +95,7 @@ def _supersede(conn, ids, approver, key, content):
     chunk_id = _sha(source_id + "v2" + content)[:20]
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
-                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
+                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(FIXTURE + content)))
     bring(conn, "document", doc, "approved", approver=approver, reason="fixture v2")
     ids[key + "_v2"] = chunk_id
 

@@ -216,6 +216,20 @@
    ],
    "security_definer": true
   },
+  "knowledge_verifier.record_verification(text,bytea)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "knowledge_verifier.verification_input(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "match_knowledge_chunks_lexical(uuid,text,integer)": {
    "config": [
     "search_path=\"\""
@@ -429,6 +443,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_chunk_hash_problem(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_chunks_search_fields()": {
    "config": [
     "search_path=\"\""
@@ -546,6 +567,20 @@
    "security_definer": true
   },
   "private.knowledge_document_snapshot(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_ed25519_available()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_ed25519_verify(bytea,bytea,bytea)": {
    "config": [
     "search_path=\"\""
    ],
@@ -743,13 +778,6 @@
    "execute": [],
    "security_definer": true
   },
-  "private.knowledge_record_integrity_verification(text,bytea)": {
-   "config": [
-    "search_path=\"\""
-   ],
-   "execute": [],
-   "security_definer": true
-  },
   "private.knowledge_register_verifier_key(text,bytea,text)": {
    "config": [
     "search_path=\"\""
@@ -813,6 +841,13 @@
    "execute": [
     "authenticated"
    ],
+   "security_definer": false
+  },
+  "private.knowledge_set_attestation_mode(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": false
   },
   "private.knowledge_set_integrity_code_digest(text)": {
@@ -900,6 +935,13 @@
    "security_definer": true
   },
   "private.knowledge_verified_actor()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_verifier_caller()": {
    "config": [
     "search_path=\"\""
    ],

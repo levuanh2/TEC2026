@@ -1,6 +1,11 @@
 # RAG V1.5 M7 E7: independent, signed verification of integrity reports
 
-Status: **IMPLEMENTED, LOCAL/CI ONLY.** Migration `20261113240000_knowledge_integrity_independent_verification_m7_e7.sql`,
+> **E7.1 (`docs/rag/RAG_V15_M7_E7_1_PORTABLE_ATTESTATION.md`) supersedes parts of this document:** the migration is
+> renamed `20261113235900`, pgsodium is optional, verifications are submitted only by the dedicated verifier role
+> (the service-role RPC below is dropped), a chunk-hash mismatch fails the verdict and the gate, and the code digest
+> is a manifest over files and runtime.
+
+Status: **IMPLEMENTED, LOCAL/CI ONLY.** Migration `20261113235900_knowledge_integrity_independent_verification_m7_e7.sql`,
 rollback in `supabase/rollbacks/`. Stacked on E2 (#72) and the M7 harness (#71). Not applied to hosted.
 **dev3-01 stays OPEN.**
 

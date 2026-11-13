@@ -106,7 +106,7 @@ def snapshot(cur) -> dict:
     for sig, schema, secdef, config in rows(cur, """
             select p.oid::regprocedure::text, n.nspname, p.prosecdef, p.proconfig
             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-            where n.nspname in ('public','private') and p.prokind = 'f' order by 1"""):
+            where n.nspname in ('public','private','knowledge_verifier') and p.prokind = 'f' order by 1"""):
         cur.execute("select has_function_privilege('anon', %s::regprocedure, 'EXECUTE'),"
                     " has_function_privilege('authenticated', %s::regprocedure, 'EXECUTE')", (sig, sig))
         anon, auth = cur.fetchone()
