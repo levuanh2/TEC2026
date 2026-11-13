@@ -697,12 +697,15 @@ def authority(target, reference="TEST FIXTURE: repealing decision naming the sup
                                      "supersedes_document_pk": str(target)}]
 
 
-def cross_source(tx, m2, *, source_status="approved", content="awd cross source"):
+def cross_source(tx, m2, *, source_status="approved", content="awd cross source", countersign=True):
     """An approved version of one public source, and an attested version of ANOTHER public source
-    (in `source_status`) that names it as superseded: (old, old_chunk, new, new_chunk, other_source)."""
+    (in `source_status`) that names it as superseded: (old, old_chunk, new, new_chunk, other_source).
+    H-c: a synthetic custodian of the old version's source countersigns the replacement unless told not to."""
     _, old, old_chunk = approved(tx, m2, content=content + " old")
     other = tx.source(status=source_status)
     new, new_chunk = version(tx, m2, other, content=content + " new", supersedes_document_pk=old)
+    if countersign:
+        m2.countersign(new)
     return old, old_chunk, new, new_chunk, other
 
 

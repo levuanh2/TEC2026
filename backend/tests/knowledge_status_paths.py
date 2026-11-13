@@ -130,6 +130,7 @@ class M2:
         self.uploader = uuid.uuid4()
         self.reviewer = uuid.uuid4()
         self.archivist = uuid.uuid4()
+        self.custodian = uuid.uuid4()
 
     @classmethod
     def of(cls, db) -> "M2":
@@ -292,6 +293,44 @@ class M2:
         return self.db.execute("select status_event_id from public.knowledge_archive_records where id = %s",
                                (record,)).fetchone()[0]
 
+    def publisher_for(self, source_id):
+        """H-c: the verified publisher a synthetic registry admin bound `source_id` to (bound if needed)."""
+        row = self.db.execute("select publisher_id from public.knowledge_source_publishers where source_id = %s",
+                              (source_id,)).fetchone()
+        if row:
+            return row[0]
+        self.ensure_admin()
+        publisher = self.call(self.admin, "select public.knowledge_register_publisher(%s, %s, %s)",
+                              (f"test-fixture-{self.tag}-{uuid.uuid4().hex[:8]}", "TEST FIXTURE publisher (synthetic)",
+                               "TEST FIXTURE identity evidence (synthetic)"))[0][0]
+        self.call(self.admin, "select public.knowledge_bind_source_publisher(%s, %s, %s)",
+                  (source_id, publisher, "TEST FIXTURE ownership evidence (synthetic)"))
+        return publisher
+
+    def custody(self, uid, source_id):
+        """H-c: the active custodian assignment of `uid` for `source_id` (granted if needed)."""
+        person = self.person(uid, label="custodian")
+        self.publisher_for(source_id)
+        row = self.db.execute("select id from public.knowledge_source_custodians where personnel_id = %s"
+                              " and source_id = %s and status = 'active'", (person, source_id)).fetchone()
+        if row:
+            return row[0]
+        self.ensure_admin()
+        return self.call(self.admin, "select public.knowledge_grant_source_custodian(%s, %s, %s)",
+                         (person, source_id, "TEST FIXTURE custodian evidence (synthetic)"))[0][0]
+
+    def countersign(self, successor, custodian=None, *, successor_sha=None, target_sha=None):
+        """H-c: a custodian of the superseded version's source countersigns replacing it with `successor`."""
+        custodian = custodian or self.custodian
+        target, target_source = self.db.execute(
+            "select t.id, t.source_id from public.knowledge_documents d join public.knowledge_documents t"
+            " on t.id = d.supersedes_document_pk where d.id = %s", (successor,)).fetchone()
+        self.custody(custodian, target_source)
+        return self.call(custodian, "select public.knowledge_countersign_supersession(%s, %s, %s, %s)",
+                         (successor, successor_sha or self.snapshot_sha("document", successor),
+                          target_sha or self.snapshot_sha("document", target),
+                          "TEST FIXTURE countersignature: the custodian authorizes this replacement"))[0][0]
+
     def step(self, kind, key, frm, to, *, reason, approver):
         """One M2-owned transition; returns its audit event id."""
         if kind == "source":
@@ -324,6 +363,12 @@ M2_EVIDENCE_TRIGGERS = {
 }
 
 
+HC_EVIDENCE_TRIGGERS = {
+    "knowledge_supersession_authorizations": "knowledge_supersession_authorizations_guard",
+    "knowledge_source_custodians": "knowledge_source_custodians_guard",
+    "knowledge_source_publishers": "knowledge_source_publishers_guard",
+    "knowledge_publishers": "knowledge_publishers_guard",
+}
 HB_EVIDENCE_TRIGGERS = {
     "knowledge_emergency_actions": "knowledge_emergency_actions_guard",
     "knowledge_archive_records": "knowledge_archive_records_guard",
@@ -337,7 +382,8 @@ def m2_cleanup(conn, sources):
     owner lifts that only here, on a local/CI database."""
     sources = list(sources)
     hb = conn.execute("select to_regclass('public.knowledge_archive_records') is not null").fetchone()[0]
-    triggers = dict(M2_EVIDENCE_TRIGGERS, **(HB_EVIDENCE_TRIGGERS if hb else {}))
+    hc = conn.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null").fetchone()[0]
+    triggers = dict(M2_EVIDENCE_TRIGGERS, **(HB_EVIDENCE_TRIGGERS if hb else {}), **(HC_EVIDENCE_TRIGGERS if hc else {}))
     tags = [r[0] for r in conn.execute(
         "select distinct substring(p.identity_reference from '^TEST-FIXTURE-M2-([0-9a-f]{8})-')"
         " from public.knowledge_personnel p where p.id in ("
@@ -345,7 +391,11 @@ def m2_cleanup(conn, sources):
         "  union select reviewer_personnel_id from public.knowledge_expert_reviews where source_id = any(%(s)s)"
         "  union select approver_personnel_id from public.knowledge_approval_records where source_id = any(%(s)s)"
         + ("  union select archivist_personnel_id from public.knowledge_archive_records where source_id = any(%(s)s)"
-           if hb else "") + ")",
+           if hb else "")
+        + ("  union select custodian_personnel_id from public.knowledge_supersession_authorizations"
+           "   where target_source_id = any(%(s)s) or successor_source_id = any(%(s)s)"
+           "  union select personnel_id from public.knowledge_source_custodians where source_id = any(%(s)s)"
+           if hc else "") + ")",
         {"s": sources}).fetchall() if r[0]]
     users = [r[0] for r in conn.execute(
         "select auth_user_id from public.knowledge_personnel where identity_reference like any(%s)",
@@ -357,6 +407,16 @@ def m2_cleanup(conn, sources):
     for table, trigger in triggers.items():
         conn.execute(f"alter table public.{table} disable trigger {trigger}")
     try:
+        if hc:
+            publishers = [r[0] for r in conn.execute(
+                "select publisher_id from public.knowledge_source_publishers where source_id = any(%s)", (sources,))]
+            conn.execute("delete from public.knowledge_supersession_authorizations where target_source_id = any(%(s)s)"
+                         " or successor_source_id = any(%(s)s)", {"s": sources})
+            for table in ("knowledge_source_custodians", "knowledge_source_publishers"):
+                conn.execute(f"delete from public.{table} where source_id = any(%s)", (sources,))
+            conn.execute("delete from public.knowledge_publishers where id = any(%s) and publisher_key like 'test-fixture-%%'"
+                         " and not exists (select 1 from public.knowledge_source_publishers b where b.publisher_id = id)",
+                         (publishers,))
         for table in (("knowledge_emergency_actions", "knowledge_archive_records") if hb else ()) + (
                 "knowledge_approval_records", "knowledge_expert_reviews", "knowledge_upload_attestations"):
             conn.execute(f"delete from public.{table} where source_id = any(%(s)s)", {"s": sources})
