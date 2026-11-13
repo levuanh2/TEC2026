@@ -1,5 +1,6 @@
 -- Rollback for migrations/20261112120000_knowledge_review_read_m4_1.sql (RAG V1.5 M4.1).
--- Not in migrations/: run by hand, in ONE transaction, BEFORE any M4 rollback, then
+-- Not in migrations/: run by hand, in ONE transaction, AFTER the H-a rollback (if H-a is installed)
+-- and BEFORE any M4 rollback, then
 --   supabase migration repair --status reverted 20261112120000
 --
 -- M4.1 replaced nothing: this only drops what M4.1 added. No status, approval, retrieval, expiry or
@@ -14,6 +15,10 @@ begin
   if coalesce(current_setting('knowledge.m4_1_rollback_evidence_exported', true), '') <> 'yes' then
     raise exception 'M4.1 rollback DROPS the reviewer read audit: export it, then'
       ' set local knowledge.m4_1_rollback_evidence_exported = ''yes''';
+  end if;
+  if to_regclass('private.knowledge_deployment') is not null then
+    raise exception 'M4.1 rollback refused: H-a is installed (it replaced the M4 evidence state M4.1 reads);'
+      ' run supabase/rollbacks/20261113090000_knowledge_m2_hardening_assurance.down.sql first';
   end if;
 end;
 $$;

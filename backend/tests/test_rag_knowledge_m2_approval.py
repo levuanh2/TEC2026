@@ -713,7 +713,15 @@ DEMO_DOC = "select private.knowledge_demo_approve_document(%s, %s, %s)"
 DEMO_SRC = "select private.knowledge_demo_approve_source(%s, %s, %s)"
 
 
+ISOLATED = ("select private.knowledge_declare_isolated_test('TEST FIXTURE: local or CI isolated Supabase stack,"
+            " synthetic accounts only, transaction rolled back')")
+
+
 def _demo(tx, enabled, label="ci"):
+    """The owner's demo switch. H-a (D-H3a): demo approval needs an isolated test database, so turning
+    it on in a test also declares this local/CI database isolated (rolled back with the test)."""
+    if enabled:
+        tx.cur.execute(ISOLATED)
     tx.cur.execute("update private.knowledge_demo_mode set enabled = %s, environment_label = %s, note = %s",
                    (enabled, label if enabled else None, "TEST FIXTURE demo switch" if enabled else None))
 
@@ -753,7 +761,9 @@ def test_demo_approval_is_labelled_audited_retrievable_and_quarantined_for_go_li
                    " where document_pk = %s order by id", (doc,))
     assert [(t, r.startswith("DEMO - NOT EXPERT-REVIEWED"), a) for t, r, a in tx.cur.fetchall()] == [
         ("expert_review", True, "service_role"), ("approved", True, "service_role")]
-    assert chunk in tx.rpc_ids(tx.member, tx.season_a, "awd demo document")
+    # H-a: a demo approval is never served by the production retrieval, even on an isolated database
+    # (test_rag_knowledge_ha_assurance.py covers the labelled demo RPC)
+    assert chunk not in tx.rpc_ids(tx.member, tx.season_a, "awd demo document")
     # a verified approval is untouched by the go-live quarantine; demo ones are quarantined
     verified_doc, review = recommended(tx, m2, content="awd verified keeps")
     m2.decide(review, tx.approver)

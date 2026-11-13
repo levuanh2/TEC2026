@@ -59,6 +59,10 @@ DEFAULT_MIN_FUSED_SCORE = 0.0
 #: `ShortText` bound of the RAG contracts; `section_path` may be up to 1 000 characters.
 _SHORT_TEXT = 500
 _ELLIPSIS = "…"
+#: H-a (D-H3a): the label every demo-approved citation carries. Demo rows exist only on an isolated test
+#: database and only the explicit demo RPC returns them; the label is applied here whatever the source.
+DEMO_ASSURANCE_LABEL = "DEMO, NOT EXPERT-REVIEWED"
+_ASSURANCES = frozenset({"verified", "demo_unverified"})
 
 
 class LineageReader(Protocol):
@@ -71,6 +75,12 @@ class LineageReader(Protocol):
 
 class KnowledgeSearch(Protocol):
     def knowledge_matches(self, season_id: str, query: str, top_k: int) -> Sequence[Mapping[str, Any]]: ...
+
+
+class DemoKnowledgeSearch(KnowledgeSearch, Protocol):
+    """H-a: the labelled demo RPC (isolated test databases only; it refuses elsewhere)."""
+
+    def knowledge_matches_demo(self, season_id: str, query: str, top_k: int) -> Sequence[Mapping[str, Any]]: ...
 
 
 #: `PostgresRecommendationRepository.assert_can_write` -- raises `CropWriteDeniedError`.
@@ -127,6 +137,9 @@ class CallerSeasonScopeResolver:
 class RetrievalSettings:
     #: Rows whose RRF fused score is below this are dropped (DEV-calibrated, ADR §6).
     min_fused_score: float = DEFAULT_MIN_FUSED_SCORE
+    #: H-a: read through the labelled demo RPC. Off unless a caller sets it; the database refuses the
+    #: demo RPC on anything but a verified isolated test database, so this cannot widen a shared one.
+    include_demo: bool = False
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.min_fused_score) or self.min_fused_score < 0:
@@ -163,16 +176,26 @@ def evidence_from_row(row: Mapping[str, Any]) -> EvidenceChunk:
     """One RPC row -> `EvidenceChunk`. Every display field is trusted ingestion metadata;
     `content` is untrusted document text and is passed through verbatim."""
     published = row.get("published_at")
+    # The production RPC serves verified approvals only and has no assurance column; the demo RPC labels
+    # every row. Anything else is refused (fail closed: the row is not evidence).
+    assurance = row.get("approval_assurance", "verified")
+    if assurance not in _ASSURANCES:
+        raise ValueError(f"unknown approval assurance {assurance!r}")
+    title = _short(row.get("title")) or row["document_id"]
+    if assurance == "demo_unverified":
+        title = _short(f"{DEMO_ASSURANCE_LABEL}: {title}")
+    metadata = _scalar_metadata(row)
+    metadata["approval_assurance"] = assurance
     return EvidenceChunk(
         source_id=row["source_id"], document_id=row["document_id"], document_version=row.get("document_version"),
-        chunk_id=row["chunk_id"], title=_short(row.get("title")) or row["document_id"],
+        chunk_id=row["chunk_id"], title=title,
         section=_short(row.get("section_path")), content=row["content"], source_type=row["source_type"],
         visibility=row["visibility"],
         organization_id=str(row["organization_id"]) if row.get("organization_id") else None,
         farm_id=str(row["farm_id"]) if row.get("farm_id") else None,
         url=row.get("official_url"), authority=row.get("authority"),
         published_at=date.fromisoformat(published) if isinstance(published, str) else published,
-        metadata=_scalar_metadata(row),
+        metadata=metadata,
     )
 
 
@@ -194,7 +217,10 @@ class LexicalKnowledgeRetriever:
         if season_id is None:
             raise RetrievalUnavailable("retrieval needs the authorized crop season")
         try:
-            rows = self._search.knowledge_matches(season_id, query.text, query.top_k)
+            if self._settings.include_demo:
+                rows = self._search.knowledge_matches_demo(season_id, query.text, query.top_k)  # type: ignore[attr-defined]
+            else:
+                rows = self._search.knowledge_matches(season_id, query.text, query.top_k)
         except Exception as exc:  # noqa: BLE001 - adapter boundary: fail closed, cause chained
             raise RetrievalUnavailable(type(exc).__name__) from exc
         evidence: list[EvidenceChunk] = []

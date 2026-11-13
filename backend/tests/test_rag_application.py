@@ -268,3 +268,49 @@ def test_service_top_k_stays_bounded(top_k):
     with pytest.raises(ValueError):
         _service().evidence(reader=FakeReader(), crop_season_id=SEASON, question="AWD?", intent=RagIntent.EVIDENCE,
                             top_k=top_k)
+
+
+# ================================================================== H-a: approval assurance
+
+def test_a_demo_row_is_labelled_on_its_citation_and_a_verified_row_is_not():
+    demo = evidence_from_row({**_row("d"), "approval_assurance": "demo_unverified"})
+    verified = evidence_from_row({**_row("v"), "approval_assurance": "verified"})
+    production = evidence_from_row(_row("p"))                  # the production RPC has no such column
+    assert demo.title.startswith("DEMO, NOT EXPERT-REVIEWED: ") and demo.metadata["approval_assurance"] == "demo_unverified"
+    assert not verified.title.startswith("DEMO") and verified.metadata["approval_assurance"] == "verified"
+    assert production.metadata["approval_assurance"] == "verified"
+    long_demo = evidence_from_row({**_row("l", title="T" * 900), "approval_assurance": "demo_unverified"})
+    assert len(long_demo.title) == 500 and long_demo.title.startswith("DEMO, NOT EXPERT-REVIEWED: ")   # never cut off
+
+
+@pytest.mark.parametrize("assurance", ["unrecorded", "", None, "VERIFIED"])
+def test_a_row_with_any_other_assurance_is_not_evidence(assurance):
+    with pytest.raises(ValueError):
+        evidence_from_row({**_row("x"), "approval_assurance": assurance})
+    with pytest.raises(RetrievalUnavailable):
+        LexicalKnowledgeRetriever(FakeReader(rows=[{**_row("x"), "approval_assurance": assurance}])).retrieve(_query())
+
+
+class DemoReader(FakeReader):
+    def knowledge_matches_demo(self, season_id, query, top_k):
+        self.calls.append(("knowledge_matches_demo", season_id, query, top_k))
+        if self.error:
+            raise self.error
+        return list(self.rows)
+
+
+def test_demo_retrieval_is_opt_in_and_uses_only_the_demo_rpc():
+    rows = [{**_row("d"), "approval_assurance": "demo_unverified"}]
+    reader = DemoReader(rows=rows)
+    assert LexicalKnowledgeRetriever(reader).retrieve(_query())[0].title.startswith("DEMO")
+    assert reader.calls == [("knowledge_matches", SEASON, "AWD là gì?", 8)]          # default: production RPC
+    reader = DemoReader(rows=rows)
+    LexicalKnowledgeRetriever(reader, RetrievalSettings(include_demo=True)).retrieve(_query())
+    assert reader.calls == [("knowledge_matches_demo", SEASON, "AWD là gì?", 8)]
+    assert RetrievalSettings().include_demo is False
+    # the database refuses the demo RPC on a shared deployment: that is retrieval unavailable, not empty
+    with pytest.raises(RetrievalUnavailable):
+        LexicalKnowledgeRetriever(DemoReader(error=RuntimeError("42501")), RetrievalSettings(include_demo=True)
+                                  ).retrieve(_query())
+    with pytest.raises(RetrievalUnavailable):                                         # a reader without it
+        LexicalKnowledgeRetriever(FakeReader(rows=rows), RetrievalSettings(include_demo=True)).retrieve(_query())
