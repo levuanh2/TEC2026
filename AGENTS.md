@@ -1,5 +1,11 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## PR #73 CI follow-up (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `app/test/pricing_selection_test.dart` (new), this ownership record and `docs/PRICING_UI_2026_11.md` (verification update) | — (released) | PR #73's Flutter analyze and 483 tests pass, but changed-line coverage for new pricing UI is 3.6% (required 80%). Add meaningful pricing choice/login/summary tests; validate via GitHub CI. Preserve CI thresholds and runtime behavior; no emulator or local Android execution. | Added 10 widget tests covering 6 choices, cancel, responsive/large text, review and auth/password-gate priority. Formatted/source-reviewed; validation tracked by PR #73 CI. |
+
 ## Publish pricing + selection (2026-11-13)
 
 User requested commit/push of the completed web and Android pricing/selection

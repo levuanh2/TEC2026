@@ -88,3 +88,14 @@ Log và ảnh QA web nằm trong thư mục bị bỏ qua Git
 `web-dashboard/reports/pricing-2026-11/`. Người dùng sau đó yêu cầu commit và
 push các thay đổi này lên nhánh hiện tại `ui/agricarbon-web-flutter-2026-11-12`.
 Không deploy hoặc chạy Android trong lượt xuất bản này.
+
+## PR và CI
+
+PR: https://github.com/levuanh2/TEC2026/pull/73 → `main`.
+Theo yêu cầu tiếp theo của người dùng, CI chuẩn của repo được chạy trên GitHub.
+Lượt đầu Flutter analyze và 483 test đều đạt, nhưng độ phủ dòng mới chỉ 3,6%
+(yêu cầu 80%). Bổ sung 10 widget test trong `app/test/pricing_selection_test.dart`
+cho cả 6 lựa chọn, hủy quay lại, màn nhỏ/chữ lớn, xem lại gói và ưu tiên bước
+đổi/khôi phục mật khẩu trong AuthGate. Không đổi ngưỡng hoặc bỏ qua kiểm tra.
+Các test bổ sung được xác minh bằng CI trên GitHub; không tạo máy ảo hoặc chạy
+Android cục bộ. Kết quả cuối cùng nằm trong Checks của PR, không tự merge/deploy.
