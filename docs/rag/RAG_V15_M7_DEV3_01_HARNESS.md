@@ -64,6 +64,20 @@ chunks the REAL answer service (`RagQuestionService`) receives.
 - **E6 No real-model replay.** The dev3-01 replay on the frozen benchmark set with the real model needs a
   paid provider call; not done.
 
+### 4a. Replay matrix with E7 (`test_e7_replay_matrix_dishonest_operator_is_stopped_mistaken_expert_is_not`)
+
+Frozen dev3-01 fixture, real approval RPCs, real retrieval RPC, real `RagQuestionService` with a scripted model
+(no provider). Local/CI only.
+
+| Path | Detected | Refused at review | Refused at approval | Retrievable | Cited as answer evidence |
+|---|---|---|---|---|---|
+| Dishonest operator omits the dev3-01 claims (E7) | yes, by the independent verifier (`mismatch`, both assertions missing); the operator's report has 0 findings | yes (E7) | yes | no | no |
+| Honest operator, reviewer acknowledges but does not disposition (E2) | yes (M4/M5 findings) | yes (E2) | yes | no | no |
+| Honest operator, reviewer resolves every finding as `false_positive` with wrong evidence (E1/E4) | yes | no | no | **yes** | **yes** |
+
+The last row is a recorded, attributable human error that no control here prevents, so
+`test_rag_source_integrity_gap.py` is NOT flipped and dev3-01 stays OPEN.
+
 ## 5. What would flip the characterization
 
 Only a demonstrated, system-enforced prevention: for example E2 closed (approval impossible while a

@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure import integrity_verifier as iv
 from infrastructure.knowledge_claims_repo import PsycopgClaimStore
-from knowledge.integrity.claims import ClaimSource, extract_claims
+from knowledge.integrity.claims import extract_claims
 from tests import knowledge_status_paths as paths
 from tests.test_rag_knowledge_m2_approval import DECIDE, as_role, code, draft, m2, owner  # noqa: F401
 from tests.test_rag_knowledge_status_events import unwind_e7
@@ -294,3 +294,87 @@ def test_a_key_revocation_and_an_approval_serialize():
             for t in ("auth.mfa_factors", "auth.sessions"):
                 cleanup.execute(f"delete from {t} where user_id = %s", (approver,))
             cleanup.execute("delete from auth.users where id = %s", (approver,))
+
+
+def test_an_unverified_report_recorded_while_the_approval_waits_is_refused_by_e7():
+    """The version has a reproduced verification; a NEW report (identical claims, never independently verified)
+    is being recorded with the service path and holds the version's share lock. The approval waits for it, then
+    sees the new report as current and is refused by E7: a verification of the previous report does not carry
+    over. COMMITS synthetic rows and removes them."""
+    source_id = f"kn-e7rep-{uuid.uuid4().hex[:10]}"
+    approver = uuid.uuid4()
+    outcome: dict = {}
+    content = "TEST FIXTURE awd e7 report race"
+    with psycopg.connect(_DB_URL) as setup:
+        setup.execute("insert into auth.users (id, email, aud, role, created_at) values (%s, %s, 'authenticated',"
+                      " 'authenticated', now())", (approver, f"kn-e7rep-{approver.hex[:8]}@agricarbon-test.invalid"))
+        m = paths.M2.of(setup)
+        setup.execute("insert into public.knowledge_sources (source_id, title, owner, source_type, visibility)"
+                      " values (%s, 'TEST FIXTURE e7 report race', 'o', 'guideline', 'public')", (source_id,))
+        paths.bring(setup, "source", source_id, "approved", approver=approver)
+        doc = setup.execute(
+            "insert into public.knowledge_documents (source_id, document_id, document_version, title, language,"
+            " artifact_ref, file_sha256, normalized_sha256, parser_version, normalizer_version, chunker_version,"
+            " license_basis) values (%s, 'doc', 'v1', 'TEST FIXTURE', 'vi', %s, %s, %s, 'p', 'n', 'c',"
+            " 'official_publication') returning id",
+            (source_id, f"knowledge-artifacts/{'a' * 64}/d.md", "a" * 64, "b" * 64)).fetchone()[0]
+        setup.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
+                      " values (%s, %s, 0, %s, %s)", (doc, uuid.uuid4().hex[:20], content, paths_sha(content)))
+        m.attest("document", doc)
+        review = m.start(doc)
+        first, _ = m.acknowledge(review)                              # report + reproduced verification
+        assert setup.execute("select verdict from public.knowledge_integrity_verifications where report_id = %s",
+                             (first,)).fetchone()[0] == "reproduced"
+        m.submit(review)
+        m.role(approver, "approver")
+        snapshot = m.current_review(doc)[3]
+        setup.commit()
+    try:
+        with psycopg.connect(_DB_URL) as a, psycopg.connect(_DB_URL) as b:
+            second, _ = paths.M2.of(a).integrity_report(doc)            # uncommitted, NOT verified: FOR SHARE held
+
+            def approve():
+                try:
+                    b.execute("set lock_timeout = '20s'")
+                    paths.M2.of(b).call(approver, DECIDE, (review, "approve", snapshot, "race"))
+                    b.commit()
+                    outcome["approval"] = ("ok", "")
+                except psycopg.Error as exc:
+                    b.rollback()
+                    outcome["approval"] = (exc.sqlstate, str(exc))
+            worker = threading.Thread(target=approve)
+            worker.start()
+            worker.join(timeout=2)
+            assert worker.is_alive(), "the approval did not wait for the new report's share lock"
+            a.commit()
+            worker.join(timeout=30)
+            assert not worker.is_alive()
+        state, message = outcome["approval"]
+        assert second != first
+        assert state == CHECK_VIOLATION and "integrity gate (E7)" in message, message
+        with psycopg.connect(_DB_URL, autocommit=True) as c:
+            assert c.execute("select status::text from public.knowledge_documents where id = %s", (doc,)).fetchone()[0] \
+                == "expert_review"
+    finally:
+        with psycopg.connect(_DB_URL, autocommit=True) as cleanup:
+            paths.m2_cleanup(cleanup, [source_id])
+            pairs = (("knowledge_documents", "knowledge_documents_immutable"), ("knowledge_claims", "user"),
+                     ("knowledge_sources", "knowledge_sources_scope"), ("knowledge_chunks", "user"))
+            for t, trg in pairs:
+                cleanup.execute(f"alter table public.{t} disable trigger {trg}")
+            try:
+                cleanup.execute("delete from public.knowledge_claims where source_id = %s", (source_id,))
+                cleanup.execute("delete from public.knowledge_chunks where document_pk = %s", (doc,))
+                cleanup.execute("delete from public.knowledge_documents where source_id = %s", (source_id,))
+                cleanup.execute("delete from public.knowledge_sources where source_id = %s", (source_id,))
+            finally:
+                for t, trg in pairs:
+                    cleanup.execute(f"alter table public.{t} enable trigger {trg}")
+            for t in ("auth.mfa_factors", "auth.sessions"):
+                cleanup.execute(f"delete from {t} where user_id = %s", (approver,))
+            cleanup.execute("delete from auth.users where id = %s", (approver,))
+
+
+def paths_sha(text):
+    from knowledge.ids import sha256_hex
+    return sha256_hex(text)

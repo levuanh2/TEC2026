@@ -24,11 +24,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
+from knowledge.ids import sha256_hex
 from knowledge.integrity.claims import CLAIM_EXTRACTOR_VERSION, Claim, ClaimSource, extract_claims
 
 VERIFICATION_FORMAT = "kn-integrity-verification-1"
-#: The extractor code the verifier runs; its digest is pinned by the owner and signed by the verifier.
-EXTRACTOR_SOURCES = ("claims.py",)
+#: The code that determines the verifier's claim set and verdict, relative to the `knowledge` package: the
+#: extractor, the claim-id derivation it imports, and this module (canonical form and comparison). Its digest
+#: is pinned by the owner and signed by the verifier; a change to any of them needs a re-pin.
+EXTRACTOR_SOURCES = ("integrity/claims.py", "ids.py", "integrity/verifier.py")
 
 
 def _num(value: Any) -> str:
@@ -76,6 +79,22 @@ def reextract(document_ref: str, chunks: Sequence[tuple[str, str, str]]) -> list
     return out
 
 
+def coverage(chunks: Sequence[tuple[str, str, str]], recomputed: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """What the re-extraction did and did not cover, per stored chunk (chunk_id, content, content_sha256).
+
+    Recorded in the signed statement as evidence; it does NOT change the verdict, which is about the claim
+    set only. `chunk_hash_mismatch` names chunks whose stored text does not hash to their stored
+    content_sha256: the database does not bind the two (an ingestion-level gap, documented), and the claims
+    are bound to the stored hash. `chunks_without_claims` are chunks in which the pinned extractor found
+    nothing: either no claim it recognises, or a claim outside its patterns (NOT evidence of clean content)."""
+    with_claims = {c["chunk_id"] for c in recomputed}
+    return {"chunks_read": len(chunks),
+            "chunks_with_claims": sum(1 for cid, _, _ in chunks if cid in with_claims),
+            "chunks_without_claims": sorted(cid for cid, _, _ in chunks if cid not in with_claims),
+            "empty_chunks": sorted(cid for cid, text, _ in chunks if not (text or "").strip()),
+            "chunk_hash_mismatch": sorted(cid for cid, text, digest in chunks if sha256_hex(text or "") != digest)}
+
+
 def compare(recomputed: Sequence[Mapping[str, Any]], stored: Sequence[Mapping[str, Any]]) -> dict[str, list[str]]:
     """Missing (recomputed, not stored), extra (stored, not recomputed) and altered claim ids."""
     a = {c["claim_id"]: canonical_line(c) for c in recomputed}
@@ -86,7 +105,7 @@ def compare(recomputed: Sequence[Mapping[str, Any]], stored: Sequence[Mapping[st
 
 def statement(*, report: Mapping[str, Any], key_id: str, recomputed: Sequence[Mapping[str, Any]],
               stored: Sequence[Mapping[str, Any]], chunks_read: int, registry_digest: str,
-              extractor_code_digest: str) -> str:
+              extractor_code_digest: str, chunk_coverage: Mapping[str, Any] | None = None) -> str:
     """The exact text the verifier signs (canonical JSON: sorted keys, no whitespace, ASCII)."""
     diff = compare(recomputed, stored)
     verdict = "reproduced" if not any(diff.values()) and chunks_read == report["chunk_count"] else "mismatch"
@@ -102,4 +121,6 @@ def statement(*, report: Mapping[str, Any], key_id: str, recomputed: Sequence[Ma
         "limitations": ["reproducibility of the claim set under the pinned extractor only; claims the extractor"
                         " does not recognise are not found by either run"],
     }
+    if chunk_coverage is not None:
+        body["coverage"] = dict(chunk_coverage)
     return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

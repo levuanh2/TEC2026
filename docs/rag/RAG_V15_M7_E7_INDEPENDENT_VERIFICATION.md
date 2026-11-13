@@ -52,6 +52,19 @@ scope tags (sorted, `,`-joined); numbers without trailing zeros (`trim_scale` / 
 lines joined by `\n`; sha256 of UTF-8. The statement is JSON with sorted keys and no whitespace. Nothing depends
 on filesystem order, locale, DateStyle, timezone or JSON key order.
 
+**Pinned code.** The extractor code digest covers `knowledge/integrity/claims.py`, `knowledge/ids.py` (claim-id
+derivation) and `knowledge/integrity/verifier.py` (canonical form, comparison, verdict), LF-normalized; changing
+any of them needs a re-pin, and a verifier running other code is refused.
+
+**Coverage evidence (signed, stored, not a verdict input).** The statement also carries `coverage`: chunks read,
+chunks with claims, `chunks_without_claims` (the pinned extractor found nothing there: no recognised claim, or a
+claim outside its patterns; NOT evidence of clean content), `empty_chunks`, and `chunk_hash_mismatch` (stored text
+that does not hash to its stored `content_sha256`). The verdict stays about the claim set only. The database does
+**not** bind `knowledge_chunks.content_sha256` to `content` (no constraint; ingestion computes it, and the test
+fixtures store prefixed text with the unprefixed hash). The verifier extracts from the actual stored text, so this
+does not let an omitted claim through; it is a provenance gap (artifact to chunk), recorded for a later
+ingestion-level constraint, not enforced here.
+
 **What a match proves:** the operator did not omit, add or alter what the pinned extractor finds in the stored
 text. **What it does not prove:** that the extractor finds every scientific claim, or that any claim is true.
 
@@ -86,6 +99,7 @@ report and then shows the dev3-01 findings; forgery with the service credential 
 statement, false "reproduced" claim, no registration / revocation / pin rights, no direct writes, no client read);
 a statement about another version; stale after metadata, code-digest re-pin, registry re-pin and key revocation;
 reviewer false positives do not replace the verification; a correctly verified synthetic document is approved;
-committed key-revocation race. `test_knowledge_integrity_verifier.py` (offline): canonical numbers, order
-independence, field sensitivity, diff, canonical statement, CRLF-independent code digest. Every existing suite
+committed key-revocation race; committed report race (a new, unverified report recorded while the approval
+waits is refused by E7: the previous report's verification does not carry over). `test_knowledge_integrity_verifier.py` (offline): canonical numbers, order
+independence, field sensitivity, diff, canonical statement, CRLF-independent code digest, coverage (unprocessed and hash-inconsistent chunks) recorded without changing the verdict. Every existing suite
 runs through the fixture helper, which verifies each report with the in-memory synthetic key.
