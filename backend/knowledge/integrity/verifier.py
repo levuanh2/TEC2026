@@ -24,7 +24,7 @@ import platform
 import sys
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
-from decimal import Decimal
+from decimal import Context, Decimal
 from typing import Any
 
 from knowledge.ids import sha256_hex
@@ -41,12 +41,14 @@ EXTRACTOR_SOURCES = ("__init__.py", "ids.py", "integrity/__init__.py", "integrit
 STDLIB_IMPORTS = frozenset({"__future__", "collections.abc", "dataclasses", "datetime", "decimal", "hashlib", "json",
                             "platform", "re", "sys", "typing", "unicodedata"})
 MANIFEST_FORMAT = "kn-extractor-manifest-1"
+_DECIMAL = Context(prec=60)
 
 
 def _num(value: Any) -> str:
     if value is None:
         return ""
-    text = format(Decimal(repr(value) if isinstance(value, float) else str(value)).normalize(), "f")
+    # a LOCAL context: the process-global decimal context (which any module may change) must not round here
+    text = format(Decimal(repr(value) if isinstance(value, float) else str(value)).normalize(_DECIMAL), "f")
     return "0" if text in ("-0", "") else text
 
 
