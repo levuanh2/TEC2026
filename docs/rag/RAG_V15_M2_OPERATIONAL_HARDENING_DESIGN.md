@@ -1,8 +1,9 @@
 # RAG V1.5 M2 operational hardening (implementation-ready design)
 
 Status: **DESIGN (refreshed 2026-11-13). Nothing here is implemented in this PR.** No migration, no
-code, no hosted change. Base: `integrate/rag-v15` at `a9bf0e6` (M1, M2, M3, M4, M4.1 merged; #59
-design docs merged as `c4cb1a9`, #60 M4.1 as `a9bf0e6`). All four owner decisions are taken (section
+code, no hosted change. Base: `integrate/rag-v15` at `3cd743d` (M1, M2, M3, M4, M4.1, M5 foundation
+merged; #59 design docs as `c4cb1a9`, #60 M4.1 as `a9bf0e6`, #61 M5 foundation as `3cd743d`; #61 adds
+only offline Python and no migration). All four owner decisions are taken (section
 8). The implementation follows in separate stacked Draft PRs H-a, H-b, H-c. dev3-01 stays OPEN.
 
 Why a design and not a migration in this PR: every change below replaces a function that M2 or M3
@@ -215,7 +216,8 @@ custodian of another source refused; stale snapshot refused; record immutable.
 
 ## 7. Delivery order
 
-1. #60 (M4.1) merged: `a9bf0e6` (2026-11-12). Done.
+1. #60 (M4.1) merged: `a9bf0e6` (2026-11-12); #61 (M5 foundation, offline only) merged: `3cd743d`
+   (2026-11-13). Done.
 2. Migration H-a `..._knowledge_m2_hardening_assurance.sql`: 4.1 and 4.2, with rollback. First,
    because it closes the path by which unverified content reaches retrieval.
 3. Migration H-b `..._knowledge_m2_hardening_operator.sql`: H1 and H2.
