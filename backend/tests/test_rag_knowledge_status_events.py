@@ -323,6 +323,7 @@ M3 = ROOT / "supabase/migrations/20261111090000_knowledge_effective_dates_m3.sql
 M3_ROLLBACK = ROOT / "supabase/rollbacks/20261111090000_knowledge_effective_dates_m3.down.sql"
 M4 = ROOT / "supabase/migrations/20261112090000_knowledge_claims_contradictions_m4.sql"
 M4_ROLLBACK = ROOT / "supabase/rollbacks/20261112090000_knowledge_claims_contradictions_m4.down.sql"
+M4_1_ROLLBACK = ROOT / "supabase/rollbacks/20261112120000_knowledge_review_read_m4_1.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -345,7 +346,10 @@ def _live_body(tx, name):
 
 
 def unwind_m4(tx):
-    """M4 (claims and contradiction candidates) replaces nothing and unwinds first."""
+    """M4.1 (reviewer read) and M4 (claims and contradiction candidates) replace nothing and unwind
+    first, newest first: the M4.1 audit table references the M2 registry."""
+    tx.cur.execute("set local knowledge.m4_1_rollback_evidence_exported = 'yes'")
+    tx.cur.execute(_without_tx_control(M4_1_ROLLBACK))
     tx.cur.execute("set local knowledge.m4_rollback_evidence_exported = 'yes'")
     tx.cur.execute(_without_tx_control(M4_ROLLBACK))
 

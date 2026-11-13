@@ -1,0 +1,152 @@
+# RAG V1.5 M4.1: reviewer read access to claims and contradiction candidates
+
+Status: **implemented, local and CI only (2026-11-12).** Migration
+`supabase/migrations/20261112120000_knowledge_review_read_m4_1.sql`, rollback
+`supabase/rollbacks/20261112120000_knowledge_review_read_m4_1.down.sql`. Not applied to hosted; a
+hosted migration needs an owner decision. Depends on M2, M3 and M4. dev3-01 stays OPEN.
+
+The design it follows is `RAG_V15_M4_REVIEWER_READ_DESIGN.md` (PR #59). This file records what was
+built and where it differs.
+
+## 1. What it is
+
+One read-only RPC, `public.knowledge_review_claims(p_document_pk uuid) returns jsonb`, for a
+verified expert reviewer or approver. It returns the M4 claims of one document version and the
+contradiction candidates in which one of those claims takes part.
+
+It is **non-blocking**. It changes no knowledge status, approves and rejects nothing, quarantines
+nothing, and no review or approval depends on it. A stored candidate stays a reviewer aid until a
+separate blocking policy is designed, reviewed and approved. The response, every claim and every
+candidate carry `"assurance": "unverified_analysis"`, and the response has a fixed notice saying so.
+
+## 2. Access
+
+| Check | How |
+|---|---|
+| Supabase Auth identity, active `aal2` session | `private.knowledge_verified_actor()` (M2): role `authenticated`, JWT at `aal2`, a live aal2 `auth.sessions` row, a verified MFA factor, not banned, deleted or anonymous, no pending password change. The identity is `auth.uid()`; the RPC takes no identity parameter. |
+| Active `expert_reviewer` or `approver` role | `private.knowledge_actor_role` (M2): the role and the person are active and inside the role's validity window. |
+| Scope | The role's scope must equal the scope of the requested version's source: same visibility, and for a tenant source the same organization. |
+
+Uploaders, registry admins, tenants, `anon`, `service_role` and the database owner get nothing. The
+function is `SECURITY DEFINER` with `search_path = ''`, static SQL, `EXECUTE` for `authenticated`
+only. It takes one uuid and no table, column, filter or SQL fragment, so it is not a service-role
+pass-through.
+
+**Farm scope.** M2 roles are scoped per visibility and organization, not per farm. A reviewer of an
+organization reads the claims of every farm of that organization. M4.1 does not widen that boundary
+and does not narrow it; farm-level reviewer roles would be a change to the M2 registry.
+
+## 3. Disclosure
+
+Returned: the claims of the requested version (with the version identity, `file_sha256`, the chunk
+hash and span), the version's M4 evidence state, and the candidates.
+
+The **other** claim of a candidate is disclosed only if the caller could read that version on their
+own:
+
+- the caller holds an active `expert_reviewer` or `approver` role for the scope of its source, or
+- it is public knowledge that is active (approved, source approved, in force), which every signed-in
+  user can already retrieve.
+
+Otherwise the candidate is withheld entirely: no row, no placeholder, and it is not counted, in the
+response or in the audit row.
+
+| Requested version | Other claim | Caller | Result |
+|---|---|---|---|
+| public | public | public reviewer | returned |
+| tenant org A | public, active | reviewer for org A | returned |
+| tenant org A | public, not served (draft, quarantined, expired) | reviewer for org A only | withheld |
+| public | tenant org A | public reviewer only | withheld |
+| tenant org A | tenant org B | anyone | cannot exist: M4 refuses to store a pair across organizations |
+
+## 4. Audit
+
+`public.knowledge_review_read_events`, append-only (the M2 evidence guard and truncate guard; the
+owner cannot insert, update, delete or truncate). One row per call that reached the role check:
+
+- `caller_user_id`, `caller_session_id` (the verified identity and session);
+- `personnel_id`, `role_id`, `role` (the role the access was granted under; null for a denial);
+- `requested_document_pk`, `recorded_at`, `recorded_xact`;
+- `outcome` (`granted` or `denied`), `claims_returned`, `candidates_returned`.
+
+It holds no document text and no claim text. Only `service_role` can read it (RLS on, no policy).
+
+**No existence oracle.** A denial is one answer, `{"access": "denied", ...}`, whether the version
+does not exist, is in another scope, or the caller holds no reviewer or approver role. Whether a
+denied call is recorded depends only on how many denials that caller already has in the last hour,
+never on the document. The audit row
+has the same shape in all three cases: the id as requested, no personnel, no counts. The requested
+id has no foreign key, so a row for a missing version is indistinguishable from one for a version
+the caller may not read. Withheld candidates are not counted in the row.
+
+## 5. Differences from the design in #59
+
+1. A denial is **returned**, not raised as `42501`. A raised error would roll the audit row back,
+   and the owner asked for the access outcome to be recorded. A caller who fails
+   `private.knowledge_verified_actor()` (no aal2, no session, service login) still gets `42501` and
+   leaves no row.
+2. The audit table was an open owner decision in the design; the owner approved it.
+3. A tenant reviewer does not see a candidate against public material that is not being served. The
+   design table said "public text is readable by everyone in scope"; a public draft is not.
+
+## 6. Known limits
+
+- Denied calls are recorded up to 20 rows per caller in any rolling hour
+  (`private.knowledge_review_read_denied_cap()`). A denied call above the cap gets the same answer
+  and is counted in `public.knowledge_review_read_denied_overflow`: one row per caller and clock
+  hour with `suppressed_calls`, `first_at` and `last_at`. The table is grow-only (written by the
+  read function alone; no other insert, no decrease, no delete, no truncate) and readable by
+  `service_role` only. So probing past the cap stays visible (who, when, how many); the id each of
+  those calls asked for is not kept. This bounds what an account without a role can add: 20 rows
+  plus one counter row an hour. Granted reads are always recorded.
+  **Owner decision (2026-11-12):** keep at most 20 detailed denied-read rows per caller within a
+  rolling hour, with the per-caller aggregate overflow counter.
+  The count runs under a per-caller advisory lock, and each statement of the function takes a
+  fresh snapshot under READ COMMITTED (the PostgREST default). A caller that opens its own
+  REPEATABLE READ transaction counts against that transaction's snapshot, so concurrent
+  transactions of ONE caller could each record up to the cap; the bound is then the cap times that
+  caller's concurrent transactions, still finite and still attributed. The row pins no account (no
+  foreign key on the caller).
+- **The cap is NOT an API rate limit.** It bounds audit growth only. A call above the cap is
+  answered exactly like a call below it: the function never refuses, delays or blocks a caller,
+  and it does the same work (identity check, role lookups, one write). Limiting request volume is
+  a separate control that this migration does not provide; see section 6.1.
+- Claim and candidate ids come from global sequences. Gaps between ids exist for many reasons and
+  are not attributable to a document, but the ids are not opaque.
+- The RPC does not compare `file_sha256` with the hash confirmed in an open M2 review; the reviewer
+  does. It does not require an open review, because an approver reads candidates after the
+  reviewer's recommendation.
+- No web screen. One must go through the web role-verification gate.
+- The M2 operational risks (database-owner trust boundary, service-role archive and quarantine, demo
+  approval) are unchanged by M4.1.
+
+### 6.1 Hosted precondition: gateway rate limiting
+
+HOSTED-PRECONDITION: gateway-rate-limit (NOT MET; no hosted migration of M4.1 before it is).
+
+`public.knowledge_review_claims` is callable by every `authenticated` aal2 session through
+PostgREST. Nothing in the database limits how often. Before M4.1 is applied to any hosted project,
+the deployment must have, and must have tested, a request rate limit in front of
+`/rest/v1/rpc/knowledge_review_claims` (API gateway, reverse proxy or the platform's own limiter),
+keyed per authenticated user and per source address. The limit, where it is enforced and the test
+evidence are an owner decision recorded in the hosted migration request; none is chosen here, and
+no hosted configuration was read or changed for this document.
+
+What the database guarantees without it, and what the tests prove
+(`test_the_denied_cap_bounds_the_audit_and_is_not_a_rate_limit`): every call above the cap is still
+answered, in the same shape, and is still counted; granted reads above 20 an hour are all served
+and all recorded. So the database stays correct under a flood, but it does not stop one.
+
+## 7. Rollback
+
+Order is M4.1, M4, M3, M2, M1. The M4 rollback refuses while M4.1 is installed. The M4.1 rollback
+drops the read audit, so it needs
+`set local knowledge.m4_1_rollback_evidence_exported = 'yes'` after an export.
+
+## 8. Tests
+
+`backend/tests/test_rag_knowledge_m4_1_review_read.py`, against the real database roles:
+privileges and append-only audit; every unverified caller is refused without a row; reviewer and
+approver in scope; one denial for every other caller and for a missing version; suspended and
+revoked roles; the disclosure cases; a stored candidate blocks no approval and a read changes no
+status; rollback and replay.
