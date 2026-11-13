@@ -73,6 +73,15 @@ def event_reason(frm, to, reason):
 
 
 _REGISTRY = {}
+_VERIFIER = {}
+
+
+def test_verifier_key():
+    """(key_id, Ed25519 private key): generated once per test process, held only in memory (never written)."""
+    if "k" not in _VERIFIER:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        _VERIFIER["k"] = (f"test-fixture-verifier-{uuid.uuid4().hex[:12]}", Ed25519PrivateKey.generate())
+    return _VERIFIER["k"]
 
 
 def integrity_registry():
@@ -310,7 +319,31 @@ class M2:
         if not self.db.execute("select 1 from public.knowledge_integrity_dispositions where review_id = %s and"
                                " report_id = %s and finding_id is null", (review, report)).fetchone():
             self.dispose(review, sha, None, "report_reviewed", reviewer=reviewer or uid)
+        self.verify_report(report)
         return report, sha
+
+    # -- M7 E7: independent, signed verification ------------------------------------------------------
+
+    def verify_report(self, report):
+        """The independent verifier (a synthetic test key, generated in this process, never stored) re-reads
+        the chunks and signs; the owner pins the code digest and registers the key in the test transaction."""
+        if not self.db.execute("select to_regclass('public.knowledge_integrity_verifications') is not null").fetchone()[0]:
+            return None
+        if self.db.execute("select 1 from public.knowledge_integrity_verifications where report_id = %s"
+                           " and verdict = 'reproduced'", (report,)).fetchone():
+            return None
+        from infrastructure import integrity_verifier
+        key_id, key = test_verifier_key()
+        self.ensure_verifier(key_id, key)
+        return integrity_verifier.verify(self.db, self.db, str(report), key, key_id)
+
+    def ensure_verifier(self, key_id, key):
+        from infrastructure.integrity_verifier import extractor_code_digest, public_key_bytes
+        if self.db.execute("select extractor_code_digest from private.knowledge_integrity_policy").fetchone()[0] is None:
+            self.db.execute("select private.knowledge_set_integrity_code_digest(%s)", (extractor_code_digest(),))
+        if not self.db.execute("select 1 from public.knowledge_integrity_verifier_keys where key_id = %s", (key_id,)).fetchone():
+            self.db.execute("select private.knowledge_register_verifier_key(%s, %s, %s)",
+                            (key_id, public_key_bytes(key), "TEST FIXTURE verifier (synthetic key, local/CI only)"))
 
     def dispose(self, review, sha, finding, disposition, *, reviewer=None, justification=None, evidence=None):
         uid = reviewer or self.db.execute("select reviewer_user_id from public.knowledge_expert_reviews where id = %s",
@@ -433,6 +466,7 @@ HC_EVIDENCE_TRIGGERS = {
     "knowledge_source_publishers": "knowledge_source_publishers_guard",
     "knowledge_publishers": "knowledge_publishers_guard",
 }
+E7_EVIDENCE_TRIGGERS = {"knowledge_integrity_verifications": "knowledge_integrity_verifications_guard"}
 E2_EVIDENCE_TRIGGERS = {
     "knowledge_integrity_dispositions": "knowledge_integrity_dispositions_guard",
     "knowledge_integrity_findings": "knowledge_integrity_findings_guard",
@@ -453,8 +487,9 @@ def m2_cleanup(conn, sources):
     hb = conn.execute("select to_regclass('public.knowledge_archive_records') is not null").fetchone()[0]
     hc = conn.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null").fetchone()[0]
     e2 = conn.execute("select to_regclass('public.knowledge_integrity_reports') is not null").fetchone()[0]
+    e7 = conn.execute("select to_regclass('public.knowledge_integrity_verifications') is not null").fetchone()[0]
     triggers = dict(M2_EVIDENCE_TRIGGERS, **(HB_EVIDENCE_TRIGGERS if hb else {}), **(HC_EVIDENCE_TRIGGERS if hc else {}),
-                    **(E2_EVIDENCE_TRIGGERS if e2 else {}))
+                    **(E2_EVIDENCE_TRIGGERS if e2 else {}), **(E7_EVIDENCE_TRIGGERS if e7 else {}))
     tags = [r[0] for r in conn.execute(
         "select distinct substring(p.identity_reference from '^TEST-FIXTURE-M2-([0-9a-f]{8})-')"
         " from public.knowledge_personnel p where p.id in ("
@@ -478,6 +513,9 @@ def m2_cleanup(conn, sources):
     for table, trigger in triggers.items():
         conn.execute(f"alter table public.{table} disable trigger {trigger}")
     try:
+        if e7:
+            conn.execute("delete from public.knowledge_integrity_verifications where report_id in (select id from"
+                         " public.knowledge_integrity_reports where source_id = any(%(s)s))", {"s": sources})
         if e2:
             conn.execute("delete from public.knowledge_integrity_dispositions where report_id in (select id from"
                          " public.knowledge_integrity_reports where source_id = any(%(s)s))", {"s": sources})

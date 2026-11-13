@@ -443,6 +443,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_claim_set_digest(uuid,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_classify_claim_pair(bigint,bigint,numeric)": {
    "config": [
     "search_path=\"\""
@@ -643,6 +650,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_integrity_verification_problem(knowledge_integrity_reports)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_live_system_identifier()": {
    "config": [
     "search_path=\"\""
@@ -729,6 +743,20 @@
    "execute": [],
    "security_definer": true
   },
+  "private.knowledge_record_integrity_verification(text,bytea)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
+  "private.knowledge_register_verifier_key(text,bytea,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.knowledge_registry_admin_actor()": {
    "config": [
     "search_path=\"\""
@@ -764,6 +792,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_revoke_verifier_key(text,text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
+  },
   "private.knowledge_same_person(uuid,uuid[])": {
    "config": [
     "search_path=\"\""
@@ -778,6 +813,13 @@
    "execute": [
     "authenticated"
    ],
+   "security_definer": false
+  },
+  "private.knowledge_set_integrity_code_digest(text)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
    "security_definer": false
   },
   "private.knowledge_set_integrity_policy(text,text,text,text)": {
@@ -858,6 +900,13 @@
    "security_definer": true
   },
   "private.knowledge_verified_actor()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_verifier_key_guard()": {
    "config": [
     "search_path=\"\""
    ],
@@ -2161,6 +2210,14 @@
    "enabled": true,
    "forced": false
   },
+  "knowledge_integrity_verifications": {
+   "enabled": true,
+   "forced": false
+  },
+  "knowledge_integrity_verifier_keys": {
+   "enabled": true,
+   "forced": false
+  },
   "knowledge_personnel": {
    "enabled": true,
    "forced": false
@@ -2436,6 +2493,10 @@
   "knowledge_integrity_findings.knowledge_integrity_findings_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_integrity_reports.knowledge_integrity_reports_guard": "private.knowledge_evidence_guard()",
   "knowledge_integrity_reports.knowledge_integrity_reports_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_integrity_verifications.knowledge_integrity_verifications_guard": "private.knowledge_evidence_guard()",
+  "knowledge_integrity_verifications.knowledge_integrity_verifications_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_integrity_verifier_keys.knowledge_integrity_verifier_keys_guard": "private.knowledge_verifier_key_guard()",
+  "knowledge_integrity_verifier_keys.knowledge_integrity_verifier_keys_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_personnel.knowledge_personnel_guard": "private.knowledge_personnel_guard()",
   "knowledge_personnel.knowledge_personnel_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_personnel_roles.knowledge_personnel_roles_guard": "private.knowledge_personnel_guard()",
@@ -2572,6 +2633,9 @@
   "knowledge_integrity_findings_pkey": "CREATE UNIQUE INDEX knowledge_integrity_findings_pkey ON public.knowledge_integrity_findings USING btree (id)",
   "knowledge_integrity_reports_pkey": "CREATE UNIQUE INDEX knowledge_integrity_reports_pkey ON public.knowledge_integrity_reports USING btree (id)",
   "knowledge_integrity_reports_report_sha256_key": "CREATE UNIQUE INDEX knowledge_integrity_reports_report_sha256_key ON public.knowledge_integrity_reports USING btree (report_sha256)",
+  "knowledge_integrity_verifications_pkey": "CREATE UNIQUE INDEX knowledge_integrity_verifications_pkey ON public.knowledge_integrity_verifications USING btree (id)",
+  "knowledge_integrity_verifier_keys_pkey": "CREATE UNIQUE INDEX knowledge_integrity_verifier_keys_pkey ON public.knowledge_integrity_verifier_keys USING btree (key_id)",
+  "knowledge_integrity_verifier_keys_public_uidx": "CREATE UNIQUE INDEX knowledge_integrity_verifier_keys_public_uidx ON public.knowledge_integrity_verifier_keys USING btree (public_key)",
   "knowledge_personnel_account_key": "CREATE UNIQUE INDEX knowledge_personnel_account_key ON public.knowledge_personnel USING btree (auth_user_id)",
   "knowledge_personnel_identity_key": "CREATE UNIQUE INDEX knowledge_personnel_identity_key ON public.knowledge_personnel USING btree (private.knowledge_identity_key(identity_reference)) WHERE (status <> 'revoked'::text)",
   "knowledge_personnel_pkey": "CREATE UNIQUE INDEX knowledge_personnel_pkey ON public.knowledge_personnel USING btree (id)",

@@ -51,9 +51,10 @@ chunks the REAL answer service (`RagQuestionService`) receives.
   report of the exact snapshot: it must be acknowledged and every needs-review finding resolved with evidence
   (false positive / contextual difference) by the review's verified reviewer, re-checked at approval. The
   dev3-01 state is reachable only through an explicit, recorded human error, which E1/E4 cannot yet prevent.
-- **E7 The integrity report producer is trusted.** E2's report is recorded with the shared service
-  credential; a dishonest or compromised operator could store fewer claims and record a falsely clean report.
-  The database checks completeness only against the claims stored (E2 document §3.1).
+- **E7 CLOSED in CI (migration 20261113240000), NOT on hosted.** An approval needs an Ed25519-signed
+  verification by a separately held verifier key that re-read the stored chunks and reproduced the stored claim
+  set; the database checks the signature (pgsodium) and recomputes the digest. Open infrastructure items: pgsodium
+  on hosted (deprecation), verifier key custody and an independent runner (`RAG_V15_M7_E7_INDEPENDENT_VERIFICATION.md` §6).
 - **E3 Detection does not exclude.** A contradiction or reference conflict never quarantines
   automatically (by design: no automatic quarantine). Exclusion depends on a human action.
 - **E4 No real expert identities.** All reviewers, approvers and archivists in tests are synthetic
