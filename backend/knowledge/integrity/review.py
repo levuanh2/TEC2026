@@ -31,6 +31,8 @@ from datetime import date
 from typing import Literal
 
 from knowledge.integrity.claims import ASSERTIONS, CLAIM_EXTRACTOR_VERSION, Claim, ClaimSource, extract_claims
+from knowledge.integrity import reference_numeric as rn
+from knowledge.integrity.conditions import CONDITION_EXTRACTOR_VERSION, NumericComparison, compare_claims
 from knowledge.integrity.references import ReferenceEntry, ReferenceRegistry
 
 REVIEW_VERSION = "kn-integrity-review-1"
@@ -44,9 +46,12 @@ FindingType = Literal[
     "superseded_guidance",     # another document in the review declares that it replaces this one
     "unresolved_claim",        # ambiguous / unsupported extraction (info)
     "unreferenced_claim",      # a quantity with a parameter but no registry entry (info)
+    # M5 follow-up (numeric_registry given): against HUMAN-VERIFIED numeric entries only
+    "numeric_reference_mismatch",   # outside the printed range / differs from the printed value
+    "numeric_unresolved",           # out_of_scope, not_comparable, reference_unverified or no entry (info)
 ]
 _NEEDS_REVIEW = frozenset({"reference_conflict", "claim_conflict", "unsupported_assertion", "expired_guidance",
-                           "not_yet_effective", "superseded_guidance"})
+                           "not_yet_effective", "superseded_guidance", "numeric_reference_mismatch"})
 _EVIDENCE = {
     "reference_conflict": "the publisher's primary text for this statement, or a recorded expert justification "
                           "for deviating from the reference",
@@ -57,6 +62,9 @@ _EVIDENCE = {
     "superseded_guidance": "archive the superseded version, or a publisher statement that both apply",
     "unresolved_claim": "a reviewer reads the span; no automatic comparison was possible",
     "unreferenced_claim": "optional: a registry entry with a primary source for this parameter",
+    "numeric_reference_mismatch": "the publisher's primary text for this value and its conditions, or a recorded "
+                                  "expert justification; the comparison lists units, conversion and conditions",
+    "numeric_unresolved": "a reviewer decides whether the reference applies; no mismatch was concluded",
 }
 
 
@@ -89,6 +97,11 @@ class IntegrityReview:
     claims: tuple[Claim, ...]
     findings: tuple[Finding, ...]
     decision: Literal["none"] = "none"         # this report never approves, rejects or quarantines
+    #: M5 follow-up: one row per (claim, numeric entry) with the full reasoning; empty without a registry
+    numeric_comparisons: tuple[NumericComparison, ...] = ()
+    numeric_registry_version: str | None = None
+    numeric_registry_digest: str | None = None
+    condition_extractor_version: str | None = None
 
     @property
     def requires_expert_review(self) -> bool:
@@ -127,7 +140,8 @@ def _periods_disjoint(a: DocumentContext | None, b: DocumentContext | None) -> b
 
 
 def review(sources: Sequence[ClaimSource], *, registry: ReferenceRegistry, as_of: date,
-           documents: Sequence[DocumentContext] = ()) -> IntegrityReview:
+           documents: Sequence[DocumentContext] = (),
+           numeric_registry: rn.NumericRegistry | None = None) -> IntegrityReview:
     claims = tuple(c for source in sources for c in extract_claims(source))
     contexts = {d.document_ref: d for d in documents}
     replaced: dict[str, set[str]] = {}
@@ -195,7 +209,25 @@ def review(sources: Sequence[ClaimSource], *, registry: ReferenceRegistry, as_of
                                      detail=f"{a.parameter}: {_fmt(a.value_min, a.value_max, a.unit)} vs "
                                             f"{_fmt(b.value_min, b.value_max, b.unit)}"))
 
+    # M5 follow-up: claims vs the human-verified numeric registry (non-blocking analysis aid).
+    comparisons: tuple[NumericComparison, ...] = ()
+    if numeric_registry is not None:
+        contents = {(s.document_ref, s.chunk_id): s.content for s in sources}
+        comparisons = compare_claims(claims, contents, numeric_registry)
+        for c in comparisons:
+            tags = ", ".join(t.tag for t in c.conditions) or "none stated"
+            detail = (f"{c.parameter}: claimed {c.claimed_min}..{c.claimed_max} {c.claim_unit} [conditions: {tags};"
+                      f" region: {c.region or 'none stated'}] vs {c.reference_id or 'no entry'}: {c.outcome}."
+                      f" {c.rationale}")
+            refs = [c.reference_id] if c.reference_id else []
+            findings.append(Finding("numeric_reference_mismatch" if c.is_mismatch else "numeric_unresolved",
+                                    c.is_mismatch, (c.document_ref,), (c.claim_id,), tuple(refs), detail,
+                                    _EVIDENCE["numeric_reference_mismatch" if c.is_mismatch else "numeric_unresolved"]))
+
     findings.sort(key=lambda f: (not f.needs_expert_review, f.finding_type, f.document_refs, f.claim_ids,
                                  f.reference_ids))
     return IntegrityReview(REVIEW_VERSION, CLAIM_EXTRACTOR_VERSION, registry.registry_version, registry.digest,
-                           as_of.isoformat(), claims, tuple(findings))
+                           as_of.isoformat(), claims, tuple(findings), numeric_comparisons=comparisons,
+                           numeric_registry_version=numeric_registry.registry_version if numeric_registry else None,
+                           numeric_registry_digest=numeric_registry.digest if numeric_registry else None,
+                           condition_extractor_version=CONDITION_EXTRACTOR_VERSION if numeric_registry else None)

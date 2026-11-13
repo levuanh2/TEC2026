@@ -58,6 +58,43 @@ verified M2 flow as a new version. The migration prints the counts per table and
 (`H-a approval_assurance backfill: ...`) so the operator sees what was withheld. Any
 `demo_unverified` record wins over `verified` for the same row.
 
+### 2.4 Legacy inventory and remediation (owner decision 2026-11-13: accept `unrecorded`)
+
+The owner accepted the fail-closed `unrecorded` backfill. Legacy rows are never classified as
+verified. H-a invents nothing: it writes no approval record, no personnel or identity, no provenance;
+it only copies the assurance of existing records onto the row (test
+`test_the_backfill_invents_nothing_and_unrecorded_is_withheld_everywhere`).
+
+**Inventory** (read-only, before and after applying): `docs/rag/sql/ha_legacy_approved_inventory.sql`
+lists every version and source ever approved without an `approve` record, with `currently_approved`
+(the rows H-a stops serving), hashes, artifact reference, chunk and event counts. The hosted count is
+**unknown** until the owner runs this query read-only on hosted; this work did not touch hosted.
+
+**Impact of an `unrecorded` row:**
+
+- a version: its chunks are no longer cited;
+- a source: **every version of it** is withheld, verified or not, because retrieval and RLS require
+  the source to be verified too.
+
+**Remediation** (no shortcut, no back-dated record):
+
+1. Run the inventory; record each `currently_approved` row in a ticket.
+2. Decide per row: keep withheld (nothing to do, it is not served), or revalidate.
+3. Revalidate a **version**: ingest the same hashed artifact as a NEW `document_version` of the same
+   source with `supersedes_document_pk` = the legacy version (review_required); the uploader attests,
+   an expert reviews with the integrity report (M4/M5), a different approver decides. The approval
+   archives the legacy version in the same transaction (M3 same-source supersession). Requires the
+   source itself to be verified.
+4. Revalidate a **source**: an approved source cannot be approved again (M2 approves only from
+   `review_required` / `rejected`). Register a NEW source id for the same publisher, approve it through
+   `public.knowledge_approve_source`, ingest its versions there, and supersede the legacy versions
+   cross-source (with H-c: a custodian countersignature of the legacy source). A dedicated "revalidate a
+   legacy source in place" RPC does not exist; adding one needs an owner decision.
+5. A legacy row that must not even stay approved (wrong or harmful): quarantine it through the
+   emergency procedure (H-b) with reason `operator_error_containment` or `provenance_withdrawn`.
+6. Re-run the inventory; the ticket closes when no `currently_approved` row remains or each remaining
+   one is recorded as deliberately withheld.
+
 ## 3. The isolation gate
 
 A database row alone cannot prove where a database runs, and a mutable flag alone does not prove
