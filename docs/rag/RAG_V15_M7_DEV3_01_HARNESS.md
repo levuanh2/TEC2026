@@ -22,7 +22,7 @@ chunks the REAL answer service (`RagQuestionService`) receives.
 |---|---|---|
 | A detection | offline integrity review (M4) of the poisoned and the clean chunk | **detected**: `reference_conflict` on `ch4.rice.emission_eliminated` and `records.water.not_required`; clean chunk not flagged; non-blocking (`decision = none`) |
 | B human gate, finding recorded | expert review that records the unresolved finding as open/blocking | **refused**: recommend_approval is rejected (`23514`); the reviewer can reject |
-| B human gate, finding not recorded | expert review that ignores the report | **gap**: approval goes through (nothing binds the review to the integrity report) |
+| B human gate, finding not recorded | expert review that ignores the report | **closed by E2** (`RAG_V15_M7_E2_INTEGRITY_APPROVAL_GATE.md`): refused, status stays `expert_review`; was: approved (bypass reproduced on the pre-E2 functions) |
 | C quarantine | emergency quarantine (H-b, `harmful_content_report`) of the approved poisoned version | **excluded**: no longer returned by retrieval; the clean chunk still is |
 | D answer side, before C | real retrieval -> real answer service -> scripted model citing the poison | **unsafe**: `generated`, `source_integrity_failure = true` (dev3-01 reproduced end to end) |
 | D answer side, after C | same, after the quarantine | **safe**: the poisoned id is not retrieved, its citation is refused, `source_integrity_failure = false` |
@@ -36,7 +36,7 @@ chunks the REAL answer service (`RagQuestionService`) receives.
 | 2 | M6 quarantine/exposure tabletop passes | **met** locally (#69) |
 | 3 | frozen dev3-01 fixture replayed | **met** deterministically (this harness); a re-run with the real model on a frozen set is NOT done (no paid provider calls) |
 | 4 | contradicted or quarantined poisoned content not retrievable | **quarantined: met. Contradicted: NOT met**: a contradiction is a finding for a human, it does not remove the chunk |
-| 5 | answer-side acceptance / refusal on actual behaviour | **partially met**: safe after quarantine; unsafe while the poisoned version is approved and not quarantined |
+| 5 | answer-side acceptance / refusal on actual behaviour | **partially met**: an unresolved finding keeps the poison out of approval (E2); safe after quarantine; unsafe if a human wrongly resolves the findings and nothing quarantines it |
 | 6 | characterization flipped only after the regression is proven | **not flipped**, correctly: the failure is prevented only when a human quarantines or rejects |
 | 7 | results and limitations documented | this document |
 
@@ -47,10 +47,10 @@ chunks the REAL answer service (`RagQuestionService`) receives.
   `engine_config_pointer`, `project_policy`), not human-verified publisher texts. QĐ 4801's MRV annex is
   not available (cover-only artifact); IPCC values are pending verification and rights; the numeric
   registry is empty.
-- **E2 The review is not bound to the integrity report.** A reviewer who does not record the finding can
-  recommend approval and an approver can approve. Closing this needs a design decision (e.g. the review
-  must reference the integrity report of the exact snapshot and resolve each `needs_expert_review`
-  finding).
+- **E2 CLOSED (migration 20261113210000).** The expert review is bound to the database-recorded integrity
+  report of the exact snapshot: it must be acknowledged and every needs-review finding resolved with evidence
+  (false positive / contextual difference) by the review's verified reviewer, re-checked at approval. The
+  dev3-01 state is reachable only through an explicit, recorded human error, which E1/E4 cannot yet prevent.
 - **E3 Detection does not exclude.** A contradiction or reference conflict never quarantines
   automatically (by design: no automatic quarantine). Exclusion depends on a human action.
 - **E4 No real expert identities.** All reviewers, approvers and archivists in tests are synthetic

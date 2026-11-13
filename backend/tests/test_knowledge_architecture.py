@@ -56,7 +56,8 @@ def test_knowledge_package_has_the_approved_modules():
                      # M4: contradiction candidates between stored claims (pure; never changes a status)
                      "integrity/contradictions.py",
                      # M5 foundation: numeric reference entries, closed unit / conversion model (pure)
-                     "integrity/reference_numeric.py", "integrity/conditions.py"}
+                     "integrity/reference_numeric.py", "integrity/conditions.py",
+                     "integrity/report.py"}
 
 
 @pytest.mark.parametrize("path", KNOWLEDGE, ids=lambda p: p.relative_to(BACKEND).as_posix())
@@ -103,8 +104,9 @@ def test_claims_adapter_only_reads_and_calls_the_two_recording_functions():
     assert statements and {s.split()[0] for s in statements} == {"select"}
     source = CLAIMS_REPO.read_text(encoding="utf-8").lower()
     called = set(re.findall(r"private\.(knowledge_\w+)\(", source))
+    # M7 E2: the integrity report recorder (operator path, append-only evidence; it never changes a status)
     assert called == {"knowledge_record_claims", "knowledge_record_contradiction_candidates",
-                      "knowledge_document_evidence_state"}
+                      "knowledge_document_evidence_state", "knowledge_record_integrity_report"}
     for banned in ("knowledge_transition", "knowledge_demo", "knowledge_expire", "status =", "disable trigger",
                    "session_replication_role", "set_config", "insert into", "update public", "delete from"):
         assert banned not in source, banned

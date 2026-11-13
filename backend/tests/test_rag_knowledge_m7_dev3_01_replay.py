@@ -36,14 +36,20 @@ def test_b_a_reviewer_who_records_the_unresolved_finding_cannot_recommend_approv
     assert tx.status_of("document", doc) == "rejected"
 
 
-def test_b_gap_the_gate_does_not_require_the_integrity_report(tx, m2):
-    """EVIDENCE GAP E2: nothing binds the expert review to the integrity report; a reviewer who records no
-    finding can still recommend approval of the poisoned text, and an approver can approve it."""
+def test_b_e2_a_reviewer_who_ignores_the_report_cannot_recommend_approval(tx, m2):
+    """E2 CLOSED by migration 20261113210000 (was: the reviewer recorded no finding and the poisoned text was
+    approved; the bypass on the pre-E2 functions is reproduced in test_rag_knowledge_m7_e2_integrity_gate.py).
+    The integrity report of the exact version is recorded and acknowledged, its dev3-01 findings stay
+    undispositioned: the recommendation is refused, the version stays under review, nothing is served."""
     doc = _poison_version(tx, m2)
     review_id = m2.start(doc)
-    m2.submit(review_id)                                                    # no finding recorded
-    m2.decide(review_id, tx.approver)
-    assert tx.status_of("document", doc) == "approved"
+    report, _ = m2.acknowledge(review_id)
+    tx.cur.execute("select count(*) from public.knowledge_integrity_findings where report_id = %s"
+                   " and needs_expert_review", (report,))
+    assert tx.cur.fetchone()[0] >= 1                                        # integrity finding generated
+    assert code(m2.submit, review_id) == CHECK_VIOLATION                    # human evidence gate
+    assert code(m2.submit, review_id, integrity=False) == CHECK_VIOLATION
+    assert tx.status_of("document", doc) == "expert_review"                 # status persisted: not approved
 
 
 # ================================================================== C + D. quarantine and answer side (DB)
@@ -64,9 +70,18 @@ def _answer(chunks):
 
 def test_c_d_quarantine_removes_the_poison_from_retrieval_and_the_answer_side_stops_citing_it(tx, m2):
     # dev3-01 state: the poisoned version was approved (stage B gap) next to a clean AWD version
+    # with E2 the only way to the dev3-01 state is an explicit, attributable human error: the reviewer
+    # resolves every finding as false_positive and names (synthetic) evidence
     poison = _poison_version(tx, m2)
     review_poison = m2.start(poison)
-    m2.submit(review_poison)                                                # the report was ignored (stage B gap)
+    report, sha = m2.acknowledge(review_poison)
+    tx.cur.execute("select id from public.knowledge_integrity_findings where report_id = %s and needs_expert_review",
+                   (report,))
+    for fid, in tx.cur.fetchall():
+        m2.dispose(review_poison, sha, fid, "false_positive",
+                   justification="TEST FIXTURE: a MISTAKEN expert judgement, recorded and attributable",
+                   evidence=[{"reference": "TEST FIXTURE wrong reference", "locator": "n/a"}])
+    m2.submit(review_poison)
     m2.decide(review_poison, tx.approver)
     _, clean = draft(tx, m2, content=CLEAN["content"])
     review_clean = m2.start(clean)
