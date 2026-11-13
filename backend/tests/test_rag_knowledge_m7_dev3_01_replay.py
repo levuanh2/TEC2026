@@ -106,3 +106,67 @@ def test_c_d_quarantine_removes_the_poison_from_retrieval_and_the_answer_side_st
     assert POISON["chunk_id"] not in run["cited"]
 
 
+
+
+# ================================================================== M7 E7: the replay matrix (DB + real answer service)
+
+def test_e7_replay_matrix_dishonest_operator_is_stopped_mistaken_expert_is_not(tx, m2):
+    """Records, for the frozen dev3-01 fixture, whether the poisoned version is detected, refused at review,
+    refused at approval, retrievable and cited, on two paths:
+
+    * dishonest operator (E7): the service-key holder stores the claims WITHOUT the dev3-01 assertions and a
+      report complete relative to them; the reviewer acknowledges it. The independent verifier re-reads the
+      chunks: mismatch. Review and approval are refused, nothing is retrievable or cited.
+    * honest operator, mistaken expert (E1/E4, NOT closed): the report is reproduced by the verifier, the
+      reviewer resolves every finding as false_positive with (synthetic) evidence: approved, retrievable,
+      cited. This is why test_rag_source_integrity_gap.py is NOT flipped and dev3-01 stays OPEN."""
+    from tests.test_rag_knowledge_m7_e7_independent_verification import dishonest_report, verdict, verify
+    query = "tưới ngập khô xen kẽ mê-tan"
+    _, clean = draft(tx, m2, content=CLEAN["content"])
+    review_clean = m2.start(clean)
+    m2.submit(review_clean)
+    m2.decide(review_clean, tx.approver)
+
+    # -- dishonest operator
+    poison = _poison_version(tx, m2)
+    review = m2.start(poison)
+    report, sha = dishonest_report(tx, m2, poison)
+    tx.cur.execute("select finding_count from public.knowledge_integrity_reports where id = %s", (report,))
+    operator_findings = tx.cur.fetchone()[0]
+    m2.dispose(review, sha, None, "report_reviewed")
+    verify(tx, m2, report)
+    v, missing = verdict(tx, report)
+    review_refused = code(m2.submit, review, integrity=False) == CHECK_VIOLATION
+    approval_refused = code(m2.decide, review, tx.approver) != "ok"
+    served = _served_chunks(tx, query)
+    run = _answer(served)
+    dishonest = {"operator_report_findings": operator_findings, "detected_by_e7": v == "mismatch" and len(missing) >= 2,
+                 "refused_at_review": review_refused, "refused_at_approval": approval_refused,
+                 "status": tx.status_of("document", poison), "retrievable": POISON in served,
+                 "cited": POISON["chunk_id"] in run["cited"] and run["source_integrity_failure"]}
+    assert dishonest == {"operator_report_findings": 0, "detected_by_e7": True, "refused_at_review": True,
+                         "refused_at_approval": True, "status": "expert_review", "retrievable": False,
+                         "cited": False}, dishonest
+    assert CLEAN in served                                                 # the clean version is still served
+
+    # -- honest operator (the full claim set is added; claims are append-only), mistaken expert
+    m2.integrity_report(poison)                                            # the full claim set, a new report
+    new_report, new_sha = m2.acknowledge(review)                           # acknowledged and independently verified
+    assert new_report != report and verdict(tx, new_report)[0] == "reproduced"
+    tx.cur.execute("select id from public.knowledge_integrity_findings where report_id = %s and needs_expert_review",
+                   (new_report,))
+    findings = [r[0] for r in tx.cur.fetchall()]
+    refused_before_disposition = code(m2.submit, review) == CHECK_VIOLATION
+    for fid in findings:
+        m2.dispose(review, new_sha, fid, "false_positive",
+                   justification="TEST FIXTURE: a MISTAKEN expert judgement, recorded and attributable",
+                   evidence=[{"reference": "TEST FIXTURE wrong reference", "locator": "n/a"}])
+    m2.submit(review)
+    m2.decide(review, tx.approver)
+    served = _served_chunks(tx, query)
+    run = _answer(served)
+    mistaken = {"detected": len(findings) >= 1, "refused_until_dispositioned": refused_before_disposition,
+                "status": tx.status_of("document", poison), "retrievable": POISON in served,
+                "cited": POISON["chunk_id"] in run["cited"] and run["source_integrity_failure"]}
+    assert mistaken == {"detected": True, "refused_until_dispositioned": True, "status": "approved",
+                        "retrievable": True, "cited": True}, mistaken          # residual: dev3-01 stays OPEN

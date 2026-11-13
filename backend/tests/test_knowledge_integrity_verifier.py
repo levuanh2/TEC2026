@@ -44,3 +44,16 @@ def test_the_statement_is_canonical_json_and_says_mismatch_on_any_difference():
     assert '"verdict":"mismatch"' in vf.statement(recomputed=[BASE], stored=[BASE], chunks_read=0, **kw)
     crlf, lf = bytes([120, 13, 10, 121]), bytes([120, 10, 121])                # "x CR LF y" and "x LF y"
     assert vf.code_digest([("a.py", crlf)]) == vf.code_digest([("a.py", lf)])   # CRLF-independent
+
+
+def test_coverage_names_unprocessed_and_hash_inconsistent_chunks_without_changing_the_verdict():
+    from knowledge.ids import sha256_hex
+    chunks = [("c1", "awd text", sha256_hex("awd text")), ("c2", "  ", sha256_hex("  ")), ("c3", "edited", "f" * 64)]
+    cov = vf.coverage(chunks, [BASE])                                        # BASE is a claim of chunk c1
+    assert cov == {"chunks_read": 3, "chunks_with_claims": 1, "chunks_without_claims": ["c2", "c3"],
+                   "empty_chunks": ["c2"], "chunk_hash_mismatch": ["c3"]}
+    report = {"id": "r", "report_sha256": "x", "document_pk": "d", "document_snapshot_sha256": "s",
+              "source_snapshot_sha256": "t", "chunk_count": 3}
+    text = vf.statement(report=report, key_id="k", recomputed=[BASE], stored=[BASE], chunks_read=3, registry_digest="g",
+                        extractor_code_digest="c" * 64, chunk_coverage=cov)
+    assert '"verdict":"reproduced"' in text and '"chunk_hash_mismatch":["c3"]' in text   # evidence, not a verdict

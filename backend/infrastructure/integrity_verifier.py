@@ -27,7 +27,7 @@ RECORD = "select private.knowledge_record_integrity_verification(%s, %s)"
 
 def extractor_code_digest() -> str:
     """The digest of the extractor code THIS process runs (the owner pins the expected value)."""
-    base = Path(verifier.__file__).resolve().parent
+    base = Path(verifier.__file__).resolve().parent.parent                    # the `knowledge` package
     return verifier.code_digest([(name, (base / name).read_bytes()) for name in verifier.EXTRACTOR_SOURCES])
 
 
@@ -66,10 +66,12 @@ def build_statement(read: Any, report_id: str, key_id: str) -> str:
         "select claim_id, chunk_id, chunk_content_sha256, span_start, span_end, kind, status, parameter, value_min,"
         " value_max, unit, dimension, to_char(date_iso, 'YYYY-MM-DD'), stage, scope_tags from public.knowledge_claims"
         " where document_pk = %s and extractor_version = %s", (report["document_pk"], report["extractor_version"])).fetchall()]
-    recomputed = verifier.reextract(ref, [(c, t, h) for c, t, h in chunks])
+    triples = [(c, t, h) for c, t, h in chunks]
+    recomputed = verifier.reextract(ref, triples)
     return verifier.statement(report=report, key_id=key_id, recomputed=recomputed, stored=stored,
                               chunks_read=len(chunks), registry_digest=report["registry_digest"],
-                              extractor_code_digest=extractor_code_digest())
+                              extractor_code_digest=extractor_code_digest(),
+                              chunk_coverage=verifier.coverage(triples, recomputed))
 
 
 def verify(read: Any, submit: Any, report_id: str, key: Ed25519PrivateKey, key_id: str) -> int:
