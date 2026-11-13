@@ -189,7 +189,7 @@ class Tx:
     def chunk(self, document_pk, content, *, ordinal=0, section=None, extra=None):
         chunk_id = _sha(f"{document_pk}|{ordinal}|{content}")[:20]
         columns, values = ["document_pk", "chunk_id", "ordinal", "section_path", "content", "content_sha256"], \
-            [document_pk, chunk_id, ordinal, section, FIXTURE + content, _sha(content)]
+            [document_pk, chunk_id, ordinal, section, FIXTURE + content, _sha(FIXTURE + content)]   # E7.1: hash of the STORED text
         for key, value in (extra or {}).items():
             columns.append(key)
             values.append(value)
@@ -975,6 +975,28 @@ HC_DEFINER = {"knowledge_register_publisher", "knowledge_set_publisher_status", 
               "knowledge_grant_source_custodian", "knowledge_set_source_custodian_status",
               "knowledge_countersign_supersession", "knowledge_custodian_snapshot"}
 HC_INVOKER = {"knowledge_supersession_conflicts"}
+# M7 E2 (20261113210000): report recording (service_role), disposition and report read (authenticated) are
+# SECURITY DEFINER; the policy setter (owner only), the gate and its helpers are not.
+E2_DEFINER = {"knowledge_record_integrity_report", "knowledge_dispose_integrity_finding", "knowledge_review_integrity_report"}
+E2_INVOKER = {"knowledge_set_integrity_policy", "knowledge_integrity_finding_blocking", "knowledge_integrity_current_report",
+              "knowledge_integrity_report_problem", "knowledge_integrity_gate"}
+# M7 E7 (20261113235900): verifier-key registration / revocation (owner) and the signed verification record
+# (service_role) are SECURITY DEFINER; the digest, the pin setter, the key guard and the check are not.
+E7_DEFINER = {"knowledge_register_verifier_key", "knowledge_revoke_verifier_key"}
+# M7 E7.1 (20261114090000): the service-role recording RPC is gone; the verifier's two SECURITY DEFINER functions
+# live in the knowledge_verifier schema (test_rag_knowledge_m7_e7_1_portable_attestation.py); these helpers are not.
+E7_1_INVOKER = {"knowledge_ed25519_available", "knowledge_ed25519_verify", "knowledge_set_attestation_mode",
+                "knowledge_chunk_hash_problem", "knowledge_verifier_caller"}
+E7_INVOKER = {"knowledge_set_integrity_code_digest", "knowledge_verifier_key_guard", "knowledge_claim_set_digest",
+              "knowledge_integrity_verification_problem"}
+# M6.1 (20261113180000): the record and purge functions (EXECUTE for service_role only) are SECURITY
+# DEFINER; the append-only guard is not.
+M6_1_DEFINER = {"knowledge_record_citation_event", "knowledge_purge_citation_events"}
+M6_1_INVOKER = {"knowledge_citation_guard"}
+# M7 E5 (20261114120000): the answer-time recheck runs under the caller's JWT (SECURITY INVOKER); the caveat
+# helper is SECURITY DEFINER (E2 tables are not client-readable) and answers only for retrievable chunks.
+E5_DEFINER = {"knowledge_cited_resolved_finding_types"}
+E5_INVOKER = {"knowledge_cited_evidence_state"}
 
 
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
@@ -1002,7 +1024,9 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     # ... and the verified-human RPCs (EXECUTE for authenticated only)
                                     *M2_RPCS, *M3_HELPERS, *M3_EXPIRY, *M4_HELPERS, *M4_OPERATOR,
                                     *M4_1_HELPERS, *M4_1_RPCS, *HA_DEFINER, *HA_INVOKER,
-                                    *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER}
+                                    *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER,
+                                    *E2_DEFINER, *E2_INVOKER, *E7_DEFINER, *E7_INVOKER, *E7_1_INVOKER,
+                                    *M6_1_DEFINER, *M6_1_INVOKER, *E5_DEFINER, *E5_INVOKER}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
@@ -1010,7 +1034,8 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
     assert {r[0] for r in rows if r[1]} == {"knowledge_read_blocked", "knowledge_transition_source",
                                             "knowledge_transition_document", *M2_RPCS, *M2_DEMO,
                                             *M3_EXPIRY, *M4_OPERATOR, *M4_1_RPCS, *HA_DEFINER,
-                                            *HB_DEFINER, *HC_DEFINER}, rows
+                                            *HB_DEFINER, *HC_DEFINER, *E2_DEFINER, *E7_DEFINER,
+                                            *M6_1_DEFINER, *E5_DEFINER}, rows
     tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
     for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere

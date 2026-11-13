@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,6 +33,8 @@ from typing import Any
 from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
 from infrastructure.read_repo import ReadNotFoundError
+from rag_citation_events import CitationSink, RecordingRetriever, build_event, record_safely
+from rag_answer_integrity import answer_time_evidence_gate
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
     CarbonScenarioWhatIf,
@@ -294,8 +297,10 @@ class RagQuestionService:
 
     def __init__(self, *, carbon_service: Any, llm_client: StructuredLlmClient | None = None,
                  retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None,
-                 quota: QuotaGate | None = None) -> None:
+                 quota: QuotaGate | None = None, citation_sink: CitationSink | None = None) -> None:
         self._carbon = carbon_service
+        #: M6.1 local/CI prototype: None (the default, and production) records nothing.
+        self._citations = citation_sink
         self._llm = llm_client
         self._retrieval = retrieval or RetrievalSettings()
         self._write_gate = write_gate
@@ -328,8 +333,9 @@ class RagQuestionService:
                 # check, the rule-code short-circuit and retrieval (orchestrator order).
                 llm = GuardedLlmClient(llm, self._quota, user_id=str(reader.user_id()), purpose="action")
             action = LlmActionGenerator(llm, meter) if llm is not None else None
+            recorder = RecordingRetriever(LexicalKnowledgeRetriever(reader, self._retrieval))
             orchestrator = RagOrchestrator(
-                retriever=LexicalKnowledgeRetriever(reader, self._retrieval),
+                retriever=recorder,
                 generator=CapabilityRoutedGenerator(action=action),
                 what_if=CarbonScenarioWhatIf(self._carbon),
             )
@@ -338,11 +344,23 @@ class RagQuestionService:
                 facts=CallerSeasonFactsSource(reader, self._carbon),
             )
             assert_recommendations_follow_rules(result)
+            # M7 E5: the LAST step before the response body is built. The cited evidence is re-validated under the
+            # caller's JWT; any failing citation discards the whole model answer (a failing recheck raises).
+            result, refused = answer_time_evidence_gate(reader, crop_season_id=crop_season_id, result=result,
+                                                        retrieved=recorder.chunks or (),
+                                                        demo=self._retrieval.include_demo)
             status = result.status
             if result.policy_rejection is not None:
                 error_code = f"policy:{result.policy_rejection}"
-            # A policy-rejected answer is trusted copy even though the provider was called (and paid).
-            return to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None)
+            elif refused:
+                error_code = "evidence:" + ",".join(sorted({reason for _, reason in refused}))
+            # A policy-rejected or evidence-refused answer is trusted copy even though the provider was called.
+            body = to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None
+                               or bool(refused))
+            record_safely(self._citations, lambda: build_event(
+                request_id=_event_id(request_id), crop_season_id=crop_season_id, recorder=recorder, result=result,
+                response_emitted=True, retrieval_mode="demo" if self._retrieval.include_demo else "production"))
+            return body
         except RagError as exc:
             error_code = exc.code
             raise
@@ -352,6 +370,14 @@ class RagQuestionService:
                 "input_tokens=%s output_tokens=%s cost_usd=%s llm_ms=%s total_ms=%s",
                 request_id, question.intent, question.mode, status, error_code, meter.calls, meter.input_tokens,
                 meter.output_tokens, meter.cost_usd, meter.latency_ms, int((time.perf_counter() - started) * 1000))
+
+
+def _event_id(request_id: str | None) -> str:
+    """The request UUID, or a fresh one when the caller's request id is not a UUID."""
+    try:
+        return str(uuid.UUID(str(request_id)))
+    except (TypeError, ValueError):
+        return str(uuid.uuid4())
 
 
 def to_response(result: RagAnswerResult, meter: UsageMeter, *, composed: bool) -> dict[str, Any]:

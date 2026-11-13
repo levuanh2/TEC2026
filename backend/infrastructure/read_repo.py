@@ -330,6 +330,14 @@ class SupabaseReadRepository:
         return self._select("rpc match_knowledge_chunks_lexical_demo",
                             lambda client: client.rpc("match_knowledge_chunks_lexical_demo", params))
 
+    def knowledge_evidence_state(self, season_id: str, chunk_ids: list[str], *, demo: bool = False) -> list[dict[str, Any]]:
+        """M7 E5: `public.knowledge_cited_evidence_state` under the caller's JWT, the answer-time re-validation of
+        cited chunks (same admissibility as retrieval, re-evaluated now). A chunk the caller can no longer
+        retrieve is simply absent; nothing about other tenants' documents is returned."""
+        params = {"p_crop_season_id": season_id, "p_chunk_ids": list(chunk_ids), "p_demo": demo}
+        return self._select("rpc knowledge_cited_evidence_state",
+                            lambda client: client.rpc("knowledge_cited_evidence_state", params))
+
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
         self._one("crop_seasons", season_id)
         rows = self._many("season_recommendations", crop_season_id=season_id)

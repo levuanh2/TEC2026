@@ -116,6 +116,23 @@ class PsycopgClaimStore:
             return cur.fetchone()[0]
 
 
+def record_integrity_report(store: PsycopgClaimStore, document_pk: str, registry: Any, *, as_of: Any) -> str:
+    """M7 E2: extract and store the claims of one version (idempotent), run the deterministic offline review
+    against `registry` and record the report through private.knowledge_record_integrity_report (operator
+    role). Returns the report id. The database refuses a report that omits a stored claim."""
+    from knowledge.integrity.report import report_payload
+    from knowledge.integrity.review import review
+
+    extract_document_claims(store, document_pk)
+    payload = report_payload(review(store.chunk_sources(document_pk), registry=registry, as_of=as_of), registry)
+    with store._conn.transaction(), store._conn.cursor() as cur:
+        cur.execute("select private.knowledge_record_integrity_report(%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)",
+                    (document_pk, payload["extractor_version"], payload["review_version"], payload["registry_version"],
+                     payload["registry_digest"], json.dumps(payload["findings"], ensure_ascii=False),
+                     json.dumps(payload["supported"]), json.dumps(payload["limitations"], ensure_ascii=False)))
+        return str(cur.fetchone()[0])
+
+
 def extract_document_claims(store: PsycopgClaimStore, document_pk: str) -> ExtractionResult:
     """Extract and store the claims of one document version. Deterministic and idempotent."""
     sources = store.chunk_sources(document_pk)
