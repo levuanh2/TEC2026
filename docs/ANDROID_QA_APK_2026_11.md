@@ -159,3 +159,78 @@ Device notes: this Xiaomi suppresses `I/flutter` in logcat (`log.tag=M`).
 `setprop log.tag.flutter V` was set for the session and is non-persistent.
 Every QA setting was restored afterwards (font_scale, rotation, Wi-Fi/data).
 
+
+## Round 3 — final hardening (14/11/2026)
+
+### Methodology bottom sheet (`season_methodology_sheet.dart`)
+
+Before (`f463aa9`, phone, landscape + Gboard + font 1.8, focus on the days
+field): only the days field was visible. Save sat below the keyboard, no
+Cancel was visible, and the sheet covered the status bar.
+
+The fix, which applies only while cramped (keyboard open, free height < 260 dp):
+- Cancel · title · Save are pinned in a 48 dp row.
+- The intro text is hidden.
+- `FocusReveal` scrolls the focused field into view.
+- The fields keep their keys, so input and focus survive the switch and rotation.
+
+Three defects were found on the phone while verifying it. Each now has a test
+that fails without its fix:
+- The pinned row sat under the status bar, where Xiaomi swallowed the taps. The
+  fix opens the sheet with `useSafeArea: true`.
+- The sheet's keyboard padding read `MediaQuery` from the caller's context, so
+  the sheet did not rebuild when the keyboard height changed. After a rotation
+  it kept a stale inset and slid under the keyboard. This bug predates PR #79.
+  The padding now uses the sheet's own context.
+- The sheet now draws the same 32x4 drag handle itself, so the handle can be
+  dropped while cramped.
+
+Phone results at `8801916`:
+
+| Check | Result |
+|---|---|
+| Portrait, font 1.0 | PASS: pixel-identical to before (0 of 1,177,200 sheet pixels differ) |
+| Landscape + keyboard + font 1.8 | PASS: Huỷ and Lưu at y≈177 px (status bar ends at 100 px, keyboard starts at 382 px); typed value visible; 0 Flutter errors |
+| Rotation landscape ↔ portrait | PASS: typed value kept |
+| Cancel button (real tap) | PASS: sheet closes on the first tap; DB unchanged |
+| System Back | PASS: 1st Back closes the keyboard (sheet back in normal mode, value kept); 2nd Back closes the sheet; DB unchanged |
+| Save with invalid value (0) in cramped mode | PASS: the sheet stays open and the field turns red, as in normal mode. Limit: the error text sits under the keyboard until the keyboard is closed |
+
+Screenshots: `E01`/`E02` before; `E03`–`E08` after.
+
+### StatusBadge at 320 dp
+
+At 320×568 with font 1.8, a long StatusBadge label overflowed by 64 px in the
+resource dashboard. The badge label now wraps when the width is bounded and
+stays content-sized in unbounded rows.
+
+### 320 dp coverage
+
+These are **widget tests with the real Be Vietnam Pro font; there was no
+emulator run and no physical 320 dp device.**
+- `test/small_screen_320_test.dart`: add-plot form, methodology sheet,
+  AppScaffold form and confirmation dialog, at font 1.0/1.8 and with/without a
+  simulated 260 dp keyboard (16 cases).
+- The carbon and resource screens scroll through 320×568 at font 1.0/1.8. Their
+  test files now load the real font; the default test font draws 1 em squares
+  and reports false overflows.
+
+### Flaky test (separate Draft PR #80, test-only)
+
+`expired_session_offline_test` › "mất mạng giữa chừng lúc làm mới" raced a
+real 10 ms connectivity-debounce Timer against `pumpEventQueue()`.
+
+| Branch | File alone (randomized) | Full suite |
+|---|---|---|
+| origin/main | 7/30 failed | 2/6 failed |
+| PR #79 head | 7/30 failed | 2/6 failed |
+| #80 | 0/30 failed | 0/6 failed |
+
+Details are in #80; #79 does not change this test.
+
+### Device and harness notes
+
+- Docker Desktop had exited during the round. It was restarted together with the
+  `tec2026-apkqa` stack; data and keys were unchanged.
+- `user_rotation` on this Xiaomi sometimes snaps back after a font-scale change.
+  The helper now waits until the rotation has held for 3 seconds.
