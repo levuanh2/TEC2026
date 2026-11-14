@@ -1,0 +1,6 @@
+{
+  "SUPABASE_URL": "http://127.0.0.1:55721",
+  "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_... (from `supabase status` of the LOCAL stack)",
+  "BACKEND_BASE_URL": "http://127.0.0.1:8010",
+  "AGRICARBON_LOCAL_QA_QUESTIONS": "true"
+}

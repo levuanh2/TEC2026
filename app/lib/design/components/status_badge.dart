@@ -53,10 +53,15 @@ class StatusBadge extends StatelessWidget {
             Icon(icon, size: 14, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(
-            label,
-            style:
-                TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+          // Loose Flexible: wraps the label when the parent bounds the width
+          // (320 dp + text 1.8 overflowed by 64 px in Hiệu quả tài nguyên),
+          // and stays content-sized inside an unbounded Row (min main axis).
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+            ),
           ),
         ],
       ),

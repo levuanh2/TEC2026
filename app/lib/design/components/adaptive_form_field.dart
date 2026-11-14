@@ -49,6 +49,8 @@ class AdaptiveFormField extends StatelessWidget {
     this.hint,
     this.helperText,
     this.errorText,
+    this.showErrorText = true,
+    this.inputFormatters,
     this.required = false,
     this.enabled = true,
   });
@@ -65,6 +67,17 @@ class AdaptiveFormField extends StatelessWidget {
   final String? hint;
   final String? helperText;
   final String? errorText;
+
+  /// Text fields only. When false, an [errorText] still marks the field as
+  /// invalid (error border and colour), but its message is not drawn under
+  /// the field. Use it only when the caller shows that same message somewhere
+  /// that is guaranteed to be visible, so the message never appears twice.
+  final bool showErrorText;
+
+  /// Text fields only: replaces the default filter of [kind]. Use it when the
+  /// caller validates the raw text itself and must SEE what was typed (the
+  /// digits-only filter silently turns "1.5" into 15).
+  final List<TextInputFormatter>? inputFormatters;
   final bool required;
   final bool enabled;
 
@@ -111,26 +124,32 @@ class AdaptiveFormField extends StatelessWidget {
               : isNumber
                   ? const TextInputType.numberWithOptions(decimal: true)
                   : TextInputType.text,
-          inputFormatters: switch (kind) {
-            AdaptiveFieldKind.integer => [
-                FilteringTextInputFormatter.digitsOnly,
-              ],
-            AdaptiveFieldKind.decimal => [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-              ],
-            _ => null,
-          },
-          decoration: _decoration(),
+          inputFormatters: inputFormatters ??
+              switch (kind) {
+                AdaptiveFieldKind.integer => [
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                AdaptiveFieldKind.decimal => [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                _ => null,
+              },
+          decoration: showErrorText || errorText == null
+              ? _decoration()
+              : _decoration(errorTextHidden: true),
         );
     }
   }
 
-  InputDecoration _decoration() => InputDecoration(
+  InputDecoration _decoration({bool errorTextHidden = false}) =>
+      InputDecoration(
         labelText: _labelWithMark,
         hintText: hint,
         helperText: helperText,
         helperMaxLines: 3,
-        errorText: errorText,
+        errorText: errorTextHidden ? null : errorText,
+        // A zero-size error widget keeps the error state (border, colours).
+        error: errorTextHidden ? const SizedBox.shrink() : null,
         errorMaxLines: 3,
       );
 }

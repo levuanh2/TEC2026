@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../tokens.dart';
 import 'app_header.dart';
+import 'focus_reveal.dart';
 
 /// Khung màn hình chuẩn: nền [AppColors.background], [AppHeader] tối tuỳ chọn ở
 /// trên, nội dung có padding ngang [AppSpacing.screenH], và [SafeArea] cho notch
@@ -49,7 +50,22 @@ class AppScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget content = body;
+    // Keyboard open with very little room (landscape phone, large text): the
+    // header shrinks to 48 dp, a pinned bottom bar moves to the end of the
+    // scroll area, and the focused field is scrolled into the middle of what
+    // is left. Normal layouts are unchanged.
+    final cramped = isCramped(MediaQuery.of(context));
+    final inlineBottomBar = cramped && scrollable && bottomBar != null;
+    Widget content = inlineBottomBar
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              body,
+              const SizedBox(height: AppSpacing.md),
+              bottomBar!,
+            ],
+          )
+        : body;
     if (padded) {
       content = Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenH),
@@ -70,7 +86,7 @@ class AppScaffold extends StatelessWidget {
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: scrollBody,
+            child: FocusReveal(enabled: cramped, child: scrollBody),
           ),
         ),
       );
@@ -93,9 +109,13 @@ class AppScaffold extends StatelessWidget {
         ),
         child: Column(
           children: [
-            if (header != null) header!,
-            Expanded(child: content),
-            if (bottomBar != null)
+            if (header != null) cramped ? header!.asCompact() : header!,
+            Expanded(
+              child: scrollable
+                  ? content
+                  : FocusReveal(enabled: cramped, child: content),
+            ),
+            if (bottomBar != null && !inlineBottomBar)
               SafeArea(
                 top: false,
                 minimum: const EdgeInsets.fromLTRB(

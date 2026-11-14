@@ -5,9 +5,11 @@ import '../design/design.dart';
 import '../models/activity.dart';
 import '../models/activity_field_spec.dart';
 import '../models/crop_season.dart';
+import '../services/season_question_api.dart';
 import '../shell/routes.dart';
 import 'activity_detail_screen.dart';
 import 'activity_form_screen.dart';
+import 'season_question_screen.dart';
 
 /// Chi tiết một vụ: hàng đợi đồng bộ, nút ghi hoạt động, danh sách đã ghi, và
 /// (nếu vụ đã đồng bộ) nút xem CO₂e.
@@ -106,6 +108,21 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
     await _load();
   }
 
+  Future<void> _openQuestions() {
+    final auth = _s.authController;
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => SeasonQuestionScreen(
+          asker: SeasonQuestionApi(() => _s.auth.accessToken),
+          cropSeasonId: widget.season.serverId!,
+          seasonLabel: widget.season.seasonCode,
+          scope: auth,
+          scopeKey: () => auth.isAuthenticated ? _s.auth.currentUserId : null,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -202,6 +219,19 @@ class _CropSeasonDetailScreenState extends State<CropSeasonDetailScreen> {
                     cropSeasonClientId: widget.season.clientId,
                   ),
                 ),
+                // Local-QA only (compile-time flag, default OFF); needs the
+                // server id, so an unsynced season shows no entry.
+                if (kLocalQaQuestionsEnabled &&
+                    widget.season.serverId != null) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  SecondaryButton(
+                    key: const Key('season-questions-entry'),
+                    label: 'Hỏi đáp về vụ mùa',
+                    icon: Icons.question_answer_outlined,
+                    expanded: true,
+                    onPressed: _openQuestions,
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.lg),
                 Text('Đã ghi nhận', style: text.titleMedium),
                 const SizedBox(height: AppSpacing.xs),

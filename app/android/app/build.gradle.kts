@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -17,6 +18,29 @@ fun signingValue(property: String, env: String): String? =
     keystoreProperties.getProperty(property) ?: System.getenv(env)
 val releaseStoreFile = signingValue("storeFile", "AGRICARBON_KEYSTORE_PATH")
 val hasReleaseSigning = releaseStoreFile != null && file(releaseStoreFile).exists()
+
+// Bản QA cài song song với app thật: CHỈ debug, chọn bằng
+// `flutter build apk --debug -P agricarbon.qaVariant=uipreview|localqa`.
+// Không có property thì debug/release giữ nguyên applicationId vn.agricarbon.mobile.
+val qaVariants = mapOf("uipreview" to "AgriCarbon Preview", "localqa" to "AgriCarbon QA")
+val qaVariant = (findProperty("agricarbon.qaVariant") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+if (qaVariant != null && qaVariant !in qaVariants) {
+    throw GradleException("agricarbon.qaVariant must be one of ${qaVariants.keys}, got '$qaVariant'")
+}
+
+// The local-QA Q&A screen (AGRICARBON_LOCAL_QA_QUESTIONS) is allowed ONLY in
+// the debug `localqa` QA build. Flutter hands --dart-define and
+// --dart-define-from-file values to Gradle as the `dart-defines` property:
+// comma-separated, each base64("KEY=VALUE"). Fail closed: any value other than
+// "false" counts as a request. The Dart side has its own kDebugMode gate.
+val dartDefines: Map<String, String> =
+    (findProperty("dart-defines") as String?).orEmpty()
+        .split(",")
+        .filter { it.isNotBlank() }
+        .map { String(Base64.getDecoder().decode(it.trim()), Charsets.UTF_8) }
+        .associate { kv -> kv.substringBefore("=") to kv.substringAfter("=", "") }
+val localQaQuestionsRequested =
+    dartDefines["AGRICARBON_LOCAL_QA_QUESTIONS"]?.trim()?.let { it.isNotEmpty() && it != "false" } ?: false
 
 android {
     namespace = "vn.agricarbon.mobile"
@@ -41,6 +65,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "AgriCarbon"
     }
 
     signingConfigs {
@@ -55,6 +80,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (qaVariant != null) {
+                applicationIdSuffix = ".$qaVariant"
+                manifestPlaceholders["appLabel"] = qaVariants.getValue(qaVariant)
+            }
+        }
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
@@ -64,7 +95,18 @@ android {
 }
 
 gradle.taskGraph.whenReady {
-    val buildsRelease = allTasks.any { it.project == project && it.name.contains("Release") }
+    val appTasks = allTasks.filter { it.project == project }
+    val buildsRelease = appTasks.any { it.name.contains("Release") }
+    val buildsProfile = appTasks.any { it.name.contains("Profile") }
+    if ((buildsRelease || buildsProfile) && qaVariant != null) {
+        throw GradleException("agricarbon.qaVariant is for debug QA builds only, never release or profile.")
+    }
+    if (localQaQuestionsRequested && (buildsRelease || buildsProfile || qaVariant != "localqa")) {
+        throw GradleException(
+            "AGRICARBON_LOCAL_QA_QUESTIONS is allowed only in the debug local-QA build " +
+                "(flutter build apk --debug -P agricarbon.qaVariant=localqa). Remove it from this build."
+        )
+    }
     if (buildsRelease && !hasReleaseSigning) {
         throw GradleException(
             "Release signing is not configured: create android/key.properties " +

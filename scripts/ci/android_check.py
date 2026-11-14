@@ -2,6 +2,7 @@
 
     python scripts/ci/android_check.py                                  # source config only
     python scripts/ci/android_check.py --apk app/build/app/outputs/flutter-apk/app-debug.apk --mode debug
+    python scripts/ci/android_check.py --apk <qa.apk> --mode debug --package vn.agricarbon.mobile.localqa
 
 SOURCE (app/android/app)
   RELEASE_DEBUG_SIGNING  the release buildType signs with the DEBUG key -- a release
@@ -9,6 +10,10 @@ SOURCE (app/android/app)
                          exception: EXC-ANDROID-01 was closed by fail-closed signing.
   MANIFEST_CLEARTEXT     main network security config / manifest permits cleartext HTTP
   MANIFEST_DEBUGGABLE    android:debuggable set in the main (release) manifest
+  QA_ONLY_FLAG           the local-QA Q&A switch (AGRICARBON_LOCAL_QA_QUESTIONS) lost a
+                         guard: Gradle must fail any build but `--debug -P
+                         agricarbon.qaVariant=localqa` that sets it, and the Dart switch
+                         must stay gated on kDebugMode (compiled out of release/profile)
 APK (merged manifest via aapt2, strings from every file in the archive)
   APK_IDENTITY           package id / versionName differ from vn.agricarbon.mobile / pubspec
   APK_BUILD_MODE         debuggable flag does not match --mode (a "debug" artifact must
@@ -35,6 +40,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ANDROID = ROOT / "app" / "android" / "app"
 PACKAGE = "vn.agricarbon.mobile"
+# Side-by-side QA installs (app/android/app/build.gradle.kts, -P agricarbon.qaVariant):
+# debug only, never release.
+QA_PACKAGES = {f"{PACKAGE}.uipreview", f"{PACKAGE}.localqa"}
 EXPORTED_ALLOWED = {
     "vn.agricarbon.mobile.MainActivity": "launcher activity",
     "androidx.profileinstaller.ProfileInstallReceiver": "guarded by android.permission.DUMP (signature|privileged)",
@@ -75,6 +83,17 @@ def check_source() -> None:
         fail("MANIFEST_CLEARTEXT", "the main (release) config permits cleartext HTTP")
     if re.search(r"android:debuggable", manifest):
         fail("MANIFEST_DEBUGGABLE", "android:debuggable must not be set in the main manifest")
+    if ('dartDefines["AGRICARBON_LOCAL_QA_QUESTIONS"]' not in gradle
+            or not re.search(r'localQaQuestionsRequested\s*&&\s*\(buildsRelease\s*\|\|\s*buildsProfile\s*\|\|\s*'
+                             r'qaVariant\s*!=\s*"localqa"\)\s*\)\s*\{\s*throw GradleException', gradle)):
+        fail("QA_ONLY_FLAG", "build.gradle.kts must fail every build except the debug localqa QA build "
+                             "when AGRICARBON_LOCAL_QA_QUESTIONS is set")
+    qa_screen = ROOT / "app/lib/screens/season_question_screen.dart"
+    if qa_screen.exists() and not re.search(
+            r"const\s+bool\s+kLocalQaQuestionsEnabled\s*=\s*kDebugMode\s*&&\s*kLocalQaQuestionsRequested\s*;",
+            qa_screen.read_text(encoding="utf-8")):
+        fail("QA_ONLY_FLAG", "kLocalQaQuestionsEnabled must be `kDebugMode && kLocalQaQuestionsRequested` "
+                             "(compiled out of release/profile; an assert alone does not run in release)")
     backup = re.search(r'android:allowBackup\s*=\s*"(\w+)"', manifest)
     notes.append(f"allowBackup: {backup.group(1) if backup else 'not set (Android default: backups ON)'}")
 
@@ -88,20 +107,25 @@ def aapt2(args: list[str]) -> str:
     return subprocess.run([str(exe), *args], check=True, capture_output=True, text=True, encoding="utf-8").stdout
 
 
-def check_apk(apk: Path, mode: str) -> None:
+def check_apk(apk: Path, mode: str, package: str = PACKAGE) -> None:
+    if package != PACKAGE and (package not in QA_PACKAGES or mode != "debug"):
+        fail("APK_IDENTITY", f"--package {package} is allowed only for a debug QA build ({sorted(QA_PACKAGES)})")
+        return
+    allowed_permissions = {p.replace(f"{PACKAGE}.DYNAMIC", f"{package}.DYNAMIC"): why
+                           for p, why in PERMISSIONS_ALLOWED.items()}
     if not apk.is_file():
         fail("APK_IDENTITY", f"{apk} does not exist")
         return
     badging = aapt2(["dump", "badging", str(apk)])
     pkg = re.search(r"package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging)
     pubspec_version = re.search(r"^version:\s*([\w.]+)", (ROOT / "app/pubspec.yaml").read_text(encoding="utf-8"), re.M).group(1)
-    if not pkg or pkg.group(1) != PACKAGE or pkg.group(3) != pubspec_version:
-        fail("APK_IDENTITY", f"badging {pkg.groups() if pkg else None} != ({PACKAGE}, versionName {pubspec_version})")
+    if not pkg or pkg.group(1) != package or pkg.group(3) != pubspec_version:
+        fail("APK_IDENTITY", f"badging {pkg.groups() if pkg else None} != ({package}, versionName {pubspec_version})")
     debuggable = "application-debuggable" in badging
     if debuggable != (mode == "debug"):
         fail("APK_BUILD_MODE", f"--mode {mode} but the APK is {'debuggable' if debuggable else 'not debuggable'}")
     for perm in re.findall(r"uses-permission: name='([^']+)'", badging):
-        if perm not in PERMISSIONS_ALLOWED:
+        if perm not in allowed_permissions:
             fail("APK_PERMISSION", f"{perm} is not on the permission allowlist")
     tree = re.sub(r"\(Raw: [^)]*\)", "", aapt2(["dump", "xmltree", "--file", "AndroidManifest.xml", str(apk)]))
     for kind, body in re.findall(r"E: (activity|service|receiver|provider) \(line=\d+\)(.*?)(?=\n\s*E: (?:activity|service|receiver|provider) |\Z)", tree, re.S):
@@ -138,10 +162,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apk", type=Path)
     ap.add_argument("--mode", choices=["debug", "release"], default="debug")
+    ap.add_argument("--package", default=PACKAGE, help="expected application id (QA ids: debug only)")
     args = ap.parse_args()
     check_source()
     if args.apk:
-        check_apk(args.apk, args.mode)
+        check_apk(args.apk, args.mode, args.package)
     for n in notes:
         print(f"note: {n}")
     for p in problems:

@@ -179,6 +179,10 @@ class _SyncChip extends StatelessWidget {
   }
 }
 
+/// The add/edit plot dialog, for layout regression tests only.
+@visibleForTesting
+Widget debugPlotFormDialog() => const _PlotDialog();
+
 class _PlotDraft {
   const _PlotDraft(this.code, this.name, this.areaHa);
   final String code;
@@ -231,43 +235,33 @@ class _PlotDialogState extends State<_PlotDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title:
-          Text(widget.initial == null ? 'Thêm thửa ruộng' : 'Sửa thửa ruộng'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _codeCtl,
-            decoration:
-                InputDecoration(labelText: 'Mã thửa *', errorText: _codeErr),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          TextField(
-            controller: _nameCtl,
-            decoration: const InputDecoration(
-              labelText: 'Tên gọi (để trống = dùng mã thửa)',
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          TextField(
-            controller: _areaCtl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: 'Diện tích (ha) *',
-              hintText: 'ví dụ: 0,5',
-              errorText: _areaErr,
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Huỷ'),
+    return AdaptiveFormDialog(
+      title: widget.initial == null ? 'Thêm thửa ruộng' : 'Sửa thửa ruộng',
+      fields: [
+        TextField(
+          controller: _codeCtl,
+          decoration:
+              InputDecoration(labelText: 'Mã thửa *', errorText: _codeErr),
         ),
-        PrimaryButton(label: 'Lưu', expanded: false, onPressed: _submit),
+        TextField(
+          controller: _nameCtl,
+          decoration: const InputDecoration(
+            labelText: 'Tên gọi (để trống = dùng mã thửa)',
+          ),
+        ),
+        TextField(
+          controller: _areaCtl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Diện tích (ha) *',
+            hintText: 'ví dụ: 0,5',
+            errorText: _areaErr,
+          ),
+        ),
       ],
+      confirmLabel: 'Lưu',
+      onConfirm: _submit,
+      onCancel: () => Navigator.pop(context),
     );
   }
 }
