@@ -1,14 +1,26 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../design/design.dart';
 import '../services/season_question_api.dart';
 
-/// Compile-time switch for the local-QA Q&A entry point. Default OFF: a normal
-/// build shows nothing new. Enable only for a local functional QA build with
-/// `--dart-define=AGRICARBON_LOCAL_QA_QUESTIONS=true`. The backend route has
-/// its own switch (RAG_QA_ENABLED); both must be on to get an answer.
-const bool kLocalQaQuestionsEnabled =
+/// The `--dart-define` request for the local-QA Q&A entry point. Default OFF.
+const bool kLocalQaQuestionsRequested =
     bool.fromEnvironment('AGRICARBON_LOCAL_QA_QUESTIONS');
+
+/// Policy: the QA-only Q&A screen may appear only in a DEBUG build that asked
+/// for it. In profile/release `kDebugMode` is the constant `false`, so the
+/// request is ignored and the entry point is compiled out, even when the flag
+/// was set by mistake. (Not an `assert`: asserts do not run in release.)
+/// The Gradle build adds a second layer: the flag fails any build other than
+/// `--debug -P agricarbon.qaVariant=localqa`. The backend route has its own
+/// switch (RAG_QA_ENABLED); both must be on to get an answer.
+bool localQaQuestionsAllowed(
+        {required bool debugBuild, required bool requested}) =>
+    debugBuild && requested;
+
+/// Compile-time value of [localQaQuestionsAllowed] for this build.
+const bool kLocalQaQuestionsEnabled = kDebugMode && kLocalQaQuestionsRequested;
 
 /// Suggested READ-tier questions (same wording as the web farmer panel,
 /// web-dashboard/src/features/aiQuestions.tsx).

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:agricarbon_app/design/design.dart';
 import 'package:agricarbon_app/screens/season_question_screen.dart';
 import 'package:agricarbon_app/services/season_question_api.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -68,7 +70,47 @@ Widget _host(Widget child) =>
 
 void main() {
   test('Q&A entry point is OFF unless the local-QA define is set', () {
+    expect(kLocalQaQuestionsRequested, isFalse);
     expect(kLocalQaQuestionsEnabled, isFalse);
+  });
+
+  group('QA-only release guard', () {
+    test('only a debug build that asked for it may show Q&A', () {
+      expect(localQaQuestionsAllowed(debugBuild: true, requested: true), isTrue);
+      expect(localQaQuestionsAllowed(debugBuild: true, requested: false),
+          isFalse);
+      expect(localQaQuestionsAllowed(debugBuild: false, requested: false),
+          isFalse);
+      expect(localQaQuestionsAllowed(debugBuild: false, requested: true),
+          isFalse,
+          reason: 'a release/profile build with the flag set by mistake '
+              'must not enable the QA screen');
+    });
+
+    test('the compile-time switch follows the policy for this build', () {
+      expect(
+          kLocalQaQuestionsEnabled,
+          localQaQuestionsAllowed(
+              debugBuild: kDebugMode, requested: kLocalQaQuestionsRequested));
+    });
+
+    // Tests always run in debug, so the check above cannot see a release
+    // build. Pin the source: the const must stay gated on kDebugMode (a
+    // compile-time false in release/profile), never on assert alone.
+    test('the switch is compiled out of release/profile builds', () {
+      final src = File('lib/screens/season_question_screen.dart')
+          .readAsStringSync()
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          src,
+          contains('const bool kLocalQaQuestionsEnabled = '
+              'kDebugMode && kLocalQaQuestionsRequested;'));
+      final detail = File('lib/screens/crop_season_detail_screen.dart')
+          .readAsStringSync();
+      expect(RegExp(r'SeasonQuestionScreen\(').allMatches(detail).length, 1,
+          reason: 'one route into the QA screen');
+      expect(detail, contains('if (kLocalQaQuestionsEnabled &&'));
+    });
   });
 
   group('SeasonQuestionApi', () {

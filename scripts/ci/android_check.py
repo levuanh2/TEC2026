@@ -10,6 +10,10 @@ SOURCE (app/android/app)
                          exception: EXC-ANDROID-01 was closed by fail-closed signing.
   MANIFEST_CLEARTEXT     main network security config / manifest permits cleartext HTTP
   MANIFEST_DEBUGGABLE    android:debuggable set in the main (release) manifest
+  QA_ONLY_FLAG           the local-QA Q&A switch (AGRICARBON_LOCAL_QA_QUESTIONS) lost a
+                         guard: Gradle must fail any build but `--debug -P
+                         agricarbon.qaVariant=localqa` that sets it, and the Dart switch
+                         must stay gated on kDebugMode (compiled out of release/profile)
 APK (merged manifest via aapt2, strings from every file in the archive)
   APK_IDENTITY           package id / versionName differ from vn.agricarbon.mobile / pubspec
   APK_BUILD_MODE         debuggable flag does not match --mode (a "debug" artifact must
@@ -79,6 +83,17 @@ def check_source() -> None:
         fail("MANIFEST_CLEARTEXT", "the main (release) config permits cleartext HTTP")
     if re.search(r"android:debuggable", manifest):
         fail("MANIFEST_DEBUGGABLE", "android:debuggable must not be set in the main manifest")
+    if ('dartDefines["AGRICARBON_LOCAL_QA_QUESTIONS"]' not in gradle
+            or not re.search(r'localQaQuestionsRequested\s*&&\s*\(buildsRelease\s*\|\|\s*buildsProfile\s*\|\|\s*'
+                             r'qaVariant\s*!=\s*"localqa"\)\s*\)\s*\{\s*throw GradleException', gradle)):
+        fail("QA_ONLY_FLAG", "build.gradle.kts must fail every build except the debug localqa QA build "
+                             "when AGRICARBON_LOCAL_QA_QUESTIONS is set")
+    qa_screen = ROOT / "app/lib/screens/season_question_screen.dart"
+    if qa_screen.exists() and not re.search(
+            r"const\s+bool\s+kLocalQaQuestionsEnabled\s*=\s*kDebugMode\s*&&\s*kLocalQaQuestionsRequested\s*;",
+            qa_screen.read_text(encoding="utf-8")):
+        fail("QA_ONLY_FLAG", "kLocalQaQuestionsEnabled must be `kDebugMode && kLocalQaQuestionsRequested` "
+                             "(compiled out of release/profile; an assert alone does not run in release)")
     backup = re.search(r'android:allowBackup\s*=\s*"(\w+)"', manifest)
     notes.append(f"allowBackup: {backup.group(1) if backup else 'not set (Android default: backups ON)'}")
 

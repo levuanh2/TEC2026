@@ -293,3 +293,43 @@ NOT TESTED: TalkBack speech on the phone. The semantics are covered by widget
 tests, and the message is present in the Android accessibility tree
 (uiautomator dump).
 
+
+## Round 5 — QA-only guard for the Q&A screen (15/11/2026)
+
+The local-QA Q&A screen used to depend on one compile-time flag,
+`AGRICARBON_LOCAL_QA_QUESTIONS=true`. A release build that set it by mistake
+would have shown the screen. There are now two independent guards, and neither
+relies on `assert`:
+
+1. **Dart**: `kLocalQaQuestionsEnabled = kDebugMode && kLocalQaQuestionsRequested`.
+   `kDebugMode` is a compile-time `false` in profile and release builds, so the
+   entry point is compiled out even if the flag is set.
+2. **Gradle**: the flag (read from Flutter's `dart-defines`, which covers both
+   `--dart-define` and `--dart-define-from-file`; any value other than `false`
+   counts as set) fails every build except
+   `flutter build apk --debug -P agricarbon.qaVariant=localqa`.
+   `agricarbon.qaVariant` is now also refused for profile builds (before, only
+   release was refused).
+
+CI: `scripts/ci/android_check.py` has a new `QA_ONLY_FLAG` source check that
+fails if either guard is removed. Tests: `season_question_test.dart`
+› *QA-only release guard* covers the policy table (release + flag → off), checks
+that the const follows that policy, and pins the source.
+
+Verification builds (arm64, 15/11/2026):
+
+| Build | Result |
+|---|---|
+| `--release --dart-define=AGRICARBON_LOCAL_QA_QUESTIONS=true` | FAIL, QA-flag error, raised before the signing check |
+| `--release --dart-define-from-file=config/local-qa.json` | FAIL, QA-flag error |
+| `--release --dart-define=AGRICARBON_LOCAL_QA_QUESTIONS=1` | FAIL, QA-flag error (fail closed) |
+| `--profile --dart-define-from-file=config/local-qa.json` | FAIL, QA-flag error |
+| `--profile -P agricarbon.qaVariant=localqa` | FAIL, `qaVariant is for debug QA builds only` |
+| `--debug` + flag, no QA variant (production app id) | FAIL, QA-flag error |
+| `--debug` + flag + `qaVariant=uipreview` | FAIL, QA-flag error |
+| `--debug --dart-define=AGRICARBON_LOCAL_QA_QUESTIONS=false` | builds |
+| `--debug` + flag + `qaVariant=localqa` (the QA APK) | builds |
+| `--release` without the flag | stops only on the existing "Release signing is not configured" |
+
+Not done: a signed release build. No release key exists, and creating one was
+out of scope.
