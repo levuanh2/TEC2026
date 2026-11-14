@@ -13,6 +13,7 @@ import 'package:agricarbon_app/services/carbon_api_service.dart';
 import 'package:agricarbon_app/services/carbon_cache.dart';
 import 'package:agricarbon_app/services/connectivity_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -197,8 +198,41 @@ Future<void> _seedSeason({
   }
 }
 
+/// 320x568 at text [scale]: settle, then scroll the whole list (the list only
+/// builds what is visible) and fail on any layout error along the way.
+Future<void> _scrollAll320(WidgetTester t, double scale) async {
+  t.view.physicalSize = const Size(320, 568);
+  t.view.devicePixelRatio = 1.0;
+  t.platformDispatcher.textScaleFactorTestValue = scale;
+  addTearDown(t.view.reset);
+  addTearDown(t.platformDispatcher.clearTextScaleFactorTestValue);
+  await t.pumpAndSettle();
+  for (var i = 0; i < 6; i++) {
+    await t.pump(const Duration(milliseconds: 20));
+  }
+  expect(t.takeException(), isNull);
+  for (var i = 0; i < 25; i++) {
+    await t.drag(find.byType(Scrollable).first, const Offset(0, -300),
+        warnIfMissed: false);
+    await t.pump(const Duration(milliseconds: 50));
+    expect(t.takeException(), isNull, reason: 'scroll step $i');
+  }
+}
+
 void main() {
   setUpAll(sqfliteFfiInit);
+  // Real Be Vietnam Pro + icons: the default test font draws every glyph as a
+  // 1 em square, which makes 320 dp width checks report false overflows.
+  setUpAll(() async {
+    final font = FontLoader(AppBrand.fontFamily);
+    for (final face in ['Regular', 'Medium', 'SemiBold', 'Bold', 'ExtraBold']) {
+      font.addFont(rootBundle.load('assets/fonts/BeVietnamPro-$face.ttf'));
+    }
+    await font.load();
+    final icons = FontLoader('MaterialIcons');
+    icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    await icons.load();
+  });
   setUp(() async {
     _tmp = await Directory.systemTemp.createTemp('agri_carbon25');
     _db = LocalDatabase(
@@ -312,6 +346,18 @@ void main() {
     expect(find.textContaining('20%'), findsOneWidget); // (2000-1600)/2000
     expect(find.textContaining('KHÔNG phải mức giảm thực tế'), findsOneWidget);
   });
+
+  for (final scale in [1.0, 1.8]) {
+    testWidgets('320x568, text $scale: full result + comparison, no layout error',
+        (tester) async {
+      await _seedSeason();
+      _api.byScenario[kScenarioAsRecorded] = _result(total: 3149.7);
+      _api.byScenario[kScenarioAwd] = _result(total: 3149.7);
+      _api.byScenario[kScenarioContinuousFlooding] = _result(total: 5500.2);
+      await tester.pumpWidget(_screen());
+      await _scrollAll320(tester, scale);
+    });
+  }
 
   testWidgets('thiếu 1 trong 2 kịch bản -> KHÔNG hiện so sánh', (tester) async {
     await _seedSeason();

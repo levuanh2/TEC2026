@@ -5,6 +5,7 @@
 library;
 
 export 'app_format.dart';
+export 'components/adaptive_form_dialog.dart';
 export 'components/adaptive_form_field.dart';
 export 'components/app_bottom_navigation.dart';
 export 'components/app_card.dart';
@@ -13,6 +14,7 @@ export 'components/app_scaffold.dart';
 export 'components/buttons.dart';
 export 'components/brand_surfaces.dart';
 export 'components/confirmation_dialog.dart';
+export 'components/focus_reveal.dart';
 export 'components/metric_card.dart';
 export 'components/offline_banner.dart';
 export 'components/state_views.dart';
