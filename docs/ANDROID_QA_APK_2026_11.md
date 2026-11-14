@@ -194,7 +194,7 @@ Phone results at `8801916`:
 | Rotation landscape ↔ portrait | PASS: typed value kept |
 | Cancel button (real tap) | PASS: sheet closes on the first tap; DB unchanged |
 | System Back | PASS: 1st Back closes the keyboard (sheet back in normal mode, value kept); 2nd Back closes the sheet; DB unchanged |
-| Save with invalid value (0) in cramped mode | PASS: the sheet stays open and the field turns red, as in normal mode. Limit: the error text sits under the keyboard until the keyboard is closed |
+| Save with invalid value (0) in cramped mode | FAIL at `8801916`, fixed in Round 4: the value was rejected and not saved, but the error text was scrolled out of view, so the rejected Save looked like it did nothing |
 
 Screenshots: `E01`/`E02` before; `E03`–`E08` after.
 
@@ -234,3 +234,62 @@ Details are in #80; #79 does not change this test.
   `tec2026-apkqa` stack; data and keys were unchanged.
 - `user_rotation` on this Xiaomi sometimes snaps back after a font-scale change.
   The helper now waits until the rotation has held for 3 seconds.
+
+## Round 4 — visible validation error (14/11/2026)
+
+### Defect
+
+At `1be5785`, on the Xiaomi (Android 16, landscape, Gboard open, font 1.8), days
+= `0` + Save kept the sheet open and wrote nothing, which is correct. But the
+error line under the field sat below the ~50 dp scroll viewport (widget-test
+geometry: the message at y 155–213 dp, while the viewport ended at 136 dp). The
+user saw no reaction. Screenshot: `E08` (before).
+
+A second issue was found in the same field: the digits-only filter silently
+turned a typed `1.5` into `15` and `-5` into `5`, which were then saved as valid
+days. The owner chose to fix this in this sheet only.
+
+### Fix (`season_methodology_sheet.dart`, `adaptive_form_field.dart`)
+
+- While cramped, the message replaces the title in the pinned Cancel / Save row,
+  so it sits next to the Save that caused it. The field keeps its red error
+  border but does not draw the message a second time (`showErrorText: false`).
+  Portrait and roomy layouts still show the normal error under the field.
+- Accessibility: on Android (no announce API), the message is a live region,
+  as Flutter's own field error is. Where announcing is supported,
+  `SemanticsService.sendAnnouncement` is used. Each rejected Save re-keys the
+  node, so a repeated tap is announced again.
+- The days field in this sheet allows `.`, `,` and `-`, so `1.5`, `1,5` and `-5`
+  reach `_save()` and are rejected visibly ("Số ngày phải là số nguyên." /
+  "… phải lớn hơn 0."). Letters are still filtered. The season and activity
+  forms keep their digits-only filter; they have the same silent-strip
+  hazard (follow-up, see the PR).
+- `cultivationDaysError()`, the saved values and the Carbon inputs are unchanged.
+
+### Tests
+
+`test/methodology_sheet_validation_test.dart` (12 tests) checks the message's
+on-screen rectangle against the visible area: every enclosing scroll viewport,
+below the status bar, above the keyboard. It covers 0, typed negative,
+typed `1.5` / `1,5` / `5-`, too large, letters, repeated Save (3×), a valid
+save after an error, portrait, rotation with input, and both announce paths.
+Without the fix, 9 of 12 fail. The 3 that pass check behaviour that does not
+change: a valid save, the Android live region, and the portrait layout.
+
+### Phone results at `1909893` (QA package only reinstalled)
+
+| Check | Result |
+|---|---|
+| Landscape + keyboard + font 1.8, days `0`, Save | PASS: "Số ngày canh tác phải lớn hơn 0." shown in the pinned row right after the first tap (`E09`); field red; value and keyboard kept; 0 Flutter errors |
+| Typed `1.5`, Save | PASS: field shows `1.5`; "Số ngày phải là số nguyên." in the pinned row |
+| Typed `-5`, Save | PASS: field shows `-5`; "… phải lớn hơn 0." (`E10`) |
+| 3 more Save taps | PASS: one message, sheet stays open |
+| Rotate to portrait, then back | PASS: normal layout with one message under the field (`E11`); back in landscape the pinned message returns; `-5` and focus kept |
+| DB after the invalid saves | PASS: `cultivation_days` still NULL |
+| Typed `95`, Save | PASS: sheet closes, no error (`E12`); local DB `cultivation_days = 95` after sync, both water-regime fields unchanged (NULL) |
+| Original app | Not touched: `vn.agricarbon.mobile` lastUpdateTime 2026-09-30 before and after |
+
+NOT TESTED: TalkBack speech on the phone. The semantics are covered by widget
+tests, and the message is present in the Android accessibility tree
+(uiautomator dump).
+
