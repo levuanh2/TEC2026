@@ -175,7 +175,9 @@ void main() {
   late SyncCoordinator co;
   late AuthController controller;
 
-  Future<void> openOffline() async {
+  Future<void> openOffline({
+    Duration connectivityDebounce = const Duration(milliseconds: 10),
+  }) async {
     db = LocalDatabase(factory: databaseFactoryFfi, directoryOverride: tmp.path);
     conn = ConnectivityService.fixed(false);
     co = SyncCoordinator(
@@ -183,7 +185,7 @@ void main() {
       db: db,
       connectivity: conn,
       ensureSession: auth.ensureFreshSession,
-      connectivityDebounce: const Duration(milliseconds: 10),
+      connectivityDebounce: connectivityDebounce,
     );
     controller = AuthController(
       auth,
@@ -375,7 +377,12 @@ void main() {
   });
 
   test('mất mạng giữa chừng lúc làm mới: không gửi, vẫn ở trong app', () async {
-    await openOffline();
+    // This test checks ONE manual run. `debugSet(online: true)` below also
+    // arms the coordinator's connectivity auto-sync, a real Timer: with 10 ms
+    // it raced the assertions and, on a busy machine, made a second refresh
+    // (refreshCalls 2, ~1 run in 4). The auto path has its own test ('có mạng
+    // lại: …'); here its timer is kept from firing before closeAll() cancels it.
+    await openOffline(connectivityDebounce: const Duration(days: 1));
     await db.saveActivity(_act('e1'));
     conn.debugSet(online: true, wifi: true); // báo có mạng nhưng không tới máy chủ
     await co.runSync(manual: true);
