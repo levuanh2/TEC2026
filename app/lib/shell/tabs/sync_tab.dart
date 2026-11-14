@@ -32,6 +32,7 @@ class SyncTab extends StatelessWidget {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: const Text('Đang bật "Chỉ gửi qua Wi-Fi"'),
           content: const Text(
             'Bạn đang dùng dữ liệu di động. Vẫn gửi lần này? '

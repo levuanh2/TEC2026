@@ -121,6 +121,7 @@ class _FarmScreenState extends State<FarmScreen> {
           }
 
           return AlertDialog(
+            scrollable: true,
             title: const Text('Tạo hộ / trang trại mới'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -170,6 +171,7 @@ class _FarmScreenState extends State<FarmScreen> {
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Chưa tạo được hộ'),
         content: Text(message),
         actions: [
@@ -187,6 +189,7 @@ class _FarmScreenState extends State<FarmScreen> {
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Chưa thuộc HTX nào'),
         content: const Text(
           'Tài khoản của bạn chưa được thêm vào hợp tác xã nào nên chưa tạo '

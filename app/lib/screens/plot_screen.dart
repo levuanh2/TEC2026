@@ -179,6 +179,10 @@ class _SyncChip extends StatelessWidget {
   }
 }
 
+/// The add/edit plot dialog, for layout regression tests only.
+@visibleForTesting
+Widget debugPlotFormDialog() => const _PlotDialog();
+
 class _PlotDraft {
   const _PlotDraft(this.code, this.name, this.areaHa);
   final String code;
@@ -232,6 +236,7 @@ class _PlotDialogState extends State<_PlotDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      scrollable: true,
       title:
           Text(widget.initial == null ? 'Thêm thửa ruộng' : 'Sửa thửa ruộng'),
       content: Column(
