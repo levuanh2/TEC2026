@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 
 import '../design/design.dart';
 import '../models/crop_season.dart';
@@ -67,6 +69,11 @@ class _SeasonMethodologyFormState extends State<SeasonMethodologyForm> {
   );
   String? _daysError;
 
+  /// Counts rejected saves. The pinned error summary is keyed by it, so a
+  /// repeated invalid Save creates a fresh live region that is announced
+  /// again instead of staying silent.
+  int _rejectedSaves = 0;
+
   @override
   void dispose() {
     _days.dispose();
@@ -83,8 +90,20 @@ class _SeasonMethodologyFormState extends State<SeasonMethodologyForm> {
           ? 'Số ngày phải là số nguyên.'
           : cultivationDaysError(days);
     }
-    setState(() => _daysError = error);
-    if (error != null) return;
+    setState(() {
+      _daysError = error;
+      if (error != null) _rejectedSaves++;
+    });
+    if (error != null) {
+      // Where the platform supports announcements, say the error out loud;
+      // elsewhere (Android) the live region below announces it, as Flutter's
+      // own field error does.
+      if (MediaQuery.supportsAnnounceOf(context)) {
+        SemanticsService.sendAnnouncement(
+            View.of(context), error, Directionality.of(context));
+      }
+      return;
+    }
     Navigator.of(context).pop(SeasonMethodologyValues(
       ipccWaterRegime: IpccWaterRegime.fromWire(_ipcc),
       preSeasonWaterRegime: PreSeasonWaterRegime.fromWire(_pre),
@@ -106,7 +125,13 @@ class _SeasonMethodologyFormState extends State<SeasonMethodologyForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          cramped ? _CrampedActions(onSave: _save) : const _SheetHandle(),
+          cramped
+              ? _CrampedActions(
+                  onSave: _save,
+                  error: _daysError,
+                  rejectedSaves: _rejectedSaves,
+                )
+              : const _SheetHandle(),
           Flexible(
             child: SingleChildScrollView(
               padding: EdgeInsets.fromLTRB(AppSpacing.screenH, 0,
@@ -159,6 +184,14 @@ class _SeasonMethodologyFormState extends State<SeasonMethodologyForm> {
                       controller: _days,
                       hint: 'Từ gieo sạ tới thu hoạch, ví dụ 100',
                       errorText: _daysError,
+                      // While cramped, the message is in the pinned row
+                      // (the line under the field is scrolled out of the
+                      // ~50 dp viewport). The field keeps its error border.
+                      showErrorText: !cramped,
+                      // Keep '.', ',' and '-' so "1.5" or "-5" reach _save
+                      // and are rejected out loud. The digits-only default
+                      // turned them into 15 / 5 and saved them silently.
+                      inputFormatters: _daysInput,
                     ),
                     if (!cramped) ...[
                       const SizedBox(height: AppSpacing.lg),
@@ -178,6 +211,8 @@ class _SeasonMethodologyFormState extends State<SeasonMethodologyForm> {
     );
   }
 }
+
+final _daysInput = [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]'))];
 
 /// Same look as Material's bottom-sheet drag handle (32x4 in a 48 dp area);
 /// dragging the sheet still works because the whole sheet is draggable.
@@ -210,9 +245,17 @@ class _SheetHandle extends StatelessWidget {
 }
 
 /// Cancel / title / Save in one 48 dp row, used only while cramped.
+///
+/// After a rejected Save the title is replaced by the validation message, so
+/// the error sits next to the Save button that produced it. On the phone
+/// (landscape, keyboard, font 1.8) the message under the field was scrolled
+/// out of view and the rejected Save looked like it did nothing.
 class _CrampedActions extends StatelessWidget {
-  const _CrampedActions({required this.onSave});
+  const _CrampedActions(
+      {required this.onSave, required this.error, required this.rejectedSaves});
   final VoidCallback onSave;
+  final String? error;
+  final int rejectedSaves;
   @override
   Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.2,
@@ -225,11 +268,15 @@ class _CrampedActions extends StatelessWidget {
               child: const Text('Huỷ'),
             ),
             Expanded(
-              child: Text('Phương pháp tính',
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall),
+              child: error == null
+                  ? Text('Phương pháp tính',
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall)
+                  : _ErrorSummary(
+                      key: ValueKey('methodology-error-$rejectedSaves'),
+                      message: error!),
             ),
             Padding(
               padding: const EdgeInsets.only(right: AppSpacing.xs),
@@ -240,6 +287,39 @@ class _CrampedActions extends StatelessWidget {
               ),
             ),
           ]),
+        ),
+      );
+}
+
+/// The validation message pinned in the cramped action row.
+class _ErrorSummary extends StatelessWidget {
+  const _ErrorSummary({super.key, required this.message});
+  final String message;
+  @override
+  Widget build(BuildContext context) => Semantics(
+        container: true,
+        liveRegion: !MediaQuery.supportsAnnounceOf(context),
+        child: Row(
+          key: const Key('methodology-error-summary'),
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const ExcludeSemantics(
+              child:
+                  Icon(Icons.error_outline, size: 18, color: AppColors.error),
+            ),
+            const SizedBox(width: AppSpacing.xxs),
+            Flexible(
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelMedium
+                    ?.copyWith(color: AppColors.error),
+              ),
+            ),
+          ],
         ),
       );
 }
