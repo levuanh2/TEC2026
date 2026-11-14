@@ -385,14 +385,19 @@ void main() {
     await openOffline(connectivityDebounce: const Duration(days: 1));
     await db.saveActivity(_act('e1'));
     conn.debugSet(online: true, wifi: true); // báo có mạng nhưng không tới máy chủ
-    await co.runSync(manual: true);
-    await pumpEventQueue();
+    try {
+      await co.runSync(manual: true);
+      await pumpEventQueue();
 
-    expect(auth.refreshCalls, 1);
-    expect(server.calls, 0);
-    expect(controller.phase, AuthPhase.authenticated);
-    expect(await db.countPendingActivities(), 1);
-    await closeAll();
+      expect(auth.refreshCalls, 1);
+      expect(server.calls, 0);
+      expect(controller.phase, AuthPhase.authenticated);
+      expect(await db.countPendingActivities(), 1);
+    } finally {
+      // Always cancel the armed (1-day) debounce timer and close the DB, also
+      // when an expectation fails; otherwise tearDown cannot delete tmp.
+      await closeAll();
+    }
   });
 
   test('đăng xuất chủ động vẫn là đăng xuất (không phải "hết phiên")', () async {
