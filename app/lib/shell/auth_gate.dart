@@ -23,6 +23,36 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   // In-memory UI intent only: no account write, quota or purchase persistence.
   ServicePlanSelection? _pendingPlan;
+  late bool _wasAuthenticated;
+
+  @override
+  void initState() {
+    super.initState();
+    _wasAuthenticated = widget.services.authController.isAuthenticated;
+    widget.services.authController.addListener(_onAuthChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.services.authController.removeListener(_onAuthChanged);
+    super.dispose();
+  }
+
+  /// Leaving the authenticated phase (sign-out, expired or revoked session)
+  /// swaps the root to Login, but routes pushed above it (farm -> plot ->
+  /// season, dialogs) would stay on top and keep showing the previous
+  /// account's data. Found on a physical phone after a server-side session
+  /// revocation: drop everything above the root.
+  void _onAuthChanged() {
+    final now = widget.services.authController.isAuthenticated;
+    if (_wasAuthenticated && !now) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      });
+    }
+    _wasAuthenticated = now;
+  }
 
   @override
   Widget build(BuildContext context) {

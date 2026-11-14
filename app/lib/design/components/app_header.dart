@@ -19,7 +19,21 @@ class AppHeader extends StatelessWidget {
     this.leading,
     this.showBackButton = false,
     this.actions = const [],
+    this.compact = false,
   });
+
+  /// The same header, 48 dp tall: no subtitle and no vertical padding, title
+  /// text capped at 1.2x. [AppScaffold] uses it only while the keyboard leaves
+  /// too little room ([isCramped]).
+  AppHeader asCompact() => AppHeader(
+        key: key,
+        title: title,
+        isOnline: isOnline,
+        leading: leading,
+        showBackButton: showBackButton,
+        actions: actions,
+        compact: true,
+      );
 
   final String title;
   final String? subtitle;
@@ -32,21 +46,22 @@ class AppHeader extends StatelessWidget {
   final Widget? leading;
   final bool showBackButton;
   final List<Widget> actions;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
+    final header = DecoratedBox(
       decoration: const BoxDecoration(gradient: AppGradients.header),
       child: Material(
         color: Colors.transparent,
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
               AppSpacing.screenH,
-              AppSpacing.sm,
+              compact ? 0 : AppSpacing.sm,
               AppSpacing.md,
-              AppSpacing.sm,
+              compact ? 0 : AppSpacing.sm,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -77,7 +92,7 @@ class AppHeader extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (subtitle != null) ...[
+                      if (subtitle != null && !compact) ...[
                         const SizedBox(height: 2),
                         Text(
                           subtitle!,
@@ -100,6 +115,9 @@ class AppHeader extends StatelessWidget {
         ),
       ),
     );
+    if (!compact) return header;
+    return MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.2, child: header);
   }
 }
 

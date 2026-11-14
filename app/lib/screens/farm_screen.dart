@@ -120,40 +120,27 @@ class _FarmScreenState extends State<FarmScreen> {
             }
           }
 
-          return AlertDialog(
-            scrollable: true,
-            title: const Text('Tạo hộ / trang trại mới'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: codeCtl,
-                  decoration: InputDecoration(
-                    labelText: 'Mã hộ *',
-                    errorText: codeErr,
-                  ),
+          return AdaptiveFormDialog(
+            title: 'Tạo hộ / trang trại mới',
+            fields: [
+              TextField(
+                controller: codeCtl,
+                decoration: InputDecoration(
+                  labelText: 'Mã hộ *',
+                  errorText: codeErr,
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                TextField(
-                  controller: nameCtl,
-                  decoration: InputDecoration(
-                    labelText: 'Tên hộ *',
-                    errorText: nameErr,
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Huỷ'),
               ),
-              PrimaryButton(
-                label: 'Tạo',
-                expanded: false,
-                onPressed: submit,
+              TextField(
+                controller: nameCtl,
+                decoration: InputDecoration(
+                  labelText: 'Tên hộ *',
+                  errorText: nameErr,
+                ),
               ),
             ],
+            confirmLabel: 'Tạo',
+            onConfirm: submit,
+            onCancel: () => Navigator.pop(dialogContext, false),
           );
         },
       ),

@@ -132,12 +132,6 @@ class AgriCarbonTheme {
             borderRadius: BorderRadius.circular(AppRadii.lg)),
         titleTextStyle: textTheme.titleLarge,
         contentTextStyle: textTheme.bodyLarge,
-        // Material's 24 dp vertical inset only bites when a dialog is taller
-        // than the free space: landscape + keyboard + large text leave ~100 dp
-        // on a phone, and the dialogs (scrollable: true) still need room for
-        // their action row. Horizontal stays at Material's 40 dp.
-        insetPadding:
-            const EdgeInsets.symmetric(horizontal: 40, vertical: AppSpacing.xs),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.surface,
