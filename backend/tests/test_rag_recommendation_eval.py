@@ -228,7 +228,8 @@ def test_e3_read_tier_on_the_same_contested_chunk_keeps_a_vietnamese_caveat():
     caveat = [line for line in body["limitations"] if "báo động nhầm" in line]
     assert len(caveat) == 1 and "mâu thuẫn với tài liệu tham chiếu" in caveat[0]
     # D-E3-3: the warning sits ON the citation, the composed answer says it is not guidance, no internal code shown
-    assert body["citations"][0]["integrity_warning"].startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
+    assert body["citations"][0]["integrity_warning"] == "Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn canh tác."
+    assert "mâu thuẫn với tài liệu tham chiếu" in body["citations"][0]["integrity_detail"]
     assert "không phải hướng dẫn canh tác" in body["answer"] and body["recommendations"] == []
     shown = " ".join([body["answer"], *body["limitations"], *(c["integrity_warning"] or "" for c in body["citations"])])
     assert "reference_conflict" not in shown

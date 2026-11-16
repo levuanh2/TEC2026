@@ -396,12 +396,19 @@ def assert_read_tier_warned(body, chunk, types):
     assert body["status"] == "generated" and body["provenance"]["answer_source"] == "system_composed", body
     assert body["recommendations"] == []
     cited = {c["chunk_id"]: c for c in body["citations"]}
-    assert chunk in cited and cited[chunk]["integrity_warning"].startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
-    assert all(FINDING_TYPE_LABELS[t] in cited[chunk]["integrity_warning"] for t in types)
+    # READ-tier citation UX: the owner's sentence verbatim; the labels are the separate `integrity_detail`
+    assert chunk in cited and cited[chunk]["integrity_warning"] == OWNER_CONFLICT_SENTENCE
+    assert all(FINDING_TYPE_LABELS[t] in cited[chunk]["integrity_detail"] for t in types)
+    assert cited[chunk]["title"] and cited[chunk]["document_id"]          # still inspectable by the authorized caller
+    assert cited[chunk]["url"] is None                                     # but never offered as a link
     assert body["answer"].endswith(ANSWER_CONFLICT_NOTE)
     assert any(line.startswith("Cảnh báo: tài liệu được dẫn có mâu thuẫn khoa học") for line in body["limitations"])
-    shown = " ".join([body["answer"], *body["limitations"], *(c["integrity_warning"] or "" for c in body["citations"])])
+    shown = " ".join([body["answer"], *body["limitations"],
+                      *(f'{c["integrity_warning"] or ""} {c["integrity_detail"] or ""}' for c in body["citations"])])
     assert not any(code in shown for code in FINDING_TYPE_LABELS), shown
+
+
+OWNER_CONFLICT_SENTENCE = "Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn canh tác."
 
 
 def test_12b_a_clean_document_in_the_same_database_still_supports_the_recommendation(tx, m2):
@@ -432,7 +439,10 @@ def test_12c_each_contained_type_is_mapped_from_the_stored_records_and_others_st
         assert body["status"] == "generated" and chunk in [c["chunk_id"] for c in body["citations"]], body
         label = FINDING_TYPE_LABELS[relabel]
         assert any(label in line for line in body["limitations"])
-        assert label in next(c for c in body["citations"] if c["chunk_id"] == chunk)["integrity_warning"]
+        cite = next(c for c in body["citations"] if c["chunk_id"] == chunk)
+        assert label in cite["integrity_detail"] and cite["integrity_warning"].startswith("Lưu ý")
+        assert cite["integrity_warning"] != OWNER_CONFLICT_SENTENCE        # a caveat is not called a contradiction
+        assert cite["url"] is None
 
 
 def test_12d_a_contextual_difference_dismissal_is_contained_like_a_false_positive(tx, m2):
@@ -480,6 +490,22 @@ def test_12f_another_htx_contested_document_reveals_nothing(tx, m2):
                       (tx.season_a, [chunk])) == ("ok", [])
 
 
+def test_12f_read_tier_another_htx_contested_document_reveals_no_title_url_or_warning(tx, m2):
+    """READ-tier citation UX: the same foreign contested document, asked about through the trusted READ composer.
+    The body never names it: its source id (part of its source title and of its URL) appears nowhere, and the
+    caller's own clean citation carries no warning borrowed from it."""
+    doc, src, chunk, _ = mistaken_expert_approval(tx, m2, visibility="tenant", org=tx.org_b)
+    _, own_src, own_chunk = cited_doc(tx, m2)
+    body, _ = ask(tx, None, intent=RagIntent.EVIDENCE, question=EVIDENCE_QUESTION)
+    assert body["status"] == "generated" and body["provenance"]["answer_source"] == "system_composed", body
+    assert [c["chunk_id"] for c in body["citations"]] == [own_chunk]
+    assert src not in json.dumps(body, ensure_ascii=False) and chunk not in json.dumps(body, ensure_ascii=False)
+    own = body["citations"][0]
+    assert (own["integrity_warning"], own["integrity_detail"]) == (None, None)
+    assert own["url"] and own["url"].startswith("https://")                 # a clean citation keeps its link
+    assert not any("xác minh lại" in line for line in body["limitations"]) and ANSWER_CONFLICT_NOTE not in body["answer"]
+
+
 def test_12g_a_contested_source_withdrawn_after_retrieval_is_refused_as_no_longer_admissible(tx, m2):
     """C1-C5 take precedence over E3: the copy names the stronger fact."""
     doc, src, chunk, _ = mistaken_expert_approval(tx, m2)
@@ -525,6 +551,7 @@ def test_12i_undetected_poison_is_still_cited_e3_only_contains_what_was_detected
     body, _ = ask(tx, (src, chunk))
     assert body["status"] == "generated" and [c["chunk_id"] for c in body["citations"]] == [chunk]
     assert body["citations"][0]["integrity_warning"] is None           # and nothing warns the farmer
+    assert body["citations"][0]["integrity_detail"] is None
 
 
 # ================================================================== rollback

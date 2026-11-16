@@ -57,11 +57,16 @@ CAVEAT_TEXT = ("Lưu ý: tài liệu được dẫn có phát hiện kiểm tra 
 CONFLICT_CAVEAT_TEXT = ("Cảnh báo: tài liệu được dẫn có mâu thuẫn khoa học ({labels}) và cần được xác minh lại. Chuyên"
                         " gia đã đánh giá là báo động nhầm hoặc khác biệt theo ngữ cảnh, nhưng điều đó chưa được xác minh"
                         " độc lập; nội dung tài liệu này không phải là hướng dẫn canh tác đã được xác lập.")
-#: Shown ON the citation itself (RagCitationResponse.integrity_warning), next to the document it is about.
-CITATION_CONFLICT_WARNING = ("Cảnh báo: tài liệu này có mâu thuẫn khoa học ({labels}) và cần được xác minh lại;"
-                             " không dùng làm hướng dẫn canh tác.")
-CITATION_CAVEAT = ("Lưu ý: tài liệu này có phát hiện kiểm tra ({labels}) đã được chuyên gia đánh giá là báo động nhầm"
-                   " hoặc khác biệt theo ngữ cảnh; hệ thống không tự xác minh nội dung khoa học.")
+#: Shown ON the citation itself (RagCitationResponse.integrity_warning), directly after its title. A dismissed
+#: SCIENTIFIC CONFLICT gets the owner's sentence verbatim (2026-11-16, docs/rag/RAG_V15_E1_E4_SOURCE_EXPERT_GOVERNANCE_PLAN.md
+#: §3): no label or other text is ever added to it. The finding description goes in `integrity_detail`.
+CITATION_CONFLICT_WARNING = ("Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn"
+                             " canh tác.")
+#: Any other dismissed finding: an integrity caveat, NOT a scientific contradiction.
+CITATION_CAVEAT = ("Lưu ý: tài liệu này có phát hiện kiểm tra đã được chuyên gia đánh giá là báo động nhầm hoặc khác biệt"
+                   " theo ngữ cảnh; hệ thống không tự xác minh nội dung khoa học.")
+#: RagCitationResponse.integrity_detail: the trusted labels of the citation's own findings, shown separately.
+CITATION_FINDINGS_DETAIL = "Phát hiện kiểm tra: {labels}."
 #: Appended to a READ-tier (system-composed) answer that cites a contested document.
 ANSWER_CONFLICT_NOTE = ("Một số tài liệu được dẫn có mâu thuẫn khoa học và cần được xác minh lại; đó không phải hướng"
                         " dẫn canh tác đã được xác lập.")
@@ -153,7 +158,7 @@ def recheck_cited_evidence(reader: Any, *, crop_season_id: str, result: Any, ret
 #: Trusted Vietnamese labels for farmer-facing copy (D-E3-3: no internal code is shown).
 FINDING_TYPE_LABELS = {
     "reference_conflict": "mâu thuẫn với tài liệu tham chiếu",
-    "claim_conflict": "mâu thuẫn với nội dung của tài liệu đã duyệt khác",
+    "claim_conflict": "mâu thuẫn với nội dung của một tài liệu khác trong kho tri thức",
     "numeric_reference_mismatch": "số liệu khác với tài liệu tham chiếu",
     "unsupported_assertion": "nhận định chưa có tài liệu tham chiếu hỗ trợ",
     "expired_guidance": "hướng dẫn đã hết hiệu lực",
@@ -187,8 +192,13 @@ def caveat_limitations(check: EvidenceCheck) -> tuple[str, ...]:
 
 
 def citation_warning(types) -> str:
-    template = CITATION_CONFLICT_WARNING if is_conflict(types) else CITATION_CAVEAT
-    return template.format(labels=finding_labels(types))
+    """The citation's headline warning: chosen by trusted code from the finding TYPES, never from any text."""
+    return CITATION_CONFLICT_WARNING if is_conflict(types) else CITATION_CAVEAT
+
+
+def citation_detail(types) -> str:
+    """The citation's finding description (labels only; an unknown code is never echoed)."""
+    return CITATION_FINDINGS_DETAIL.format(labels=finding_labels(types))
 
 
 def answer_time_evidence_gate(reader: Any, *, crop_season_id: str, result: Any, retrieved: Sequence[Any],
@@ -222,7 +232,11 @@ def answer_time_evidence_gate(reader: Any, *, crop_season_id: str, result: Any, 
     warnings = dict(check.caveats)
     update: dict[str, Any] = {
         "limitations": tuple(result.limitations) + caveat_limitations(check),
-        "evidence": tuple(c.model_copy(update={"integrity_warning": citation_warning(warnings[c.chunk_id])})
+        # A warned citation keeps its authorized title but never carries a navigable URL, for every client
+        # (owner decision 2026-11-16, READ-tier citation UX): decided from the finding TYPES, never from text.
+        "evidence": tuple(c.model_copy(update={"integrity_warning": citation_warning(warnings[c.chunk_id]),
+                                               "integrity_detail": citation_detail(warnings[c.chunk_id]),
+                                               "url": None})
                           if c.chunk_id in warnings else c for c in result.evidence),
     }
     if not is_action_answer(result) and any(is_conflict(ts) for ts in warnings.values()) and result.answer:

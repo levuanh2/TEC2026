@@ -297,6 +297,8 @@ class CitedEvidence(Contract):
     #: M7 E5/E3: trusted Vietnamese warning set by the answer-time gate when this document carries integrity
     #: findings an expert dismissed (rag_answer_integrity.citation_warning); never model or document text.
     integrity_warning: str | None = None
+    #: The trusted labels of those findings ("Phát hiện kiểm tra: ..."), shown apart from the warning sentence.
+    integrity_detail: str | None = None
 
 
 # -- generation (UNTRUSTED until grounded) -----------------------------------

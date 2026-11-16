@@ -12,7 +12,8 @@ from types import SimpleNamespace
 import pytest
 
 from rag_answer_integrity import (ACTION_CONTAINED_FINDING_TYPES, ANSWER_CONFLICT_NOTE, CAVEAT_TEXT,
-                                  CONFLICT_CAVEAT_TEXT, FINDING_TYPE_LABELS, answer_time_evidence_gate,
+                                  CITATION_CAVEAT, CITATION_CONFLICT_WARNING, CONFLICT_CAVEAT_TEXT,
+                                  FINDING_TYPE_LABELS, answer_time_evidence_gate, citation_detail, citation_warning,
                                   is_action_answer, recheck_cited_evidence)
 from recommendation.rag import RetrievalUnavailable
 from recommendation.rag.answers import INSUFFICIENT_MESSAGES
@@ -123,7 +124,8 @@ def test_the_gate_discards_the_whole_model_answer_or_adds_the_caveat():
                                              crop_season_id="s", result=base, retrieved=[CHUNK], demo=False)
     assert not refused and out.limitations == ("l", CAVEAT_TEXT.format(
         labels="nhận định chưa có tài liệu tham chiếu hỗ trợ"))
-    assert out.evidence[0].integrity_warning.startswith("Lưu ý: tài liệu này") and out.answer == "model text"
+    assert out.evidence[0].integrity_warning == CITATION_CAVEAT and out.answer == "model text"
+    assert out.evidence[0].integrity_detail == "Phát hiện kiểm tra: nhận định chưa có tài liệu tham chiếu hỗ trợ."
     # nothing to check: an answer without evidence passes untouched, and the database is not called
     reader = Reader()
     out, refused = answer_time_evidence_gate(reader, crop_season_id="s", result=Result(status="insufficient_evidence",
@@ -214,7 +216,8 @@ def _read_answer(types, *, intent="evidence"):
 
 
 def _farmer_text(out) -> str:
-    return " ".join([out.answer or "", *out.limitations, *(c.integrity_warning or "" for c in out.evidence)])
+    return " ".join([out.answer or "", *out.limitations,
+                     *(f"{c.integrity_warning or ''} {getattr(c, 'integrity_detail', None) or ''}" for c in out.evidence)])
 
 
 @pytest.mark.parametrize("finding_type", sorted(ACTION_CONTAINED_FINDING_TYPES))
@@ -222,8 +225,10 @@ def test_d_e3_3_read_tier_conflict_is_warned_on_the_citation_and_in_the_answer_w
     out, refused = _read_answer([finding_type])
     assert not refused and out.status == "generated"
     label = FINDING_TYPE_LABELS[finding_type]
-    assert out.evidence[0].integrity_warning.startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
-    assert label in out.evidence[0].integrity_warning
+    # the owner's sentence, verbatim, with nothing added; the finding description is a separate field
+    assert out.evidence[0].integrity_warning == OWNER_CONFLICT_SENTENCE
+    assert out.evidence[0].integrity_detail == f"Phát hiện kiểm tra: {label}."
+    assert out.evidence[0].url is None                                       # no navigable URL for any client
     assert out.answer.endswith(ANSWER_CONFLICT_NOTE) and out.answer_template.endswith(ANSWER_CONFLICT_NOTE)
     assert out.limitations == ("l", CONFLICT_CAVEAT_TEXT.format(labels=label))
     text = _farmer_text(out)
@@ -239,7 +244,42 @@ def test_d_e3_3_a_mixed_citation_names_only_vietnamese_labels_and_unknown_codes_
 
 def test_d_e3_3_a_non_conflict_finding_does_not_add_the_conflict_sentence():
     out, _ = _read_answer(["expired_guidance"])
-    assert out.answer == "Hệ thống soạn." and out.evidence[0].integrity_warning.startswith("Lưu ý")
+    assert out.answer == "Hệ thống soạn." and out.evidence[0].integrity_warning == CITATION_CAVEAT
+    # an integrity caveat is distinct copy and never calls the document a scientific contradiction
+    assert out.evidence[0].integrity_warning != OWNER_CONFLICT_SENTENCE
+    assert "mâu thuẫn" not in out.evidence[0].integrity_warning and "khoa học cần xác minh" not in _farmer_text(out)
+    assert out.evidence[0].integrity_detail == "Phát hiện kiểm tra: hướng dẫn đã hết hiệu lực."
+    assert out.evidence[0].url is None                                       # a caveat also withholds the URL
+
+
+#: Pinned as a literal (not imported): the owner's required sentence, 2026-11-16.
+OWNER_CONFLICT_SENTENCE = ("Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn"
+                           " canh tác.")
+
+
+def test_read_ux_the_conflict_warning_is_exactly_the_owner_sentence():
+    assert CITATION_CONFLICT_WARNING == OWNER_CONFLICT_SENTENCE
+    assert "{" not in CITATION_CONFLICT_WARNING and "{" not in CITATION_CAVEAT     # no interpolation into either
+
+
+@pytest.mark.parametrize("types, conflict", [
+    (["reference_conflict"], True), (["claim_conflict"], True), (["numeric_reference_mismatch"], True),
+    (["reference_conflict", "expired_guidance", "some_future_type"], True),
+    (["unsupported_assertion"], False), (["expired_guidance"], False), (["not_yet_effective"], False),
+    (["superseded_guidance"], False), (["some_future_type"], False)])
+def test_read_ux_the_headline_is_chosen_from_the_finding_types_and_the_detail_never_echoes_a_code(types, conflict):
+    assert citation_warning(types) == (OWNER_CONFLICT_SENTENCE if conflict else CITATION_CAVEAT)
+    detail = citation_detail(types)
+    assert detail.startswith("Phát hiện kiểm tra: ") and "some_future_type" not in detail
+    assert not any(code in detail for code in FINDING_TYPE_LABELS)
+
+
+def test_read_ux_a_clean_citation_gets_no_warning_and_no_detail():
+    base = _Answer(status="generated", intent="evidence", evidence=(CHUNK,), recommendations=(), answer="Hệ thống soạn.",
+                   answer_template="Hệ thống soạn.", limitations=("l",), insufficient_reason=None)
+    out, refused = answer_time_evidence_gate(Reader([row()]), crop_season_id="s", result=base, retrieved=[CHUNK],
+                                             demo=False)
+    assert not refused and out is base and not hasattr(out.evidence[0], "integrity_warning")
 
 
 def test_e3_cannot_fail_open_when_the_recheck_omits_the_finding_state():

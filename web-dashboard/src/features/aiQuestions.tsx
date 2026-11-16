@@ -8,7 +8,7 @@
 // season's or another person's screen.
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ApiError } from '../api/client'
-import { askSeasonQuestion, type QuestionAnswer, type QuestionIntent } from '../api/questions'
+import { askSeasonQuestion, type QuestionAnswer, type QuestionCitation, type QuestionIntent } from '../api/questions'
 import { suggestIntent } from './questionIntent'
 import './aiQuestions.css'
 
@@ -26,7 +26,7 @@ interface IntentOption { intent: QuestionIntent; label: string; hint: string }
 const READ_INTENTS: IntentOption[] = [
   { intent: 'explain', label: 'Giải thích vụ', hint: 'Mô tả số liệu đã ghi nhận của vụ' },
   { intent: 'data_gap', label: 'Dữ liệu còn thiếu', hint: 'Những dữ liệu cần bổ sung để tính phát thải' },
-  { intent: 'evidence', label: 'Tài liệu tham khảo', hint: 'Đoạn tài liệu đã duyệt liên quan câu hỏi' },
+  { intent: 'evidence', label: 'Tài liệu tham khảo', hint: 'Đoạn tài liệu trong kho tri thức liên quan câu hỏi' },
   { intent: 'compare', label: 'So sánh', hint: 'Đặt số liệu vụ này cạnh vụ khác bạn được xem' },
 ]
 const FARMER_ACTION: IntentOption = {
@@ -46,7 +46,7 @@ const SUGGESTIONS: Record<QuestionAudience, { text: string; intent: QuestionInte
   manager: [
     { text: 'Tóm tắt số liệu của vụ này', intent: 'explain' },
     { text: 'Vụ này còn thiếu dữ liệu nào để tính phát thải?', intent: 'data_gap' },
-    { text: 'Có tài liệu đã duyệt nào về giảm phát thải mê-tan?', intent: 'evidence' },
+    { text: 'Có tài liệu nào trong kho tri thức về giảm phát thải mê-tan?', intent: 'evidence' },
     { text: 'So sánh với các vụ khác của cùng thửa', intent: 'compare' },
   ],
 }
@@ -149,7 +149,7 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
       <div className="aiq__head">
         <h2 id={`${ids}-title`} className="aiq__title">Hỏi đáp về vụ này</h2>
         <p className="aiq__lead">
-          Câu trả lời chỉ dùng số liệu đã ghi nhận của vụ và tài liệu đã được duyệt. Hệ thống không lưu câu hỏi.
+          Câu trả lời chỉ dùng số liệu đã ghi nhận của vụ và tài liệu trong kho tri thức. Hệ thống không lưu câu hỏi.
         </p>
       </div>
 
@@ -225,7 +225,7 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
       {answer.answer && <p className="aiq__text">{answer.answer}</p>}
       <p className="aiq__provenance">
         {aiWritten
-          ? 'Do trợ lý AI viết từ tài liệu đã duyệt; mọi số liệu và nguồn đã được hệ thống kiểm tra.'
+          ? 'Do trợ lý AI viết từ tài liệu trong kho tri thức; hệ thống đã đối chiếu số liệu và nguồn dẫn với dữ liệu được truy xuất, không xác minh nội dung khoa học.'
           : 'Hệ thống tự soạn từ số liệu đã ghi nhận, không dùng mô hình AI. Đây là câu trả lời theo mẫu cố định của loại câu hỏi đã chọn, không diễn giải riêng câu chữ của bạn.'}
       </p>
 
@@ -267,22 +267,14 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
       <div className="aiq__block">
         <h3>Nguồn tài liệu</h3>
         {answer.citations.length === 0 ? (
-          <p className="aiq__muted">Chưa có tài liệu đã duyệt nào khớp với câu hỏi này.</p>
+          <p className="aiq__muted">Chưa có đoạn tài liệu nào trong kho tri thức khớp với câu hỏi này.</p>
         ) : (
-          <ol className="aiq__citations">
-            {answer.citations.map((c) => (
-              <li key={`${c.sourceId}/${c.chunkId}`}>
-                <span className="aiq__cite-title">{c.title}</span>
-                {c.section && <span className="aiq__muted"> · {c.section}</span>}
-                <span className="aiq__muted"> · {SOURCE_TYPE[c.sourceType] ?? c.sourceType}</span>
-                {c.publishedAt && <span className="aiq__muted"> · {c.publishedAt}</span>}
-                {c.url && (
-                  <> · <a href={c.url} target="_blank" rel="noopener noreferrer">Mở nguồn<span className="sr-only"> (tab mới)</span></a></>
-                )}
-                {c.integrityWarning && <p className="aiq__cite-warning" role="note">{c.integrityWarning}</p>}
-              </li>
-            ))}
-          </ol>
+          <>
+            <p className="aiq__muted">{CITATION_SCOPE_NOTE}</p>
+            <ol className="aiq__citations">
+              {answer.citations.map((c) => <Citation key={`${c.sourceId}/${c.chunkId}`} citation={c} />)}
+            </ol>
+          </>
         )}
       </div>
 
@@ -295,5 +287,47 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
         </details>
       )}
     </article>
+  )
+}
+
+/** Workflow approval is not scientific verification (M7 READ-tier citation UX, 2026-11-16). */
+export const CITATION_SCOPE_NOTE =
+  'Tài liệu được dẫn là tài liệu trong kho tri thức đã qua quy trình duyệt tài liệu; điều đó không có nghĩa nội dung khoa học đã được xác minh độc lập.'
+/** Shown instead of the link when a citation carries an integrity warning. */
+export const LINK_WITHHELD_NOTE = 'Không hiển thị liên kết nguồn cho tài liệu có cảnh báo kiểm tra.'
+
+/** Only an https URL is ever offered as a link. Re-checked here, not only in the API mapper. */
+export function navigableUrl(url: string | null): string | null {
+  if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url)) return null
+  try { return new URL(url).protocol === 'https:' ? url : null } catch { return null }
+}
+
+/** One citation. The warning sits directly after the title, always visible (no tooltip), and is the
+ *  accessible description of the citation group. A warned citation is never offered as a link: that
+ *  decision uses the server's structured state (integrityWarning present), never the warning's wording.
+ *  All text is rendered as React text nodes (no HTML interpolation). */
+function Citation({ citation: c }: { citation: QuestionCitation }) {
+  const id = useId()
+  const warned = c.integrityWarning !== null
+  const url = warned ? null : navigableUrl(c.url)
+  const titleId = `${id}-title`
+  const warningId = `${id}-warning`
+  const detailId = `${id}-detail`
+  const described = warned ? [warningId, ...(c.integrityDetail ? [detailId] : [])].join(' ') : undefined
+  return (
+    <li className={`aiq__cite${warned ? ' is-warned' : ''}`}>
+      <div role="group" aria-labelledby={titleId} aria-describedby={described}>
+        <span id={titleId} className="aiq__cite-title">{c.title}</span>
+        {warned && <p id={warningId} className="aiq__cite-warning" role="note">{c.integrityWarning}</p>}
+        {warned && c.integrityDetail && <p id={detailId} className="aiq__cite-detail">{c.integrityDetail}</p>}
+        <p className="aiq__cite-meta">
+          {[c.section, SOURCE_TYPE[c.sourceType] ?? c.sourceType, c.publishedAt].filter(Boolean).join(' · ')}
+          {url && (
+            <> · <a href={url} target="_blank" rel="noopener noreferrer">Mở nguồn<span className="sr-only"> (tab mới)</span></a></>
+          )}
+          {warned && <> · <span className="aiq__cite-nolink">{LINK_WITHHELD_NOTE}</span></>}
+        </p>
+      </div>
+    </li>
   )
 }

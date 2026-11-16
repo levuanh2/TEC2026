@@ -35,7 +35,7 @@ and authorization controls are preserved.
 |---|---|---|
 | ACTION (a recommendation, or intent RECOMMEND / WHAT_IF) | `reference_conflict`, `claim_conflict` or `numeric_reference_mismatch` | the whole model answer is discarded: `insufficient_evidence` / `evidence_integrity_contested`. No model text, recommendation, citation or model-referenced fact survives. The stored M05 signals, the Carbon Engine's what-if numbers and the basis stay. The M6.1 outcome is `evidence_refused`. |
 | ACTION | another type (`unsupported_assertion`, temporal types) | admitted; a caveat in `limitations` and a note on that citation |
-| READ (trusted composer, no model) | one of the three | admitted; a warning on the citation (`integrity_warning`), a conflict warning in `limitations`, and a sentence appended to the composed answer saying that the source needs re-verification and is not established guidance |
+| READ (trusted composer, no model) | one of the three | admitted; a warning on the citation (`integrity_warning`, the owner's exact sentence; labels in `integrity_detail`; `url` withheld), a conflict warning in `limitations`, and a sentence appended to the composed answer saying that the source needs re-verification and is not established guidance |
 | READ | another type | admitted; a caveat and a citation note |
 | any | none | unchanged (and not proof of correctness) |
 
@@ -54,9 +54,20 @@ Additional rules:
   model, and their schema has no recommendation slot. Mode is ASK only.
 - **Copy.** It is trusted Vietnamese, built from `FINDING_TYPE_LABELS`. An unknown code is shown as a generic
   label, never echoed. The codes are logged (`rag_answer_evidence_caveat`) and stay in the E2 records.
-- **API.** `RagCitationResponse.integrity_warning` is an optional string (an additive OpenAPI change, 0 breaking). The
-  web Q&A panel renders it as a `role="note"` inside the citation's own list item. `insufficient_reason` was already a
-  free string.
+- **API.** `RagCitationResponse.integrity_warning` is an optional string (an additive OpenAPI change, 0 breaking).
+  `insufficient_reason` was already a free string.
+- **READ-tier citation UX (2026-11-16, stacked on #81; owner requirement in the E1/E4 plan §3).**
+  - Copy. A scientific-conflict citation carries the owner's sentence verbatim: "Tài liệu đang có nội dung khoa học
+    cần xác minh lại; không sử dụng làm căn cứ hướng dẫn canh tác." A non-conflict finding keeps a separate
+    integrity caveat, which never calls the document a contradiction.
+  - Finding labels. They go in the additive `integrity_detail` field ("Phát hiện kiểm tra: ..."), never inside the
+    sentence. Both texts are chosen by trusted code from the finding types.
+  - URL. A warned citation keeps its authorized title, but `url` is `null` for every client.
+  - Web panel. The warning sits directly after the title, always visible (no tooltip). It is the accessible
+    description of the citation group. The panel offers no link for a warned citation, decided from the structured
+    state, not the wording, and re-checks that any link it does render is `https:`.
+  - Wording. READ-tier copy says "tài liệu trong kho tri thức", not "tài liệu đã duyệt": workflow approval is not
+    scientific verification.
 
 What E3 does **not** do:
 

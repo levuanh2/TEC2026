@@ -19,6 +19,8 @@ export interface QuestionCitation {
   publishedAt: string | null
   /** Trusted Vietnamese warning from the server (M7 E5/E3): the document carries integrity findings. */
   integrityWarning: string | null
+  /** Trusted labels of those findings, shown apart from the warning (null when absent or unwarned). */
+  integrityDetail: string | null
 }
 
 export interface TrustedFact {
@@ -77,6 +79,8 @@ export const mapAnswer = (x: any): QuestionAnswer => ({
     documentVersion: c.document_version ?? null, title: c.title, section: c.section ?? null,
     sourceType: c.source_type, url: safeUrl(c.url), publishedAt: c.published_at ?? null,
     integrityWarning: typeof c.integrity_warning === 'string' && c.integrity_warning ? c.integrity_warning : null,
+    integrityDetail: typeof c.integrity_warning === 'string' && c.integrity_warning
+      && typeof c.integrity_detail === 'string' && c.integrity_detail ? c.integrity_detail : null,
   })),
   facts: (x.trusted_facts ?? []).map((f: any) => ({
     factId: f.fact_id, kind: f.kind, value: f.value ?? null, unit: f.unit ?? null, source: f.source,

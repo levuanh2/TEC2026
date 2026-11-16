@@ -116,6 +116,10 @@ def test_retrieval_failure_is_503():
     assert response.status_code == 503 and "postgrest" not in response.text
 
 
+#: The fixture chunk's https URL (tests/test_rag_qa.py CHUNK), which a clean citation must keep.
+CLEAN_URL = "https://example.invalid/awd"
+
+
 def test_e3_citation_integrity_warning_survives_the_response_model():
     """D-E3-3: the per-citation Vietnamese warning set by the answer-time gate reaches the API body
     (RagCitationResponse would silently drop an undeclared field), and no internal finding code does."""
@@ -130,9 +134,16 @@ def test_e3_citation_integrity_warning_survives_the_response_model():
         URL, json={"question": "Tài liệu nào nói về tưới nước AWD?", "intent": "evidence"}, headers=AUTH).json()
     assert body["status"] == "generated" and body["citations"][0]["chunk_id"] == "c1"
     warning = body["citations"][0]["integrity_warning"]
-    assert warning.startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
-    shown = " ".join([body["answer"], *body["limitations"], warning])
+    assert warning == "Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn canh tác."
+    detail = body["citations"][0]["integrity_detail"]
+    assert detail == "Phát hiện kiểm tra: mâu thuẫn với tài liệu tham chiếu."
+    shown = " ".join([body["answer"], *body["limitations"], warning, detail])
     assert not any(code in shown for code in FINDING_TYPE_LABELS)
     clean = client().post(URL, json={"question": "Tài liệu nào nói về tưới nước AWD?", "intent": "evidence"},
                           headers=AUTH).json()
-    assert clean["citations"][0]["integrity_warning"] is None
+    assert body["citations"][0]["url"] is None and body["citations"][0]["title"]   # title kept, URL withheld
+    assert clean["citations"][0]["integrity_warning"] is None and clean["citations"][0]["integrity_detail"] is None
+    assert clean["citations"][0]["url"] == CLEAN_URL                     # a clean citation keeps its https URL
+    # additive: every pre-existing citation field is still present with its old type
+    assert {"source_id", "chunk_id", "document_id", "document_version", "title", "section", "source_type", "url",
+            "published_at", "integrity_warning"} <= set(clean["citations"][0])

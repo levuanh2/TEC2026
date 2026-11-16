@@ -7527,6 +7527,17 @@
               }
             ],
             "title": "Integrity Warning"
+          },
+          "integrity_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Detail"
           }
         },
         "type": "object",
