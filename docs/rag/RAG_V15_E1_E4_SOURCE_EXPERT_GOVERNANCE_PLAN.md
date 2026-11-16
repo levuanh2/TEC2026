@@ -1,98 +1,79 @@
-# RAG V1.5 E1/E4: authoritative references and expert verification — follow-up plan
+# RAG V1.5 E1/E4: scientific evidence and expert governance (plan and index)
 
-Status: **PLAN ONLY, 2026-11-16.** No code, registry entry, corpus document or approval is added by this plan.
-It is kept apart from the E3 code change on purpose. It records what is verified, what is not, and what has to happen
-before any scientific reference can support detection (E1) or an approval can rest on a qualified human (E4).
+Status: **DOCUMENTATION ONLY, 2026-11-16. E1 OPEN, E4 OPEN, dev3-01 OPEN.**
 
-Nothing below is a verification. Every name of a person, role holder or approval is to be supplied by the project
-owner; none is invented here.
+This PR adds no code, registry entry, corpus document, approval, identity or migration. Nothing in it verifies a
+source or qualifies a person. It is kept apart from the E3 code change (Draft PR #81, stacked on #78) and does not
+depend on it.
 
 ## 1. Why it matters
 
-E2/E7 detect conflicts only against the reference registry (`backend/knowledge/integrity/reference_registry*.json`),
-and E3 contains only what was detected. With an unverified registry, a poisoned claim that no entry covers is
-approved without a finding and cited without a warning (dev3-01, `test_rag_source_integrity_gap.py`; E3 replay
-`test_12i` on the E3 branch). Conversely, an entry that is itself wrong can block a correct document.
+E2 and E7 detect conflicts only against the reference registry, and E3 (#81) contains only what was detected. Two
+consequences:
 
-## 2. Inventory (as of `integrate/rag-v15` 5f7e730)
+- **Unverified registry, missed poison.** With an unverified registry, a poisoned claim that no entry covers is
+  approved without a finding and cited without a warning. This is dev3-01, `test_rag_source_integrity_gap.py`, and
+  `test_12i` on #81.
+- **Wrong entry, blocked document.** An entry that is itself wrong can block a correct document.
 
-| Reference / source | What exists | Verified against the primary document by a named human? | Missing |
+## 2. Documents
+
+| Document | Contents |
+|---|---|
+| `RAG_V15_E1_SOURCE_REGISTRY_AUDIT.md` | tool check vs human verification; classification of every source; the reference metadata record; per-source records; the internal operational source policy; status of the Vietnamese decisions |
+| `RAG_V15_E1_RIGHTS_AND_OCR.md` | IPCC licensing findings and the exposure already in the repository; the rights-clearance checklist; the OCR policy and its auditable review record |
+| `RAG_V15_E4_EXPERT_GOVERNANCE.md` | qualification criteria; separation of duties; the E3 Option C database record design and its prerequisites; E4 closure criteria |
+
+## 3. Proposals for READ-tier contested citations (Phase 8, NOT implemented here)
+
+The owner's requirement (2026-11-16):
+
+- keep the title for an authorized caller;
+- show beside it, verbatim: "Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn
+  canh tác.";
+- no tooltip;
+- no implied endorsement;
+- no cross-tenant metadata;
+- no unsafe navigation links;
+- never action advice;
+- tests for visibility, authorization and accessibility.
+
+Gap analysis against #81 head `6d85b55`:
+
+| Requirement | #81 today | Gap | Proposed change (separate code PR, stacked on #81) |
 |---|---|---|---|
-| `ref-ch4-awd-not-eliminated` (qualitative, `verification.status: engine_config_pointer`) | pointer to `backend/config/emission_factors.yaml` (IPCC 2019 Refinement Vol. 4 Ch. 5 Table 5.12) | **No.** The YAML's `VERIFIED` is the project's own citation check; `methodology.domain_expert_review: PENDING` | artifact hash on the entry, page, human evidence file, rights |
-| `ref-water-records-required` (qualitative, `project_policy`) | internal rule `data.completeness.water` | **No** — internal policy, not an external authority | an external MRV source (QĐ 4801 annex unavailable) |
-| numeric registry `kn-reference-registry-2` | schema, loader, closed conversion table; **0 entries** | n/a | everything |
-| IPCC 2019 Refinement Vol. 4 Ch. 5 (A1) and Ch. 11 (A2) | publisher URL, bytes, SHA-256 and PDF/printed pages recorded by a machine reading (`RAG_V15_M5_REFERENCE_REGISTRY_DESIGN.md` §2-3) | **No** (machine reading; spanning table cells ambiguous) | named human re-check per row; **rights not cleared** (`ipcc.ch/copyright` not read; owner decision required) |
-| QĐ 2626/QĐ-BTNMT, Appendix III | no first-party artifact | No | a first-party copy (browser search of vbpl.vn / vanban.chinhphu.vn, or the ministry) |
-| QĐ 4801/QĐ-BNNMT, MRV annex | decision cover page only | No | the annex from the issuer |
-| QĐ 4043 (rice procedure) | Cà Mau provincial copy of the annex; signature chain verified | No | the complete original decision; expert reading of the straw-timing inconsistency (3 vs 2 weeks) |
-| QĐ 1490 | complete portal-signed scan, no text layer | No | text layer / OCR policy (no OCR in V1.3) |
-| C1-04 NAEC rice/coffee book | prefilter PASS, gate PARTIAL | No | rights; section-path extraction; SFp/N2O conflict with the registry |
+| exact warning text | `Cảnh báo: tài liệu này có mâu thuẫn khoa học (<labels>) và cần được xác minh lại; không dùng làm hướng dẫn canh tác.` | wording differs | set `CITATION_CONFLICT_WARNING` to the owner's sentence (labels, if kept, as a second sentence); update the DB, offline, route and web tests |
+| beside the title, not a tooltip | a visible `role="note"` paragraph, but after section, type, date and the link | not beside the title | render it directly after `.aiq__cite-title`, with `aria-describedby` linking title and warning; DOM test for order and accessible name |
+| title must not imply endorsement | the composed answer says "Các đoạn tài liệu đã duyệt…", and the panel hint says "tài liệu đã duyệt" | "đã duyệt" (approved) reads as endorsement of a contested source | when a cited source is contested: neutral wording ("tài liệu trong kho"), and no "đã duyệt" next to that citation; test |
+| no unsafe or trusted navigation | `Mở nguồn` link rendered for any `https` URL, contested or not | a contested source is still offered as a trusted link | for a contested citation, render no link, or a plain-text URL marked "cần xác minh lại"; test |
+| no cross-tenant titles or metadata | E5 recheck + C1 citation check; #81 `test_12f` (other HTX: not retrieved, `citation_mismatch`, helpers return nothing) | none found | keep; add a route-level test with a foreign contested chunk |
+| never action advice | READ intents never reach a model; the trusted composer has no recommendation slot; #81 disguised-action tests | none found | keep |
+| accessibility | `role="note"`, not colour-only | needs an explicit test | axe/role test in the Vitest DOM suite; contrast check of the `--warning-*` tokens |
 
-Merely transcribed or secondary: everything above that is a pointer, a machine reading or a private legal-portal
-copy. Private portals (thuvienphapluat.vn, luatvietnam.vn) and press articles are pointers only.
+## 4. Proposed order of work (each step needs owner approval)
 
-Missing version, page or effective date: both qualitative entries (no page on the entry); QĐ 2626/4801 (no artifact);
-QĐ 4043 (decision page missing).
+1. Rights: a person reads `ipcc.ch/copyright` in a browser and fills the clearance checklist per intended use. The owner
+   decides on the existing IPCC-derived content in the repository (rights doc §2.4).
+2. The owner appoints qualified reviewers (E4 §2), with evidence.
+3. Obtain first-party copies of:
+   - QĐ 2626 with its appendices;
+   - the QĐ 4801 annex;
+   - the complete QĐ 4043 decision.
+4. Per reference: complete the metadata record (audit §3), then the human verification. Only then is it
+   `human_verified`.
+5. The owner adopts the OCR policy before QĐ 1490 is used.
+6. The READ-tier citation changes (§3) are a separate code PR on #81.
+7. Option C design review only after steps 2 and 4.
+8. Re-run the dev3-01 replay with the verified entries. A changed detection result does not close dev3-01 by itself.
 
-## 3. Source-ingestion checklist for an authoritative reference entry
+## 5. Owner actions
 
-Every step is recorded in the entry or in an evidence file whose hash the entry stores. A step that cannot be met
-keeps the entry `unverified`. An unverified entry may raise a finding for a human to review; it must never become a
-recommendation rule, an M05 rule input or proof of correctness.
-
-1. **Artifact.** The file comes from the issuer's own HTTPS host. Record the URL, retrieval date, byte count and SHA-256.
-2. **Authenticity.** For a Vietnamese decision: the signature chain is checked against the official Ban Cơ yếu
-   anchor, with strict CRL, and the number and date are read from the signature widgets. Otherwise: the issuer page
-   links the file.
-3. **Completeness.** The decision page and every annex relied on are present. A cover page alone does not count.
-4. **Identity.** Record the document number, issuer, version or edition, and the date it takes effect. When that date
-   is null, record the reason.
-5. **Exact location.** Record the PDF page, the printed page, and the table, equation or paragraph. For a table cell,
-   record the row and column labels as printed. A cell spanning several rows needs a human reading.
-6. **Verbatim passage.** Copy the passage, or the cell value with its unit as printed, from the artifact, never from a
-   secondary source. Record the passage's own hash.
-7. **Applicability.** Record the region, regime, baseline and the quantity the value is per. A conversion uses only
-   the closed table (`reference_numeric.py`).
-8. **Rights.** `rights.status` is cleared for this exact use: storing a value, quoting a passage, or adding the
-   document to the retrieval corpus. `not_cleared` is refused by the loader.
-9. **Human verification (E4).** A named, qualified person re-reads the passage in the artifact. Their evidence file
-   is hashed into `verification.human.evidence_sha256`. An AI reading, or an AI review, is never this step.
-10. **Internal consistency.** Check the source against itself. A contradiction keeps the entry unverified until an
-    expert resolves it, and the resolution is recorded.
-11. **Versioning.** Bump `registry_version`. A changed entry is a new entry, and the old one is kept for re-reviews.
-
-## 4. Expert verification (E4)
-
-- Every expert reviewer, approver, archivist and re-verifier in tests is a synthetic fixture. No qualified human has
-  reviewed the real corpus or the registry.
-- Real verification must be performed by qualified, **named** humans whose identity, qualification category and
-  appointment are recorded by the owner (M2 `knowledge_expert_reviews` carries the fields; the people do not exist yet).
-- No fictional expert identity, approval or verification may be created to satisfy a gate, a test outside a
-  rolled-back fixture, or a document.
-- Option C of E3 (re-admission after independent verification) depends on this: it needs a second, distinct, real
-  verified reviewer and a database-enforced concurrence record.
-
-## 5. IPCC and other protected material
-
-- No IPCC table, value, passage or PDF is added to the repository, the registry or the retrieval corpus until the
-  owner has decided on the permitted use (read `https://www.ipcc.ch/copyright/` in a browser, or ask the IPCC
-  Secretariat). The engine's existing configuration pointers are unchanged by this plan.
-- The same applies to any third-party book or guide whose rights are ambiguous (for example C1-04).
-
-## 6. Proposed order (each step needs owner approval)
-
-1. Owner decision on IPCC rights, and on which uses of each document are required.
-2. Owner names the qualified reviewers (E4) and their qualification evidence.
-3. Obtain first-party copies of QĐ 2626 Appendix III and the QĐ 4801 annex, plus the complete QĐ 4043 decision.
-4. Per entry: complete checklist steps 1-11, then the named human verification. Only then mark the entry `verified`.
-5. Re-run the dev3-01 replay with the verified entries and record whether detection changes. This is not a closure
-   of dev3-01 by itself.
-6. Design Option C only after steps 2 and 4.
-
-## 7. Decisions required from the owner
-
-- the permitted use of IPCC material (store values? quote passages? corpus?);
-- who the qualified reviewers are, and what qualifies them;
-- whether internal project policy (`ref-water-records-required`) may stay a registry entry, or must wait for an
-  external MRV source;
-- the OCR policy for scan-only official decisions (QĐ 1490).
+- Read and record the IPCC copyright terms (no automated access is possible). Decide each intended use and the
+  existing repository content.
+- Name and appoint the qualified reviewers. Define the qualification thresholds and conflicts of interest.
+- Obtain the Vietnamese decisions from their issuers (browser search of `vbpl.vn` / `vanban.chinhphu.vn` /
+  `mae.gov.vn`, or a written request).
+- Adopt, or amend, the OCR policy.
+- Decide whether internal rules (`ref-water-records-required`) may stay as `detection_only` entries.
+- Approve the READ-tier citation change proposal (§3) as a separate code PR.
+- Approve the Option C policy when its prerequisites exist.
