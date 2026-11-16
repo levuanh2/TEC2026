@@ -28,7 +28,8 @@ const answer = (over: Partial<QuestionAnswer> = {}): QuestionAnswer => ({
   limitations: ['Câu trả lời được hệ thống soạn từ dữ liệu đã ghi nhận và tài liệu đã duyệt; đây không phải lời khuyên canh tác.'],
   insufficientReason: null,
   citations: [{ sourceId: 'src', chunkId: 'c1', documentId: 'doc', documentVersion: 'v1', title: 'Hướng dẫn tưới AWD',
-                section: 'Tưới nước', sourceType: 'guideline', url: 'https://example.invalid/awd', publishedAt: '2025-11-10' }],
+                section: 'Tưới nước', sourceType: 'guideline', url: 'https://example.invalid/awd', publishedAt: '2025-11-10',
+                integrityWarning: null }],
   facts: [{ factId: 'current.carbon.total_co2e_kg', kind: 'carbon_total', value: 2900, unit: 'kg CO2e', source: 'carbon_service' }],
   recommendations: [], storedRecommendations: [], answerSource: 'system_composed', model: null, ...over,
 })
@@ -96,6 +97,22 @@ describe('SeasonQuestionPanel', () => {
     expect(await screen.findByRole('status', { name: 'Đang soạn câu trả lời' })).toBeTruthy()
     await act(async () => { pending.resolve(answer()) })
     expect(screen.queryByRole('status', { name: 'Đang soạn câu trả lời' })).toBeNull()
+  })
+
+  it('shows the server integrity warning on the citation it is about (M7 E3, D-E3-3)', async () => {
+    const base = answer().citations[0]
+    ask.resolve(answer({ intent: 'evidence', citations: [
+      { ...base, integrityWarning: 'Cảnh báo: tài liệu này có mâu thuẫn khoa học (mâu thuẫn với tài liệu tham chiếu) và cần được xác minh lại; không dùng làm hướng dẫn canh tác.' },
+      { ...base, chunkId: 'c2', title: 'Sổ tay ghi chép', integrityWarning: null },
+    ] }))
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tài liệu nào nói về AWD?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
+    const note = await screen.findByRole('note')
+    expect(note.textContent).toBe('Cảnh báo: tài liệu này có mâu thuẫn khoa học (mâu thuẫn với tài liệu tham chiếu) và cần được xác minh lại; không dùng làm hướng dẫn canh tác.')
+    expect(note.closest('li')?.textContent).toContain('Hướng dẫn tưới AWD')       // inside its own citation
+    expect(screen.getAllByRole('note')).toHaveLength(1)                             // the clean citation has none
+    expect(document.body.textContent).not.toContain('reference_conflict')
   })
 
   it('insufficient evidence is shown as such, with no citation invented', async () => {

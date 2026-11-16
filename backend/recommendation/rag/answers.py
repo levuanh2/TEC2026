@@ -31,7 +31,8 @@ from .prose import validate_placeholder_syntax
 
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
 InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined",
-                             "out_of_scope_question", "instruction_like_question", "answer_policy_rejected"]
+                             "out_of_scope_question", "instruction_like_question", "answer_policy_rejected",
+                             "evidence_no_longer_admissible", "evidence_integrity_contested"]
 
 #: Trusted copy for states no generator is asked about.
 NEEDS_CLARIFICATION_MESSAGE = (
@@ -58,6 +59,19 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
     "instruction_like_question": (
         "Câu hỏi có nội dung như một mệnh lệnh gửi cho trợ lý nên không được xử lý."
         " Trợ lý chỉ giải thích khuyến nghị đã có của vụ theo tài liệu đã duyệt."
+    ),
+    # M7 E5: a cited document was withdrawn, expired, changed or is no longer verified when the answer was
+    # about to be returned (rag_answer_integrity.py): the whole model answer is discarded.
+    "evidence_no_longer_admissible": (
+        "Tài liệu mà câu trả lời dựa vào không còn hợp lệ tại thời điểm trả lời (đã bị thu hồi, hết hiệu lực,"
+        " thay đổi hoặc chưa được chuyên gia xác minh), nên câu trả lời đã bị chặn. Vui lòng hỏi lại."
+    ),
+    # M7 E3 (owner decision D-E3-1 B): an ACTION answer cited a document whose detected scientific
+    # conflict an expert dismissed; the dismissal is recorded, not proof, so no action is advised from it.
+    "evidence_integrity_contested": (
+        "Tài liệu mà câu trả lời dựa vào từng bị hệ thống phát hiện mâu thuẫn với tài liệu tham chiếu; chuyên gia"
+        " đã đánh giá là báo động nhầm nhưng điều đó chưa được xác minh độc lập, nên trợ lý không dùng tài liệu này"
+        " để đưa ra gợi ý hành động. Khuyến nghị do hệ thống quy tắc ghi nhận cho vụ vẫn được giữ nguyên."
     ),
 }
 

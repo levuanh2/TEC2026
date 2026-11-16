@@ -38,6 +38,14 @@ describe('askSeasonQuestion', () => {
       .toBe('https://example.invalid/x')
   })
 
+  it('maps the server integrity warning of a citation, and nothing else as one (M7 E3)', () => {
+    expect(mapAnswer(BODY).citations[0].integrityWarning).toBeNull()
+    const warned = { ...BODY, citations: [{ ...BODY.citations[0], integrity_warning: 'Cảnh báo: tài liệu này có mâu thuẫn khoa học (mâu thuẫn với tài liệu tham chiếu) và cần được xác minh lại; không dùng làm hướng dẫn canh tác.' }] }
+    expect(mapAnswer(warned).citations[0].integrityWarning).toBe('Cảnh báo: tài liệu này có mâu thuẫn khoa học (mâu thuẫn với tài liệu tham chiếu) và cần được xác minh lại; không dùng làm hướng dẫn canh tác.')
+    for (const bad of ['', 42, { text: 'x' }])
+      expect(mapAnswer({ ...BODY, citations: [{ ...BODY.citations[0], integrity_warning: bad }] }).citations[0].integrityWarning).toBeNull()
+  })
+
   it('maps the stored M05 rule outcomes apart from the generated suggestions', () => {
     const mapped = mapAnswer({ ...BODY, signals: [{ rule_code: 'data.completeness.water', type: 'data_task',
                                                     title: 'Bổ sung lượng nước tưới', status: 'generated', reason: 'x' }] })

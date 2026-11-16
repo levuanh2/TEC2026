@@ -457,6 +457,8 @@ class RagCitationResponse(BaseModel):
     source_type: str
     url: str | None = None
     published_at: date | None = None
+    #: M7 E5/E3: trusted Vietnamese warning when the document carries integrity findings an expert dismissed.
+    integrity_warning: str | None = None
 
 
 class RagTrustedFactResponse(BaseModel):
