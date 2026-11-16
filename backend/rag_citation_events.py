@@ -71,6 +71,10 @@ class RecordingRetriever:
         return rows
 
 
+#: M7 E5 / E3: the answer-time gate discarded the model answer because of its cited evidence.
+_EVIDENCE_REFUSED = frozenset({"evidence_no_longer_admissible", "evidence_integrity_contested"})
+
+
 def build_event(*, request_id: str, crop_season_id: str, recorder: RecordingRetriever | None, result: Any | None,
                 response_emitted: bool, retrieval_failed: bool = False, retrieval_mode: Mode = "production") -> CitationEvent:
     """`result` is the trusted RagAnswerResult (None when the request failed before one existed).
@@ -80,7 +84,7 @@ def build_event(*, request_id: str, crop_season_id: str, recorder: RecordingRetr
         outcome: Outcome = "error"
     elif getattr(result, "policy_rejection", None) is not None:
         outcome = "policy_rejected"
-    elif getattr(result, "insufficient_reason", None) == "evidence_no_longer_admissible":
+    elif getattr(result, "insufficient_reason", None) in _EVIDENCE_REFUSED:
         outcome = "evidence_refused"
     else:
         outcome = "generated" if result.status == "generated" else "insufficient_evidence"

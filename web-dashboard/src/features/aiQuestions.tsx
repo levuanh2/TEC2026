@@ -279,6 +279,7 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
                 {c.url && (
                   <> · <a href={c.url} target="_blank" rel="noopener noreferrer">Mở nguồn<span className="sr-only"> (tab mới)</span></a></>
                 )}
+                {c.integrityWarning && <p className="aiq__cite-warning" role="note">{c.integrityWarning}</p>}
               </li>
             ))}
           </ol>

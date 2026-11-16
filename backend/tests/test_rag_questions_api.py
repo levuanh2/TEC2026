@@ -114,3 +114,25 @@ def test_retrieval_failure_is_503():
             raise RuntimeError("postgrest down")
     response = client(reader=Broken()).post(URL, json={"question": "?", "intent": "evidence"}, headers=AUTH)
     assert response.status_code == 503 and "postgrest" not in response.text
+
+
+def test_e3_citation_integrity_warning_survives_the_response_model():
+    """D-E3-3: the per-citation Vietnamese warning set by the answer-time gate reaches the API body
+    (RagCitationResponse would silently drop an undeclared field), and no internal finding code does."""
+    from rag_answer_integrity import FINDING_TYPE_LABELS, fixture_evidence_state
+
+    class ContestedReader(Reader):
+        def knowledge_evidence_state(self, season_id, chunk_ids, *, demo=False):
+            return [{**r, "resolved_finding_types": ["reference_conflict"]}
+                    for r in fixture_evidence_state(self.chunks, chunk_ids)]
+
+    body = client(reader=ContestedReader()).post(
+        URL, json={"question": "Tài liệu nào nói về tưới nước AWD?", "intent": "evidence"}, headers=AUTH).json()
+    assert body["status"] == "generated" and body["citations"][0]["chunk_id"] == "c1"
+    warning = body["citations"][0]["integrity_warning"]
+    assert warning.startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
+    shown = " ".join([body["answer"], *body["limitations"], warning])
+    assert not any(code in shown for code in FINDING_TYPE_LABELS)
+    clean = client().post(URL, json={"question": "Tài liệu nào nói về tưới nước AWD?", "intent": "evidence"},
+                          headers=AUTH).json()
+    assert clean["citations"][0]["integrity_warning"] is None

@@ -11,12 +11,23 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag_answer_integrity import CAVEAT_TEXT, answer_time_evidence_gate, recheck_cited_evidence
+from rag_answer_integrity import (ACTION_CONTAINED_FINDING_TYPES, ANSWER_CONFLICT_NOTE, CAVEAT_TEXT,
+                                  CONFLICT_CAVEAT_TEXT, FINDING_TYPE_LABELS, answer_time_evidence_gate,
+                                  is_action_answer, recheck_cited_evidence)
 from recommendation.rag import RetrievalUnavailable
 from recommendation.rag.answers import INSUFFICIENT_MESSAGES
 
 CONTENT = "Tưới ngập khô xen kẽ giúp giảm phát thải mê-tan."
-CHUNK = SimpleNamespace(source_id="s1", chunk_id="c1", document_id="d1", document_version="v1", content=CONTENT)
+
+
+class Cite(SimpleNamespace):
+    """A frozen-model stand-in for EvidenceChunk / CitedEvidence (`model_copy` like pydantic)."""
+
+    def model_copy(self, *, update):
+        return Cite(**{**self.__dict__, **update})
+
+
+CHUNK = Cite(source_id="s1", chunk_id="c1", document_id="d1", document_version="v1", content=CONTENT)
 
 
 def row(**over):
@@ -110,9 +121,132 @@ def test_the_gate_discards_the_whole_model_answer_or_adds_the_caveat():
     assert out.signals == ("sig",)                                        # deterministic signals stay
     out, refused = answer_time_evidence_gate(Reader([row(resolved_finding_types=["unsupported_assertion"])]),
                                              crop_season_id="s", result=base, retrieved=[CHUNK], demo=False)
-    assert not refused and out.limitations == ("l", CAVEAT_TEXT.format(types="unsupported_assertion"))
+    assert not refused and out.limitations == ("l", CAVEAT_TEXT.format(
+        labels="nhận định chưa có tài liệu tham chiếu hỗ trợ"))
+    assert out.evidence[0].integrity_warning.startswith("Lưu ý: tài liệu này") and out.answer == "model text"
     # nothing to check: an answer without evidence passes untouched, and the database is not called
     reader = Reader()
     out, refused = answer_time_evidence_gate(reader, crop_season_id="s", result=Result(status="insufficient_evidence",
                                              evidence=()), retrieved=[], demo=False)
     assert not refused and reader.calls == []
+
+
+# ================================================================== M7 E3 (owner decision D-E3-1 B): action-tier containment
+
+def read_result(intent="explain"):
+    """A READ-tier (INFORMATIONAL) answer: no recommendation slot."""
+    return SimpleNamespace(status="generated", intent=intent, evidence=(CHUNK,), recommendations=())
+
+
+@pytest.mark.parametrize("finding_type", sorted(ACTION_CONTAINED_FINDING_TYPES))
+def test_e3_an_action_answer_on_a_dismissed_scientific_conflict_is_refused(finding_type):
+    out = check([row(resolved_finding_types=[finding_type])])
+    assert out.refused == (("c1", "integrity_conflict_dismissed"),) and out.caveats == ()
+
+
+def test_e3_a_what_if_answer_is_action_tier_even_without_a_recommendation():
+    res = SimpleNamespace(status="generated", intent="what_if", evidence=(CHUNK,), recommendations=())
+    assert is_action_answer(res) and not is_action_answer(read_result())
+    assert check([row(resolved_finding_types=["reference_conflict"])], res=res).refused == \
+        (("c1", "integrity_conflict_dismissed"),)
+
+
+def test_e3_a_read_tier_answer_keeps_the_caveat_and_is_not_refused():
+    out = check([row(resolved_finding_types=["reference_conflict", "claim_conflict"])], res=read_result())
+    assert out.admissible and out.caveats == (("c1", ("reference_conflict", "claim_conflict")),)
+
+
+@pytest.mark.parametrize("finding_type", ["unsupported_assertion", "expired_guidance", "superseded_guidance",
+                                          "not_yet_effective"])
+def test_e3_other_dismissed_finding_types_stay_a_caveat_for_actions(finding_type):
+    out = check([row(resolved_finding_types=[finding_type])])
+    assert out.admissible and out.caveats == (("c1", (finding_type,)),)
+
+
+def test_e3_contained_types_are_blocking_e2_types_and_never_temporal():
+    from knowledge.integrity.review import _NEEDS_REVIEW
+    assert ACTION_CONTAINED_FINDING_TYPES <= _NEEDS_REVIEW
+    assert not ACTION_CONTAINED_FINDING_TYPES & {"expired_guidance", "not_yet_effective", "superseded_guidance"}
+
+
+def test_e3_refusal_shape_keeps_signals_and_inadmissible_evidence_takes_precedence():
+    base = Result(status="generated", evidence=(CHUNK,), recommendations=result().recommendations, answer="model text",
+                  answer_template="t", rationale="r", facts=("f",), limitations=("l",), confidence="high",
+                  insufficient_reason=None, signals=("sig",), intent="recommend")
+    out, refused = answer_time_evidence_gate(Reader([row(resolved_finding_types=["reference_conflict"])]),
+                                             crop_season_id="s", result=base, retrieved=[CHUNK], demo=False)
+    assert refused == (("c1", "integrity_conflict_dismissed"),)
+    assert (out.status, out.insufficient_reason, out.answer) == \
+        ("insufficient_evidence", "evidence_integrity_contested", INSUFFICIENT_MESSAGES["evidence_integrity_contested"])
+    assert (out.recommendations, out.evidence, out.facts, out.rationale, out.limitations) == ((), (), (), None, ())
+    assert out.signals == ("sig",)                                        # the stored M05 rule outcome stays
+    # one contested + one withdrawn citation: the copy names the stronger fact (no longer admissible)
+    other = SimpleNamespace(source_id="s1", chunk_id="c2", document_id="d2", document_version="v1", content="x")
+    two = Result(**{**base.__dict__, "evidence": (CHUNK, other),
+                    "recommendations": result(recs=(("water.awd", ("c1", "c2")),)).recommendations})
+    out, refused = answer_time_evidence_gate(Reader([row(resolved_finding_types=["claim_conflict"])]),
+                                             crop_season_id="s", result=two, retrieved=[CHUNK, other], demo=False)
+    assert {r for _, r in refused} == {"integrity_conflict_dismissed", "no_longer_admissible"}
+    assert out.insufficient_reason == "evidence_no_longer_admissible"
+
+
+def test_e3_refusal_is_recorded_as_an_evidence_refused_citation_event():
+    from rag_citation_events import build_event
+    refused_result = SimpleNamespace(status="insufficient_evidence", insufficient_reason="evidence_integrity_contested",
+                                     policy_rejection=None, evidence=())
+    event = build_event(request_id="00000000-0000-0000-0000-000000000001",
+                        crop_season_id="00000000-0000-0000-0000-000000000002", recorder=None,
+                        result=refused_result, response_emitted=True)
+    assert event.outcome == "evidence_refused" and event.cited == ()
+
+
+# ================================================================== D-E3-3 (owner, 2026-11-16): READ-tier warnings
+
+class _Answer(Result):
+    pass
+
+
+def _read_answer(types, *, intent="evidence"):
+    base = _Answer(status="generated", intent=intent, evidence=(CHUNK,), recommendations=(), answer="Hệ thống soạn.",
+                   answer_template="Hệ thống soạn.", limitations=("l",), insufficient_reason=None)
+    return answer_time_evidence_gate(Reader([row(resolved_finding_types=list(types))]), crop_season_id="s",
+                                     result=base, retrieved=[CHUNK], demo=False)
+
+
+def _farmer_text(out) -> str:
+    return " ".join([out.answer or "", *out.limitations, *(c.integrity_warning or "" for c in out.evidence)])
+
+
+@pytest.mark.parametrize("finding_type", sorted(ACTION_CONTAINED_FINDING_TYPES))
+def test_d_e3_3_read_tier_conflict_is_warned_on_the_citation_and_in_the_answer_without_codes(finding_type):
+    out, refused = _read_answer([finding_type])
+    assert not refused and out.status == "generated"
+    label = FINDING_TYPE_LABELS[finding_type]
+    assert out.evidence[0].integrity_warning.startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
+    assert label in out.evidence[0].integrity_warning
+    assert out.answer.endswith(ANSWER_CONFLICT_NOTE) and out.answer_template.endswith(ANSWER_CONFLICT_NOTE)
+    assert out.limitations == ("l", CONFLICT_CAVEAT_TEXT.format(labels=label))
+    text = _farmer_text(out)
+    assert not any(code in text for code in FINDING_TYPE_LABELS), text       # no internal code shown to a farmer
+
+
+def test_d_e3_3_a_mixed_citation_names_only_vietnamese_labels_and_unknown_codes_are_not_echoed():
+    out, _ = _read_answer(["reference_conflict", "unsupported_assertion", "some_future_type"])
+    text = _farmer_text(out)
+    assert "some_future_type" not in text and "phát hiện kiểm tra khác" in text
+    assert not any(code in text for code in FINDING_TYPE_LABELS)
+
+
+def test_d_e3_3_a_non_conflict_finding_does_not_add_the_conflict_sentence():
+    out, _ = _read_answer(["expired_guidance"])
+    assert out.answer == "Hệ thống soạn." and out.evidence[0].integrity_warning.startswith("Lưu ý")
+
+
+def test_e3_cannot_fail_open_when_the_recheck_omits_the_finding_state():
+    for bad in (None, "reference_conflict"):
+        with pytest.raises(RetrievalUnavailable):
+            check([row(resolved_finding_types=bad)])
+    missing = row()
+    del missing["resolved_finding_types"]
+    with pytest.raises(RetrievalUnavailable):
+        check([missing])

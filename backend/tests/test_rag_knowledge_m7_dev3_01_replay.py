@@ -119,7 +119,11 @@ def test_e7_replay_matrix_dishonest_operator_is_stopped_mistaken_expert_is_not(t
       chunks: mismatch. Review and approval are refused, nothing is retrievable or cited.
     * honest operator, mistaken expert (E1/E4, NOT closed): the report is reproduced by the verifier, the
       reviewer resolves every finding as false_positive with (synthetic) evidence: approved, retrievable,
-      cited. This is why test_rag_source_integrity_gap.py is NOT flipped and dev3-01 stays OPEN."""
+      cited. This is why test_rag_source_integrity_gap.py is NOT flipped and dev3-01 stays OPEN.
+
+    "cited" here is the OFFLINE benchmark answer path over the chunks the real retrieval served (its fixture
+    corpus carries no integrity state); the answer-time E5/E3 outcome on the real path is
+    test_e5_full_chain_matrix_on_the_real_answer_path."""
     from tests.test_rag_knowledge_m7_e7_independent_verification import dishonest_report, verdict, verify
     query = "tưới ngập khô xen kẽ mê-tan"
     _, clean = draft(tx, m2, content=CLEAN["content"])
@@ -178,7 +182,9 @@ def test_e5_full_chain_matrix_on_the_real_answer_path(tx, m2):
     """The frozen dev3-01 fixture through E2 + E7/E7.1 + E5 with the REAL retrieval RPC, the REAL answer-time
     recheck (both under the member's JWT) and the REAL RagQuestionService with a scripted model that cites the
     poisoned chunk. Columns: claim detection, independent verification, human review, approval, retrieval,
-    answer-time validation, response outcome. The mistaken-expert row is the open residual (dev3-01 OPEN)."""
+    answer-time validation, response outcome. Mistaken-expert row: with E3 (owner decision D-E3-1 B) the ACTION answer is
+    refused (`evidence_integrity_contested`) although the version stays approved and retrievable. dev3-01 stays
+    OPEN: E3 needs the conflict to be DETECTED (E1)."""
     from recommendation.rag import RagError
     from tests.test_rag_knowledge_m7_e5_answer_time import ask
     from tests.test_rag_knowledge_m7_e7_independent_verification import dishonest_report, verdict, verify
@@ -229,9 +235,10 @@ def test_e5_full_chain_matrix_on_the_real_answer_path(tx, m2):
     mistaken = {"claims_detected": len(findings) >= 1, "independent_verification": verdict(tx, new_report)[0],
                 "approved": tx.status_of("document", poison) == "approved",
                 "retrievable": chunk in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)],
-                "answer_time_rechecked": rechecks == 1,
-                "caveat_shown": any("báo động nhầm" in line for line in body["limitations"]),
+                "answer_time_rechecked": rechecks == 1, "reason": body["insufficient_reason"],
+                "recommendations": len(body["recommendations"]), "rule_signal_kept": bool(body["signals"]),
                 "response": status, "poison_cited": cited}
     assert mistaken == {"claims_detected": True, "independent_verification": "reproduced", "approved": True,
-                        "retrievable": True, "answer_time_rechecked": True, "caveat_shown": True,
-                        "response": "generated", "poison_cited": True}, mistaken      # residual: dev3-01 OPEN
+                        "retrievable": True, "answer_time_rechecked": True, "reason": "evidence_integrity_contested",
+                        "recommendations": 0, "rule_signal_kept": True,
+                        "response": "insufficient_evidence", "poison_cited": False}, mistaken  # E3: contained

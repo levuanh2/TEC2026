@@ -72,13 +72,17 @@ Case 7 cannot be staged in the database (a chunk id belongs to one version), so 
 | Path | Claims | Independent verification | Review | Approval | Retrieval | Answer-time check | Response |
 |---|---|---|---|---|---|---|---|
 | Dishonest operator omits the claims | omitted by the operator | `mismatch` | refused | no | not retrievable | not reached | refused `citation_mismatch`, poison not cited |
-| Honest operator, mistaken expert (`false_positive`) | detected | `reproduced` | accepted (recorded human error) | approved | retrievable | admissible, **caveat shown** | generated, **poison cited** |
+| Honest operator, mistaken expert (`false_positive`) | detected | `reproduced` | accepted (recorded human error) | approved | retrievable | E5 alone: admissible, caveat shown. **With E3:** action tier refused | E5 alone: generated, poison cited. **With E3:** `insufficient_evidence` / `evidence_integrity_contested`, poison not cited, stored rule signal kept |
 
-The second row is why `test_rag_source_integrity_gap.py` is **not** flipped and dev3-01 stays OPEN.
+Before E3, the second row was why `test_rag_source_integrity_gap.py` was **not** flipped. With E3 (owner decision
+D-E3-1 B, 2026-11-16, `RAG_V15_M7_E3_ACTION_CONTAINMENT.md`), a DETECTED conflict that an expert dismissed no longer
+supports an action answer. The characterization still stands, because poison the verifier does not detect is still
+cited (E1). dev3-01 stays OPEN.
 
 ## 5. Remaining gaps
 - **E1:** authoritative reference verification.
-- **E3:** detection-to-containment policy (detection never quarantines).
+- **E3:** detection-to-containment policy (detection never quarantines). Answer-time action-tier containment is
+  implemented local/CI in `RAG_V15_M7_E3_ACTION_CONTAINMENT.md` (owner decision D-E3-1 B; C planned).
 - **E4:** real expert identity and qualification.
 - **E6:** a real-model replay (only scripted models here).
 - **E7:** its infrastructure (#77 §6): a non-owner producer login, a separate verifier runner, and the hosted attestation mode.

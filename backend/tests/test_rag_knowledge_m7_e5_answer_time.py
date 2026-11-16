@@ -8,7 +8,8 @@ transaction after the model answered and just before the recheck: the real quara
 owner-level edit where no product path exists (documented per test).
 
 Every text and identity is a SYNTHETIC TEST FIXTURE; one rolled-back transaction per test. Skipped without
-SUPABASE_DB_URL. dev3-01 stays OPEN: an approved poisoned version is still cited (with a caveat).
+SUPABASE_DB_URL. dev3-01 stays OPEN. With E3 (owner decision D-E3-1 B) an approved poisoned version whose detected
+conflict was dismissed no longer supports an ACTION answer; a READ-tier answer still cites it with a caveat.
 """
 
 from __future__ import annotations
@@ -22,8 +23,10 @@ import pytest
 import scripts.rag_llm_benchmark as bench
 from infrastructure.llm_client import LlmCompletion, LlmUsage
 from rag_citation_events import PostgresCitationSink
+from rag_answer_integrity import ACTION_CONTAINED_FINDING_TYPES, ANSWER_CONFLICT_NOTE, FINDING_TYPE_LABELS
 from rag_qa import QuestionInput, RagQuestionService
 from recommendation.rag import RagError, RagIntent
+from recommendation.rag.answers import INSUFFICIENT_MESSAGES
 from tests.test_rag_knowledge_ha_assurance import ISOLATED, verified_doc
 from tests.test_rag_knowledge_m2_approval import as_role, draft, m2, owner  # noqa: F401
 from tests.test_rag_knowledge_storage import PERMISSION_DENIED, psycopg, pytestmark, tx  # noqa: E402
@@ -114,13 +117,35 @@ def cited_doc(tx, m2, content=AWD_TEXT):
     return doc, tx.cur.fetchone()[0], chunk
 
 
-def ask(tx, cite, *, before_recheck=None, decline=False, sink=None, reader=None):
+def ask(tx, cite, *, before_recheck=None, decline=False, sink=None, reader=None, intent=RagIntent.RECOMMEND,
+        question=QUESTION, model=None, scenario=None):
     reader = reader or DbReader(tx, tx.member, tx.season_a, before_recheck=before_recheck)
-    service = RagQuestionService(carbon_service=bench.FixtureCarbon(), llm_client=ScriptedModel(cite, decline=decline),
+    service = RagQuestionService(carbon_service=bench.FixtureCarbon(),
+                                 llm_client=model or ScriptedModel(cite, decline=decline),
                                  write_gate=lambda **_: None, citation_sink=sink)
     body = service.answer(reader=reader, crop_season_id=str(tx.season_a), request_id=str(uuid.uuid4()),
-                          question=QuestionInput(question=QUESTION, intent=RagIntent.RECOMMEND))
+                          question=QuestionInput(question=question, intent=intent, what_if_scenario=scenario))
     return body, reader
+
+
+class WhatIfModel:
+    """A what-if answer about the Carbon Engine's AWD delta, citing `cite` (or nothing)."""
+
+    def __init__(self, cite=None):
+        self.cite, self.calls = cite, 0
+
+    def complete_json(self, *, system, user, schema):
+        self.calls += 1
+        data = {"status": "generated", "answer": "Theo Carbon Engine, mức chênh lệch là {{fact:what_if.awd.delta_co2e_kg}}.",
+                "fact_refs": [{"fact_id": "what_if.awd.delta_co2e_kg"}]}
+        if self.cite is not None:
+            data["evidence_refs"] = [{"source_id": self.cite[0], "chunk_id": self.cite[1]}]
+        return LlmCompletion(data=data, usage=LlmUsage(900, 150, 1050, None), latency_ms=5, model="scripted-e3-what-if",
+                             finish_reason="STOP")
+
+
+WHAT_IF_QUESTION = "Nếu tưới ngập khô xen kẽ thì phát thải thay đổi thế nào?"
+EVIDENCE_QUESTION = "Tài liệu nào nói về tưới ngập khô xen kẽ và khí mê-tan?"
 
 
 def refused(body):
@@ -289,34 +314,217 @@ def test_the_answer_time_rpcs_are_for_signed_in_callers_only(tx, m2):
 
 # ================================================================== 12: the frozen dev3-01 fixture
 
-def test_12_dev3_01_approved_through_a_mistaken_expert_is_still_cited_with_a_caveat(tx, m2):
-    """E5 cannot know an approved text is false. The poisoned version approved through recorded false-positive
-    dispositions (E1/E4) is admissible at answer time, so it is cited; E5 only refuses to HIDE the resolved
-    findings: the answer carries the trusted caveat with their types. dev3-01 stays OPEN."""
-    _, doc = draft(tx, m2, content=POISON["content"])
+def mistaken_expert_approval(tx, m2, content=POISON["content"], *, disposition="false_positive", visibility="public",
+                             org=None):
+    """The frozen dev3-01 path: integrity findings detected, every one dismissed (`disposition`: false_positive or
+    contextual_difference) with WRONG (synthetic) evidence by the verified reviewer, then approved.
+    Returns (doc, source_id, chunk_id, finding ids)."""
+    _, doc = draft(tx, m2, content=content, visibility=visibility, org=org)
     review = m2.start(doc)
     report, sha = m2.acknowledge(review)
     tx.cur.execute("select id from public.knowledge_integrity_findings where report_id = %s and needs_expert_review",
                    (report,))
     findings = [r[0] for r in tx.cur.fetchall()]
     assert findings
+    evidence = {"reference": "TEST FIXTURE wrong reference", "locator": "n/a"}
+    if disposition == "contextual_difference":
+        evidence["conditions"] = ["TEST FIXTURE condition that does not hold"]
     for fid in findings:
-        m2.dispose(review, sha, fid, "false_positive",
+        m2.dispose(review, sha, fid, disposition,
                    justification="TEST FIXTURE: a MISTAKEN expert judgement, recorded and attributable",
-                   evidence=[{"reference": "TEST FIXTURE wrong reference", "locator": "n/a"}])
+                   evidence=[evidence])
     m2.submit(review)
     m2.decide(review, tx.approver)
     tx.cur.execute("select d.source_id, c.chunk_id, c.content from public.knowledge_chunks c join public.knowledge_documents d"
                    " on d.id = c.document_pk where d.id = %s", (doc,))
     src, chunk, content = tx.cur.fetchone()
     assert hashlib.sha256(content.encode()).hexdigest()                 # hash-consistent (E7.1 contract)
-    body, reader = ask(tx, (src, chunk))
-    assert body["status"] == "generated" and chunk in [c["chunk_id"] for c in body["citations"]]
-    caveats = [line for line in body["limitations"] if "báo động nhầm" in line]
-    assert len(caveats) == 1 and reader.rechecks == 1
-    tx.cur.execute("select distinct f.finding_type from public.knowledge_integrity_findings f where f.id = any(%s)",
+    return doc, src, chunk, findings
+
+
+def _review_trail(tx, findings):
+    tx.cur.execute("select d.id, d.finding_id, d.disposition, d.justification from public.knowledge_integrity_dispositions d"
+                   " where d.finding_id = any(%s) order by d.id", (findings,))
+    return tx.cur.fetchall()
+
+
+def test_12_dev3_01_mistaken_expert_action_answer_is_contained_read_tier_keeps_the_caveat(tx, m2):
+    """E3 (owner decision D-E3-1 B) on the frozen dev3-01 fixture. E5 cannot know an approved text is false, and E3 does
+    not try: it refuses to let an ACTION answer rest on a scientific conflict that only a (mistaken) dismissal
+    resolved. The poisoned version stays approved and retrievable (no quarantine), the review trail is
+    unchanged, the stored M05 rule signal is still returned, and a READ-tier answer citing it keeps the caveat.
+    dev3-01 stays OPEN (undetected poison, E1, test_12i; real-model replay, E6)."""
+    doc, src, chunk, findings = mistaken_expert_approval(tx, m2)
+    tx.cur.execute("select distinct finding_type from public.knowledge_integrity_findings where id = any(%s)",
                    (findings,))
-    assert all(t in caveats[0] for (t,) in tx.cur.fetchall())
+    types = {t for (t,) in tx.cur.fetchall()}
+    assert types & ACTION_CONTAINED_FINDING_TYPES, types               # dev3-01 = reference_conflict
+    trail_before = _review_trail(tx, findings)
+    assert len(trail_before) == len(findings)
+    sink = TxSink(tx)
+    tx.cur.execute(ISOLATED)                                           # M6.1 records only on an isolated database
+
+    # -- RECOMMEND (action tier): the model cites the poison with the stored AWD rule -> contained
+    body, reader = ask(tx, (src, chunk), sink=sink)
+    assert (body["status"], body["insufficient_reason"]) == ("insufficient_evidence", "evidence_integrity_contested")
+    assert body["recommendations"] == [] and body["citations"] == [] and reader.rechecks == 1
+    assert body["answer"] == INSUFFICIENT_MESSAGES["evidence_integrity_contested"]
+    assert body["provenance"]["answer_source"] == "system_composed"
+    assert [s["rule_code"] for s in body["signals"]] == [bench.RULE]  # the deterministic M05 outcome stays
+    assert sink.results and sink.results[-1][0] == "ok"
+    tx.cur.execute("select outcome, response_emitted from public.knowledge_citation_events order by occurred_at desc"
+                   " limit 1")
+    assert tx.cur.fetchone() == ("evidence_refused", True)
+
+    # -- nothing was quarantined, re-reviewed or rewritten
+    assert tx.status_of("document", doc) == "approved"
+    assert chunk in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)]
+    assert _review_trail(tx, findings) == trail_before
+
+    # -- READ tier (trusted composer, no model): may cite it, with a conspicuous warning ON the citation (D-E3-3)
+    body, _ = ask(tx, (src, chunk), intent=RagIntent.EVIDENCE, question=EVIDENCE_QUESTION)
+    assert_read_tier_warned(body, chunk, types)
+    # -- an action request disguised as an evidence question: still no advice, still warned
+    body, _ = ask(tx, (src, chunk), intent=RagIntent.EVIDENCE,
+                  question="Tài liệu nào cho biết sau tưới ngập khô xen kẽ tôi có thể ngừng ghi mực nước?")
+    assert_read_tier_warned(body, chunk, types)
+
+
+def assert_read_tier_warned(body, chunk, types):
+    """D-E3-3: generated by the trusted composer, the contested citation carries the Vietnamese warning, the answer
+    says the source is not established guidance, no recommendation, and no internal finding code is shown."""
+    assert body["status"] == "generated" and body["provenance"]["answer_source"] == "system_composed", body
+    assert body["recommendations"] == []
+    cited = {c["chunk_id"]: c for c in body["citations"]}
+    assert chunk in cited and cited[chunk]["integrity_warning"].startswith("Cảnh báo: tài liệu này có mâu thuẫn khoa học")
+    assert all(FINDING_TYPE_LABELS[t] in cited[chunk]["integrity_warning"] for t in types)
+    assert body["answer"].endswith(ANSWER_CONFLICT_NOTE)
+    assert any(line.startswith("Cảnh báo: tài liệu được dẫn có mâu thuẫn khoa học") for line in body["limitations"])
+    shown = " ".join([body["answer"], *body["limitations"], *(c["integrity_warning"] or "" for c in body["citations"])])
+    assert not any(code in shown for code in FINDING_TYPE_LABELS), shown
+
+
+def test_12b_a_clean_document_in_the_same_database_still_supports_the_recommendation(tx, m2):
+    """Containment is per cited chunk: an approved clean AWD document next to the contained poison still
+    supports the stored AWD recommendation."""
+    mistaken_expert_approval(tx, m2)
+    doc, src, chunk = cited_doc(tx, m2)
+    body, reader = ask(tx, (src, chunk))
+    assert body["status"] == "generated" and [c["chunk_id"] for c in body["citations"]] == [chunk]
+    assert body["recommendations"][0]["rule_code"] == bench.RULE and reader.rechecks == 1
+    assert not any("báo động nhầm" in line for line in body["limitations"])
+
+
+@pytest.mark.parametrize("relabel, contained", [("claim_conflict", True), ("numeric_reference_mismatch", True),
+                                               ("unsupported_assertion", False)])
+def test_12c_each_contained_type_is_mapped_from_the_stored_records_and_others_stay_a_caveat(tx, m2, relabel, contained):
+    """D-E3-2: the stored finding type (relabelled by an owner-level edit inside the rolled-back test, standing for a
+    finding of that type) decides. The three conflict types contain an action answer; `unsupported_assertion` stays a
+    caveat (with its Vietnamese label, on the citation too)."""
+    doc, src, chunk, findings = mistaken_expert_approval(tx, m2)
+    owner_edit(tx, "knowledge_integrity_findings", "knowledge_integrity_findings_guard",
+               "update public.knowledge_integrity_findings set finding_type = %s where id = any(%s)", (relabel, findings))
+    body, _ = ask(tx, (src, chunk))
+    if contained:
+        assert (body["status"], body["insufficient_reason"]) == ("insufficient_evidence", "evidence_integrity_contested")
+        assert body["citations"] == [] and body["recommendations"] == []
+    else:
+        assert body["status"] == "generated" and chunk in [c["chunk_id"] for c in body["citations"]], body
+        label = FINDING_TYPE_LABELS[relabel]
+        assert any(label in line for line in body["limitations"])
+        assert label in next(c for c in body["citations"] if c["chunk_id"] == chunk)["integrity_warning"]
+
+
+def test_12d_a_contextual_difference_dismissal_is_contained_like_a_false_positive(tx, m2):
+    doc, src, chunk, findings = mistaken_expert_approval(tx, m2, disposition="contextual_difference")
+    tx.cur.execute("select distinct disposition from public.knowledge_integrity_dispositions where finding_id = any(%s)",
+                   (findings,))
+    assert [r[0] for r in tx.cur.fetchall()] == ["contextual_difference"]
+    body, _ = ask(tx, (src, chunk))
+    assert (body["status"], body["insufficient_reason"]) == ("insufficient_evidence", "evidence_integrity_contested")
+
+
+def test_12e_a_confirmed_conflict_is_rejected_and_never_retrieved_or_cited(tx, m2):
+    """Unchanged E2 behaviour, replayed: a reviewer who CONFIRMS the conflict rejects the version."""
+    _, doc = draft(tx, m2, content=POISON["content"])
+    review = m2.start(doc)
+    report, sha = m2.acknowledge(review)
+    tx.cur.execute("select id from public.knowledge_integrity_findings where report_id = %s and needs_expert_review",
+                   (report,))
+    for (fid,) in tx.cur.fetchall():
+        m2.dispose(review, sha, fid, "confirmed_problem", justification="TEST FIXTURE: contradicts the reference")
+    m2.submit(review, "reject", rationale="TEST FIXTURE: the integrity findings are confirmed")
+    assert tx.status_of("document", doc) == "rejected"
+    cited_doc(tx, m2)                                                  # an approved clean document is retrieved
+    tx.cur.execute("select d.source_id, c.chunk_id from public.knowledge_chunks c join public.knowledge_documents d"
+                   " on d.id = c.document_pk where d.id = %s", (doc,))
+    src, chunk = tx.cur.fetchone()
+    assert chunk not in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)]
+    with pytest.raises(RagError) as exc:
+        ask(tx, (src, chunk))
+    assert exc.value.code == "citation_mismatch"
+
+
+def test_12f_another_htx_contested_document_reveals_nothing(tx, m2):
+    """Another cooperative's tenant document, approved through the same mistaken dismissal: never retrieved for this
+    season, its citation is refused exactly like any unknown chunk (no E3 reason, no warning), and neither the recheck
+    nor the caveat helper reveals that it exists or that it has findings."""
+    doc, src, chunk, _ = mistaken_expert_approval(tx, m2, visibility="tenant", org=tx.org_b)
+    cited_doc(tx, m2)                                                  # this season's own clean document is retrieved
+    assert chunk not in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)]
+    with pytest.raises(RagError) as exc:
+        ask(tx, (src, chunk))
+    assert exc.value.code == "citation_mismatch"
+    assert tx.as_user(tx.member, STATE, (tx.season_a, [chunk], False)) == ("ok", [])
+    assert tx.as_user(tx.member, "select * from private.knowledge_cited_resolved_finding_types(%s, %s)",
+                      (tx.season_a, [chunk])) == ("ok", [])
+
+
+def test_12g_a_contested_source_withdrawn_after_retrieval_is_refused_as_no_longer_admissible(tx, m2):
+    """C1-C5 take precedence over E3: the copy names the stronger fact."""
+    doc, src, chunk, _ = mistaken_expert_approval(tx, m2)
+    body, _ = ask(tx, (src, chunk), before_recheck=lambda: as_role(
+        tx, "service_role", EQ_DOC, (doc, "harmful_content_report", "TEST FIXTURE: quarantined mid-request",
+                                     "TEST-FIXTURE-E3-12G")))
+    assert refused(body)
+
+
+def test_12h_what_if_on_contested_evidence_keeps_the_engine_numbers_and_drops_the_model_answer(tx, m2):
+    doc, src, chunk, _ = mistaken_expert_approval(tx, m2)
+    body, _ = ask(tx, None, intent=RagIntent.WHAT_IF, question=WHAT_IF_QUESTION, scenario="awd",
+                  model=WhatIfModel((src, chunk)))
+    assert (body["status"], body["insufficient_reason"]) == ("insufficient_evidence", "evidence_integrity_contested")
+    assert body["citations"] == [] and body["trusted_facts"] == [] and body["what_if"] is not None
+    assert body["answer"] == INSUFFICIENT_MESSAGES["evidence_integrity_contested"]
+    # the same what-if, citing nothing: the Carbon Engine numbers alone, no document, no advice
+    body, reader = ask(tx, None, intent=RagIntent.WHAT_IF, question=WHAT_IF_QUESTION, scenario="awd",
+                       model=WhatIfModel())
+    assert body["status"] == "generated" and body["citations"] == [] and body["recommendations"] == []
+    assert body["what_if"] is not None and reader.rechecks == 0
+
+
+#: Plausible misinformation that no registry entry covers (E1): the verifier raises no needs-review finding.
+UNDETECTED_POISON = ("Khi tưới ngập khô xen kẽ, nên để ruộng khô nứt nẻ suốt giai đoạn trổ bông thì lúa cho năng suất"
+                     " cao nhất.")
+
+
+def test_12i_undetected_poison_is_still_cited_e3_only_contains_what_was_detected(tx, m2):
+    """STILL UNSAFE (E1, characterization). Absence of a finding is not proof of correctness: a false claim no
+    reference covers is approved without any disposition and supports the recommendation. dev3-01 stays OPEN."""
+    _, doc = draft(tx, m2, content=UNDETECTED_POISON)
+    review = m2.start(doc)
+    report, _ = m2.acknowledge(review)
+    tx.cur.execute("select count(*) from public.knowledge_integrity_findings where report_id = %s and needs_expert_review",
+                   (report,))
+    assert tx.cur.fetchone()[0] == 0                                   # nothing for E2 or E3 to act on
+    m2.submit(review)
+    m2.decide(review, tx.approver)
+    tx.cur.execute("select d.source_id, c.chunk_id from public.knowledge_chunks c join public.knowledge_documents d"
+                   " on d.id = c.document_pk where d.id = %s", (doc,))
+    src, chunk = tx.cur.fetchone()
+    body, _ = ask(tx, (src, chunk))
+    assert body["status"] == "generated" and [c["chunk_id"] for c in body["citations"]] == [chunk]
+    assert body["citations"][0]["integrity_warning"] is None           # and nothing warns the farmer
 
 
 # ================================================================== rollback

@@ -60,6 +60,10 @@ chunks the REAL answer service (`RagQuestionService`) receives.
   the hosted attestation mode (`RAG_V15_M7_E7_1_PORTABLE_ATTESTATION.md` §6).
 - **E3 Detection does not exclude.** A contradiction or reference conflict never quarantines
   automatically (by design: no automatic quarantine). Exclusion depends on a human action.
+  **IMPLEMENTED local/CI (owner decisions D-E3-1 B / D-E3-2 / D-E3-3, 2026-11-16):** answer-time action-tier containment
+  (`RAG_V15_M7_E3_ACTION_CONTAINMENT.md`). A cited chunk whose detected conflict an expert dismissed cannot support
+  a recommendation or a what-if answer. READ answers keep a warning on the citation. Nothing is quarantined. It covers only
+  DETECTED conflicts.
 - **E4 No real expert identities.** All reviewers, approvers and archivists in tests are synthetic
   fixtures; no qualified human has reviewed the real corpus.
 - **E5 PARTIAL in CI (migration 20261114120000), NOT on hosted.** At answer time the cited evidence is
@@ -81,8 +85,10 @@ Frozen dev3-01 fixture, real approval RPCs, real retrieval RPC, real `RagQuestio
 | Honest operator, reviewer acknowledges but does not disposition (E2) | yes (M4/M5 findings) | yes (E2) | yes | no | no |
 | Honest operator, reviewer resolves every finding as `false_positive` with wrong evidence (E1/E4) | yes | no | no | **yes** | **yes** |
 
-The last row is a recorded, attributable human error that no control here prevents, so
-`test_rag_source_integrity_gap.py` is NOT flipped and dev3-01 stays OPEN.
+The last row is a recorded, attributable human error that no approval-side control prevents. In this matrix
+"cited" is the OFFLINE benchmark answer path, which carries no integrity state. On the real answer path, the E3
+control refuses the action answer (`test_e5_full_chain_matrix_on_the_real_answer_path`). Undetected poison is
+still cited, so `test_rag_source_integrity_gap.py` is NOT flipped and dev3-01 stays OPEN.
 
 ## 5. What would flip the characterization
 

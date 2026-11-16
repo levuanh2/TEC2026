@@ -7516,6 +7516,17 @@
               }
             ],
             "title": "Published At"
+          },
+          "integrity_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Warning"
           }
         },
         "type": "object",
