@@ -19,6 +19,9 @@ import time
 import uuid
 import weakref
 
+from knowledge.integrity.claims import CLAIM_EXTRACTOR_VERSION
+from knowledge.integrity.review import REVIEW_VERSION
+
 TRANSITION = {
     "source": "select private.knowledge_transition_source(%s, %s::public.knowledge_status,"
               " %s::public.knowledge_status, %s, %s)",
@@ -67,6 +70,29 @@ def event_reason(frm, to, reason):
     if to == "archived":
         return f"ARCHIVE retention_policy: TEST FIXTURE archive rationale: {reason}"[:2000]
     return reason
+
+
+_REGISTRY = {}
+_VERIFIER = {}
+
+
+def test_verifier_key():
+    """(key_id, Ed25519 private key): generated once per test process, held only in memory (never written)."""
+    if "k" not in _VERIFIER:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        _VERIFIER["k"] = (f"test-fixture-verifier-{uuid.uuid4().hex[:12]}", Ed25519PrivateKey.generate())
+    return _VERIFIER["k"]
+
+
+def integrity_registry():
+    """The committed reference registry (the one the E2 policy pins in tests)."""
+    if "r" not in _REGISTRY:
+        from pathlib import Path
+
+        from knowledge.integrity.references import load_registry
+        path = Path(__file__).resolve().parent.parent / "knowledge" / "integrity" / "reference_registry.json"
+        _REGISTRY["r"] = load_registry(json.loads(path.read_text(encoding="utf-8")))
+    return _REGISTRY["r"]
 
 
 #: Marks the synthetic auth.sessions / auth.mfa_factors rows these helpers insert (m2_cleanup removes them).
@@ -259,10 +285,111 @@ class M2:
         return self.db.execute("select id, decision, reviewer_user_id, snapshot_sha256 from public.knowledge_expert_reviews"
                                " where document_pk = %s order by seq desc limit 1", (doc,)).fetchone()
 
+    # -- M7 E2: integrity report, acknowledgement ----------------------------------------------------
+
+    def pin_integrity_policy(self):
+        """Pin the committed registry, extractor and review versions (owner; rolled back with the test, or
+        committed by a test that commits its fixtures: same values)."""
+        reg = integrity_registry()
+        self.db.execute("select private.knowledge_set_integrity_policy(%s, %s, %s, %s)",
+                        (CLAIM_EXTRACTOR_VERSION, REVIEW_VERSION, reg.registry_version, reg.digest))
+
+    def integrity_report(self, doc):
+        """Record the integrity report of `doc` through the operator path; returns (report_id, report_sha256)."""
+        from datetime import date
+
+        from infrastructure.knowledge_claims_repo import PsycopgClaimStore, record_integrity_report
+        if self.db.execute("select registry_digest from private.knowledge_integrity_policy").fetchone()[0] is None:
+            self.pin_integrity_policy()
+        report = record_integrity_report(PsycopgClaimStore(_conn(self.db)), str(doc), integrity_registry(),
+                                         as_of=date.today())
+        sha = self.db.execute("select report_sha256 from public.knowledge_integrity_reports where id = %s",
+                              (report,)).fetchone()[0]
+        return report, sha
+
+    def acknowledge(self, review, *, reviewer=None):
+        """The reviewer acknowledges the CURRENT report of the review's version (recorded if missing). Blocking
+        findings are NOT dispositioned here: a test that needs them resolved does it explicitly."""
+        doc, uid = self.db.execute("select document_pk, reviewer_user_id from public.knowledge_expert_reviews"
+                                   " where id = %s", (review,)).fetchone()
+        current = self.db.execute("select r.id, r.report_sha256 from private.knowledge_integrity_current_report(%s) r"
+                                  " where r.id is not null and private.knowledge_integrity_report_problem(r) is null",
+                                  (doc,)).fetchone()
+        report, sha = current if current else self.integrity_report(doc)
+        if not self.db.execute("select 1 from public.knowledge_integrity_dispositions where review_id = %s and"
+                               " report_id = %s and finding_id is null", (review, report)).fetchone():
+            self.dispose(review, sha, None, "report_reviewed", reviewer=reviewer or uid)
+        self.verify_report(report)
+        return report, sha
+
+    # -- M7 E7: independent, signed verification ------------------------------------------------------
+
+    def verify_report(self, report):
+        """The independent verifier (a synthetic test key, generated in this process, never stored) re-reads
+        the chunks and signs; the owner pins the code digest and registers the key in the test transaction."""
+        if not self.db.execute("select to_regclass('public.knowledge_integrity_verifications') is not null").fetchone()[0]:
+            return None
+        if self.db.execute("select 1 from public.knowledge_integrity_verifications where report_id = %s"
+                           " and verdict = 'reproduced'", (report,)).fetchone():
+            return None
+        if not self.db.execute("select to_regnamespace('knowledge_verifier') is not null").fetchone()[0]:
+            return None                                                 # E7.1 unwound: nothing can verify
+        from infrastructure import integrity_verifier
+        key_id, key = test_verifier_key()
+        self.ensure_verifier(key_id, key)
+        return self.as_verifier(lambda: integrity_verifier.verify(self.db, self.db, str(report), key, key_id))
+
+    def as_verifier(self, fn):
+        """Run `fn` as the verifier group role (E7.1), savepoint-isolated. In this single-process fixture the test
+        connection impersonates the role; the multi-process test uses a separate login (E7.1 doc section 5)."""
+        self.grant_verifier_to_self()
+        self.db.execute("savepoint as_verifier")
+        try:
+            self.db.execute("set local role knowledge_integrity_verifier")
+            out = fn()
+            self.db.execute("reset role")
+            self.db.execute("release savepoint as_verifier")
+            return out
+        except BaseException:
+            self.db.execute("rollback to savepoint as_verifier")
+            raise
+
+    def grant_verifier_to_self(self):
+        """TEST ONLY: the owner creates the group with ADMIN but no SET option (Postgres 16+), so it cannot
+        impersonate the verifier by default; the fixture grants itself SET inside the test transaction."""
+        if self.db.execute("select to_regrole('knowledge_integrity_verifier') is not null").fetchone()[0] and \
+                not self.db.execute("select pg_has_role(current_user, 'knowledge_integrity_verifier', 'SET')").fetchone()[0]:
+            self.db.execute("grant knowledge_integrity_verifier to current_user")
+
+    def ensure_verifier(self, key_id, key):
+        self.grant_verifier_to_self()
+        from infrastructure.integrity_verifier import extractor_code_digest, public_key_bytes
+        if self.db.execute("select extractor_code_digest from private.knowledge_integrity_policy").fetchone()[0] is None:
+            self.db.execute("select private.knowledge_set_integrity_code_digest(%s)", (extractor_code_digest(),))
+        if self.db.execute("select to_regnamespace('knowledge_verifier') is not null").fetchone()[0] and \
+                self.db.execute("select attestation_mode from private.knowledge_integrity_policy").fetchone()[0] is None:
+            mode = "in_database_signature" if self.db.execute("select private.knowledge_ed25519_available()").fetchone()[0] \
+                else "offline_signature_audit"
+            self.db.execute("select private.knowledge_set_attestation_mode(%s)", (mode,))
+        if not self.db.execute("select 1 from public.knowledge_integrity_verifier_keys where key_id = %s", (key_id,)).fetchone():
+            self.db.execute("select private.knowledge_register_verifier_key(%s, %s, %s)",
+                            (key_id, public_key_bytes(key), "TEST FIXTURE verifier (synthetic key, local/CI only)"))
+
+    def dispose(self, review, sha, finding, disposition, *, reviewer=None, justification=None, evidence=None):
+        uid = reviewer or self.db.execute("select reviewer_user_id from public.knowledge_expert_reviews where id = %s",
+                                          (review,)).fetchone()[0]
+        return self.call(uid, "select public.knowledge_dispose_integrity_finding(%s, %s, %s, %s, %s, %s::jsonb)",
+                         (review, sha, finding, disposition,
+                          justification or "TEST FIXTURE: the expert read the integrity report of this version",
+                          json.dumps(evidence or [])))[0][0]
+
     def submit(self, review, decision="recommend_approval", *, checklist=None, sources=None, findings=None,
-               rationale="TEST FIXTURE expert rationale", reviewer=None, snapshot_sha256=None):
+               rationale="TEST FIXTURE expert rationale", reviewer=None, snapshot_sha256=None, integrity=True):
         row = self.db.execute("select reviewer_user_id, snapshot_sha256 from public.knowledge_expert_reviews"
                               " where id = %s", (review,)).fetchone()
+        if integrity and decision == "recommend_approval" and self.db.execute(
+                "select to_regclass('public.knowledge_integrity_reports') is not null").fetchone()[0]:
+            self.acknowledge(review, reviewer=row[0])                  # E2 installed (not after its rollback)
         return self.call(reviewer or row[0], "select public.knowledge_submit_expert_review(%s, %s, %s, %s, %s, %s, %s)",
                          (review, decision, snapshot_sha256 or row[1],
                           json.dumps(CHECKLIST if checklist is None else checklist),
@@ -369,6 +496,12 @@ HC_EVIDENCE_TRIGGERS = {
     "knowledge_source_publishers": "knowledge_source_publishers_guard",
     "knowledge_publishers": "knowledge_publishers_guard",
 }
+E7_EVIDENCE_TRIGGERS = {"knowledge_integrity_verifications": "knowledge_integrity_verifications_guard"}
+E2_EVIDENCE_TRIGGERS = {
+    "knowledge_integrity_dispositions": "knowledge_integrity_dispositions_guard",
+    "knowledge_integrity_findings": "knowledge_integrity_findings_guard",
+    "knowledge_integrity_reports": "knowledge_integrity_reports_guard",
+}
 HB_EVIDENCE_TRIGGERS = {
     "knowledge_emergency_actions": "knowledge_emergency_actions_guard",
     "knowledge_archive_records": "knowledge_archive_records_guard",
@@ -383,7 +516,10 @@ def m2_cleanup(conn, sources):
     sources = list(sources)
     hb = conn.execute("select to_regclass('public.knowledge_archive_records') is not null").fetchone()[0]
     hc = conn.execute("select to_regclass('public.knowledge_supersession_authorizations') is not null").fetchone()[0]
-    triggers = dict(M2_EVIDENCE_TRIGGERS, **(HB_EVIDENCE_TRIGGERS if hb else {}), **(HC_EVIDENCE_TRIGGERS if hc else {}))
+    e2 = conn.execute("select to_regclass('public.knowledge_integrity_reports') is not null").fetchone()[0]
+    e7 = conn.execute("select to_regclass('public.knowledge_integrity_verifications') is not null").fetchone()[0]
+    triggers = dict(M2_EVIDENCE_TRIGGERS, **(HB_EVIDENCE_TRIGGERS if hb else {}), **(HC_EVIDENCE_TRIGGERS if hc else {}),
+                    **(E2_EVIDENCE_TRIGGERS if e2 else {}), **(E7_EVIDENCE_TRIGGERS if e7 else {}))
     tags = [r[0] for r in conn.execute(
         "select distinct substring(p.identity_reference from '^TEST-FIXTURE-M2-([0-9a-f]{8})-')"
         " from public.knowledge_personnel p where p.id in ("
@@ -407,6 +543,15 @@ def m2_cleanup(conn, sources):
     for table, trigger in triggers.items():
         conn.execute(f"alter table public.{table} disable trigger {trigger}")
     try:
+        if e7:
+            conn.execute("delete from public.knowledge_integrity_verifications where report_id in (select id from"
+                         " public.knowledge_integrity_reports where source_id = any(%(s)s))", {"s": sources})
+        if e2:
+            conn.execute("delete from public.knowledge_integrity_dispositions where report_id in (select id from"
+                         " public.knowledge_integrity_reports where source_id = any(%(s)s))", {"s": sources})
+            conn.execute("delete from public.knowledge_integrity_findings where report_id in (select id from"
+                         " public.knowledge_integrity_reports where source_id = any(%(s)s))", {"s": sources})
+            conn.execute("delete from public.knowledge_integrity_reports where source_id = any(%(s)s)", {"s": sources})
         if hc:
             publishers = [r[0] for r in conn.execute(
                 "select publisher_id from public.knowledge_source_publishers where source_id = any(%s)", (sources,))]
