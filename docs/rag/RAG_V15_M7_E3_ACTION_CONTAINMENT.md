@@ -126,8 +126,10 @@ rate is derived.
 | Q02 | stored total shown through a fact reference | value 2900 from the Carbon result; "chưa đạt yêu cầu MRV"; calculation id in the basis |
 | Q03 | model declines | `generator_declined`, trusted copy |
 
-Two further tests in the file: the READ tier on the contested chunk (warning on the citation, no code shown), and an
-action request disguised as an evidence question (no model call, no recommendation, warning shown). Every
+24 tests in total: the 20 scenario rows above, plus 4 detail tests: P01 is explainable in Vietnamese; Q02 shows
+the trusted backend value and the not-MRV label; the READ tier on the contested chunk gets a warning on the citation
+and shows no code; an action request disguised as an evidence question makes no model call, produces no
+recommendation and shows the warning. Every
 insufficient case also checks: no recommendation, no citation, Vietnamese copy, stored signals kept.
 
 Not measured, and therefore not claimed:
