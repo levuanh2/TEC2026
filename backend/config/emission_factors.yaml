@@ -55,9 +55,11 @@ methodology:
 # GWP — quy đổi CH4, N2O sang CO2e (một khung duy nhất cho mọi khí)
 # ---------------------------------------------------------------------------
 # Khung GWP là quyết định có chủ đích: chênh lệch AR4 vs AR6 cho CH4 tới ~19% và đi thẳng vào con số cuối.
-# Quyết định (chủ dự án, 2026-09-15): AR5 GWP-100. Căn cứ: UNFCCC 18/CMA.1 annex §37 + 5/CMA.3 §25 yêu cầu
-# báo cáo theo Thoả thuận Paris dùng GWP-100 của AR5 Table 8.A.1 (không gồm methane hoá thạch); Việt Nam
-# báo cáo quốc gia theo AR5. QĐ 2626/QĐ-BTNMT và QĐ 4801/QĐ-BNNMT không nêu khung GWP (QĐ 2626 đã kiểm tra).
+# Quyết định (chủ dự án, 2026-09-15): AgriCarbon CHỌN AR5 GWP-100 làm khung quy đổi CO2e cho bộ hệ số phiên bản
+# này. Tham chiếu: UNFCCC 18/CMA.1 annex §37 + 5/CMA.3 §25 (báo cáo theo Thoả thuận Paris dùng GWP-100 của AR5
+# Table 8.A.1, không gồm methane hoá thạch). Đây là lựa chọn phương pháp của dự án, KHÔNG phải xác nhận rằng Việt
+# Nam dùng AR5 cho mọi báo cáo quốc gia: cơ sở báo cáo quốc gia phải đối chiếu với BUR/BTR/NIR chính thức (chưa
+# có trong hồ sơ nguồn). QĐ 2626/QĐ-BTNMT và QĐ 4801/QĐ-BNNMT không nêu khung GWP (QĐ 2626 đã kiểm tra).
 # Một khung duy nhất cho mọi khí; KHÔNG trộn AR5 với AR6.
 gwp:
   framework:
