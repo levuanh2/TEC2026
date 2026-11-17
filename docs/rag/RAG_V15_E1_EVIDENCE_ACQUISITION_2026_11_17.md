@@ -258,6 +258,21 @@ done here.
 | D7 | Keep the config comment "Việt Nam báo cáo quốc gia theo AR5" only with an artifact | config accuracy |
 | A1 | Obtain the QĐ 4801 annex and the QĐ 4043 decision from the issuers (written request) | R2 external basis; 4043 effectivity |
 
+### 5.1 Owner decisions recorded 2026-11-17
+
+The owner gave these answers in the Claude Code session of 2026-11-17. They are recorded here verbatim in substance.
+None of them is a scientific verification. E1, E4 and dev3-01 stay OPEN.
+
+| # | Decision | Recorded effect | Still required |
+|---|---|---|---|
+| D2 | **Accepted with conditions.** The Điện Biên provincial copy of QĐ 2626 (A-08) is accepted as provenance for the document. This mirrors the QĐ 4043 decision of 2026-10-07 | A-08 may be cited as the record copy of QĐ 2626. It is **not** scientifically verified, and its factor values are not admitted to any registry by this decision | a person reads the rendered number and date on p. 1 and records them. Rights (D1) and expert review (D6) for any value it contains |
+| D3 | **Accepted, with the limit stated.** Record the chain as: "reaches the official Ban Cơ yếu G1 root with SHA-1 allowed; strict validation at the 2022 signing time is not established" | the provenance record of A-08 carries that sentence. It must never be shortened to "chain validated" | none for provenance. Revisit if a ministry copy with a stronger chain appears |
+| D4 | **Approved.** | Draft #86 (base `main`): the farmer and Management Carbon copy no longer says "đã xác minh" | review and merge by the owner |
+| D5 | **Approved.** | Draft #87 (base `integrate/rag-v15`): extractor `kn-claims-4`. The flowering-stage poison and numeric poison are still undetected | review and merge. Renew any E7.1 extractor pin. Re-extract claims stored under `kn-claims-3` |
+| A1 | **Letters drafted, not sent.** One to the Bộ NN&MT office (4801 annex), one to Cục TT&BVTV (4043 decision) | drafts held locally by the owner. Not committed, because they carry the requester's contact details | the owner fills in the details and sends them through an official channel |
+
+D1, D6 and D7 are still open.
+
 ## Sources
 
 Official artifacts are listed in §1.1. Search results used to find A-08 and to confirm that nothing newer exists:
