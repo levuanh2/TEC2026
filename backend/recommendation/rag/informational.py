@@ -36,12 +36,16 @@ MAX_CITED_CHUNKS = 3
 #: How many comparison seasons/benchmarks a COMPARE answer names.
 MAX_COMPARISONS = 3
 
+# Neutral wording (M7 READ-tier citation UX, 2026-11-16): a document's workflow approval is not a scientific
+# endorsement, so READ-tier copy says "tài liệu trong kho tri thức", never "tài liệu đã duyệt". Whether a cited
+# document is contested is said on the citation itself (rag_answer_integrity.CITATION_CONFLICT_WARNING).
 LIMITATION_SYSTEM_COMPOSED = (
-    "Câu trả lời được hệ thống soạn từ dữ liệu đã ghi nhận và tài liệu đã duyệt; đây không phải lời khuyên canh tác."
+    "Câu trả lời được hệ thống soạn từ dữ liệu đã ghi nhận và tài liệu trong kho tri thức; đây không phải lời khuyên"
+    " canh tác."
 )
-LIMITATION_NO_EVIDENCE = "Chưa có đoạn tài liệu đã duyệt nào khớp với câu hỏi này."
+LIMITATION_NO_EVIDENCE = "Chưa có đoạn tài liệu nào trong kho tri thức khớp với câu hỏi này."
 LIMITATION_NO_CARBON = "Vụ này chưa có kết quả tính phát thải đã lưu."
-ANSWER_OUT_OF_SCOPE = ("Câu hỏi này nằm ngoài phạm vi số liệu đã ghi nhận và tài liệu đã duyệt của vụ "
+ANSWER_OUT_OF_SCOPE = ("Câu hỏi này nằm ngoài phạm vi số liệu đã ghi nhận của vụ và tài liệu trong kho tri thức "
                        "(hệ thống không trả lời về thuốc bảo vệ thực vật, thời tiết hay dữ liệu của đơn vị khác).")
 ANSWER_UNCLEAR_TOPIC = ("Chưa xác định được câu hỏi hỏi về số liệu cụ thể nào; dưới đây là tóm tắt số liệu "
                         "đã ghi nhận của vụ. Có thể hỏi cụ thể về phát thải, sản lượng, nước tưới, phân bón, "
@@ -87,7 +91,7 @@ class _Answer:
 def _cite(answer: _Answer, evidence: Sequence[EvidenceChunk]) -> list[dict[str, str]]:
     refs = [{"source_id": c.source_id, "chunk_id": c.chunk_id} for c in evidence[:MAX_CITED_CHUNKS]]
     if refs:
-        answer.say("Các đoạn tài liệu đã duyệt liên quan đến câu hỏi được dẫn ở phần nguồn bên dưới.")
+        answer.say("Các đoạn tài liệu trong kho tri thức liên quan đến câu hỏi được dẫn ở phần nguồn bên dưới.")
     else:
         answer.limitations.append(LIMITATION_NO_EVIDENCE)
     return refs

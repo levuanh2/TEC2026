@@ -38,7 +38,10 @@ from typing import Literal
 
 from knowledge.ids import sha256_hex
 
-CLAIM_EXTRACTOR_VERSION = "kn-claims-3"
+# kn-claims-4 (2026-11-17): a zero spelled as a word ("bằng không", "về không") is no longer read as a
+# negation, so "phát thải ... bằng không" is now an elimination assertion. Output differs from kn-claims-3:
+# re-extract stored claims under the new version; kn-claims-3 rows are never compared with these.
+CLAIM_EXTRACTOR_VERSION = "kn-claims-4"
 
 ClaimKind = Literal["quantity", "date", "stage", "assertion"]
 ClaimStatus = Literal["extracted", "ambiguous", "unsupported"]
@@ -183,8 +186,10 @@ _ASSERTION_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
         rf"not required|can be omitted|can be skipped)")),
 )
 # A negator just before or inside an assertion match ("không bao giờ bằng 0", "chưa hết phát thải")
-# cancels it. The assertion's own trigger phrase is removed before this test.
-_TRIGGERS = re.compile(r"khong con|chang con|hong con|khong can thiet|khong can|khoi can|khong phai|khong bat buoc|"
+# cancels it. The assertion's own trigger phrase is removed before this test, including a zero spelled
+# as a word ("bằng không", "về không"), whose "không" is the value, not a negator.
+_TRIGGERS = re.compile(r"bang khong|ve khong|"
+                       r"khong con|chang con|hong con|khong can thiet|khong can|khoi can|khong phai|khong bat buoc|"
                        r"no need to|need not|not required to|do not need to|don't need to|not required")
 _NEGATOR = re.compile(r"(?<!\w)(?:khong|chang|chua|never|not|isn't|aren't|n't)(?!\w)")
 _SENTENCE_END = re.compile(r"[.!?;](?=\s|$)|\n")
