@@ -59,7 +59,10 @@ methodology:
 # này. Tham chiếu: UNFCCC 18/CMA.1 annex §37 + 5/CMA.3 §25 (báo cáo theo Thoả thuận Paris dùng GWP-100 của AR5
 # Table 8.A.1, không gồm methane hoá thạch). Đây là lựa chọn phương pháp của dự án, KHÔNG phải xác nhận rằng Việt
 # Nam dùng AR5 cho mọi báo cáo quốc gia: cơ sở báo cáo quốc gia phải đối chiếu với BUR/BTR/NIR chính thức (chưa
-# có trong hồ sơ nguồn). QĐ 2626/QĐ-BTNMT và QĐ 4801/QĐ-BNNMT không nêu khung GWP (QĐ 2626 đã kiểm tra).
+# có trong hồ sơ nguồn). QĐ 2626/QĐ-BTNMT: không thấy khung GWP. Đây là kiểm tra bằng công cụ ngày 2026-11-17
+# trên bản ký số A-08 (#85, sha256 cf3f3e13…d468): lớp văn bản 23 trang không có GWP / AR4–AR6 /
+# "CO2 tương đương". Chưa có người đọc xác nhận. Lần đọc trước lấy từ thuvienphapluat.vn (cổng tư nhân).
+# QĐ 4801/QĐ-BNNMT: trang quyết định không nêu khung GWP. Phụ lục MRV chưa công bố nên CHƯA kiểm tra được.
 # Một khung duy nhất cho mọi khí; KHÔNG trộn AR5 với AR6.
 gwp:
   framework:
