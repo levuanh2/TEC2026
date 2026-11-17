@@ -375,6 +375,19 @@ class M2:
             self.db.execute("select private.knowledge_register_verifier_key(%s, %s, %s)",
                             (key_id, public_key_bytes(key), "TEST FIXTURE verifier (synthetic key, local/CI only)"))
 
+    def dismiss_blocking_findings(self, doc):
+        """TEST FIXTURE of the MISTAKEN-EXPERT path (dev3-01): the reviewer of `doc`'s open review dismisses every
+        blocking finding of its current report as a false positive, with synthetic evidence. Used only where a
+        test needs a version that the integrity gate flags to be approved anyway; it is never the default."""
+        review = self.current_review(doc)[0]
+        report, sha = self.acknowledge(review)
+        for fid, in self.db.execute("select id from public.knowledge_integrity_findings where report_id = %s"
+                                    " and needs_expert_review order by id", (report,)).fetchall():
+            self.dispose(review, sha, fid, "false_positive",
+                         justification="TEST FIXTURE: a (mistaken) expert dismissed this finding",
+                         evidence=[{"reference": "TEST FIXTURE primary text (synthetic)", "locator": "section S.1"}])
+        return report
+
     def dispose(self, review, sha, finding, disposition, *, reviewer=None, justification=None, evidence=None):
         uid = reviewer or self.db.execute("select reviewer_user_id from public.knowledge_expert_reviews where id = %s",
                                           (review,)).fetchone()[0]

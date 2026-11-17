@@ -23,7 +23,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from infrastructure.config import load_settings  # noqa: E402
-from tests.knowledge_status_paths import bring, m2_cleanup  # noqa: E402
+from tests.knowledge_status_paths import M2, bring, m2_cleanup, transition  # noqa: E402
 
 _SETTINGS = load_settings()
 _DB_URL = _SETTINGS.supabase_db_url
@@ -54,7 +54,7 @@ def _sha(text: str) -> str:
 
 
 def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=None, farm=None,
-               source_status="approved", document_status="approved"):
+               source_status="approved", document_status="approved", expert_dismisses=False):
     """One source + version + chunk (operator path, table owner), in the given statuses."""
     source_id = f"rq-{ids['run']}-{key.replace('_', '-')}"
     ids["sources"].append(source_id)
@@ -76,7 +76,15 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
                  (doc, chunk_id, section(ids), FIXTURE + content, _sha(FIXTURE + content)))
-    bring(conn, "document", doc, document_status, approver=approver, reason="fixture")   # via expert_review (D3)
+    if expert_dismisses:
+        # kn-claims-4 extracts "phát thải bằng không" from this chunk, and the E2 gate then blocks it
+        # (reference_conflict). This module tests retrieval scope, not integrity, so the version is approved
+        # the only way the gate allows: a (synthetic, mistaken) expert dismisses the finding first.
+        bring(conn, "document", doc, "expert_review", reason="fixture")
+        M2.of(conn).dismiss_blocking_findings(doc)
+        transition(conn, "document", doc, "expert_review", "approved", reason="fixture", approver=approver)
+    else:
+        bring(conn, "document", doc, document_status, approver=approver, reason="fixture")   # via expert_review (D3)
     ids[key] = chunk_id
 
 
@@ -167,7 +175,7 @@ def env():
                        source_status="approved", document_status="archived")
             _knowledge(conn, ids, approver, "archived_src", "nguồn awd đã lưu trữ",
                        source_status="archived", document_status="approved")
-            _knowledge(conn, ids, approver, "injection", INJECTION)
+            _knowledge(conn, ids, approver, "injection", INJECTION, expert_dismisses=True)
             # Superseded: v1 approved then archived, v2 approved (source integrity: only the current version).
             _knowledge(conn, ids, approver, "superseded", "phiên bản awd cũ đã bị thay thế",
                        source_status="approved", document_status="archived")
