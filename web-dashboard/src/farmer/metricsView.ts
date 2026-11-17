@@ -395,7 +395,9 @@ function carbon(m: SeasonMetrics, c: CarbonInputs | null): MetricDetail {
       : fixable ? { label: `Bổ sung ${fixable} thông tin`, to: c?.fixTo ?? '/farmer/carbon' }
         : { label: 'Xem Carbon của vụ', to: c?.fixTo ?? '/farmer/carbon' },
     method: [
-      'Máy chủ tính theo phương pháp IPCC 2019 với bộ hệ số đã xác minh; màn hình không ước đoán khi thiếu dữ liệu.',
+      // The factor set is IPCC Tier 1 defaults whose domain-expert review is still PENDING
+      // (backend/config/emission_factors.yaml): say what it is, never that it is verified.
+      'Máy chủ tính theo phương pháp IPCC 2019 (Tier 1) với bộ hệ số mặc định; bộ hệ số chưa được chuyên gia thẩm định. Màn hình không ước đoán khi thiếu dữ liệu.',
       'kg CO₂e/kg lúa = tổng phát thải ÷ sản lượng thóc đã ghi.',
       ...(limits ? [`Giới hạn phương pháp (không phải do bạn nhập thiếu): ${c!.limitations.map((x) => x.label).join('; ')}.`] : []),
       'Chi phí không được dùng để tính Carbon.',
