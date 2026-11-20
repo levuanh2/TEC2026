@@ -291,8 +291,29 @@ class M2:
         """Pin the committed registry, extractor and review versions (owner; rolled back with the test, or
         committed by a test that commits its fixtures: same values)."""
         reg = integrity_registry()
-        self.db.execute("select private.knowledge_set_integrity_policy(%s, %s, %s, %s)",
-                        (CLAIM_EXTRACTOR_VERSION, REVIEW_VERSION, reg.registry_version, reg.digest))
+        target = (CLAIM_EXTRACTOR_VERSION, REVIEW_VERSION, reg.registry_version, reg.digest)
+        # M7 E5.2: every pin UPDATE is a new generation (an identical re-pin included), which suspends every approval
+        # made before it. A fixture that only needs "pinned" must not re-pin; a test that means a re-pin calls the
+        # owner functions itself.
+        current = self.db.execute("select extractor_version, review_version, registry_version, registry_digest"
+                                  " from private.knowledge_integrity_policy").fetchone()
+        if tuple(current) != target:
+            self.db.execute("select private.knowledge_set_integrity_policy(%s, %s, %s, %s)", target)
+
+    def complete_pin(self):
+        """M7 E5.2: the owner completes the pin (extractor code digest, attestation mode) BEFORE any report is recorded.
+        Every pin change is a new generation, so a piece set later would make the report of an earlier generation.
+        Only fills what is missing (never changes a pin a test set) and is a no-op when the layers are not installed."""
+        if not self.db.execute("select to_regclass('public.knowledge_integrity_verifications') is not null").fetchone()[0]:
+            return
+        if self.db.execute("select extractor_code_digest from private.knowledge_integrity_policy").fetchone()[0] is None:
+            from infrastructure.integrity_verifier import extractor_code_digest
+            self.db.execute("select private.knowledge_set_integrity_code_digest(%s)", (extractor_code_digest(),))
+        if self.db.execute("select to_regnamespace('knowledge_verifier') is not null").fetchone()[0] and \
+                self.db.execute("select attestation_mode from private.knowledge_integrity_policy").fetchone()[0] is None:
+            mode = "in_database_signature" if self.db.execute("select private.knowledge_ed25519_available()").fetchone()[0] \
+                else "offline_signature_audit"
+            self.db.execute("select private.knowledge_set_attestation_mode(%s)", (mode,))
 
     def integrity_report(self, doc):
         """Record the integrity report of `doc` through the operator path; returns (report_id, report_sha256)."""
@@ -301,6 +322,7 @@ class M2:
         from infrastructure.knowledge_claims_repo import PsycopgClaimStore, record_integrity_report
         if self.db.execute("select registry_digest from private.knowledge_integrity_policy").fetchone()[0] is None:
             self.pin_integrity_policy()
+        self.complete_pin()
         report = record_integrity_report(PsycopgClaimStore(_conn(self.db)), str(doc), integrity_registry(),
                                          as_of=date.today())
         sha = self.db.execute("select report_sha256 from public.knowledge_integrity_reports where id = %s",

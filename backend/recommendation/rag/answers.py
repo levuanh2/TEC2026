@@ -82,8 +82,9 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
         " Thông tin của vụ và khuyến nghị do hệ thống quy tắc ghi nhận vẫn được giữ nguyên."
     ),
     # M7 E5.1: before any model call, every retrieved document that could answer was excluded for the same reason.
+    # E5.2: also when the caller's scope holds approved versions suspended by a re-pin (retrieval no longer ranks them).
     "no_integrity_current_evidence": (
-        "Tài liệu liên quan trong kho tri thức đang chờ được kiểm tra lại theo quy trình kiểm tra tính toàn vẹn hiện"
+        "Một số tài liệu trong kho tri thức đang chờ được kiểm tra lại theo quy trình kiểm tra tính toàn vẹn hiện"
         " hành, nên chưa được dùng làm căn cứ. Hiện chưa có tài liệu đã kiểm tra hợp lệ đủ để trả lời câu hỏi này;"
         " hệ thống không thay bằng một nguồn chưa được kiểm tra."
     ),

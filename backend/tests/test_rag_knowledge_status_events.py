@@ -335,6 +335,7 @@ E7_ROLLBACK = ROOT / "supabase/rollbacks/20261113235900_knowledge_integrity_inde
 E7_1_ROLLBACK = ROOT / "supabase/rollbacks/20261114090000_knowledge_integrity_portable_attestation_m7_e7_1.down.sql"
 E5_ROLLBACK = ROOT / "supabase/rollbacks/20261114120000_knowledge_answer_time_evidence_e5.down.sql"
 E5_1_ROLLBACK = ROOT / "supabase/rollbacks/20261120090000_knowledge_pin_aware_admission_e5_1.down.sql"
+E5_2_ROLLBACK = ROOT / "supabase/rollbacks/20261120120000_knowledge_pin_generation_e5_2.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -364,8 +365,26 @@ def unwind_m6_1(tx):
         tx.cur.execute(_without_tx_control(M6_1_ROLLBACK))
 
 
+def unwind_e5_2(tx):
+    """M7 E5.2 (pin generations) unwinds first, when it is installed (its rollback needs the explicit
+    acknowledgement and ends in safe refusal)."""
+    tx.cur.execute("select to_regprocedure('private.knowledge_stamp_pin_generation()') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute("select extractor_version, review_version, registry_version, registry_digest,"
+                       " extractor_code_digest, attestation_mode from private.knowledge_integrity_policy")
+        before = tx.cur.fetchone()
+        tx.cur.execute("set local knowledge.e5_2_rollback = 'safe-refusal-acknowledged'")
+        tx.cur.execute(_without_tx_control(E5_2_ROLLBACK))      # ends in safe refusal: the pin is cleared
+        # the owner pins again, deliberately, so a test of an earlier layer sees the pin it had (TEST ONLY)
+        tx.cur.execute("select private.knowledge_set_integrity_policy(%s, %s, %s, %s)", before[:4])
+        tx.cur.execute("select private.knowledge_set_integrity_code_digest(%s)", (before[4],))
+        if before[5] is not None:
+            tx.cur.execute("select private.knowledge_set_attestation_mode(%s)", (before[5],))
+
+
 def unwind_e5_1(tx):
-    """M7 E5.1 (pin-aware admission) unwinds first, when it is installed."""
+    """E5.2 first, then M7 E5.1 (pin-aware admission), when installed."""
+    unwind_e5_2(tx)
     tx.cur.execute("select to_regprocedure('public.knowledge_cited_evidence_state(uuid,text[],boolean,boolean)')"
                    " is not null")
     if tx.cur.fetchone()[0]:

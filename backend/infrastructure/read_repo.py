@@ -346,6 +346,14 @@ class SupabaseReadRepository:
         evidence into the model context). Same RPC, same caller's JWT, same answer."""
         return self.knowledge_evidence_state(season_id, chunk_ids, demo=demo)
 
+    def knowledge_evidence_awaiting_recheck(self, season_id: str) -> bool:
+        """M7 E5.2: one boolean for the caller's own season scope: is an approved, verified version suspended (not
+        admitted in the current pin generation)? Explanation only; never admits anything."""
+        rows = self._select("rpc knowledge_evidence_awaiting_recheck",
+                            lambda client: client.rpc("knowledge_evidence_awaiting_recheck",
+                                                      {"p_crop_season_id": season_id}))
+        return bool(rows and rows[0].get("awaiting") is True)
+
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
         self._one("crop_seasons", season_id)
         rows = self._many("season_recommendations", crop_season_id=season_id)

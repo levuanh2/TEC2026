@@ -348,7 +348,8 @@ class RagQuestionService:
                 facts=CallerSeasonFactsSource(reader, self._carbon),
             )
             assert_recommendations_follow_rules(result)
-            result = explain_unadmitted_evidence(result, admission.admission)
+            result = explain_unadmitted_evidence(result, admission.admission,
+                                                 awaiting=_awaiting_recheck(reader, crop_season_id, result))
             # M7 E5: the LAST step before the response body is built. The cited evidence is re-validated under the
             # caller's JWT; any failing citation discards the whole model answer (a failing recheck raises).
             result, refused = answer_time_evidence_gate(reader, crop_season_id=crop_season_id, result=result,
@@ -377,6 +378,21 @@ class RagQuestionService:
                 "input_tokens=%s output_tokens=%s cost_usd=%s llm_ms=%s total_ms=%s",
                 request_id, question.intent, question.mode, status, error_code, meter.calls, meter.input_tokens,
                 meter.output_tokens, meter.cost_usd, meter.latency_ms, int((time.perf_counter() - started) * 1000))
+
+
+def _awaiting_recheck(reader: Any, crop_season_id: str, result: Any) -> bool:
+    """M7 E5.2: asked only when nothing usable was retrieved. An explanation signal, never an admission: a reader
+    without it, or a failure, keeps the generic copy (the answer is insufficient_evidence either way)."""
+    if result.status != "insufficient_evidence" or result.insufficient_reason != "no_evidence_retrieved":
+        return False
+    lookup = getattr(reader, "knowledge_evidence_awaiting_recheck", None)
+    if lookup is None:
+        return False
+    try:
+        return lookup(crop_season_id) is True
+    except Exception:  # noqa: BLE001 - explanation only; the refusal itself does not depend on it
+        logger.warning("rag_awaiting_recheck_unavailable crop_season_id=%s", crop_season_id)
+        return False
 
 
 def _event_id(request_id: str | None) -> str:

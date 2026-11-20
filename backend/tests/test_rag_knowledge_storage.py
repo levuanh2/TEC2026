@@ -1001,6 +1001,14 @@ E5_INVOKER = {"knowledge_cited_evidence_state"}
 # answers only for retrievable chunks; the admission check and the operator inventory are owner-only invokers.
 E5_1_DEFINER = {"knowledge_cited_integrity_status"}
 E5_1_INVOKER = {"knowledge_integrity_admission_problem", "knowledge_integrity_admission_inventory"}
+# M7 E5.2 (20261120120000): the generation stamp (pin row is private whoever inserts) and the generation-admitted
+# retrieval helper (answers only for the caller's season scope) are SECURITY DEFINER; the epoch triggers, the log
+# guards and the owner-only corpus inventory are invokers.
+E5_2_DEFINER = {"knowledge_stamp_pin_generation", "knowledge_generation_admitted_documents",
+                "knowledge_scope_has_suspended_evidence"}
+E5_2_INVOKER = {"knowledge_pin_generation_log_guard", "knowledge_pin_no_truncate", "knowledge_pin_generation_next",
+                "knowledge_pin_generation_record", "knowledge_corpus_integrity_inventory",
+                "knowledge_pin_generation_frozen", "knowledge_evidence_awaiting_recheck"}
 
 
 def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
@@ -1031,7 +1039,7 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                     *HB_DEFINER, *HB_INVOKER, *HC_DEFINER, *HC_INVOKER,
                                     *E2_DEFINER, *E2_INVOKER, *E7_DEFINER, *E7_INVOKER, *E7_1_INVOKER,
                                     *M6_1_DEFINER, *M6_1_INVOKER, *E5_DEFINER, *E5_INVOKER,
-                                    *E5_1_DEFINER, *E5_1_INVOKER}
+                                    *E5_1_DEFINER, *E5_1_INVOKER, *E5_2_DEFINER, *E5_2_INVOKER}
     assert all(r[2] == ['search_path=""'] for r in rows), rows
     # SECURITY DEFINER: the password-guard wrapper (test_password_guard_is_core_v1s), the two M1
     # operator functions (EXECUTE for service_role only) and the M2 RPCs (EXECUTE for authenticated
@@ -1040,7 +1048,7 @@ def test_rpc_and_helpers_are_security_invoker_with_a_pinned_search_path(tx):
                                             "knowledge_transition_document", *M2_RPCS, *M2_DEMO,
                                             *M3_EXPIRY, *M4_OPERATOR, *M4_1_RPCS, *HA_DEFINER,
                                             *HB_DEFINER, *HC_DEFINER, *E2_DEFINER, *E7_DEFINER,
-                                            *M6_1_DEFINER, *E5_DEFINER, *E5_1_DEFINER}, rows
+                                            *M6_1_DEFINER, *E5_DEFINER, *E5_1_DEFINER, *E5_2_DEFINER}, rows
     tx.cur.execute("select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                    " where n.nspname in ('public', 'private') and p.proname like '%%knowledge%%'")
     for name, body in tx.cur.fetchall():                                    # no dynamic SQL anywhere

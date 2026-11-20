@@ -44,6 +44,7 @@ def poisoned(tx, m2):
 def dishonest_report(tx, m2, doc, *, keep=lambda c: c.kind != "assertion"):
     """The E7 attack: store only the claims `keep` allows, then a report complete relative to them."""
     m2.pin_integrity_policy()
+    m2.complete_pin()                      # E5.2: the whole pin before the report (a later piece = new generation)
     store = PsycopgClaimStore(tx.cur.connection)
     sources = store.chunk_sources(str(doc))
     claims = [c for s in sources for c in extract_claims(s) if keep(c)]

@@ -80,6 +80,14 @@ class DbReader:
             raise RuntimeError(f"admission check failed: {rows}")
         return [r[0] for r in rows]
 
+    def knowledge_evidence_awaiting_recheck(self, season_id):
+        """M7 E5.2 explanation signal under the member's JWT."""
+        status, rows = self.tx.as_user(self.user, "select awaiting from public.knowledge_evidence_awaiting_recheck(%s)",
+                                       (season_id,))
+        if status != "ok":
+            raise RuntimeError(f"awaiting-recheck failed: {rows}")
+        return bool(rows and rows[0][0] is True)
+
     def knowledge_evidence_state(self, season_id, chunk_ids, *, demo=False):
         if self.before_recheck is not None:
             self.before_recheck()

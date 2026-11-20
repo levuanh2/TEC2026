@@ -81,6 +81,8 @@ again.
 - They are reported as `demo_unverified`, never as `current`.
 - The backend admits them only in its labelled demo mode, as before.
 
+**Superseded by E5.2 (2026-11-20, `RAG_V15_M7_E5_2_PIN_GENERATION.md`):** every pin change is a new generation and nothing is ever reactivated. What follows describes E5.1 alone.
+
 **Pin rollback.** The check compares with the pin as it is now.
 
 - Setting the pin back to the exact earlier tuple (same version labels and the same code digest) makes the versions

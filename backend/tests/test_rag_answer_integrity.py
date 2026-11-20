@@ -393,6 +393,10 @@ def test_e5_1_only_a_pin_exclusion_changes_the_no_evidence_copy():
     assert explain_unadmitted_evidence(empty, None) is empty
     other = Result(status="insufficient_evidence", insufficient_reason="no_rule_signal", answer="a", answer_template=None)
     assert explain_unadmitted_evidence(other, pin_out) is other
+    # E5.2: retrieval no longer returns suspended versions; the caller-scoped signal gives the same copy
+    out = explain_unadmitted_evidence(empty, None, awaiting=True)
+    assert out.insufficient_reason == "no_integrity_current_evidence"
+    assert explain_unadmitted_evidence(other, None, awaiting=True) is other
 
 
 def test_e5_1_citation_events_record_the_answer_time_pin_refusal_only():

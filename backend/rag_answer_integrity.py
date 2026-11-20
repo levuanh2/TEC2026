@@ -249,10 +249,13 @@ class AdmittedEvidenceRetriever:
         return self.admission.admitted
 
 
-def explain_unadmitted_evidence(result: Any, admission: EvidenceAdmission | None) -> Any:
-    """A request that found no usable document only because gate 1 excluded documents whose integrity evidence is
-    not current says so (trusted copy), instead of the generic "no approved document" message."""
-    if (admission is None or not admission.pin_excluded or result.status != "insufficient_evidence"
+def explain_unadmitted_evidence(result: Any, admission: EvidenceAdmission | None, *, awaiting: bool = False) -> Any:
+    """A request that found no usable document while documents are waiting for an integrity re-check says so (trusted
+    copy), instead of the generic "no approved document" message. Either gate 1 excluded retrieved documents for the
+    pin (E5.1), or, since retrieval is admission-aware (E5.2), the database said the caller's own scope holds approved
+    versions suspended by a re-pin (`awaiting`). Explanation only: the answer stays insufficient_evidence."""
+    pin_excluded = admission is not None and admission.pin_excluded
+    if (not (pin_excluded or awaiting) or result.status != "insufficient_evidence"
             or result.insufficient_reason != "no_evidence_retrieved"):
         return result
     return result.model_copy(update={"insufficient_reason": "no_integrity_current_evidence",

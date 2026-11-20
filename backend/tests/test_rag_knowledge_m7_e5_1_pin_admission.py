@@ -136,6 +136,8 @@ def generated_citing(body, chunk):
 
 
 def gate1_refused(body):
+    """The stale version never reaches the model and the answer says documents await a re-check. Since E5.2 the stale
+    version is not even retrieved; the copy comes from the caller-scoped `knowledge_evidence_awaiting_recheck` signal."""
     return (body["status"], body["insufficient_reason"], body["recommendations"], body["citations"],
             body["answer"]) == ("insufficient_evidence", "no_integrity_current_evidence", [], [],
                                 INSUFFICIENT_MESSAGES["no_integrity_current_evidence"])
@@ -165,8 +167,8 @@ def test_new_pin_old_report_previously_approved_spelled_zero_is_not_given_to_the
     assert tx.status_of("document", doc) == "approved"
     tx.cur.execute("select extractor_version from public.knowledge_integrity_reports where document_pk = %s", (doc,))
     assert [r[0] for r in tx.cur.fetchall()] == [OLD]
-    # retrieval itself is unchanged (E5.1 is an admission rule, not a status change)
-    assert chunk in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)]
+    # E5.2: retrieval itself no longer ranks it (admission-aware retrieval); no status was changed
+    assert chunk not in [r[3] for r in tx.rpc(tx.member, tx.season_a, "tưới ngập khô xen kẽ mê-tan", 50)]
 
 
 def test_a_clean_unaffected_kn3_approval_is_suspended_too(tx, m2, monkeypatch):
@@ -216,7 +218,8 @@ def test_mismatched_manifest_digest_suspends_admission_and_the_verifier_refuses_
     src = tx.source()
     doc, chunk = approve_now(tx, m2, src, AWD_TEXT, doc_version="v1")
     tx.cur.execute("select private.knowledge_set_integrity_code_digest(%s)", ("6" * 64,))   # other runtime/code
-    assert problem(tx, doc) == "not_verified_under_current_pin" and status_for(tx, chunk) == ["not_current"]
+    # E5.2: any pin change is a new generation, checked before the verification itself
+    assert problem(tx, doc) == "report_from_earlier_generation" and status_for(tx, chunk) == ["not_current"]
     assert gate1_refused(ask(tx, (src, chunk))[0])
     tx.cur.execute("select id from public.knowledge_integrity_reports where document_pk = %s", (doc,))
     report = tx.cur.fetchone()[0]
@@ -260,7 +263,7 @@ def test_missing_integrity_metadata_is_never_current(tx, m2):
     tx.cur.execute("select private.knowledge_set_attestation_mode(null)")
     assert problem(tx, doc) == "policy_not_pinned"
     tx.cur.execute("select private.knowledge_set_attestation_mode(%s)", (mode,))
-    assert problem(tx, doc) is None
+    assert problem(tx, doc) == "report_from_earlier_generation"       # E5.2: restoring the value revives nothing
     # a version with no integrity report at all (here: still under review) has nothing to admit
     _, bare = draft(tx, m2, content="TEST FIXTURE: phiên bản chưa có báo cáo kiểm tra")
     assert problem(tx, bare) == "no_report"
@@ -280,15 +283,17 @@ def test_a_new_version_whose_snapshot_changed_after_its_report_cannot_be_approve
 
 # ================================================================== D7, D12: rollback, re-activation, mid-request
 
-def test_pin_rollback_reactivates_only_what_was_approved_under_that_exact_pin(tx, m2, monkeypatch):
+def test_pin_rollback_reactivates_nothing_since_e5_2(tx, m2, monkeypatch):
+    """E5.1 re-activated approvals of the restored tuple (its decision E5.1-d); E5.2's generations end that."""
     old_doc, src, old_chunk = approve_under_kn3(tx, m2, monkeypatch, AWD_TEXT)
     real_pin(tx)
     new_doc, new_chunk = approve_now(tx, m2, src, AWD_TEXT + " Bản v2.", doc_version="v2", document_id="doc-v2")
     assert (problem(tx, old_doc), problem(tx, new_doc)) == ("report_not_under_current_pin", None)
     pin(tx, OLD, OLD_DIGEST)                                     # the owner rolls back to the EXACT earlier tuple
-    assert (problem(tx, old_doc), problem(tx, new_doc)) == (None, "report_not_under_current_pin")
+    assert (problem(tx, old_doc), problem(tx, new_doc)) == ("report_from_earlier_generation",
+                                                            "report_not_under_current_pin")
     pin(tx, OLD, "8" * 64)                                       # same extractor label, another manifest: nothing
-    assert problem(tx, old_doc) == "not_verified_under_current_pin"
+    assert problem(tx, old_doc) == "report_from_earlier_generation"
     pin(tx, NEXT, "9" * 64)                                      # a pin no report was made under: nothing
     assert (problem(tx, old_doc), problem(tx, new_doc)) == ("report_not_under_current_pin",) * 2
 

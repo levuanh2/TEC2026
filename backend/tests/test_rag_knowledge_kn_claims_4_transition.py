@@ -38,6 +38,7 @@ def pin(tx, version, digest):
     tx.cur.execute("select private.knowledge_set_integrity_policy(%s, %s, %s, %s)",
                    (version, paths.REVIEW_VERSION, reg.registry_version, reg.digest))
     tx.cur.execute("select private.knowledge_set_integrity_code_digest(%s)", (digest,))
+    paths.M2.of(tx.cur).complete_pin()          # E5.2: the attestation mode too, before any report of this pin
 
 
 def kn3_report(tx, doc):

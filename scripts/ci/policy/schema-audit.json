@@ -108,6 +108,15 @@
    ],
    "security_definer": true
   },
+  "knowledge_evidence_awaiting_recheck(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": false
+  },
   "knowledge_grant_personnel_role(uuid,text,text,uuid,text,text,text,timestamp with time zone)": {
    "config": [
     "search_path=\"\""
@@ -512,6 +521,13 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_corpus_integrity_inventory()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.knowledge_declare_isolated_test(text)": {
    "config": [
     "search_path=\"\""
@@ -670,6 +686,15 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_generation_admitted_documents(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.knowledge_has_real_accounts()": {
    "config": [
     "search_path=\"\""
@@ -776,6 +801,41 @@
    "security_definer": false
   },
   "private.knowledge_personnel_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_pin_generation_frozen()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_pin_generation_log_guard()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_pin_generation_next()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_pin_generation_record()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_pin_no_truncate()": {
    "config": [
     "search_path=\"\""
    ],
@@ -896,6 +956,15 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_scope_has_suspended_evidence(uuid)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.knowledge_search_text(text)": {
    "config": [
     "search_path=\"\""
@@ -946,6 +1015,13 @@
    ],
    "execute": [],
    "security_definer": false
+  },
+  "private.knowledge_stamp_pin_generation()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": true
   },
   "private.knowledge_status_events_append_only()": {
    "config": [
@@ -2587,6 +2663,8 @@
   "irrigation_events.set_updated_at_trg": "private.set_updated_at()",
   "knowledge_approval_records.knowledge_approval_records_guard": "private.knowledge_evidence_guard()",
   "knowledge_approval_records.knowledge_approval_records_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_approval_records.knowledge_approval_records_pin_generation": "private.knowledge_stamp_pin_generation()",
+  "knowledge_approval_records.knowledge_approval_records_pin_generation_frozen": "private.knowledge_pin_generation_frozen()",
   "knowledge_archive_records.knowledge_archive_records_guard": "private.knowledge_evidence_guard()",
   "knowledge_archive_records.knowledge_archive_records_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_chunks.knowledge_chunks_immutable": "private.enforce_knowledge_chunk_immutability()",
@@ -2615,8 +2693,12 @@
   "knowledge_integrity_findings.knowledge_integrity_findings_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_integrity_reports.knowledge_integrity_reports_guard": "private.knowledge_evidence_guard()",
   "knowledge_integrity_reports.knowledge_integrity_reports_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_integrity_reports.knowledge_integrity_reports_pin_generation": "private.knowledge_stamp_pin_generation()",
+  "knowledge_integrity_reports.knowledge_integrity_reports_pin_generation_frozen": "private.knowledge_pin_generation_frozen()",
   "knowledge_integrity_verifications.knowledge_integrity_verifications_guard": "private.knowledge_evidence_guard()",
   "knowledge_integrity_verifications.knowledge_integrity_verifications_no_truncate": "private.knowledge_m2_no_truncate()",
+  "knowledge_integrity_verifications.knowledge_integrity_verifications_pin_generation": "private.knowledge_stamp_pin_generation()",
+  "knowledge_integrity_verifications.knowledge_integrity_verifications_pin_generation_frozen": "private.knowledge_pin_generation_frozen()",
   "knowledge_integrity_verifier_keys.knowledge_integrity_verifier_keys_guard": "private.knowledge_verifier_key_guard()",
   "knowledge_integrity_verifier_keys.knowledge_integrity_verifier_keys_no_truncate": "private.knowledge_m2_no_truncate()",
   "knowledge_personnel.knowledge_personnel_guard": "private.knowledge_personnel_guard()",

@@ -159,6 +159,12 @@ def test_without_pgsodium_only_an_explicit_offline_mode_accepts_and_the_audit_fi
         tx.cur.execute("select private.knowledge_set_attestation_mode('in_database_signature')")
     tx.cur.execute("rollback to savepoint m")
     tx.cur.execute("select private.knowledge_set_attestation_mode('offline_signature_audit')")
+    # E5.2: the mode change is a new pin generation, so the report of the earlier generation is retired: the operator
+    # records the report again (same claims) and the reviewer acknowledges it, before anything is verified
+    report, sha_ = m2.integrity_report(doc)
+    m2.dispose(review, sha_, None, "report_reviewed")
+    text = m2.as_verifier(lambda: iv.build_statement(tx.cur, str(report), key_id))
+    good = key.sign(text.encode())
     # the database cannot check a signature now: a forged one is accepted on the role's identity ...
     forged = Ed25519PrivateKey.generate().sign(text.encode())
     assert as_role(tx, "knowledge_integrity_verifier", iv.RECORD, (text, forged))[0] == "ok"
