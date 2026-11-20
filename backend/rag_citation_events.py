@@ -72,7 +72,10 @@ class RecordingRetriever:
 
 
 #: M7 E5 / E3: the answer-time gate discarded the model answer because of its cited evidence.
-_EVIDENCE_REFUSED = frozenset({"evidence_no_longer_admissible", "evidence_integrity_contested"})
+#: E5.1 `evidence_integrity_not_current` is an answer-time refusal too; `no_integrity_current_evidence` is not (it
+#: stops before the model: nothing was refused after generation, the event is an insufficient_evidence one).
+_EVIDENCE_REFUSED = frozenset({"evidence_no_longer_admissible", "evidence_integrity_contested",
+                               "evidence_integrity_not_current"})
 
 
 def build_event(*, request_id: str, crop_season_id: str, recorder: RecordingRetriever | None, result: Any | None,

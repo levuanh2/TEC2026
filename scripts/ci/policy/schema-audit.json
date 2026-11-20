@@ -63,7 +63,7 @@
    ],
    "security_definer": true
   },
-  "knowledge_cited_evidence_state(uuid,text[],boolean)": {
+  "knowledge_cited_evidence_state(uuid,text[],boolean,boolean)": {
    "config": [
     "search_path=\"\""
    ],
@@ -473,6 +473,15 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_cited_integrity_status(uuid,text[],boolean)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.knowledge_cited_resolved_finding_types(uuid,text[])": {
    "config": [
     "search_path=\"\""
@@ -676,6 +685,20 @@
    "security_definer": false
   },
   "private.knowledge_in_force(date,date,date,date)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_integrity_admission_inventory()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
+  "private.knowledge_integrity_admission_problem(uuid)": {
    "config": [
     "search_path=\"\""
    ],

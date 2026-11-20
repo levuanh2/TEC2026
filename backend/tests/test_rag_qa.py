@@ -97,6 +97,11 @@ class Reader:
         from rag_answer_integrity import fixture_evidence_state      # M7 E5: the fixture corpus stays admissible
         return fixture_evidence_state(self.chunks, chunk_ids)
 
+    def knowledge_evidence_admission(self, season_id, chunk_ids, *, demo=False):
+        # M7 E5.1 gate 1 (before the model): the fixture corpus is integrity-current. Subclasses that model a change
+        # AFTER retrieval override knowledge_evidence_state only, so this stays the clean database answer.
+        return Reader.knowledge_evidence_state(self, season_id, chunk_ids, demo=demo)
+
 
 class Carbon:
     def __init__(self):

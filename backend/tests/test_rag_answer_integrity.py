@@ -7,13 +7,15 @@ The database half is test_rag_knowledge_m7_e5_answer_time.py. Synthetic values o
 from __future__ import annotations
 
 import hashlib
+import uuid
 from types import SimpleNamespace
 
 import pytest
 
 from rag_answer_integrity import (ACTION_CONTAINED_FINDING_TYPES, ANSWER_CONFLICT_NOTE, CAVEAT_TEXT,
                                   CITATION_CAVEAT, CITATION_CONFLICT_WARNING, CONFLICT_CAVEAT_TEXT,
-                                  FINDING_TYPE_LABELS, answer_time_evidence_gate, citation_detail, citation_warning,
+                                  FINDING_TYPE_LABELS, AdmittedEvidenceRetriever, admit_retrieved_evidence,
+                                  answer_time_evidence_gate, citation_detail, citation_warning,
                                   is_action_answer, recheck_cited_evidence)
 from recommendation.rag import RetrievalUnavailable
 from recommendation.rag.answers import INSUFFICIENT_MESSAGES
@@ -35,7 +37,10 @@ def row(**over):
     base = {"source_id": "s1", "document_id": "d1", "document_version": "v1", "chunk_id": "c1",
             "content_sha256": hashlib.sha256(CONTENT.encode()).hexdigest(), "content_hash_consistent": True,
             "approval_assurance": "verified", "resolved_finding_types": []}
-    return {**base, **over}
+    out = {**base, **over}
+    # E5.1: what the database reports for an integrity-current version (or a demo approval) unless a test says otherwise
+    out.setdefault("integrity_status", "current" if out["approval_assurance"] == "verified" else "demo_unverified")
+    return out
 
 
 class Reader:
@@ -290,3 +295,118 @@ def test_e3_cannot_fail_open_when_the_recheck_omits_the_finding_state():
     del missing["resolved_finding_types"]
     with pytest.raises(RetrievalUnavailable):
         check([missing])
+
+
+# ================================================================== M7 E5.1: pin-aware admission (offline half)
+
+class AdmissionReader:
+    def __init__(self, rows=None, fail=False):
+        self.rows, self.fail, self.calls = rows if rows is not None else [row()], fail, []
+
+    def knowledge_evidence_admission(self, season_id, chunk_ids, *, demo):
+        self.calls.append((season_id, tuple(chunk_ids), demo))
+        if self.fail:
+            raise OSError("TEST FIXTURE: database unreachable")
+        return self.rows
+
+
+def test_e5_1_a_citation_whose_integrity_is_not_current_is_refused_with_its_own_copy():
+    assert check([row(integrity_status="not_current")]).refused == (("c1", "integrity_not_current"),)
+    base = Result(status="generated", evidence=(CHUNK,), recommendations=result().recommendations, answer="model text",
+                  answer_template="t", rationale="r", facts=("f",), limitations=("l",), confidence="high",
+                  insufficient_reason=None, signals=("sig",), intent="recommend")
+    out, refused = answer_time_evidence_gate(Reader([row(integrity_status="not_current",
+                                                         resolved_finding_types=["reference_conflict"])]),
+                                             crop_season_id="s", result=base, retrieved=[CHUNK], demo=False)
+    # stale takes precedence over E3: the conflict review it would rest on is itself out of date
+    assert refused == (("c1", "integrity_not_current"),)
+    assert (out.status, out.insufficient_reason, out.answer, out.evidence, out.recommendations) == \
+        ("insufficient_evidence", "evidence_integrity_not_current",
+         INSUFFICIENT_MESSAGES["evidence_integrity_not_current"], (), ())
+    assert out.signals == ("sig",)
+
+
+@pytest.mark.parametrize("status", [None, "", "CURRENT", "unknown", 1, True])
+def test_e5_1_a_missing_or_unknown_integrity_status_fails_closed(status):
+    bad = row()
+    if status is None:
+        del bad["integrity_status"]
+    else:
+        bad["integrity_status"] = status
+    with pytest.raises(RetrievalUnavailable):
+        check([bad])
+    with pytest.raises(RetrievalUnavailable):
+        admit_retrieved_evidence(AdmissionReader([bad]), crop_season_id="s", retrieved=[CHUNK], demo=False)
+
+
+def test_e5_1_demo_rows_must_say_demo_unverified_and_verified_rows_must_say_current():
+    assert check([row(approval_assurance="demo_unverified")], demo=True).refused == ()
+    assert check([row(approval_assurance="demo_unverified", integrity_status="current")], demo=True).refused == \
+        (("c1", "integrity_not_current"),)
+    assert check([row(integrity_status="demo_unverified")]).refused == (("c1", "integrity_not_current"),)
+
+
+def test_e5_1_gate_1_admits_only_current_chunks_and_never_passes_through_on_failure():
+    other = SimpleNamespace(source_id="s1", chunk_id="c2", document_id="d2", document_version="v1", content="x")
+    stale = row(chunk_id="c2", document_id="d2", content_sha256=hashlib.sha256(b"x").hexdigest(),
+                integrity_status="not_current")
+    reader = AdmissionReader([row(), stale])
+    out = admit_retrieved_evidence(reader, crop_season_id="s", retrieved=[CHUNK, other], demo=False)
+    assert out.admitted == (CHUNK,) and out.excluded == (("c2", "integrity_not_current"),) and out.pin_excluded
+    assert reader.calls == [("s", ("c1", "c2"), False)]
+    # a dismissed conflict is NOT a gate-1 decision (E3 stays at answer time)
+    out = admit_retrieved_evidence(AdmissionReader([row(resolved_finding_types=["reference_conflict"])]),
+                                   crop_season_id="s", retrieved=[CHUNK], demo=False)
+    assert out.admitted == (CHUNK,)
+    # nothing retrieved: no lookup at all
+    empty = AdmissionReader()
+    assert admit_retrieved_evidence(empty, crop_season_id="s", retrieved=[], demo=False).admitted == ()
+    assert empty.calls == []
+    with pytest.raises(RetrievalUnavailable):
+        admit_retrieved_evidence(AdmissionReader(fail=True), crop_season_id="s", retrieved=[CHUNK], demo=False)
+    with pytest.raises(RetrievalUnavailable):                      # a reader without the check never passes through
+        admit_retrieved_evidence(object(), crop_season_id="s", retrieved=[CHUNK], demo=False)
+
+
+def test_e5_1_the_retriever_wrapper_hands_the_model_only_admitted_chunks():
+    other = SimpleNamespace(source_id="s1", chunk_id="c2", document_id="d2", document_version="v1", content="x")
+    inner = SimpleNamespace(retrieve=lambda query: (CHUNK, other))
+    wrapper = AdmittedEvidenceRetriever(inner, AdmissionReader([row()]), demo=False)
+    query = SimpleNamespace(tenant=SimpleNamespace(crop_season_id="s"))
+    assert wrapper.retrieve(query) == (CHUNK,)
+    assert wrapper.admission.excluded == (("c2", "no_longer_admissible"),) and not wrapper.admission.pin_excluded
+    with pytest.raises(RetrievalUnavailable):
+        AdmittedEvidenceRetriever(inner, AdmissionReader(), demo=False).retrieve(
+            SimpleNamespace(tenant=SimpleNamespace(crop_season_id=None)))
+
+
+def test_e5_1_only_a_pin_exclusion_changes_the_no_evidence_copy():
+    from rag_answer_integrity import EvidenceAdmission, explain_unadmitted_evidence
+    empty = Result(status="insufficient_evidence", insufficient_reason="no_evidence_retrieved", answer="a",
+                   answer_template=None)
+    pin_out = EvidenceAdmission(admitted=(), excluded=(("c1", "integrity_not_current"),))
+    out = explain_unadmitted_evidence(empty, pin_out)
+    assert (out.insufficient_reason, out.answer) == ("no_integrity_current_evidence",
+                                                    INSUFFICIENT_MESSAGES["no_integrity_current_evidence"])
+    withdrawn = EvidenceAdmission(admitted=(), excluded=(("c1", "no_longer_admissible"),))
+    assert explain_unadmitted_evidence(empty, withdrawn) is empty
+    assert explain_unadmitted_evidence(empty, None) is empty
+    other = Result(status="insufficient_evidence", insufficient_reason="no_rule_signal", answer="a", answer_template=None)
+    assert explain_unadmitted_evidence(other, pin_out) is other
+
+
+def test_e5_1_citation_events_record_the_answer_time_pin_refusal_only():
+    from rag_citation_events import build_event
+    for reason, outcome in (("evidence_integrity_not_current", "evidence_refused"),
+                            ("no_integrity_current_evidence", "insufficient_evidence")):
+        res = SimpleNamespace(status="insufficient_evidence", insufficient_reason=reason, evidence=(),
+                              policy_rejection=None)
+        assert build_event(request_id=str(uuid.uuid4()), crop_season_id=str(uuid.uuid4()), recorder=None, result=res,
+                           response_emitted=True).outcome == outcome
+
+
+def test_e5_1_the_new_copy_is_vietnamese_and_names_no_internal_code():
+    for reason in ("evidence_integrity_not_current", "no_integrity_current_evidence"):
+        text = INSUFFICIENT_MESSAGES[reason]
+        assert "kiểm tra tính toàn vẹn hiện hành" in text and "không thay bằng một nguồn chưa được kiểm tra" in text
+        assert "kn-claims" not in text and "pin" not in text.lower().split()

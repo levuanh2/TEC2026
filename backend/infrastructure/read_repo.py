@@ -333,10 +333,18 @@ class SupabaseReadRepository:
     def knowledge_evidence_state(self, season_id: str, chunk_ids: list[str], *, demo: bool = False) -> list[dict[str, Any]]:
         """M7 E5: `public.knowledge_cited_evidence_state` under the caller's JWT, the answer-time re-validation of
         cited chunks (same admissibility as retrieval, re-evaluated now). A chunk the caller can no longer
-        retrieve is simply absent; nothing about other tenants' documents is returned."""
-        params = {"p_crop_season_id": season_id, "p_chunk_ids": list(chunk_ids), "p_demo": demo}
+        retrieve is simply absent; nothing about other tenants' documents is returned.
+        M7 E5.1: `p_integrity_status` asks for every row with its `integrity_status` (current / not_current /
+        demo_unverified) instead of silently excluding the rows that are not integrity-current."""
+        params = {"p_crop_season_id": season_id, "p_chunk_ids": list(chunk_ids), "p_demo": demo,
+                  "p_integrity_status": True}
         return self._select("rpc knowledge_cited_evidence_state",
                             lambda client: client.rpc("knowledge_cited_evidence_state", params))
+
+    def knowledge_evidence_admission(self, season_id: str, chunk_ids: list[str], *, demo: bool = False) -> list[dict[str, Any]]:
+        """M7 E5.1 gate 1: the same check over the RETRIEVED chunks, before any model call (the admission of
+        evidence into the model context). Same RPC, same caller's JWT, same answer."""
+        return self.knowledge_evidence_state(season_id, chunk_ids, demo=demo)
 
     def recommendations(self, season_id: str) -> list[dict[str, Any]]:
         self._one("crop_seasons", season_id)

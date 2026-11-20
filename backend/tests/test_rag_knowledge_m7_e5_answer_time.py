@@ -38,6 +38,8 @@ QUESTION = "Vụ này có nên chuyển sang tưới ngập khô xen kẽ không
 AWD_TEXT = bench.AWD_CHUNKS[0]["content"]
 MATCH = "select to_jsonb(r) from public.match_knowledge_chunks_lexical(%s, %s, %s) r"
 STATE = "select to_jsonb(r) from public.knowledge_cited_evidence_state(%s, %s, %s) r"
+#: What the E5.1 backend sends (infrastructure/read_repo.py): every row, with its integrity_status.
+STATE_PIN = "select to_jsonb(r) from public.knowledge_cited_evidence_state(%s, %s, %s, true) r"
 EQ_DOC = "select private.knowledge_emergency_quarantine_document(%s, %s, %s, %s)"
 EQ_SRC = "select private.knowledge_emergency_quarantine_source(%s, %s, %s, %s)"
 
@@ -69,11 +71,20 @@ class DbReader:
         assert status == "ok", rows
         return [r[0] for r in rows]
 
+    def knowledge_evidence_admission(self, season_id, chunk_ids, *, demo=False):
+        """M7 E5.1 gate 1, before the model: the same RPC under the member's JWT (no `before_recheck`: that models a
+        change AFTER the model answered)."""
+        self.admissions = getattr(self, "admissions", 0) + 1
+        status, rows = self.tx.as_user(self.user, STATE_PIN, (season_id, list(chunk_ids), demo))
+        if status != "ok":
+            raise RuntimeError(f"admission check failed: {rows}")
+        return [r[0] for r in rows]
+
     def knowledge_evidence_state(self, season_id, chunk_ids, *, demo=False):
         if self.before_recheck is not None:
             self.before_recheck()
         self.rechecks += 1
-        status, rows = self.tx.as_user(self.user, STATE, (season_id, list(chunk_ids), demo))
+        status, rows = self.tx.as_user(self.user, STATE_PIN, (season_id, list(chunk_ids), demo))
         if status != "ok":
             raise RuntimeError(f"recheck failed: {rows}")
         return [r[0] for r in rows]
@@ -305,8 +316,11 @@ def test_a_change_committed_after_the_recheck_is_not_seen_by_the_response(tx, m2
 
 
 def test_the_answer_time_rpcs_are_for_signed_in_callers_only(tx, m2):
-    for fn, ok in (("public.knowledge_cited_evidence_state(uuid,text[],boolean)", {"authenticated"}),
-                   ("private.knowledge_cited_resolved_finding_types(uuid,text[])", {"authenticated"})):
+    for fn, ok in (("public.knowledge_cited_evidence_state(uuid,text[],boolean,boolean)", {"authenticated"}),
+                   ("private.knowledge_cited_resolved_finding_types(uuid,text[])", {"authenticated"}),
+                   ("private.knowledge_cited_integrity_status(uuid,text[],boolean)", {"authenticated"}),
+                   ("private.knowledge_integrity_admission_problem(uuid)", set()),
+                   ("private.knowledge_integrity_admission_inventory()", set())):
         for role in ("anon", "authenticated", "service_role"):
             tx.cur.execute("select has_function_privilege(%s, %s, 'execute')", (role, fn))
             assert tx.cur.fetchone()[0] is (role in ok), (fn, role)
@@ -571,7 +585,8 @@ def test_the_e5_rollback_restores_m6_1_and_refuses_while_refusal_events_exist(tx
 
 
 def test_the_e5_rollback_on_a_clean_database_removes_e5_and_restores_m6_1(tx, m2):
-    from tests.test_rag_knowledge_status_events import E5_ROLLBACK, _without_tx_control
+    from tests.test_rag_knowledge_status_events import E5_ROLLBACK, _without_tx_control, unwind_e5_1
+    unwind_e5_1(tx)                                                # E5.1 (pin-aware admission) unwinds first
     tx.cur.execute(_without_tx_control(E5_ROLLBACK))
     tx.cur.execute("select to_regprocedure('public.knowledge_cited_evidence_state(uuid,text[],boolean)'),"
                    " to_regprocedure('private.knowledge_cited_resolved_finding_types(uuid,text[])')")

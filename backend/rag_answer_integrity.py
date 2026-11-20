@@ -20,6 +20,11 @@ response body is built. It never makes the model an authority and never changes 
       a READ-tier answer keeps the C5 caveat. Nothing is quarantined, no review record is touched and the approval
       policy is unchanged: this is answer-time admissibility only.
 
+E5.1 (owner decision D-E5-PIN, docs/rag/RAG_V15_M7_E5_1_PIN_AWARE_ADMISSION.md) a verified version is admissible only
+      while its integrity report and independent verification are under the CURRENT integrity pin
+      (`integrity_status` = current). Gate 1 (`AdmittedEvidenceRetriever`) applies it to the retrieved chunks BEFORE the
+      model sees them; gate 2 (this recheck) applies it again to the cited chunks at answer time.
+
 Consistency boundary: the database statement's snapshot. A change committed after it is not seen here.
 """
 
@@ -39,7 +44,14 @@ logger = logging.getLogger("agricarbon.rag")
 
 Refusal = Literal["not_retrieved", "no_longer_admissible", "version_changed", "content_changed",
                   "content_hash_inconsistent", "assurance_not_verified", "recommendation_without_citation",
-                  "integrity_conflict_dismissed"]
+                  "integrity_conflict_dismissed", "integrity_not_current"]
+
+#: E5.1 (owner decision D-E5-PIN): the values `knowledge_cited_evidence_state.integrity_status` may take. Anything
+#: else, or a missing value, is a broken recheck (fail closed), never "current".
+INTEGRITY_STATUSES = frozenset({"current", "not_current", "demo_unverified"})
+
+#: E5.1: refusals that mean "admissible except that its integrity evidence is not under the current pin".
+_PIN_REFUSALS = frozenset({"integrity_not_current"})
 
 #: E3: finding types that state a detected CONFLICT of a source claim with a trusted reference, another approved
 #: claim or a reference number (E2's blocking set minus the temporal types M3 governs and `unsupported_assertion`,
@@ -126,33 +138,126 @@ def recheck_cited_evidence(reader: Any, *, crop_season_id: str, result: Any, ret
         rows = list(lookup(crop_season_id, ids, demo=demo))
     except Exception as exc:  # noqa: BLE001 - adapter boundary: fail closed, cause chained
         raise RetrievalUnavailable("final evidence recheck failed") from exc
-    state = {(r["source_id"], r["chunk_id"]): r for r in rows}
-    for r in rows:
-        # E3 cannot fail open: a row that does not say which findings were dismissed is not "no findings".
-        if not isinstance(r.get("resolved_finding_types"), (list, tuple)):
-            raise RetrievalUnavailable("final evidence recheck returned no integrity finding state")
+    state = _validated_state(rows, "final evidence recheck")
     caveats: list[tuple[str, tuple[str, ...]]] = []
     for c in cited:
         key = (c.source_id, c.chunk_id)
         if key not in by_key:
             continue                                                                  # already refused (C1)
-        row, chunk = state.get(key), by_key[key]
-        if row is None:                                                               # C2
-            refused.append((c.chunk_id, "no_longer_admissible"))
-        elif (row["document_id"], row["document_version"]) != (chunk.document_id, chunk.document_version):
-            refused.append((c.chunk_id, "version_changed"))                           # C3
-        elif row["content_sha256"] != _sha(chunk.content):
-            refused.append((c.chunk_id, "content_changed"))
-        elif row.get("content_hash_consistent") is not True:
-            refused.append((c.chunk_id, "content_hash_inconsistent"))
-        elif row.get("approval_assurance") != "verified" and not (demo and row.get("approval_assurance")
-                                                                    == "demo_unverified"):
-            refused.append((c.chunk_id, "assurance_not_verified"))                    # C4
+        row = state.get(key)
+        why = _evidence_refusal(row, by_key[key], demo=demo)                          # C2-C4, E5.1
+        if why is not None:
+            refused.append((c.chunk_id, why))
         elif action and ACTION_CONTAINED_FINDING_TYPES & set(row.get("resolved_finding_types") or ()):
             refused.append((c.chunk_id, "integrity_conflict_dismissed"))             # E3 (action tier)
         elif row.get("resolved_finding_types"):
             caveats.append((c.chunk_id, tuple(row["resolved_finding_types"])))       # C5 (caveat)
     return EvidenceCheck(refused=tuple(refused), caveats=tuple(caveats), checked=tuple(ids))
+
+
+def _validated_state(rows: Sequence[Mapping[str, Any]], what: str) -> dict[tuple[str, str], Mapping[str, Any]]:
+    """Index the recheck rows; a row that does not state its finding types (E3) or its integrity status (E5.1) is a
+    broken recheck, never "no findings" or "current": the request fails closed (503)."""
+    for r in rows:
+        if not isinstance(r.get("resolved_finding_types"), (list, tuple)):
+            raise RetrievalUnavailable(f"{what} returned no integrity finding state")
+        if r.get("integrity_status") not in INTEGRITY_STATUSES:
+            raise RetrievalUnavailable(f"{what} returned no integrity status (E5.1 not installed?)")
+    return {(r["source_id"], r["chunk_id"]): r for r in rows}
+
+
+def _evidence_refusal(row: Mapping[str, Any] | None, chunk: Any, *, demo: bool) -> Refusal | None:
+    """Why the retrieved `chunk` is not admissible evidence now (C2-C4 and the E5.1 pin), or None. Shared by the
+    before-model admission (gate 1) and the answer-time recheck (gate 2), so both apply exactly one policy."""
+    if row is None:                                                                   # C2
+        return "no_longer_admissible"
+    if (row["document_id"], row["document_version"]) != (chunk.document_id, chunk.document_version):
+        return "version_changed"                                                      # C3
+    if row["content_sha256"] != _sha(chunk.content):
+        return "content_changed"
+    if row.get("content_hash_consistent") is not True:
+        return "content_hash_inconsistent"
+    assurance = row.get("approval_assurance")
+    if assurance != "verified" and not (demo and assurance == "demo_unverified"):
+        return "assurance_not_verified"                                               # C4
+    # E5.1 (D-E5-PIN): a verified version is admissible only while its integrity report and independent
+    # verification are under the CURRENT pin; a demo approval only as what it is, in the labelled demo mode.
+    expected = "current" if assurance == "verified" else "demo_unverified"
+    if row.get("integrity_status") != expected:
+        return "integrity_not_current"
+    return None
+
+
+@dataclass(frozen=True)
+class EvidenceAdmission:
+    """Gate 1 result: the retrieved chunks admitted into the model context, and the excluded ones with why."""
+    admitted: tuple[Any, ...]
+    excluded: tuple[tuple[str, Refusal], ...] = ()
+
+    @property
+    def pin_excluded(self) -> bool:
+        return any(reason in _PIN_REFUSALS for _, reason in self.excluded)
+
+
+def admit_retrieved_evidence(reader: Any, *, crop_season_id: str, retrieved: Sequence[Any],
+                             demo: bool) -> EvidenceAdmission:
+    """M7 E5.1 gate 1, BEFORE any provider call: only retrieved chunks that are admissible now under the current
+    integrity pin (`_evidence_refusal`) may enter the model context. The check runs in the database under the
+    CALLER'S JWT (`knowledge_evidence_admission`); a reader that cannot run it, or a failing check, refuses the
+    request (RetrievalUnavailable), it never passes the chunks through. E3 containment is NOT applied here: a
+    dismissed conflict stays an answer-time decision (gate 2), exactly as owner decisions D-E3-1..3 define it."""
+    chunks = list(retrieved)
+    if not chunks:
+        return EvidenceAdmission(admitted=())
+    lookup = getattr(reader, "knowledge_evidence_admission", None)
+    if lookup is None:
+        raise RetrievalUnavailable("this reader cannot check evidence admission")
+    ids = sorted({c.chunk_id for c in chunks})
+    try:
+        rows = list(lookup(crop_season_id, ids, demo=demo))
+    except Exception as exc:  # noqa: BLE001 - adapter boundary: fail closed, cause chained
+        raise RetrievalUnavailable("evidence admission check failed") from exc
+    state = _validated_state(rows, "evidence admission check")
+    admitted, excluded = [], []
+    for c in chunks:
+        why = _evidence_refusal(state.get((c.source_id, c.chunk_id)), c, demo=demo)
+        if why is None:
+            admitted.append(c)
+        else:
+            excluded.append((c.chunk_id, why))
+    return EvidenceAdmission(admitted=tuple(admitted), excluded=tuple(excluded))
+
+
+class AdmittedEvidenceRetriever:
+    """Wraps the request's retriever: the orchestrator (and so the model) only ever sees gate-1-admitted chunks.
+    `admission` keeps the last result for the answer's explanation and the developer log (never the response)."""
+
+    def __init__(self, inner: Any, reader: Any, *, demo: bool) -> None:
+        self._inner, self._reader, self._demo = inner, reader, demo
+        self.admission: EvidenceAdmission | None = None
+
+    def retrieve(self, query: Any) -> tuple[Any, ...]:
+        rows = tuple(self._inner.retrieve(query))
+        season_id = query.tenant.crop_season_id
+        if season_id is None:
+            raise RetrievalUnavailable("evidence admission needs the authorized crop season")
+        self.admission = admit_retrieved_evidence(self._reader, crop_season_id=season_id, retrieved=rows,
+                                                  demo=self._demo)
+        if self.admission.excluded:
+            logger.warning("rag_evidence_not_admitted crop_season_id=%s reasons=%s", season_id,
+                           sorted({reason for _, reason in self.admission.excluded}))
+        return self.admission.admitted
+
+
+def explain_unadmitted_evidence(result: Any, admission: EvidenceAdmission | None) -> Any:
+    """A request that found no usable document only because gate 1 excluded documents whose integrity evidence is
+    not current says so (trusted copy), instead of the generic "no approved document" message."""
+    if (admission is None or not admission.pin_excluded or result.status != "insufficient_evidence"
+            or result.insufficient_reason != "no_evidence_retrieved"):
+        return result
+    return result.model_copy(update={"insufficient_reason": "no_integrity_current_evidence",
+                                     "answer": INSUFFICIENT_MESSAGES["no_integrity_current_evidence"],
+                                     "answer_template": None})
 
 
 #: Trusted Vietnamese labels for farmer-facing copy (D-E3-3: no internal code is shown).
@@ -218,7 +323,14 @@ def answer_time_evidence_gate(reader: Any, *, crop_season_id: str, result: Any, 
         logger.warning("rag_answer_evidence_refused crop_season_id=%s reasons=%s", crop_season_id, sorted(reasons))
         # Inadmissible evidence (C1-C5) takes precedence over E3 containment: the copy must not claim a reviewed
         # conflict when the document is in fact withdrawn, changed or unverified.
-        why = "evidence_integrity_contested" if reasons <= _CONTAINMENT_REFUSALS else "evidence_no_longer_admissible"
+        # E5.1: a document whose integrity evidence is not under the current pin is not admissible either; it
+        # takes precedence over E3 (the conflict review it would rest on is itself out of date).
+        if reasons <= _CONTAINMENT_REFUSALS:
+            why = "evidence_integrity_contested"
+        elif reasons <= _CONTAINMENT_REFUSALS | _PIN_REFUSALS:
+            why = "evidence_integrity_not_current"
+        else:
+            why = "evidence_no_longer_admissible"
         return result.model_copy(update={
             "status": "insufficient_evidence", "insufficient_reason": why,
             "answer": INSUFFICIENT_MESSAGES[why], "answer_template": None,
@@ -252,7 +364,14 @@ def fixture_evidence_state(rows: Sequence[Mapping[str, Any]], chunk_ids: Sequenc
     approved, verified knowledge that stays admissible for the whole request. The answer-time controls
     themselves are tested against the database (test_rag_knowledge_m7_e5_answer_time.py)."""
     wanted = set(chunk_ids)
-    return [{"source_id": r["source_id"], "document_id": r["document_id"], "document_version": r.get("document_version"),
-             "chunk_id": r["chunk_id"], "content_sha256": _sha(r["content"]), "content_hash_consistent": True,
-             "approval_assurance": r.get("approval_assurance", "verified"), "resolved_finding_types": []}
-            for r in rows if r["chunk_id"] in wanted]
+    out = []
+    for r in rows:
+        if r["chunk_id"] not in wanted:
+            continue
+        assurance = r.get("approval_assurance", "verified")
+        out.append({"source_id": r["source_id"], "document_id": r["document_id"],
+                    "document_version": r.get("document_version"), "chunk_id": r["chunk_id"],
+                    "content_sha256": _sha(r["content"]), "content_hash_consistent": True,
+                    "approval_assurance": assurance, "resolved_finding_types": [],
+                    "integrity_status": "current" if assurance == "verified" else "demo_unverified"})
+    return out

@@ -32,7 +32,8 @@ from .prose import validate_placeholder_syntax
 AnswerStatus = Literal["generated", "insufficient_evidence", "needs_clarification"]
 InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no_rule_signal", "generator_declined",
                              "out_of_scope_question", "instruction_like_question", "answer_policy_rejected",
-                             "evidence_no_longer_admissible", "evidence_integrity_contested"]
+                             "evidence_no_longer_admissible", "evidence_integrity_contested",
+                             "evidence_integrity_not_current", "no_integrity_current_evidence"]
 
 #: Trusted copy for states no generator is asked about.
 NEEDS_CLARIFICATION_MESSAGE = (
@@ -72,6 +73,19 @@ INSUFFICIENT_MESSAGES: dict[str, str] = {
         "Tài liệu mà câu trả lời dựa vào từng bị hệ thống phát hiện mâu thuẫn với tài liệu tham chiếu; chuyên gia"
         " đã đánh giá là báo động nhầm nhưng điều đó chưa được xác minh độc lập, nên trợ lý không dùng tài liệu này"
         " để đưa ra gợi ý hành động. Khuyến nghị do hệ thống quy tắc ghi nhận cho vụ vẫn được giữ nguyên."
+    ),
+    # M7 E5.1 (owner decision D-E5-PIN): the integrity evidence of a cited document was made under an extractor,
+    # registry or verifier pin that is no longer the current one (or is missing), checked at answer time.
+    "evidence_integrity_not_current": (
+        "Tài liệu mà câu trả lời dựa vào chưa được kiểm tra lại theo quy trình kiểm tra tính toàn vẹn hiện hành,"
+        " nên câu trả lời đã bị chặn. Hệ thống không thay bằng một nguồn chưa được kiểm tra."
+        " Thông tin của vụ và khuyến nghị do hệ thống quy tắc ghi nhận vẫn được giữ nguyên."
+    ),
+    # M7 E5.1: before any model call, every retrieved document that could answer was excluded for the same reason.
+    "no_integrity_current_evidence": (
+        "Tài liệu liên quan trong kho tri thức đang chờ được kiểm tra lại theo quy trình kiểm tra tính toàn vẹn hiện"
+        " hành, nên chưa được dùng làm căn cứ. Hiện chưa có tài liệu đã kiểm tra hợp lệ đủ để trả lời câu hỏi này;"
+        " hệ thống không thay bằng một nguồn chưa được kiểm tra."
     ),
 }
 

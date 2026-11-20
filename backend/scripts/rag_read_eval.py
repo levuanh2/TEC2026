@@ -136,6 +136,10 @@ class Reader:
                  "content": FIXTURE + content} for key, (_title, _section, content) in CORPUS.items()]
         return fixture_evidence_state(rows, chunk_ids)
 
+    def knowledge_evidence_admission(self, season_id, chunk_ids, *, demo=False):
+        """M7 E5.1 gate 1: the same fixture answer before the model."""
+        return self.knowledge_evidence_state(season_id, chunk_ids, demo=demo)
+
 
 class Carbon:
     def stored(self, season_id, scenario):

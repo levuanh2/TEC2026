@@ -72,6 +72,7 @@ The 7 skips are 2 CV checkpoint smoke tests and 5 POSIX-only resource-limit test
 - E5 checks approval and assurance at answer time, not the current extractor pin.
 - An approved version whose text holds a spelled-zero claim therefore stays citable, with no finding, until a person acts.
 - This is existing E2/E5 policy, unchanged here. **Changing it (for example, E5 refusing approvals whose report is not under the current pin) is an owner decision.**
+- **2026-11-20: decided and implemented locally.** Owner decision D-E5-PIN; E5.1 (`RAG_V15_M7_E5_1_PIN_AWARE_ADMISSION.md`) refuses such approvals before the model and at answer time. Local/CI only.
 
 ## 6. Re-extraction plan (local first; never hosted without approval)
 

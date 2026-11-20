@@ -34,7 +34,7 @@ from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
 from infrastructure.read_repo import ReadNotFoundError
 from rag_citation_events import CitationSink, RecordingRetriever, build_event, record_safely
-from rag_answer_integrity import answer_time_evidence_gate
+from rag_answer_integrity import AdmittedEvidenceRetriever, answer_time_evidence_gate, explain_unadmitted_evidence
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
     CarbonScenarioWhatIf,
@@ -333,7 +333,11 @@ class RagQuestionService:
                 # check, the rule-code short-circuit and retrieval (orchestrator order).
                 llm = GuardedLlmClient(llm, self._quota, user_id=str(reader.user_id()), purpose="action")
             action = LlmActionGenerator(llm, meter) if llm is not None else None
-            recorder = RecordingRetriever(LexicalKnowledgeRetriever(reader, self._retrieval))
+            # M7 E5.1 gate 1: the model context only ever holds chunks admissible NOW under the current integrity
+            # pin (checked under the caller's JWT). The recorder sits outside it: M6.1 records what was admitted.
+            admission = AdmittedEvidenceRetriever(LexicalKnowledgeRetriever(reader, self._retrieval), reader,
+                                                  demo=self._retrieval.include_demo)
+            recorder = RecordingRetriever(admission)
             orchestrator = RagOrchestrator(
                 retriever=recorder,
                 generator=CapabilityRoutedGenerator(action=action),
@@ -344,6 +348,7 @@ class RagQuestionService:
                 facts=CallerSeasonFactsSource(reader, self._carbon),
             )
             assert_recommendations_follow_rules(result)
+            result = explain_unadmitted_evidence(result, admission.admission)
             # M7 E5: the LAST step before the response body is built. The cited evidence is re-validated under the
             # caller's JWT; any failing citation discards the whole model answer (a failing recheck raises).
             result, refused = answer_time_evidence_gate(reader, crop_season_id=crop_season_id, result=result,
@@ -354,6 +359,8 @@ class RagQuestionService:
                 error_code = f"policy:{result.policy_rejection}"
             elif refused:
                 error_code = "evidence:" + ",".join(sorted({reason for _, reason in refused}))
+            elif admission.admission is not None and admission.admission.excluded:
+                error_code = "admission:" + ",".join(sorted({r for _, r in admission.admission.excluded}))
             # A policy-rejected or evidence-refused answer is trusted copy even though the provider was called.
             body = to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None
                                or bool(refused))

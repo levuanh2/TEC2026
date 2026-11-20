@@ -334,6 +334,7 @@ E2_ROLLBACK = ROOT / "supabase/rollbacks/20261113210000_knowledge_integrity_appr
 E7_ROLLBACK = ROOT / "supabase/rollbacks/20261113235900_knowledge_integrity_independent_verification_m7_e7.down.sql"
 E7_1_ROLLBACK = ROOT / "supabase/rollbacks/20261114090000_knowledge_integrity_portable_attestation_m7_e7_1.down.sql"
 E5_ROLLBACK = ROOT / "supabase/rollbacks/20261114120000_knowledge_answer_time_evidence_e5.down.sql"
+E5_1_ROLLBACK = ROOT / "supabase/rollbacks/20261120090000_knowledge_pin_aware_admission_e5_1.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -363,8 +364,17 @@ def unwind_m6_1(tx):
         tx.cur.execute(_without_tx_control(M6_1_ROLLBACK))
 
 
+def unwind_e5_1(tx):
+    """M7 E5.1 (pin-aware admission) unwinds first, when it is installed."""
+    tx.cur.execute("select to_regprocedure('public.knowledge_cited_evidence_state(uuid,text[],boolean,boolean)')"
+                   " is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute(_without_tx_control(E5_1_ROLLBACK))
+
+
 def unwind_e5(tx):
-    """M7 E5 (answer-time evidence check) unwinds first, when it is installed."""
+    """E5.1 first, then M7 E5 (answer-time evidence check), when installed."""
+    unwind_e5_1(tx)
     tx.cur.execute("select to_regprocedure('public.knowledge_cited_evidence_state(uuid,text[],boolean)') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute(_without_tx_control(E5_ROLLBACK))
