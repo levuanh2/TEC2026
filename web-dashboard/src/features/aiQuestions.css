@@ -72,7 +72,17 @@
 .aiq__block h3, .aiq__block summary { margin: 0 0 4px; font-size: 0.875rem; font-weight: 600; color: var(--ink); cursor: default; }
 .aiq__block summary { cursor: pointer; }
 .aiq__block ul, .aiq__block ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 0.875rem; }
-.aiq__cite-title { font-weight: 600; overflow-wrap: anywhere; }
+.aiq__cite { min-width: 0; }
+.aiq__cite > [role="group"] { display: grid; gap: 4px; min-width: 0; }
+.aiq__cite-title { display: block; font-weight: 600; overflow-wrap: anywhere; }
+/* M7 E3 + READ-tier citation UX: the server's integrity warning sits directly after the citation title,
+ * always visible (never a tooltip, never colour alone: role="note", its own text and a left rule). */
+.aiq__cite-warning { display: block; margin: 0; padding: 6px 8px; border-left: 3px solid var(--warning-line);
+  border-radius: var(--radius-sm, 8px); background: var(--warning-bg); color: var(--ink); font-size: 0.875rem;
+  font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; max-width: 100%; box-sizing: border-box; }
+.aiq__cite-detail, .aiq__cite-meta { margin: 0; color: var(--ink-muted); font-size: 0.8125rem; overflow-wrap: anywhere; }
+.aiq__cite-detail { color: var(--ink-body, var(--ink)); }
+.aiq__cite-meta a { overflow-wrap: anywhere; }
 .aiq__facts code { font-family: var(--font-mono, monospace); font-size: 0.8125rem; overflow-wrap: anywhere; }
 @media (max-width: 480px) {
   .aiq { padding: 12px; }

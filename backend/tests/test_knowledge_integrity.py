@@ -456,6 +456,28 @@ def test_review_false_negatives_are_now_caught(text, parameter):
         assert text[c.start:c.end] == c.text
 
 
+# A zero spelled as a word ("bằng không", "về không") is the assertion, not a negation of it. Before
+# 2026-11-17 the "không" inside the trigger cancelled the match (#85, E1 evidence report).
+@pytest.mark.parametrize("text", [
+    "Áp dụng AWD một vụ thì phát thải khí mê-tan bằng không.",
+    "Phat thai metan cua ruong AWD bang khong.",
+    "Làm khô xen kẽ đưa phát thải mê-tan về không.",
+])
+def test_spelled_zero_is_an_elimination_assertion(text):
+    assert "ch4.rice.emission_eliminated" in _assertions(text)
+    for c in _claims(text):
+        assert text[c.start:c.end] == c.text
+
+
+@pytest.mark.parametrize("text", [
+    "Phát thải mê-tan không bao giờ bằng không.",
+    "Phát thải mê-tan của ruộng ngập nước không bằng không.",
+    "AWD chưa đưa phát thải mê-tan về không, chỉ giảm.",
+])
+def test_negated_spelled_zero_is_still_not_an_assertion(text):
+    assert _assertions(text) == []
+
+
 def test_number_and_unit_regressions():
     assert _one("Hệ số phát thải 0.125 kgCH4/ha/ngày.").value_min == 0.125
     assert _one("Bón 1,500 kg/ha phân bón.").status == "ambiguous"        # 1.5 or 1500: never guessed

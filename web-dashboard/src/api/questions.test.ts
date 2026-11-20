@@ -38,6 +38,25 @@ describe('askSeasonQuestion', () => {
       .toBe('https://example.invalid/x')
   })
 
+  it('maps the server integrity warning of a citation, and nothing else as one (M7 E3)', () => {
+    const sentence = 'Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn canh tác.'
+    expect(mapAnswer(BODY).citations[0].integrityWarning).toBeNull()
+    const warned = { ...BODY, citations: [{ ...BODY.citations[0], integrity_warning: sentence }] }
+    expect(mapAnswer(warned).citations[0].integrityWarning).toBe(sentence)
+    for (const bad of ['', 42, { text: 'x' }])
+      expect(mapAnswer({ ...BODY, citations: [{ ...BODY.citations[0], integrity_warning: bad }] }).citations[0].integrityWarning).toBeNull()
+  })
+
+  it('maps the additive finding detail only alongside a warning (older servers omit it)', () => {
+    const c = BODY.citations[0]
+    const detail = 'Phát hiện kiểm tra: mâu thuẫn với tài liệu tham chiếu.'
+    expect(mapAnswer(BODY).citations[0].integrityDetail).toBeNull()                         // field absent: compatible
+    expect(mapAnswer({ ...BODY, citations: [{ ...c, integrity_warning: 'w', integrity_detail: detail }] }).citations[0].integrityDetail).toBe(detail)
+    expect(mapAnswer({ ...BODY, citations: [{ ...c, integrity_warning: null, integrity_detail: detail }] }).citations[0].integrityDetail).toBeNull()
+    for (const bad of ['', 42, { text: 'x' }, null])
+      expect(mapAnswer({ ...BODY, citations: [{ ...c, integrity_warning: 'w', integrity_detail: bad }] }).citations[0].integrityDetail).toBeNull()
+  })
+
   it('maps the stored M05 rule outcomes apart from the generated suggestions', () => {
     const mapped = mapAnswer({ ...BODY, signals: [{ rule_code: 'data.completeness.water', type: 'data_task',
                                                     title: 'Bổ sung lượng nước tưới', status: 'generated', reason: 'x' }] })
