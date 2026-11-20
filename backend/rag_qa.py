@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,6 +33,8 @@ from typing import Any
 from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
 from infrastructure.read_repo import ReadNotFoundError
+from rag_citation_events import CitationSink, RecordingRetriever, build_event, record_safely
+from rag_answer_integrity import AdmittedEvidenceRetriever, answer_time_evidence_gate, explain_unadmitted_evidence
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
     CarbonScenarioWhatIf,
@@ -294,8 +297,10 @@ class RagQuestionService:
 
     def __init__(self, *, carbon_service: Any, llm_client: StructuredLlmClient | None = None,
                  retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None,
-                 quota: QuotaGate | None = None) -> None:
+                 quota: QuotaGate | None = None, citation_sink: CitationSink | None = None) -> None:
         self._carbon = carbon_service
+        #: M6.1 local/CI prototype: None (the default, and production) records nothing.
+        self._citations = citation_sink
         self._llm = llm_client
         self._retrieval = retrieval or RetrievalSettings()
         self._write_gate = write_gate
@@ -328,8 +333,13 @@ class RagQuestionService:
                 # check, the rule-code short-circuit and retrieval (orchestrator order).
                 llm = GuardedLlmClient(llm, self._quota, user_id=str(reader.user_id()), purpose="action")
             action = LlmActionGenerator(llm, meter) if llm is not None else None
+            # M7 E5.1 gate 1: the model context only ever holds chunks admissible NOW under the current integrity
+            # pin (checked under the caller's JWT). The recorder sits outside it: M6.1 records what was admitted.
+            admission = AdmittedEvidenceRetriever(LexicalKnowledgeRetriever(reader, self._retrieval), reader,
+                                                  demo=self._retrieval.include_demo)
+            recorder = RecordingRetriever(admission)
             orchestrator = RagOrchestrator(
-                retriever=LexicalKnowledgeRetriever(reader, self._retrieval),
+                retriever=recorder,
                 generator=CapabilityRoutedGenerator(action=action),
                 what_if=CarbonScenarioWhatIf(self._carbon),
             )
@@ -338,11 +348,27 @@ class RagQuestionService:
                 facts=CallerSeasonFactsSource(reader, self._carbon),
             )
             assert_recommendations_follow_rules(result)
+            result = explain_unadmitted_evidence(result, admission.admission,
+                                                 awaiting=_awaiting_recheck(reader, crop_season_id, result))
+            # M7 E5: the LAST step before the response body is built. The cited evidence is re-validated under the
+            # caller's JWT; any failing citation discards the whole model answer (a failing recheck raises).
+            result, refused = answer_time_evidence_gate(reader, crop_season_id=crop_season_id, result=result,
+                                                        retrieved=recorder.chunks or (),
+                                                        demo=self._retrieval.include_demo)
             status = result.status
             if result.policy_rejection is not None:
                 error_code = f"policy:{result.policy_rejection}"
-            # A policy-rejected answer is trusted copy even though the provider was called (and paid).
-            return to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None)
+            elif refused:
+                error_code = "evidence:" + ",".join(sorted({reason for _, reason in refused}))
+            elif admission.admission is not None and admission.admission.excluded:
+                error_code = "admission:" + ",".join(sorted({r for _, r in admission.admission.excluded}))
+            # A policy-rejected or evidence-refused answer is trusted copy even though the provider was called.
+            body = to_response(result, meter, composed=meter.calls == 0 or result.policy_rejection is not None
+                               or bool(refused))
+            record_safely(self._citations, lambda: build_event(
+                request_id=_event_id(request_id), crop_season_id=crop_season_id, recorder=recorder, result=result,
+                response_emitted=True, retrieval_mode="demo" if self._retrieval.include_demo else "production"))
+            return body
         except RagError as exc:
             error_code = exc.code
             raise
@@ -352,6 +378,29 @@ class RagQuestionService:
                 "input_tokens=%s output_tokens=%s cost_usd=%s llm_ms=%s total_ms=%s",
                 request_id, question.intent, question.mode, status, error_code, meter.calls, meter.input_tokens,
                 meter.output_tokens, meter.cost_usd, meter.latency_ms, int((time.perf_counter() - started) * 1000))
+
+
+def _awaiting_recheck(reader: Any, crop_season_id: str, result: Any) -> bool:
+    """M7 E5.2: asked only when nothing usable was retrieved. An explanation signal, never an admission: a reader
+    without it, or a failure, keeps the generic copy (the answer is insufficient_evidence either way)."""
+    if result.status != "insufficient_evidence" or result.insufficient_reason != "no_evidence_retrieved":
+        return False
+    lookup = getattr(reader, "knowledge_evidence_awaiting_recheck", None)
+    if lookup is None:
+        return False
+    try:
+        return lookup(crop_season_id) is True
+    except Exception:  # noqa: BLE001 - explanation only; the refusal itself does not depend on it
+        logger.warning("rag_awaiting_recheck_unavailable crop_season_id=%s", crop_season_id)
+        return False
+
+
+def _event_id(request_id: str | None) -> str:
+    """The request UUID, or a fresh one when the caller's request id is not a UUID."""
+    try:
+        return str(uuid.UUID(str(request_id)))
+    except (TypeError, ValueError):
+        return str(uuid.uuid4())
 
 
 def to_response(result: RagAnswerResult, meter: UsageMeter, *, composed: bool) -> dict[str, Any]:

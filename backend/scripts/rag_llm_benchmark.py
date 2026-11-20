@@ -354,6 +354,22 @@ class FixtureReader:
                  "published_at": None, "metadata": {}, "fused_score": 0.03, **chunk,
                  "content": FIXTURE + chunk["content"]} for chunk in self.chunks][:top_k]
 
+    def knowledge_evidence_state(self, season_id, chunk_ids, *, demo=False):
+        """M7 E5: the fixture corpus stands for approved, verified knowledge that stays admissible for the whole
+        request (the answer-time controls themselves are tested against the database)."""
+        import hashlib
+        rows = self.knowledge_matches(season_id, "", 50)
+        return [{"source_id": r["source_id"], "document_id": r["document_id"], "document_version": r["document_version"],
+                 "chunk_id": r["chunk_id"], "content_sha256": hashlib.sha256(r["content"].encode("utf-8")).hexdigest(),
+                 "content_hash_consistent": True, "approval_assurance": "verified", "resolved_finding_types": [],
+                 "integrity_status": "current"}
+                for r in rows if r["chunk_id"] in set(chunk_ids)]
+
+    def knowledge_evidence_admission(self, season_id, chunk_ids, *, demo=False):
+        """M7 E5.1 gate 1 (before the model): the fixture corpus is integrity-current. A subclass that models a change
+        AFTER retrieval overrides knowledge_evidence_state only, so this stays the clean answer."""
+        return FixtureReader.knowledge_evidence_state(self, season_id, chunk_ids, demo=demo)
+
 
 class FixtureCarbon:
     def stored(self, season_id, scenario):

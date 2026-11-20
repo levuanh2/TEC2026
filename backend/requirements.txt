@@ -24,6 +24,11 @@ python-multipart>=0.0.9
 # autofilter, so anything larger would be weight without benefit.
 openpyxl>=3.1
 
+# M7 E7: the independent integrity verifier signs its statement with Ed25519 (infrastructure/
+# integrity_verifier.py). Already installed and pinned (constraints.txt) as a dependency of the auth stack;
+# declared because the verifier imports it directly. No version change.
+cryptography>=42
+
 # M07 part 3: the PDF evidence report. ReportLab (BSD) is pure Python with
 # tables, repeated table headers, pagination and TrueType embedding -- enough
 # for a dense audit report without a browser or native GTK stack (WeasyPrint).

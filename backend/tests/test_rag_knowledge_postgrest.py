@@ -65,7 +65,7 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
          _sha(source_id), _sha("n" + source_id))).fetchone()[0]
     chunk_id = _sha(source_id + content)[:20]
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, content, content_sha256)"
-                 " values (%s, %s, 0, %s, %s)", (doc, chunk_id, FIXTURE + content, _sha(content)))
+                 " values (%s, %s, 0, %s, %s)", (doc, chunk_id, FIXTURE + content, _sha(FIXTURE + content)))
     bring(conn, "document", doc, document_status, approver=approver)       # via expert_review (D3)
     ids[key] = chunk_id
 
