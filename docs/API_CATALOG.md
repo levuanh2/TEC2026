@@ -42,9 +42,12 @@ what_if_scenario?}`. It has no organization, farm, tenant or filter field, and u
 - **Scope:** comes only from the caller's JWT. An out-of-scope season is 404 `not_found`.
 - **READ intents** (`explain`, `compare`, `evidence`, `data_gap`): the answer is written by trusted
   server composition. No model is involved (D8, strategy B).
-- **`recommend` / `what_if`:** need Core V1 write authority on the season, plus a provider
-  configured server-side (`RAG_LLM_*`); without a provider the answer is 503
-  `generation_unavailable`.
+- **`recommend` / `what_if`:** READ-only by default: unless the server sets
+  `RAG_QA_ACTION_TIER_ENABLED=true`, both (and any non-ASK mode) are 503 `action_tier_disabled`
+  before any read, and no provider setting is loaded. With the flag they need Core V1 write
+  authority on the season, plus a provider configured server-side (`RAG_LLM_*`); without a
+  provider the answer is 503 `generation_unavailable`. The web offers the farmer action option
+  only when built with `VITE_AI_QA_ACTION_ENABLED=true`.
 - **Switch:** the route is OFF unless `RAG_QA_ENABLED=true`, and returns 503
   `backend_not_configured` while off.
 - **Further reading:** `docs/rag/RAG_V1_ARCHITECTURE.md`.

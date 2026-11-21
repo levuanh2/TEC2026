@@ -15,6 +15,8 @@ one, #33 must still be merged afterwards (its diff then shrinks to docs + V1.5).
 |---|---|---|
 | `RAG_QA_ENABLED` | `true` | the questions route answers (else 503 `backend_not_configured`) |
 | `VITE_AI_QA_ENABLED` | `true` (build time) | the season panel is shown |
+| `RAG_QA_ACTION_TIER_ENABLED` | **unset** (since PR #92) | READ-only: recommend / what_if are 503 `action_tier_disabled` before any read; provider settings are not even loaded. A demo of AI action answers needs `true` here **and** `VITE_AI_QA_ACTION_ENABLED=true` in the web build, or the feature looks broken |
+| `VITE_AI_QA_ACTION_ENABLED` | **unset** (build time, since PR #92) | the farmer "Gợi ý hành động" option is hidden |
 | `RAG_LLM_PROVIDER` | **unset** | strategy B baseline: READ composed, action intents 503 |
 | `RAG_D8C_ENABLED` | **unset** (not in this branch) | — |
 | `RAG_LLM_KILL_SWITCH` | `true` once a provider is ever configured, until its gate passes | no model call at all |
@@ -37,7 +39,8 @@ the cost hard stop), `RAG_LLM_THINKING=disabled` for DeepSeek. Never a `VITE_*` 
 | Case | Farmer | Manager | Outsider |
 |---|---|---|---|
 | typed explain / data_gap / evidence / compare | composed, `llm_calls 0` | composed, READ only | 404 |
-| recommend | 503 `generation_unavailable` (no provider) or `no_rule_signal` | 404 (no WRITE) | 404 |
+| recommend / what_if (action tier OFF, the default since PR #92) | 503 `action_tier_disabled` | 503 `action_tier_disabled` (the lock runs before scope, so it is the same for everyone) | 503 `action_tier_disabled` |
+| recommend (only with `RAG_QA_ACTION_TIER_ENABLED=true`) | 503 `generation_unavailable` (no provider) or `no_rule_signal` | 404 (no WRITE) | 404 |
 | citations | only approved synthetic rows | same | none |
 | sign-out then other identity | no stale answer | — | — |
 | phone 390 px | no horizontal scroll, 44 px controls | same | — |
@@ -126,8 +129,9 @@ questions and record any off-topic answer.
    set `VITE_AI_QA_ENABLED=true`; deploy the exact merged SHA to both (`POST /v1/services/{id}/deploys
    {"commitId": "<sha>"}`), poll until `live`, check `commit.id`. No migration, no hosted data write.
 5. Read-only verification: `GET /health`; with a staging QA farmer JWT, `POST
-   /v1/crop-seasons/{id}/questions` explain → 200 `system_composed`, `llm_calls 0`; recommend → 503
-   `generation_unavailable` or 200 `no_rule_signal`; manager recommend → 404; an outsider → 404.
+   /v1/crop-seasons/{id}/questions` explain → 200 `system_composed`, `llm_calls 0`; recommend and
+   what_if → 503 `action_tier_disabled` for every caller (action tier off, PR #92); an outsider's
+   explain → 404. The startup log must show `rag_question_service tier=read_only provider=not_loaded`.
    Then `ai-qa-real.spec.ts` with `REAL_E2E_BASE_URL=<staging web>` and staging identities, 1 worker
    (the `evidence` assertion expects citations: with the empty hosted corpus, expect that one step to
    report insufficient evidence — run with the spec's evidence step treated as N/A, or after a
