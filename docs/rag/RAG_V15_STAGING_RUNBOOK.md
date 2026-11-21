@@ -15,6 +15,8 @@ one, #33 must still be merged afterwards (its diff then shrinks to docs + V1.5).
 |---|---|---|
 | `RAG_QA_ENABLED` | `true` | the questions route answers (else 503 `backend_not_configured`) |
 | `VITE_AI_QA_ENABLED` | `true` (build time) | the season panel is shown |
+| `RAG_QA_ACTION_TIER_ENABLED` | **unset** (since PR #92) | READ-only: recommend / what_if are 503 `action_tier_disabled` before any read; provider settings are not even loaded. A demo of AI action answers needs `true` here **and** `VITE_AI_QA_ACTION_ENABLED=true` in the web build, or the feature looks broken |
+| `VITE_AI_QA_ACTION_ENABLED` | **unset** (build time, since PR #92) | the farmer "Gợi ý hành động" option is hidden |
 | `RAG_LLM_PROVIDER` | **unset** | strategy B baseline: READ composed, action intents 503 |
 | `RAG_D8C_ENABLED` | **unset** (not in this branch) | — |
 | `RAG_LLM_KILL_SWITCH` | `true` once a provider is ever configured, until its gate passes | no model call at all |
