@@ -43,7 +43,8 @@ of the docs against the code, re-verified by hand.
 - Identities: local CI farmer (DEMO-FARM-01), demo HTX manager, an outsider without membership.
   Random local passwords, never printed or stored in git.
 - Backend pilot config: `RAG_QA_ENABLED=true`, `RAG_LLM_KILL_SWITCH=true`, action tier unset, no
-  provider key. Web build: `VITE_AI_QA_ENABLED=true`, action flag unset (bundle: `!0` / `!1`).
+  model provider configured.
+- Web build: `VITE_AI_QA_ENABLED=true`, action flag unset (bundle: `!0` / `!1`).
 
 ### 2.1 Fixture setup vs. the no-mutation checks
 
