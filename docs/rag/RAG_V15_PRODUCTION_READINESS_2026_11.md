@@ -5,6 +5,10 @@ merges, deploys, applies a hosted migration, re-pins, backfills, approves a docu
 model. **E1, E4 and dev3-01 stay OPEN. D1 and D6 stay BLOCKED.** A green CI (17/17) is never read
 as production-ready in this report.
 
+**Status update 2026-11-21:** local READ-only pilot acceptance is recorded in
+[RAG_READ_ONLY_PILOT_ACCEPTANCE.md](RAG_READ_ONLY_PILOT_ACCEPTANCE.md) (#92 head `c71f07e`, CI 17/17;
+A1–A15 status, latency risk, rollback rehearsal). Production remains **NO-GO**.
+
 The question this report answers:
 
 > **What exactly is still missing to open READ-only on production, and after that real AI
