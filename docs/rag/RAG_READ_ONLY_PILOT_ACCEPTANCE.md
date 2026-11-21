@@ -33,7 +33,7 @@ of the docs against the code, re-verified by hand.
 | Can recommend/what_if pass the lock? | No. The refusal is the first statement of `RagQuestionService.answer`, before scope, reads, Carbon or retrieval. |
 | Does a misconfigured provider open the action tier? | No. Unless `RAG_QA_ACTION_TIER_ENABLED` is exactly `true`, provider settings are never loaded (verified live, run B). |
 | Is the web flag only cosmetic? | Yes. `VITE_AI_QA_ACTION_ENABLED` hides the option; the server refuses direct API calls either way. |
-| Errors / timeout | 401 no/garbage/revoked token, 404 out of scope, 422 malformed, 503 lock or feature off. UI timeout 45 s; retry only on the user's click. |
+| Errors / timeout | 401 no/garbage/revoked token, 404 out of scope, 422 malformed, 503 lock or feature off (exercised in the runs below). UI timeout 45 s with retry only on the user's click: code constant `QUESTION_TIMEOUT_MS`, covered by the web unit test `aiQuestions.dom.test.tsx` (timer advanced past 45 s → "Quá thời gian…" → "Thử lại"); not exercised in the browser runs. |
 
 ## 2. Test environment (isolated, no shared database)
 
