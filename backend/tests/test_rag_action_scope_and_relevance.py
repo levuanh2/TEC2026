@@ -124,13 +124,14 @@ def test_the_content_free_guard_never_touches_read_intents():
 
 
 def test_a_content_free_recommend_never_calls_the_provider_through_the_service():
-    """Through RagQuestionService with the action tier on and a fake provider: zero provider requests."""
+    """Through RagQuestionService with a fake provider: zero provider requests. The action tier is on by
+    the constructor default (where #92's READ-only lock exists it defaults to True as well)."""
     from rag_qa import QuestionInput, RagQuestionService
     from recommendation.rag import RagIntent
     from tests.fixtures.rag_fakes import SEASON_ID
     from tests.test_rag_qa import GOOD_RECOMMEND, Carbon, Llm, Reader, gate
     llm, reader = Llm(GOOD_RECOMMEND), Reader()
-    service = RagQuestionService(carbon_service=Carbon(), llm_client=llm, write_gate=gate(), action_tier_enabled=True)
+    service = RagQuestionService(carbon_service=Carbon(), llm_client=llm, write_gate=gate())
     body = service.answer(reader=reader, crop_season_id=SEASON_ID,
                           question=QuestionInput(question="?", intent=RagIntent.RECOMMEND))
     assert body["status"] == "needs_clarification" and llm.requests == []
