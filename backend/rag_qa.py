@@ -401,11 +401,17 @@ class RagQuestionService:
             error_code = exc.code
             raise
         finally:
+            tier = "read_and_action" if self._action_tier_enabled else "read_only"
             logger.info(
                 "rag_question request_id=%s intent=%s mode=%s status=%s error=%s llm_calls=%s "
-                "input_tokens=%s output_tokens=%s cost_usd=%s llm_ms=%s total_ms=%s",
+                "input_tokens=%s output_tokens=%s cost_usd=%s llm_ms=%s total_ms=%s tier=%s",
                 request_id, question.intent, question.mode, status, error_code, meter.calls, meter.input_tokens,
-                meter.output_tokens, meter.cost_usd, meter.latency_ms, int((time.perf_counter() - started) * 1000))
+                meter.output_tokens, meter.cost_usd, meter.latency_ms, int((time.perf_counter() - started) * 1000),
+                tier)
+            if meter.calls and not self._action_tier_enabled:
+                # Impossible by construction (a READ-only service holds no provider client); a
+                # tripwire for monitoring (scripts/ops/rag_qa_log_summary.py), never expected.
+                logger.error("rag_alert llm_calls_in_read_only request_id=%s llm_calls=%s", request_id, meter.calls)
 
 
 def to_response(result: RagAnswerResult, meter: UsageMeter, *, composed: bool) -> dict[str, Any]:
@@ -495,6 +501,7 @@ def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None,
 
     settings = load_llm_settings()
     logger.info("rag_question_service tier=read_and_action provider_configured=%s", settings is not None)
+    logger.warning("rag_alert action_tier_enabled provider_configured=%s", settings is not None)
     return RagQuestionService(carbon_service=carbon_service, llm_client=build_llm_client(settings),
                               retrieval=retrieval, write_gate=write_gate,
                               quota=build_quota_gate(load_quota_policy(), settings), rate_limiter=rate_limiter)
