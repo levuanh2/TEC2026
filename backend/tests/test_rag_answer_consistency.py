@@ -250,12 +250,21 @@ def test_a_subject_no_rule_covers_blocks_recommendations_even_with_a_covered_one
 
 @pytest.mark.parametrize("question", [
     "Câu hỏi riêng của nông hộ Nguyễn Văn A",   # names no subject at all
-    "?",
 ])
 def test_known_false_positive_class_questions_without_a_subject_are_refused(question):
     """Fail closed by design: no recognisable subject and not a pure 'what should I do' request.
     The farmer gets the trusted non-actionable answer, never an unrelated recommendation."""
     _rejected(Harness(output=RELEVANT_AWD).ask(question=question), "recommendation_off_topic")
+
+
+def test_a_bare_question_mark_is_now_asked_back_before_the_model_not_after():
+    """Was the second case above: "?" reached the model and was discarded by this post gate. Since
+    the content-free guard (test_rag_action_scope_and_relevance.py) it never reaches the model:
+    stricter, and still never an unrelated recommendation."""
+    h = Harness(output=RELEVANT_AWD)
+    result = h.ask(question="?")
+    assert result.status == "needs_clarification" and result.recommendations == ()
+    assert "generate" not in h.calls
 
 
 def test_deep_water_is_not_a_pest():
