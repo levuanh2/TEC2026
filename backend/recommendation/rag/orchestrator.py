@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from .answer_consistency import answer_policy_violation, uncovered_question_refusal
 from .answers import (
     INSUFFICIENT_MESSAGES,
+    EMPTY_QUESTION_MESSAGE,
     LIMITATION_CARBON_ESTIMATE,
     NEEDS_CLARIFICATION_MESSAGE,
     UNKNOWN_FACTOR_SET_TEXT,
@@ -96,6 +97,11 @@ class RagOrchestrator:
             # (question_scope.OUT_OF_SCOPE); the provider prompt, rule_code and grounding follow.
             # Second layer: a subject no stored rule covers (answer_consistency's closed vocabulary,
             # the same one the post-generation gate uses) cannot be answered by any recommendation.
+            if not any(ch.isalnum() for ch in request.question):
+                # Nothing to ground a recommendation on: asked back before the what-if simulation, any
+                # retrieval and any model call, so no season data leaves the server for a bare "?".
+                return RagAnswerResult(status="needs_clarification", intent=intent, mode=request.mode,
+                                       crop_season_id=scope.crop_season_id, answer=EMPTY_QUESTION_MESSAGE)
             refusal = action_question_refusal(request.question) or uncovered_question_refusal(request.question)
             if refusal is not None:
                 return _insufficient(request, intent, context, signals, None, refusal)

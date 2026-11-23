@@ -84,6 +84,61 @@ def test_an_ambiguous_in_scope_action_question_is_not_refused_by_keywords():
     assert h.ask(question="Tôi nên làm gì cho vụ này?").status == "generated"
 
 
+@pytest.mark.parametrize("question", ["?", "...", " ? ! ", "—", "?!?", " ?"])
+@pytest.mark.parametrize("intent", ["recommend", "what_if"])
+def test_a_content_free_action_question_is_asked_back_before_retrieval_simulation_or_model(question, intent):
+    """Integration finding 2026-11-23: a bare "?" passed both pre-model layers, reached the provider with
+    the season's data, and was only discarded afterwards (answer_policy_rejected). With no letter or
+    digit there is nothing to ground a recommendation on: it is asked back by trusted code."""
+    from recommendation.rag.answers import EMPTY_QUESTION_MESSAGE
+    h = Harness()
+    extra = {"hypothetical": {"dimension": "water_regime", "scenario": "awd"}} if intent == "what_if" else {}
+    result = h.ask(intent=intent, question=question, **extra)
+    assert result.status == "needs_clarification" and result.answer == EMPTY_QUESTION_MESSAGE
+    assert "retrieve" not in h.calls and "generate" not in h.calls
+    assert result.recommendations == () and result.evidence == () and result.what_if is None
+    assert h.carbon.calls == []
+    assert h.resolver.levels == [WRITE]  # authorization still ran first
+
+
+@pytest.mark.parametrize("question", ["AWD?", "Tưới?", "15 cm?"])
+def test_the_content_free_guard_is_narrow_one_word_or_number_still_reaches_the_later_gates(question):
+    from recommendation.rag.answers import EMPTY_QUESTION_MESSAGE
+    h = Harness()
+    result = h.ask(question=question)
+    assert result.answer != EMPTY_QUESTION_MESSAGE
+    assert "retrieve" in h.calls  # judged by the existing scope, relevance and answer gates instead
+
+
+def test_a_content_free_question_is_refused_for_a_read_caller_before_the_guard():
+    h = Harness(granted=READ)
+    with pytest.raises(RagAccessDenied):
+        h.ask(question="?")
+    assert h.calls == ["resolve"]
+
+
+def test_the_content_free_guard_never_touches_read_intents():
+    h = Harness(granted=READ, output=FACT_ONLY)
+    result = h.ask(intent="explain", question="?")
+    assert result.status != "needs_clarification" and h.resolver.levels == [READ]
+
+
+def test_a_content_free_recommend_never_calls_the_provider_through_the_service():
+    """Through RagQuestionService with the action tier on and a fake provider: zero provider requests."""
+    from rag_qa import QuestionInput, RagQuestionService
+    from recommendation.rag import RagIntent
+    from tests.fixtures.rag_fakes import SEASON_ID
+    from tests.test_rag_qa import GOOD_RECOMMEND, Carbon, Llm, Reader, gate
+    llm, reader = Llm(GOOD_RECOMMEND), Reader()
+    service = RagQuestionService(carbon_service=Carbon(), llm_client=llm, write_gate=gate(), action_tier_enabled=True)
+    body = service.answer(reader=reader, crop_season_id=SEASON_ID,
+                          question=QuestionInput(question="?", intent=RagIntent.RECOMMEND))
+    assert body["status"] == "needs_clarification" and llm.requests == []
+    assert body["recommendations"] == [] and body["citations"] == []
+    assert body["provenance"]["llm_calls"] == 0 and body["provenance"]["answer_source"] == "system_composed"
+    assert not any(call[0] == "knowledge_matches" for call in reader.calls)
+
+
 def test_unknown_intent_stays_needs_clarification_without_any_read_or_model():
     h = Harness()
     result = h.ask(intent=None, question="Tôi nên phun thuốc gì?")

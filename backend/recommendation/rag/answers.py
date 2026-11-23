@@ -39,6 +39,10 @@ InsufficientReason = Literal["no_evidence_retrieved", "no_comparison_basis", "no
 NEEDS_CLARIFICATION_MESSAGE = (
     "Chưa rõ bạn muốn giải thích, so sánh, khuyến nghị hay mô phỏng. Hãy chọn một loại câu hỏi."
 )
+#: An ACTION question with no letter or digit at all ("?", "...") is asked back, never sent to a provider.
+EMPTY_QUESTION_MESSAGE = (
+    "Câu hỏi chưa có nội dung. Hãy viết rõ bạn muốn hỏi gì về vụ này, ví dụ về tưới nước hoặc bón phân."
+)
 INSUFFICIENT_MESSAGES: dict[str, str] = {
     "no_evidence_retrieved": "Chưa có tài liệu đã duyệt đủ để trả lời câu hỏi này.",
     "no_comparison_basis": "Không có benchmark hoặc vụ đối chiếu đủ điều kiện để so sánh.",
