@@ -438,6 +438,12 @@ class _MetricPerKgCard extends StatelessWidget {
     };
     return MetricCard(
       label: _kKindLabel[kind]!,
+      tone: switch (kind) {
+        ResourceMetricKind.water => AppTone.water,
+        ResourceMetricKind.fertilizer => AppTone.leaf,
+        ResourceMetricKind.co2e => AppTone.carbon,
+        ResourceMetricKind.cost => AppTone.grain,
+      },
       value: state == MetricCellState.value && value != null
           ? _formatPerKg(kind, value)
           : null,

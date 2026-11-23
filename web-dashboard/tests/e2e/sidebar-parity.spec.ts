@@ -1,5 +1,5 @@
 import { expect, test, type Page } from './fixtures'
-import { isInstitutionalGreen } from './round41-helpers'
+import { isInstitutionalGreen, tokenColour } from './round41-helpers'
 
 /* Round 4.2 — Farmer and Management render one sidebar (components/Sidebar.tsx)
  * on one width token. Measured on the mock tenant, where the Management shell
@@ -169,6 +169,8 @@ test('keyboard: Farmer Tab order walks brand, all six destinations, then the acc
   await open(page, '/farmer/carbon', FARMER_SIDE)
   await page.keyboard.press('Tab')
   await expect(page.getByRole('link', { name: 'Bỏ qua điều hướng, tới nội dung chính' })).toBeFocused()
+  // Palette 2026-11 (docs/UI_REFRESH_2026_11.md): the light marker is the rice-gold --ac-sidebar-marker.
+  const marker = await tokenColour(page, '--ac-sidebar-marker', 'aside.sidebar')
   const seen: string[] = []
   for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Tab')
@@ -180,7 +182,7 @@ test('keyboard: Farmer Tab order walks brand, all six destinations, then the acc
     expect(f.ring).toBe('solid'); expect(f.w).toBeGreaterThanOrEqual(2)
     // Light marker, not the workspace blue (~2:1 on forest) and not forest.
     expect(isInstitutionalGreen(f.color)).toBe(false)
-    expect(f.color).toMatch(/oklch\(0\.78 0\.16 140\)/)
+    expect(f.color).toBe(marker)
     seen.push(f.name)
   }
   expect(seen.slice(0, 7)).toEqual(['AgriCarbonNông hộ', 'Tổng quan', 'Nhật ký', 'Ruộng / Vụ mùa', 'Hiệu suất', 'Carbon', 'Tôi'])
