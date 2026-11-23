@@ -1,5 +1,7 @@
 # RAG V1 — Pilot readiness (provider, cost, privacy, corpus, UX, release gates)
 
+> Edited 2026-11-24: repository-governance details (access, review settings) were replaced by neutral wording. The technical evidence, dates and SHAs are unchanged.
+
 Date: **2026-11-07**. Scope: the cumulative Draft PRs #27–#32 on `integrate/rag-v1-27-32`.
 State of record: [RAG_V1_STATUS.md](RAG_V1_STATUS.md). Nothing here authorizes a merge, a deploy, a
 hosted change, an ingestion or an approval.
@@ -172,4 +174,4 @@ Remaining gaps:
    approval, server-enforced quotas + budget alert + kill switch implemented and tested.
 6. Read-only hosted verification: migration history = repo, ST1/ST1.1 constraints present,
    approved-document audit = 0 orphans.
-7. A second human CODEOWNER (today `enforce_admins` is off and the only code owner is the author).
+7. An independent human review path for code-owned changes (owner-controlled; details outside git).
