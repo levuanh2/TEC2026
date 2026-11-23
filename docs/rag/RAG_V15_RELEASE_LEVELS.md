@@ -23,11 +23,24 @@ Answers are composed by trusted server code from the caller's own season data. N
 | L1-8 | Production smoke after enabling (A8): explain 200 `llm_calls 0`, recommend 503 lock, outsider 404, 11th question 429; p50/p95 measured on production, not inferred from local | smoke log | ⬜ after L1-1…L1-7 |
 | L1-9 | Web build with `VITE_AI_QA_ENABLED=true`, action flag unset, bundle checked (A9) | bundle grep | ⬜ |
 
-Latency risk: on main each READ question is 26–41 sequential database statements (~30 round
-trips); on the local integration trial with the M7 stack (E5.1 / E5.2 admission) one explain
-question took 43 database calls. Local p50 ≈ 0.2–0.4 s; with an added 138 ms round trip the local
-model gives ≈ 4.3–4.5 s on main, more with the stack. That is a model, not a production number:
-L1-8 must measure p50/p95 against the real API ↔ database distance before the cohort grows.
+Latency risk (local measurements, 2026-11-23, same database and season for every tree):
+
+| Tree | DB calls per READ question | Supabase Auth calls | local p50 |
+|---|---|---|---|
+| #92 (main + lock) | 40–41 | 1 | ≈ 0.47–0.50 s |
+| #95 (+ rate limit) | 42–43 | 2 | ≈ 0.61–0.66 s |
+| integration trial (#91 + main + #95) | 42–44 | 2 | ≈ 0.63–0.69 s |
+
+#95 adds two calls: the quota statement (by design) and a **second Auth `get_user`**, because the
+rate limiter verifies the caller and the scope resolver verifies the same token again later in the
+same request. The M7 stack adds 0–1 call. Most calls are sequential: the earlier delay-proxy model
+(#94) measured ≈ 30 sequential round trips for ≈ 41 statements, so #95 makes it ≈ 32. Each pays the
+full API ↔ database round trip: at 30–40 ms per trip (two regions) ≈ 1.0–1.3 s of waiting per
+question, at 138 ms ≈ 4.4–4.6 s. Proposed, not applied: verify the token once per request and reuse
+the verified user (removes one Auth call); read the season row once instead of 8 times. Neither
+changes authorization, but each needs its own tests and review. Local numbers are not production
+numbers: L1-8 must measure p50/p95 against the real API ↔ database distance before the cohort
+grows.
 
 **GO for Level 1** = L1-1 … L1-9 all ✅ and the owner's written approval. Until then NO-GO.
 
@@ -39,7 +52,7 @@ The READ answers may cite scientific sources only when every source is qualified
 |---|---|---|
 | L2-1 | Level 1 is GO and stable | ⬜ |
 | L2-2 | The `integrate/rag-v15` stack lands as one chain: tip #91 (contains #70–#90 by ancestry, plus the #87 and #89 patches as cherry-picks), then the docs PRs #82/#83/#85; #87 and #89 are closed unmerged (#89 is DO-NOT-MERGE, and merging it after #91 conflicts add/add). The stack's migrations `20261110090000`…`20261120120000` sort after main's newest; #95's `20261106090000` sorts before them on purpose | ⬜ owner merges, human review |
-| L2-3 | A local integration trial (#91 + main + #95, never pushed) passes from an empty database and as an upgrade of a seeded main database; the full backend suite, web unit and Playwright mock pass | ✅ local 2026-11-23, with one known item: #92's `test_with_the_flag_the_existing_action_path_is_unchanged` asks `"?"`, which the stack's action-path question check treats as unclear; with a real question it passes. Fix that test question when #92 and the stack meet (test-only). Counts: commit message of the change that added this line |
+| L2-3 | The integration of #91 + main + #92 + #95 passes from an empty database and as an upgrade of a seeded main database; the full backend suite (CV / torch included), web unit and Playwright mock pass, on a tree that can actually be merged | **INCOMPLETE — integration validation not clean on any mergeable tree.** The TEST-ONLY tree `b111361` (Draft #96, never to be merged) is clean: GitHub CI 17/17, backend 4157 passed / 2 skipped (CV real-model smoke: no checkpoint in CI) / 0 failed. It is clean only because of four commits that exist on that branch alone: `ab9a8f0` asks a content-free ACTION question ("?") back before any model call — on the stack "?" passed both pre-model checks, reached the (fake) provider, and was discarded only afterwards (`answer_policy_rejected`); an earlier note here said the stack refused it before the model, which was wrong — and `1847e4d`, `bc9ecf0`, `b111361` give three tests a real question / split the "?" case. Where these land in the stack and #92 is an owner decision; re-run on the resulting tree |
 | L2-4 | E1: every cited source has a first-party artifact, a text layer, a recorded content hash, documented rights (IPCC needs permission: D1) and extracted claims without unresolved registry conflicts | ⛔ E1 OPEN, D1 BLOCKED |
 | L2-5 | E4: real, named domain experts (not test reviewers, not agents) review and approve each document; approval records are real | ⛔ E4 OPEN, D6 BLOCKED |
 | L2-6 | Real verifier keys in custody (E7 / E7.1 independent signed verification) and a current integrity pin generation (E5.2) for the approved set; answer-time admission (E5.1) on | ⛔ owner key custody |
