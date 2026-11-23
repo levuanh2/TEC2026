@@ -24,6 +24,21 @@ export function isInstitutionalGreen(css: string, minChroma = 0.015): boolean {
   return hue >= 100 && hue <= 175 && (max + min) / 2 < 0.45
 }
 
+/** The computed colour a design token resolves to inside `scope` (the first match), as Chrome reports
+ *  it. Compares a rendered colour with the palette by name, not by a pinned value: the user-approved
+ *  2026-11 palette (docs/UI_REFRESH_2026_11.md, src/theme.css) redefines the tokens. */
+export function tokenColour(page: Page, token: string, scope = 'main'): Promise<string> {
+  return page.evaluate(([t, s]) => {
+    const host = document.querySelector(s) ?? document.body
+    const probe = document.createElement('span')
+    probe.style.color = `var(${t})`
+    host.appendChild(probe)
+    const colour = getComputedStyle(probe).color
+    probe.remove()
+    return colour
+  }, [token, scope] as const)
+}
+
 export interface ActionBox {
   name: string; kind: string; left: number; right: number; w: number; h: number
   containerLeft: number; limitRight: number; inside: boolean; hit: boolean

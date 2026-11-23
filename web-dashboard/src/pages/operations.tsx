@@ -5,6 +5,7 @@ import { exceptionsOf, queueGaps, useOperations, type Exception, type OpsRow, ty
 import { readTime, StaleNotice } from '../query/StaleNotice'
 import { label } from '../vocab'
 import { perKg as perKgFmt } from '../format'
+import { FieldBanner } from '../components/BrandScenery'
 
 /* Management is an operations workspace: the queue of work comes first, a
  * summary second, and there is no chart on this page. Every row is something
@@ -72,6 +73,7 @@ export function OperationsOverview({ organizationId }: { organizationId: string 
 
   return (
     <section className="ops">
+      <FieldBanner />
       <header className="ops__head">
         <div>
           <h1>Hôm nay cần xử lý gì?</h1>

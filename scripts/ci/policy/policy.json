@@ -85,9 +85,9 @@
     }
   },
   "bundle": {
-    "entry_js_bytes": 731850,
-    "css_bytes": 135629,
-    "total_dist_bytes": 869004,
+    "entry_js_bytes": 625745,
+    "css_bytes": 190989,
+    "total_dist_bytes": 1295122,
     "max_growth_pct": 20,
     "min_size_pct": 50
   },

@@ -11,7 +11,7 @@ import { usingMockData } from './api/farms'
 import { Ico } from './icons'
 import { routeName, routeParam } from './routes'
 import { buildNav } from './nav'
-import { go, LoadingSkeleton, Notice, setLinkIntentHandler } from './ui'
+import { go, Link, LoadingSkeleton, Notice, setLinkIntentHandler } from './ui'
 import { prefetchRoute, retryFailedChunks } from './routeChunks'
 import { ChunkErrorBoundary } from './chunkRecovery'
 import { prefetchRouteData } from './query/prefetch'
@@ -24,7 +24,12 @@ import {
 import { AccountName, Sidebar } from './components/Sidebar'
 import { useMobileDrawer } from './components/useMobileDrawer'
 import { ForcedPasswordChange } from './components/ForcedPasswordChange'
+import { AuthScenery } from './components/BrandScenery'
 import { prefetchFarmerScope } from './farmer/scope'
+import { isPublicPath } from './public/routes'
+import { PublicSite } from './public/PublicSite'
+import { PlanSelectionPage } from './public/PlanSelection'
+import { readPlanSelection, selectedPlanReturn } from './public/pricing'
 
 const ROLE_LABEL: Record<string, string> = {
   farmer: 'Nông hộ',
@@ -78,6 +83,8 @@ function ConfirmSignOut({ onConfirmed }: { onConfirmed: () => void }) {
 function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void; ended: AuthEndReason | null; onSignOutConfirmed: () => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const planReturn = selectedPlanReturn(sameOriginPath(new URLSearchParams(location.search).get('next')))
+  const selection = planReturn ? readPlanSelection(planReturn.slice(planReturn.indexOf('?'))) : null
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setBusy(true)
@@ -95,11 +102,12 @@ function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void
     }
   }
   return (
-    <main className="login">
-      <section className="login-card">
-        <p className="eyebrow">AGRICARBON</p>
+    <AuthScenery>
+      <section className="login-card login-card--welcome">
+        <p className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</p>
         <h1>Đăng nhập</h1>
         <p>Nhật ký canh tác, hiệu suất tài nguyên và Carbon cho lúa gạo.</p>
+        {selection && <Notice kind="info">Bạn đã chọn gói {selection.plan.name} — {selection.audienceLabel}. Đăng nhập để tiếp tục với gói đã chọn.</Notice>}
         {ended && !error && (
           <div role={ENDED_NOTICE[ended].kind === 'warning' ? 'alert' : 'status'} data-testid="auth-ended" data-reason={ended}>
             <Notice kind={ENDED_NOTICE[ended].kind}>{ENDED_NOTICE[ended].text}</Notice>
@@ -109,19 +117,20 @@ function Login({ done, ended, onSignOutConfirmed }: { done: (s: Session) => void
         <form onSubmit={submit}>
           <label>
             Email
-            <input name="email" type="email" autoComplete="username" required />
+            <input name="email" type="email" autoComplete="username" placeholder="Nhập địa chỉ email của bạn" required />
           </label>
           <label>
             Mật khẩu
-            <input name="password" type="password" autoComplete="current-password" required />
+            <input name="password" type="password" autoComplete="current-password" placeholder="Nhập mật khẩu" required />
           </label>
           {error && <Notice kind="error">{error}</Notice>}
-          <button className="btn" disabled={busy}>
+          <button className="btn login-submit" disabled={busy} aria-busy={busy}>
+            <Ico name={busy ? 'refresh' : 'denied'} size={17} />
             {busy ? 'Đang đăng nhập…' : ended === 'expired' ? 'Đăng nhập lại' : 'Đăng nhập'}
           </button>
         </form>
       </section>
-    </main>
+    </AuthScenery>
   )
 }
 
@@ -196,6 +205,7 @@ function AppShell({ session, viewer, path, children }: { session: Session | null
           <span className="sidebar__id">
             <AccountName text={email} />
             <small>{ROLE_LABEL[viewer.role] ?? viewer.role}</small>
+            <Link to="/bang-gia" className="link" onClick={drawer.close}>Bảng giá dịch vụ</Link>
             {session && (
               <button className="link" onClick={() => void signOut()}>
                 Đăng xuất
@@ -303,8 +313,9 @@ function render(path: string, viewer: CurrentUser): ReactNode {
  * race between two effects (see below). */
 function applyRoleRedirect(role: string, currentPath: string) {
   const home = role === 'farmer' ? '/farmer' : '/dashboard'
+  if (currentPath === '/chon-goi') return
   if (currentPath === '/login') {
-    go(home)
+    go(selectedPlanReturn(sameOriginPath(new URLSearchParams(location.search).get('next'))) ?? home)
     return
   }
   if (role === 'farmer' && !currentPath.startsWith('/farmer')) go('/farmer')
@@ -400,9 +411,20 @@ function ViewerUnverified({ failure, onRetry }: { failure: ViewerFailure; onRetr
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppRoot />
+      <AppEntry />
     </QueryClientProvider>
   )
+}
+
+/** Public pages mount without the application's session/read effects. */
+function AppEntry() {
+  const [path, setPath] = useState(location.pathname)
+  useEffect(() => {
+    const update = () => setPath(location.pathname)
+    addEventListener('popstate', update)
+    return () => removeEventListener('popstate', update)
+  }, [])
+  return isPublicPath(path) ? <PublicSite path={path} /> : <AppRoot />
 }
 
 function AppRoot() {
@@ -455,7 +477,8 @@ function AppRoot() {
     // Already on the login screen: nothing to remember and no URL to change,
     // so a late second signal can never become a redirect to itself.
     if (location.pathname !== '/login') {
-      const next = reason === 'expired' ? `/login?next=${encodeURIComponent(location.pathname)}` : '/login'
+      const returnTo = location.pathname === '/chon-goi' ? location.pathname + location.search : location.pathname
+      const next = reason === 'expired' ? `/login?next=${encodeURIComponent(returnTo)}` : '/login'
       history.replaceState({}, '', next)
     }
     setPath('/login')
@@ -488,6 +511,14 @@ function AppRoot() {
       .catch(() => null)
       .finally(() => setReady(true))
   }, [])
+
+  useEffect(() => {
+    if (!ready || session || path !== '/chon-goi') return
+    const next = location.pathname + location.search
+    history.replaceState({}, '', `/login?next=${encodeURIComponent(next)}`)
+    setPath('/login')
+    dispatchEvent(new PopStateEvent('popstate'))
+  }, [ready, session, path])
 
   // Real bug found while deep-link-testing the redesign (brief Part 6): this
   // effect and the role-redirect effect below both depended on `session`.
@@ -678,7 +709,7 @@ function AppRoot() {
   // silently affect normal production mode, but it also must not be blocked by
   // the real Supabase credentials loaded from .env during the mock smoke test.
   const authRequired = Boolean(!usingMockData && import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY && !session)
-  if (path === '/login' || authRequired) {
+  if (path === '/login' || authRequired || (path === '/chon-goi' && !session)) {
     return <Login ended={ended} onSignOutConfirmed={() => setEnded((r) => (r === 'signed_out_unconfirmed' ? 'signed_out' : r))} done={(s) => {
       setEnded(null)
       // Back to where an expired session interrupted the person, if it was a
@@ -696,6 +727,10 @@ function AppRoot() {
   }
   // Every business screen below needs a role /v1/me confirmed for THIS session.
   if (session && !verified) return <ViewerVerifying text="Đang xác minh quyền tài khoản…" />
+
+  if (path === '/chon-goi' && session && verified) {
+    return <PlanSelectionPage home={viewer.role === 'farmer' ? '/farmer' : '/dashboard'} />
+  }
 
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
     return (
