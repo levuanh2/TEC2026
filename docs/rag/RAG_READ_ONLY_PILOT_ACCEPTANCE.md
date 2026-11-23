@@ -18,7 +18,7 @@ Companion of `RAG_V15_PRODUCTION_READINESS_2026_11.md` (defines A1–A15). Gover
 | PR | Head | CI | State |
 |---|---|---|---|
 | #92 READ-only tier lock (`fix/rag-read-only-tier-lock`) | `c71f07e` | 17/17 SUCCESS | OPEN Draft, 0 reviews |
-| #93 readiness report (`docs/rag-v15-production-readiness-2026-11`) | this branch | 17/17 at `88e3ea2` (re-runs on this commit) | OPEN Draft, 0 reviews |
+| #94 readiness report + READ-only pilot acceptance (`docs/rag-v15-production-readiness-2026-11-v2`) | this branch (`62168d1` before this correction) | 17/17 SUCCESS at `62168d1`; CI re-runs on this commit | OPEN Draft, 0 reviews; replaces #93 (CLOSED, not merged) |
 | main / integrate/rag-v15 | `63ae678` / `5f7e730` | — | unchanged |
 
 #92 commits: `abfe640` lock + 45 tests → `3e6c45d` the two flags documented → `c71f07e` staging
