@@ -231,7 +231,11 @@ def test_with_the_flag_the_existing_action_path_is_unchanged():
     llm = Llm(GOOD_RECOMMEND)
     service = RagQuestionService(carbon_service=Carbon(), llm_client=llm, write_gate=gate(),
                                  action_tier_enabled=True)
-    body = client(service, Reader()).post(URL, json={"question": "?", "intent": "recommend"}, headers=AUTH).json()
+    # A real farming question: since the M7 stack, an ACTION question must carry content (a bare "?"
+    # is asked back, see test_rag_action_scope_and_relevance.py); the lock itself is what is tested here.
+    question = "Tôi nên điều chỉnh tưới nước thế nào để giảm phát thải mê-tan?"
+    body = client(service, Reader()).post(URL, json={"question": question, "intent": "recommend"},
+                                          headers=AUTH).json()
     assert body["provenance"]["answer_source"] == "model_generated" and len(llm.requests) == 1
 
 
