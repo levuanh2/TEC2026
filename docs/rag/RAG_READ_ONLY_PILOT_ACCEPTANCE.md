@@ -27,8 +27,8 @@ Update 2026-11-24 (no acceptance run was repeated; §3 results belong to `c71f07
 | PR | Head | CI | State |
 |---|---|---|---|
 | #92 | `ef6b9a2` (`efc0f00`, `ef6b9a2`: test inputs only) | 17/17 SUCCESS | OPEN Draft |
-| #95 per-user rate limit + monitoring, stacked on #92 | `d69550e` | 17/17 SUCCESS | OPEN Draft |
-| this documentation PR | replaces #94 (to be closed without merging), which replaced #93 | — | Draft |
+| #95 per-user rate limit + monitoring + DB role preflight, stacked on #92 | `ec06989` (`d69550e` on 2026-11-23) | 17/17 SUCCESS at both | OPEN Draft |
+| this documentation PR | replaces #94 (closed, not merged, 2026-11-24), which replaced #93 | — | Draft |
 | main / integrate/rag-v15 | `63ae678` / `5f7e730` | — | unchanged |
 
 #92 commits: `abfe640` lock + 45 tests → `3e6c45d` the two flags documented → `c71f07e` staging
