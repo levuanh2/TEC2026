@@ -4,8 +4,8 @@ import { expect, test, type Page, type Response } from '@playwright/test'
 // real JWT scope, real RLS, the real lexical retriever and the trusted READ composer.
 // Intended for a LOCAL isolated stack seeded with SYNTHETIC knowledge ("TEST FIXTURE"
 // titles), one prompt-injection chunk and one stored M05 data_task on the season; the
-// backend runs with RAG_QA_ENABLED=true and NO provider (strategy B baseline), the web
-// build with VITE_AI_QA_ENABLED=true. Never point it at production.
+// backend runs with RAG_QA_ENABLED=true, NO provider and the action tier OFF (READ-only
+// default), the web build with VITE_AI_QA_ENABLED=true. Never point it at production.
 const farmer = { email: process.env.FARMER_REAL_E2E_EMAIL, password: process.env.FARMER_REAL_E2E_PASSWORD }
 const manager = { email: process.env.MANAGER_REAL_E2E_EMAIL, password: process.env.MANAGER_REAL_E2E_PASSWORD }
 const seasonId = process.env.AI_QA_E2E_SEASON
@@ -85,12 +85,14 @@ test.describe('AI Q&A against a real local stack', () => {
       expect(explain.body.limitations.join(' ')).toContain('chưa đạt yêu cầu MRV')
     }
 
-    // Action assistance: the farmer has WRITE and the season has a stored M05 rule, but no
-    // provider is configured (strategy B baseline) -> 503 generation_unavailable, honestly shown.
-    const action = await ask(page, 'Tôi nên làm gì để giảm phát thải?', 'Gợi ý hành động')
-    expect(action.response.status()).toBe(503)
-    expect(action.body.detail.error.code).toBe('generation_unavailable')
-    await expect(panel.getByRole('alert')).toContainText('cần trợ lý AI, hiện chưa sẵn sàng')
+    // Action assistance: READ-only by default (backend without RAG_QA_ACTION_TIER_ENABLED, web
+    // build without VITE_AI_QA_ACTION_ENABLED). The farmer has WRITE and a stored M05 rule, but is
+    // not offered the action intent, and a typed action question says why. The server-side refusal
+    // (503 action_tier_disabled before any read) is proven by
+    // backend/tests/test_rag_read_only_tier_lock.py.
+    await expect(panel.getByLabel('Gợi ý hành động', { exact: true })).toHaveCount(0)
+    await panel.getByLabel('Câu hỏi của bạn').fill('Tôi nên làm gì để giảm phát thải?')
+    await expect(panel.getByText('Giai đoạn thử nghiệm chưa có gợi ý hành động', { exact: false })).toBeVisible()
 
     // Mobile: the panel fits a 390 px phone without horizontal scrolling; controls stay reachable.
     await page.setViewportSize({ width: 390, height: 844 })
