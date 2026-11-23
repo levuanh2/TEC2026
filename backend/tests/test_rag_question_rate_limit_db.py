@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import threading
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -219,3 +220,104 @@ def test_route_revoked_token_is_401_and_not_counted(http, env):
     response = http(token, env["season_member"])
     assert response.status_code == 401
     assert events(user) == 0
+
+
+# -- which database role runs the quota function (release preflight evidence) ----------
+#
+# The API calls the function over SUPABASE_DB_URL (infrastructure/pg_pool.py: no SET ROLE, no
+# PostgREST), so the login in that URL executes it. The function is SECURITY INVOKER and the table
+# forces RLS with no policy, so that login needs BYPASSRLS (or superuser) plus EXECUTE, USAGE on
+# schema private and select/insert/delete on the table. RAG_QA_PILOT_SAFEGUARDS.md §5 checks the
+# same facts read-only on the target database before the migration and before the deploy.
+
+QUOTA_FN = "private.consume_rag_question_quota(uuid,integer,integer)"
+EVENTS = "private.rag_question_events"
+
+
+def test_the_backend_login_runs_the_function_and_meets_its_requirements(users):
+    import psycopg
+
+    with psycopg.connect(_DB_URL) as conn:
+        login = conn.execute("select current_user").fetchone()[0]
+        superuser, bypassrls = conn.execute(
+            "select rolsuper, rolbypassrls from pg_roles where rolname = current_user").fetchone()
+        grants = conn.execute(
+            "select has_function_privilege(current_user, %s, 'execute'),"
+            " has_schema_privilege(current_user, 'private', 'usage'),"
+            " has_table_privilege(current_user, %s, 'select'), has_table_privilege(current_user, %s, 'insert'),"
+            " has_table_privilege(current_user, %s, 'delete')", (QUOTA_FN, EVENTS, EVENTS, EVENTS)).fetchone()
+        rls = conn.execute("select relrowsecurity, relforcerowsecurity from pg_class where oid = %s::regclass",
+                           (EVENTS,)).fetchone()
+        policies = conn.execute("select count(*) from pg_policies"
+                                " where schemaname = 'private' and tablename = 'rag_question_events'").fetchone()[0]
+        security_definer = conn.execute("select prosecdef from pg_proc where oid = %s::regprocedure",
+                                        (QUOTA_FN,)).fetchone()[0]
+    assert rls == (True, True) and policies == 0 and security_definer is False
+    assert superuser or bypassrls, f"{login} would hit the forced RLS on every question (503)"
+    assert all(grants), (login, grants)
+
+
+def test_the_postgrest_service_role_is_not_the_role_that_runs_it(users):
+    """service_role holds the migration's EXECUTE grant but no table privilege: under SECURITY INVOKER
+    a call as service_role fails. The API never calls the function as service_role."""
+    import psycopg
+
+    with psycopg.connect(_DB_URL) as conn:
+        conn.execute("set role service_role")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute(FN, (users[0], 1000, 1000))
+
+
+@contextmanager
+def _login_without_bypassrls(conninfo):
+    """A connection acting as a fresh role that has every grant but NOT BYPASSRLS. Everything runs in
+    one transaction that is rolled back, so the role never exists outside this block."""
+    import psycopg
+
+    role = f"rl_nobypass_{uuid.uuid4().hex[:8]}"
+    conn = psycopg.connect(conninfo)
+    try:
+        conn.execute(f"create role {role} nologin nobypassrls")
+        conn.execute(f"grant usage on schema private to {role}")
+        conn.execute(f"grant execute on function {QUOTA_FN} to {role}")
+        conn.execute(f"grant select, insert, delete on {EVENTS} to {role}")
+        conn.execute(f"grant {role} to current_user")
+        conn.execute(f"set local role {role}")
+        yield conn
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def test_a_login_without_bypassrls_fails_closed_before_any_read(users):
+    import psycopg
+
+    import rag_qa
+    from infrastructure.question_rate_limit import (PostgresQuestionRateStore, QuestionRateLimiter,
+                                                    QuestionRateLimitUnavailable, QuestionRatePolicy)
+    from recommendation.rag import RagIntent
+
+    user = users[1]
+    backdate(user)
+    store = PostgresQuestionRateStore(_DB_URL, connection=_login_without_bypassrls)
+    with pytest.raises(QuestionRateLimitUnavailable) as unavailable:
+        store.consume(user, QuestionRatePolicy())
+    cause = unavailable.value.__cause__
+    assert isinstance(cause, psycopg.errors.InsufficientPrivilege) and "row-level security" in str(cause)
+
+    class Reader:
+        def user_id(self):
+            return user
+
+        def __getattr__(self, name):
+            raise AssertionError(f"read before the quota: {name}")
+
+    service = rag_qa.RagQuestionService(carbon_service=None, action_tier_enabled=False, rate_limiter=QuestionRateLimiter(
+        QuestionRatePolicy(), store, store_kind="postgres"))
+    with pytest.raises(rag_qa.QuestionRefused) as refused:
+        rag_qa.respond(service, reader=Reader(), crop_season_id=str(uuid.uuid4()),
+                       question=rag_qa.QuestionInput(question="Vụ này phát thải bao nhiêu?", intent=RagIntent.EXPLAIN))
+    assert (refused.value.status, refused.value.code) == (503, "question_rate_limit_unavailable")
+    assert events(user) == 0
+    with psycopg.connect(_DB_URL) as conn:
+        assert conn.execute("select count(*) from pg_roles where rolname like 'rl_nobypass_%'").fetchone()[0] == 0

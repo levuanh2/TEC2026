@@ -91,13 +91,14 @@ path **before** any deploy. Nothing in this section was run on hosted.
 
 1. Owner approves migration `20261106090000_rag_question_rate_limit.sql` for the hosted database.
 2. Read-only check of the hosted migration history and of the dependencies the migration uses
-   (`auth.users`, schema `private`, role `service_role`).
+   (`auth.users`, schema `private`, role `service_role`), **and the role preflight, part 1
+   (§5.1). It is mandatory: if it fails, stop here.**
 3. In its own, separately approved change window: apply that one migration on hosted. Nothing
    else in the same step (one migration, verify, then the next).
-4. Verify: `private.rag_question_events` exists with RLS enabled + forced; function
+4. Verify: `private.rag_question_events` exists with RLS enabled + forced and no policy; function
    `private.consume_rag_question_quota(uuid, integer, integer)` exists, is SECURITY INVOKER with
-   `search_path=""`; EXECUTE for `service_role` only (none for `anon` / `authenticated`);
-   `scripts/ci/db_audit.py` against the committed snapshot has no drift for these objects.
+   `search_path=""`; no EXECUTE for `anon` / `authenticated`; `scripts/ci/db_audit.py` against the
+   committed snapshot has no drift for these objects; **role preflight, part 2 (§5.1) passes.**
 5. Fail-closed and recovery check on an isolated stack with the same versions (not on
    production): function missing → 503; function back → 200.
 6. Only then deploy the code of #92 + #95, following the merge / release plan the owner approved.
@@ -106,6 +107,76 @@ path **before** any deploy. Nothing in this section was run on hosted.
    another QA account is not affected; an outsider gets 404; `rag_qa_log_summary.py` over the
    smoke window shows no alert; p50 / p95 measured on production (not inferred from local).
 8. Only then open Q&A to the approved QA cohort (A-1).
+
+### 5.1 Database role preflight (mandatory for Path A; read-only; PREPARED, NOT EXECUTED on hosted)
+
+**Which role runs the quota function.** The API calls `private.consume_rag_question_quota` over its
+own `SUPABASE_DB_URL` (`infrastructure/pg_pool.py`: no `SET ROLE`, no PostgREST). So the login
+in that URL executes it. It is **not** PostgREST's `service_role`. The function is SECURITY
+INVOKER, and the table forces RLS with no policy. That login therefore needs:
+
+- `BYPASSRLS` (or superuser). Without it every first insert fails with "new row violates
+  row-level security policy", and the API answers **every** question with 503
+  `question_rate_limit_unavailable` (fail closed, nothing read).
+- EXECUTE on the function, USAGE on schema `private`, and SELECT, INSERT and DELETE on the
+  table. As the owner of both objects it holds these implicitly.
+
+The migration's EXECUTE grant to `service_role` is not what the API uses. `service_role` has no
+table privilege, so a call as `service_role` fails.
+
+Local evidence (isolated stack, 2026-11-24, branch head of #95), `tests/test_rag_question_rate_limit_db.py`:
+- `test_the_backend_login_runs_the_function_and_meets_its_requirements`: the local login is not superuser, has `BYPASSRLS` and owns the table and the function. The table forces RLS, has 0 policies, and the function is not SECURITY DEFINER.
+- `test_the_postgrest_service_role_is_not_the_role_that_runs_it`: a call as `service_role` gets "permission denied for table".
+- `test_a_login_without_bypassrls_fails_closed_before_any_read`: a fresh role with every grant except `BYPASSRLS` is refused by RLS, the service answers 503 `question_rate_limit_unavailable`, and 0 events are written. The role exists only inside a rolled-back transaction.
+- Mutation: giving that role `BYPASSRLS` makes the test fail, because the call then succeeds.
+- The 15 existing tests (atomicity under 30 concurrent connections, sliding windows, `Retry-After`, `anon` / `authenticated` denied) pass in the same run.
+
+**How to run it (owner-authorized; never by an agent on hosted).** Connect with the API's own
+database URL (the same login the API uses), in a read-only session
+(`PGOPTIONS='-c default_transaction_read_only=on'`), one transaction ending in `rollback`. No
+role, grant, policy or data is created. Record the output without the URL or any credential.
+
+```sql
+begin read only;
+-- part 1, before the migration
+select current_user, session_user;
+select rolsuper, rolbypassrls from pg_roles where rolname = current_user;
+select has_schema_privilege(current_user, 'private', 'usage') as private_usage;
+-- part 2, after the migration
+select pg_get_userbyid(c.relowner) as table_owner, c.relrowsecurity, c.relforcerowsecurity,
+       (select count(*) from pg_policies where schemaname = 'private' and tablename = 'rag_question_events') as policies
+  from pg_class c where c.oid = 'private.rag_question_events'::regclass;
+select pg_get_userbyid(p.proowner) as function_owner, p.prosecdef
+  from pg_proc p where p.oid = 'private.consume_rag_question_quota(uuid,integer,integer)'::regprocedure;
+select has_function_privilege(current_user, 'private.consume_rag_question_quota(uuid,integer,integer)', 'execute') as can_execute,
+       has_table_privilege(current_user, 'private.rag_question_events', 'select') as can_select,
+       has_table_privilege(current_user, 'private.rag_question_events', 'insert') as can_insert,
+       has_table_privilege(current_user, 'private.rag_question_events', 'delete') as can_delete;
+select has_function_privilege('anon', 'private.consume_rag_question_quota(uuid,integer,integer)', 'execute') as anon_exec,
+       has_function_privilege('authenticated', 'private.consume_rag_question_quota(uuid,integer,integer)', 'execute') as authenticated_exec;
+rollback;
+```
+
+**Pass:** `rolsuper` or `rolbypassrls` is true; `relforcerowsecurity` true; `policies` 0; `prosecdef`
+false; `can_execute`, `can_select`, `can_insert`, `can_delete` all true; `anon_exec` and
+`authenticated_exec` false. Part 1 must pass before the migration is applied, part 2 before the
+code is deployed.
+
+**If the API login is incompatible (for example no `BYPASSRLS`): rollout stays BLOCKED.** Do not
+grant `BYPASSRLS`, disable or relax RLS, switch the function to SECURITY DEFINER or add a
+permissive policy as a quick fix. A least-privilege remediation needs its own migration, review
+and approval. The proposal, in order of preference:
+
+1. **A policy scoped to the API login only.** Add a policy on `private.rag_question_events` for
+   that one role (`for all to <api_login> using (true) with check (true)`) plus explicit
+   SELECT, INSERT and DELETE grants. Keep FORCE RLS and the revokes from `public`, `anon` and
+   `authenticated`. The table holds only user id + timestamp, and only this function touches it.
+   No role gains BYPASSRLS anywhere else.
+2. **A dedicated NOLOGIN owner role** that owns the table and a SECURITY DEFINER version of the
+   function (`search_path=''`), with EXECUTE granted only to the API login. This changes the
+   function's security mode, so it needs a separate security review.
+
+Path B (memory store) needs no database role and is unaffected.
 
 ### Path B — memory store (alternative; never the default)
 
