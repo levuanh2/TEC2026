@@ -57,7 +57,12 @@ Rules:
 - Idempotent: an identical claim is skipped. The same claim id with other facts under the same
   extractor version is refused; a changed extractor needs a new version.
 
-### 2.1 What the extractor recognises (`kn-claims-3`)
+### 2.1 What the extractor recognises (`kn-claims-3`; `kn-claims-4` since 2026-11-17)
+
+`kn-claims-4` changes one thing: a zero spelled as a word ("phát thải … bằng không", "… về không") is an
+elimination assertion. Before, its "không" was taken as a negator and the claim was dropped (#85). A real
+negator still cancels it ("không bao giờ bằng không"). Claims stored under `kn-claims-3` must be re-extracted;
+the two versions are never compared with each other.
 
 | Parameter | Canonical unit | Examples of accepted raw units |
 |---|---|---|
