@@ -79,6 +79,66 @@ the API host (container env + Caddy). Until A-13 is decided, the pilot must not 
 | `RAG_QA_ENABLED=false` | route answers 503 `backend_not_configured` | API healthy again ≈ 11 s (local) | the container reads `--env-file` only at `docker run`: this is a re-create, not `docker restart` |
 | `RAG_QA_RATE_LIMIT_PER_MINUTE=1` | throttles without stopping | re-create, as above | not a stop |
 
-The rate-limit migration can be rolled back with
-`supabase/rollbacks/20261106090000_rag_question_rate_limit.down.sql` — first set
-`RAG_QA_RATE_LIMIT_STORE=memory` or `RAG_QA_ENABLED=false`, or every question is 503.
+## 5. Release order (mandatory)
+
+The default store is `postgres`. Code from #95 deployed **without** migration `20261106090000` on
+that database refuses **every** question with 503 `question_rate_limit_unavailable` (fail
+closed). Verified locally: the refused request costs 2 database calls (Auth + the quota attempt),
+an answered one 43, so nothing about the season is read before the refusal. The owner picks one
+path **before** any deploy. Nothing in this section was run on hosted.
+
+### Path A — Postgres store (recommended; owner approval required)
+
+1. Owner approves migration `20261106090000_rag_question_rate_limit.sql` for the hosted database.
+2. Read-only check of the hosted migration history and of the dependencies the migration uses
+   (`auth.users`, schema `private`, role `service_role`).
+3. In its own, separately approved change window: apply that one migration on hosted. Nothing
+   else in the same step (one migration, verify, then the next).
+4. Verify: `private.rag_question_events` exists with RLS enabled + forced; function
+   `private.consume_rag_question_quota(uuid, integer, integer)` exists, is SECURITY INVOKER with
+   `search_path=""`; EXECUTE for `service_role` only (none for `anon` / `authenticated`);
+   `scripts/ci/db_audit.py` against the committed snapshot has no drift for these objects.
+5. Fail-closed and recovery check on an isolated stack with the same versions (not on
+   production): function missing → 503; function back → 200.
+6. Only then deploy the code of #92 + #95, following the merge / release plan the owner approved.
+7. Production smoke (one QA account, within its quota): READ answers 200 with `llm_calls 0`;
+   recommend 503 `action_tier_disabled`; question 11 within a minute 429 with `Retry-After`;
+   another QA account is not affected; an outsider gets 404; `rag_qa_log_summary.py` over the
+   smoke window shows no alert; p50 / p95 measured on production (not inferred from local).
+8. Only then open Q&A to the approved QA cohort (A-1).
+
+### Path B — memory store (alternative; never the default)
+
+Only if the owner chooses it explicitly and confirms that production runs exactly **one** API
+process / worker, accepts that every restart resets the counts, and accepts that the limit is not
+durable. Set `RAG_QA_RATE_LIMIT_STORE=memory` in the API environment before the deploy. The API
+never falls back to memory on its own: if Path B was not chosen and the migration is missing, the
+API stays fail-closed.
+
+### Rollback order
+
+1. Switch Q&A off first (Caddy 503 route or `RAG_QA_ENABLED=false` + container re-create).
+   Never roll back the quota schema while Q&A is serving.
+2. Then, if the schema must go: run
+   `supabase/rollbacks/20261106090000_rag_question_rate_limit.down.sql` by hand, in one
+   transaction, then `supabase migration repair --status reverted 20261106090000`. The table
+   holds only user id + timestamp for the last 24 h; check the retention / rollback policy
+   before dropping a table that has rows.
+3. Code rollback of #95 does not need the schema rollback (the table is unused without it).
+4. Back on: re-apply the migration (or set Path B), verify as in Path A step 4, then switch Q&A
+   on again. Rehearsed locally: down 16 ms → 503 → re-apply → 200; on the integration trial the
+   E5.2 → E5.1 → rate-limit rollback and re-apply also left `db_audit` and the lifecycle probe
+   (36/36) passing.
+
+## 6. QA cohort and acceptance runs
+
+The limit counts per **signed-in account**, not per person or device. Testers sharing one QA
+account (for example the DEMO-FARM-01 farmers) share its 10 questions per minute. The earlier
+acceptance suites (31 API cases, 30 Carbon cases, 20 browser cases) ask questions back to back
+from one account and will hit 429 under the default limits.
+
+* Acceptance on an isolated stack: give each tester or suite its own account, or raise
+  `RAG_QA_RATE_LIMIT_PER_MINUTE` / `_PER_DAY` in that stack's API environment for the run.
+* Production smoke: plan it within 10 questions per minute per account (step 7 asks exactly
+  one question over the limit). Changing production limits for a smoke is an owner decision.
+* CI cannot catch this: its Playwright runs on mock data.
