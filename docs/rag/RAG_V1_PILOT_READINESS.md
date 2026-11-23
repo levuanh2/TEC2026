@@ -72,7 +72,9 @@ RECOMMEND without a stored M05 rule or without evidence is answered before the p
 - Pilot storage: one API container today (EC2 t3.small) → an in-process counter is exact but resets on
   restart; production needs a durable counter (`rag_usage_daily(user_id, day, requests, cost_usd)`,
   service-role only, RLS deny-all) = **a new migration with its own approval**.
-- Kill switch: unset `RAG_LLM_PROVIDER` (restart) → every action intent is 503
+- Kill switch: unset `RAG_QA_ACTION_TIER_ENABLED` (restart; the default since PR #92) → every
+  action intent is 503 `action_tier_disabled` before any read and no provider is loaded; unset
+  `RAG_LLM_PROVIDER` (restart) → with the action tier on, every action intent is 503
   `generation_unavailable`; `RAG_QA_ENABLED=false` removes the route's service entirely (503
   `backend_not_configured`); `VITE_AI_QA_ENABLED=false` hides the panel on the next build.
 
