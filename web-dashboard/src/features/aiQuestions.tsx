@@ -70,6 +70,8 @@ function failureMessage(error: unknown, timedOut: boolean): { message: string; r
   if (!(error instanceof ApiError)) return { message: 'Không gửi được câu hỏi. Vui lòng thử lại.', retryable: true }
   if (error.code === 'backend_not_configured') return { message: 'Trợ lý hỏi đáp chưa được bật cho hệ thống này.', retryable: false }
   if (error.code === 'action_tier_disabled') return { message: 'Giai đoạn thử nghiệm chỉ hỗ trợ câu hỏi giải thích số liệu; chưa có gợi ý hành động.', retryable: false }
+  if (error.code === 'question_rate_limited') return { message: 'Bạn đã hỏi quá nhiều câu trong thời gian ngắn. Vui lòng thử lại sau ít phút.', retryable: false }
+  if (error.code === 'question_rate_limit_unavailable') return { message: 'Trợ lý tạm thời chưa nhận câu hỏi. Vui lòng thử lại sau.', retryable: false }
   if (error.code === 'generation_unavailable') return { message: 'Loại câu hỏi này cần trợ lý AI, hiện chưa sẵn sàng. Hãy chọn loại câu hỏi khác.', retryable: false }
   if (error.status === 404) return { message: 'Không tìm thấy vụ, hoặc bạn không có quyền với loại câu hỏi này.', retryable: false }
   if (error.status === 422) return { message: 'Câu hỏi chưa hợp lệ. Hãy viết ngắn gọn hơn và chọn loại câu hỏi.', retryable: false }

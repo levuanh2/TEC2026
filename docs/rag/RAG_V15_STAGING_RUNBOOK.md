@@ -17,6 +17,8 @@ one, #33 must still be merged afterwards (its diff then shrinks to docs + V1.5).
 | `VITE_AI_QA_ENABLED` | `true` (build time) | the season panel is shown |
 | `RAG_QA_ACTION_TIER_ENABLED` | **unset** (since PR #92) | READ-only: recommend / what_if are 503 `action_tier_disabled` before any read; provider settings are not even loaded. A demo of AI action answers needs `true` here **and** `VITE_AI_QA_ACTION_ENABLED=true` in the web build, or the feature looks broken |
 | `VITE_AI_QA_ACTION_ENABLED` | **unset** (build time, since PR #92) | the farmer "Gợi ý hành động" option is hidden |
+| `RAG_QA_RATE_LIMIT_PER_MINUTE` / `RAG_QA_RATE_LIMIT_PER_DAY` | unset → 10 / 100 (proposed, not owner-approved) | per verified user, sliding windows; 429 `question_rate_limited` + `Retry-After` before any read; integers ≥ 1 only, a bad value fails start-up |
+| `RAG_QA_RATE_LIMIT_STORE` | unset → `postgres` | needs migration `20261106090000_rag_question_rate_limit.sql` on that database; without it every question is 503 `question_rate_limit_unavailable` (fail closed). `memory` = one API process only, resets on restart |
 | `RAG_LLM_PROVIDER` | **unset** | strategy B baseline: READ composed, action intents 503 |
 | `RAG_D8C_ENABLED` | **unset** (not in this branch) | — |
 | `RAG_LLM_KILL_SWITCH` | `true` once a provider is ever configured, until its gate passes | no model call at all |

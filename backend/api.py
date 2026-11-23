@@ -834,7 +834,8 @@ def ask_crop_season_question(
         return rag_qa.respond(service, reader=repo, crop_season_id=crop_season_id, question=question,
                               request_id=getattr(request.state, "request_id", None))
     except rag_qa.QuestionRefused as exc:
-        raise HTTPException(status_code=exc.status, detail=error_detail(exc.code, exc.message)) from exc
+        raise HTTPException(status_code=exc.status, detail=error_detail(exc.code, exc.message),
+                            headers=exc.headers or None) from exc
 
 
 # -- M03 CV Farmer integration ---------------------------------------------

@@ -43,6 +43,24 @@ class ActionTierDisabled(RagError):
     code = "action_tier_disabled"
 
 
+class QuestionRateLimited(RagError):
+    """The verified caller asked more questions than the server-side per-user limit allows.
+    Raised after JWT verification and before any season read, so it is the same for every
+    season id. `retry_after_seconds` becomes the Retry-After header."""
+
+    code = "question_rate_limited"
+
+    def __init__(self, message: str = "question rate limit reached", *, retry_after_seconds: int = 60) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = max(1, int(retry_after_seconds))
+
+
+class QuestionRateLimitUnavailable(RagError):
+    """The rate-limit store could not answer: the question is refused, never let through."""
+
+    code = "question_rate_limit_unavailable"
+
+
 class InvalidGeneratedSchema(RagError):
     code = "invalid_generated_schema"
 

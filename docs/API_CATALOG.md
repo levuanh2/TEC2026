@@ -48,6 +48,15 @@ what_if_scenario?}`. It has no organization, farm, tenant or filter field, and u
   authority on the season, plus a provider configured server-side (`RAG_LLM_*`); without a
   provider the answer is 503 `generation_unavailable`. The web offers the farmer action option
   only when built with `VITE_AI_QA_ACTION_ENABLED=true`.
+- **Rate limit (every intent that passes the action-tier lock):** after Supabase Auth has verified
+  the caller's JWT (401 first for an invalid, expired or revoked token) and before any season,
+  Carbon or knowledge read, one question is counted against the verified user id: by default
+  10 per sliding minute and 100 per sliding 24 h (`RAG_QA_RATE_LIMIT_PER_MINUTE` / `_PER_DAY`,
+  proposed pilot values). Over the limit: 429 `question_rate_limited` with `Retry-After` (seconds),
+  identical for every `crop_season_id`. The key is never a request field, an IP or a season id.
+  Store `RAG_QA_RATE_LIMIT_STORE=postgres` (default; durable, atomic, migration 20261106090000) or
+  `memory` (one API process only). A store that cannot answer gives 503
+  `question_rate_limit_unavailable`; there is no "off".
 - **Switch:** the route is OFF unless `RAG_QA_ENABLED=true`, and returns 503
   `backend_not_configured` while off.
 - **Further reading:** `docs/rag/RAG_V1_ARCHITECTURE.md`.

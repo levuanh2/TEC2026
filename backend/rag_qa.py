@@ -14,6 +14,10 @@ docs/rag/RAG_V1_ARCHITECTURE.md §11):
   `action_tier_disabled` before ANY read unless the server sets
   `RAG_QA_ACTION_TIER_ENABLED=true`. Without that flag the composition root never builds a
   provider client, whatever `RAG_LLM_*` / `GEMINI_*` / `DEEPSEEK_*` say.
+* Per-user rate limit (`infrastructure/question_rate_limit.py`): right after the lock, the
+  caller's JWT is verified by Supabase Auth and one question is counted against the verified
+  user id; over the limit -> 429 `question_rate_limited` before any season, Carbon or
+  knowledge read, identically for every season id.
 * Every answer, composed or generated, passes the core's schema, citation, fact-reference,
   prose and intent gates. Then one more structural gate runs here: a generated recommendation
   must name a deterministic rule the season really has (`rule_code`). A model can therefore
@@ -35,6 +39,7 @@ from typing import Any
 
 from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
+from infrastructure import question_rate_limit
 from infrastructure.read_repo import ReadNotFoundError
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
@@ -52,7 +57,7 @@ from recommendation.rag import (
     RagQuestionRequest,
     UnsupportedWhatIfDimension,
 )
-from recommendation.rag.errors import ActionTierDisabled
+from recommendation.rag.errors import ActionTierDisabled, QuestionRateLimitUnavailable, QuestionRateLimited
 from recommendation.rag.models import SIMULABLE_SCENARIOS
 from recommendation.rag.informational import CapabilityRoutedGenerator
 
@@ -312,8 +317,10 @@ class RagQuestionService:
 
     def __init__(self, *, carbon_service: Any, llm_client: StructuredLlmClient | None = None,
                  retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None,
-                 quota: QuotaGate | None = None, action_tier_enabled: bool = True) -> None:
+                 quota: QuotaGate | None = None, action_tier_enabled: bool = True,
+                 rate_limiter: question_rate_limit.QuestionRateLimiter | None = None) -> None:
         self._carbon = carbon_service
+        self._rate_limiter = rate_limiter
         self._action_tier_enabled = action_tier_enabled
         self._llm = llm_client if action_tier_enabled else None
         self._retrieval = retrieval or RetrievalSettings()
@@ -328,6 +335,25 @@ class RagQuestionService:
     def action_generation_configured(self) -> bool:
         return self._llm is not None
 
+    @property
+    def rate_limited(self) -> bool:
+        return self._rate_limiter is not None
+
+    def _consume_question(self, reader: Any, request_id: str | None) -> str:
+        """Verify the caller with Supabase Auth, then count one question for that user.
+
+        `reader.user_id()` is the Auth call: an expired, invalid, logged-out or revoked JWT
+        raises `InvalidTokenError` (401) here, before any quota row is touched. Nothing else is
+        read before the limit, so an over-limit request is the same for every season id."""
+        user_id = str(reader.user_id())
+        try:
+            self._rate_limiter.consume(user_id, request_id=request_id)
+        except question_rate_limit.QuestionRateLimited as exc:
+            raise QuestionRateLimited(retry_after_seconds=exc.retry_after_seconds) from None
+        except question_rate_limit.QuestionRateLimitUnavailable:
+            raise QuestionRateLimitUnavailable("the question rate limit store is unavailable") from None
+        return user_id
+
     def answer(self, *, reader: Any, crop_season_id: str, question: QuestionInput,
                request_id: str | None = None) -> dict[str, Any]:
         started = time.perf_counter()
@@ -339,6 +365,8 @@ class RagQuestionService:
                 # First statement: nothing is read, simulated, retrieved or generated, and the
                 # refusal is the same for every season, so it reveals nothing about scope.
                 raise ActionTierDisabled("the action tier is disabled on this server")
+            verified_user_id = (self._consume_question(reader, request_id)
+                                if self._rate_limiter is not None else None)
             if question.mode is not RagMode.ASK:
                 raise RagAccessDenied("only ask mode is available")
             hypothetical = None
@@ -354,7 +382,8 @@ class RagQuestionService:
             if llm is not None and self._quota is not None:
                 # Counted only when the provider is about to be called, i.e. after the WRITE
                 # check, the rule-code short-circuit and retrieval (orchestrator order).
-                llm = GuardedLlmClient(llm, self._quota, user_id=str(reader.user_id()), purpose="action")
+                llm = GuardedLlmClient(llm, self._quota, user_id=verified_user_id or str(reader.user_id()),
+                                       purpose="action")
             action = LlmActionGenerator(llm, meter) if llm is not None else None
             orchestrator = RagOrchestrator(
                 retriever=LexicalKnowledgeRetriever(reader, self._retrieval),
@@ -409,6 +438,8 @@ HTTP_STATUS: dict[str, int] = {
     "fact_reference_mismatch": 502,
     "tenant_isolation_violation": 500,
     "quota_exceeded": 429,
+    "question_rate_limited": 429,
+    "question_rate_limit_unavailable": 503,
 }
 
 PUBLIC_MESSAGES: dict[str, str] = {
@@ -419,37 +450,45 @@ PUBLIC_MESSAGES: dict[str, str] = {
     "generation_unavailable": "Trợ lý chưa sẵn sàng cho loại câu hỏi này.",
     "tenant_isolation_violation": "Lỗi hệ thống.",
     "quota_exceeded": "Đã đạt giới hạn lượt hỏi trợ lý AI cho hôm nay. Vui lòng thử lại sau.",
+    "question_rate_limited": "Bạn đã hỏi quá nhiều câu trong thời gian ngắn. Vui lòng thử lại sau.",
+    "question_rate_limit_unavailable": "Trợ lý tạm thời chưa nhận câu hỏi. Vui lòng thử lại sau.",
 }
 _GROUNDING_MESSAGE = "Câu trả lời không vượt qua kiểm tra nguồn dẫn nên đã bị chặn. Vui lòng thử lại."
 
 
 class QuestionRefused(Exception):
-    """What the route turns into the Core V1 error envelope. Carries no internal detail."""
+    """What the route turns into the Core V1 error envelope. Carries no internal detail;
+    `headers` is only ever Retry-After (seconds) for `question_rate_limited`."""
 
-    def __init__(self, status: int, code: str, message: str) -> None:
+    def __init__(self, status: int, code: str, message: str, headers: Mapping[str, str] | None = None) -> None:
         super().__init__(code)
         self.status, self.code, self.message = status, code, message
+        self.headers = dict(headers or {})
 
 
 def respond(service: RagQuestionService, **kwargs: Any) -> dict[str, Any]:
     """`service.answer`, with every RAG refusal mapped to `QuestionRefused` (§15)."""
     try:
         return service.answer(**kwargs)
+    except QuestionRateLimited as exc:
+        raise QuestionRefused(*http_error(exc), headers={"Retry-After": str(exc.retry_after_seconds)}) from exc
     except RagError as exc:
         raise QuestionRefused(*http_error(exc)) from exc
 
 
-def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None) -> RagQuestionService:
+def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None,
+                           rate_limiter: question_rate_limit.QuestionRateLimiter | None = None) -> RagQuestionService:
     """Composition-root factory: tier, provider and retrieval cutoff from server-side env only.
 
     READ-only unless `RAG_QA_ACTION_TIER_ENABLED=true`: then no provider setting is even
-    read, so a stray `RAG_LLM_PROVIDER` or API key cannot make a model reachable."""
+    read, so a stray `RAG_LLM_PROVIDER` or API key cannot make a model reachable.
+    `rate_limiter` is always passed by main.py (`build_question_rate_limiter`); tests may omit it."""
     raw = (os.environ.get("RAG_RETRIEVAL_MIN_FUSED_SCORE") or "").strip()
     retrieval = RetrievalSettings(min_fused_score=float(raw)) if raw else RetrievalSettings()
     if not action_tier_enabled_from_env():
         logger.info("rag_question_service tier=read_only provider=not_loaded")
         return RagQuestionService(carbon_service=carbon_service, retrieval=retrieval, write_gate=write_gate,
-                                  action_tier_enabled=False)
+                                  action_tier_enabled=False, rate_limiter=rate_limiter)
 
     from infrastructure.llm_client import build_llm_client, load_llm_settings
     from infrastructure.llm_quota import build_quota_gate, load_quota_policy
@@ -458,7 +497,7 @@ def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None)
     logger.info("rag_question_service tier=read_and_action provider_configured=%s", settings is not None)
     return RagQuestionService(carbon_service=carbon_service, llm_client=build_llm_client(settings),
                               retrieval=retrieval, write_gate=write_gate,
-                              quota=build_quota_gate(load_quota_policy(), settings))
+                              quota=build_quota_gate(load_quota_policy(), settings), rate_limiter=rate_limiter)
 
 
 def http_error(exc: RagError) -> tuple[int, str, str]:

@@ -202,10 +202,14 @@ if settings.auth_configured and settings.supabase_db_url and settings.supabase_c
 
 # RAG V1 AI Q&A: OFF unless RAG_QA_ENABLED=true. READ-tier answers need no provider;
 # recommend/what_if additionally need RAG_LLM_* (infrastructure/llm_client.py).
+# Every question is rate limited per verified user (RAG_QA_RATE_LIMIT_*,
+# infrastructure/question_rate_limit.py); a bad limit setting fails start-up.
 if (os.environ.get("RAG_QA_ENABLED", "").strip().lower() == "true"
         and settings.auth_configured and settings.supabase_db_url and settings.supabase_configured):
+    from infrastructure.question_rate_limit import build_question_rate_limiter
     _rag_question_singleton = rag_qa.build_question_service(
-        carbon_service=_service_singleton, write_gate=PostgresRecommendationRepository(settings).assert_can_write)
+        carbon_service=_service_singleton, write_gate=PostgresRecommendationRepository(settings).assert_can_write,
+        rate_limiter=build_question_rate_limiter(db_url=settings.supabase_db_url))
     app.dependency_overrides[api._rag_question_service] = lambda: _rag_question_singleton
 
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:
