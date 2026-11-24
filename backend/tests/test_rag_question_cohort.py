@@ -15,7 +15,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import rag_qa  # noqa: E402
-from infrastructure import question_rate_limit as qrl  # noqa: E402
 from rag_qa import RagQuestionService  # noqa: E402
 from tests.fixtures.rag_fakes import SEASON_ID  # noqa: E402
 from tests.test_rag_qa import Carbon, gate  # noqa: E402
@@ -130,10 +129,16 @@ def test_cohort_gate_works_without_a_rate_limiter():
     assert response.status_code == 403 and reader.used == ["user_id"]
 
 
-def test_invalid_token_is_still_401_not_403():
+@pytest.mark.parametrize("allowed", [frozenset({USER_A}), frozenset({USER_B}), frozenset()],
+                         ids=["caller_listed", "caller_not_listed", "cohort_closed"])
+def test_invalid_token_is_401_never_403_whatever_the_cohort(allowed):
+    # A revoked / expired JWT must be 401 even for a caller outside the cohort or with the cohort
+    # closed: the gate may only judge a user id that Supabase Auth has verified.
+    counting = CountingLimiter(limiter())
     reader = CountingReader(user=USER_A, reject_token=True)
-    response = ask(app_client(service(frozenset({USER_A}), limiter()), reader))
-    assert response.status_code == 401
+    response = ask(app_client(service(allowed, counting), reader))
+    assert response.status_code == 401 and error_code(response) == "unauthenticated"
+    assert counting.counted == []
 
 
 def test_action_intent_is_locked_first_even_for_a_listed_user():
@@ -161,4 +166,3 @@ def test_quota_of_a_listed_user_still_applies():
 def test_error_code_is_mapped_in_the_public_tables():
     assert rag_qa.HTTP_STATUS["question_not_enabled"] == 403
     assert rag_qa.PUBLIC_MESSAGES["question_not_enabled"] == NOT_ENABLED
-    assert qrl  # module stays importable alongside the gate
