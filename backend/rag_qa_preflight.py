@@ -1,8 +1,9 @@
 """Offline start-up check of the season Q&A pilot configuration. Run it inside the CANDIDATE image,
 with the production env-file and no network, BEFORE the running container is replaced:
 
-    docker run --rm --network none --env-file /etc/agricarbon/api.env --entrypoint python \
-        <candidate-image> -m rag_qa_preflight [--expect-user-ids-file /run/cohort.txt]
+    docker run --rm --network none --env-file /etc/agricarbon/api.env \
+        -v <host file with the approved ids>:/run/cohort.txt:ro --entrypoint python \
+        <candidate-image> -m rag_qa_preflight --expect-user-ids-file /run/cohort.txt
 
 It uses the same parsers and the same service factory as main.py (rag_qa.pilot_cohort_from_env,
 infrastructure.question_rate_limit, rag_qa.build_question_service), so a value main.py would
@@ -59,6 +60,13 @@ def check(*, expected_ids: frozenset[str] | None = None,
     failures: list[str] = []
     facts: dict[str, Any] = {}
 
+    # First, as main.py does at import (`settings = load_settings()` before any RAG_* read): it may
+    # add values from a backend/.env inside the image to the environment, and everything below must
+    # see exactly the environment main.py will see.
+    if load_settings is None:
+        from infrastructure.config import load_settings
+    settings = load_settings()
+
     if not _flag("RAG_QA_ENABLED"):
         failures.append("RAG_QA_ENABLED is not true (Q&A would stay off: 503 backend_not_configured)")
     if rag_qa.action_tier_enabled_from_env():
@@ -72,14 +80,24 @@ def check(*, expected_ids: frozenset[str] | None = None,
         failures.append("provider credential variables present: " + ", ".join(present))
 
     # main.py wires the question service only when all three hold; otherwise Q&A silently stays 503.
-    if load_settings is None:
-        from infrastructure.config import load_settings
-    settings = load_settings()
     missing = [name for name, ok in (("SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY (Auth)", settings.auth_configured),
                                      ("SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY", settings.supabase_configured),
                                      ("SUPABASE_DB_URL", bool(settings.supabase_db_url))) if not ok]
     if missing:
         failures.append("main.py would not wire Q&A; missing: " + "; ".join(missing))
+    # main.py loads the Carbon parameter file at import when Supabase is configured; a bad
+    # AGRICARBON_EF_CONFIG stops the whole API there.
+    try:
+        from carbon import ParameterSet
+        ParameterSet.load(settings.ef_config_path)
+    except Exception as exc:  # noqa: BLE001 - report the type only, never a path or a value
+        failures.append(f"the Carbon parameter file (AGRICARBON_EF_CONFIG) does not load: {type(exc).__name__}")
+    raw_score = (os.environ.get("RAG_RETRIEVAL_MIN_FUSED_SCORE") or "").strip()
+    if raw_score:
+        try:
+            float(raw_score)
+        except ValueError:
+            failures.append("RAG_RETRIEVAL_MIN_FUSED_SCORE is not a number (the service factory would fail)")
 
     try:
         policy = qrl.load_question_rate_policy()
@@ -114,8 +132,12 @@ def check(*, expected_ids: frozenset[str] | None = None,
 
     # Same factory as main.py. READ-only must never build a model client (provider not loaded).
     if not failures:
-        service = rag_qa.build_question_service(carbon_service=object(), write_gate=None, rate_limiter=None,
-                                                allowed_user_ids=cohort)
+        try:
+            service = rag_qa.build_question_service(carbon_service=object(), write_gate=None, rate_limiter=None,
+                                                    allowed_user_ids=cohort)
+        except Exception as exc:  # noqa: BLE001 - a traceback could echo an env value; report the type only
+            failures.append(f"the service factory failed: {type(exc).__name__}")
+            return failures, facts
         if getattr(service, "_llm", None) is not None or getattr(service, "_action_tier_enabled", True):
             failures.append("the service factory built an action tier / model client")
         else:

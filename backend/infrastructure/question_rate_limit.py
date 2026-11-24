@@ -170,6 +170,7 @@ class PostgresQuestionRateStore:
             logger.error("rag_question_rate_store_error type=%s", type(exc).__name__)
             raise QuestionRateLimitUnavailable("the question rate limit store is unavailable") from exc
         if row is None:
+            logger.error("rag_question_rate_store_error type=EmptyResult")
             raise QuestionRateLimitUnavailable("the question rate limit store returned nothing")
         if isinstance(row, Mapping):
             allowed, window, retry = row["allowed"], row["limit_window"], row["retry_after_seconds"]

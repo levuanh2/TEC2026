@@ -118,10 +118,12 @@ path **before** any deploy. Nothing in this section was run on hosted.
 6. Only then deploy the code of #92 + #95, following the merge / release plan the owner approved.
    Before the running container is replaced, run the offline configuration check **in the
    candidate image** with the production env-file and no network:
-   `docker run --rm --network none --env-file <api env-file> --entrypoint python <candidate image> -m rag_qa_preflight --expect-user-ids-file <approved ids>`.
+   `docker run --rm --network none --env-file <api env-file> -v <approved ids file>:/run/cohort.txt:ro --entrypoint python <candidate image> -m rag_qa_preflight --expect-user-ids-file /run/cohort.txt`
+   (the ids file is mounted read-only; without the mount the check stops with a USAGE error).
    It must print `RAG-QA-PREFLIGHT PASS (configuration only)`. It refuses `*`, an empty or
    malformed cohort, a cohort that differs from the approved set, the action tier, a provider or
-   its credential variables, a store other than `postgres`, bad limits, and settings main.py
+   its credential variables, a store other than `postgres`, bad limits, a Carbon parameter file
+   that does not load, a non-numeric `RAG_RETRIEVAL_MIN_FUSED_SCORE`, and settings main.py
    needs to wire Q&A. A malformed cohort or limit makes main.py fail at import, which stops the
    **whole** API, so this check comes first. PASS is configuration only: database, Auth and
    network readiness are shown by the candidate's start-up log and the smoke, not by it.

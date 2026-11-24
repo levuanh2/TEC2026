@@ -35,7 +35,7 @@ PILOT_ENV = {
     "SUPABASE_SERVICE_ROLE_KEY": SECRET_KEY,
     "SUPABASE_DB_URL": SECRET_DB_URL,
 }
-CLEARED = ("RAG_QA_ACTION_TIER_ENABLED", "RAG_LLM_PROVIDER", "RAG_LLM_API_KEY", "GEMINI_API_KEY",
+CLEARED = ("AGRICARBON_EF_CONFIG", "RAG_QA_ACTION_TIER_ENABLED", "RAG_LLM_PROVIDER", "RAG_LLM_API_KEY", "GEMINI_API_KEY",
            "DEEPSEEK_API_KEY", "RAG_RETRIEVAL_MIN_FUSED_SCORE")
 
 
@@ -86,6 +86,8 @@ def test_approved_pilot_configuration_passes(pilot_env, tmp_path):
     ("DEEPSEEK_API_KEY", "sk-never-print", "provider credential variables present: DEEPSEEK_API_KEY"),
     ("SUPABASE_DB_URL", "", "missing: SUPABASE_DB_URL"),
     ("SUPABASE_PUBLISHABLE_KEY", "", "(Auth)"),
+    ("AGRICARBON_EF_CONFIG", "/nonexistent/never-print.yaml", "does not load: "),
+    ("RAG_RETRIEVAL_MIN_FUSED_SCORE", "never-print", "RAG_RETRIEVAL_MIN_FUSED_SCORE is not a number"),
 ])
 def test_each_unsafe_or_broken_setting_fails(pilot_env, tmp_path, name, value, reason):
     pilot_env.setenv(name, value)
@@ -140,3 +142,28 @@ def test_all_failures_are_reported_at_once(pilot_env, tmp_path):
     pilot_env.setenv("RAG_QA_ACTION_TIER_ENABLED", "true")
     code, text = run(tmp_path)
     assert code == 1 and "RAG-QA-PREFLIGHT FAIL (3)" in text, text
+
+
+def test_a_dotenv_in_the_image_is_applied_before_any_rag_setting_is_read(pilot_env, tmp_path):
+    """main.py calls load_settings() (which reads backend/.env into the environment) before it reads
+    any RAG_* value; the preflight must judge that same environment, not the env-file alone."""
+    pilot_env.delenv("RAG_QA_ACTION_TIER_ENABLED", raising=False)
+    pilot_env.delenv("RAG_LLM_PROVIDER", raising=False)
+    dotenv = tmp_path / "image.env"
+    dotenv.write_text("RAG_QA_ACTION_TIER_ENABLED=true\nRAG_LLM_PROVIDER=gemini\n", encoding="utf-8")
+    out = io.StringIO()
+    code = rag_qa_preflight.main([], out=out, load_settings=lambda: config.load_settings(dotenv_path=dotenv))
+    text = out.getvalue()
+    assert code == 1, text
+    assert "the pilot is READ-only" in text and "RAG_LLM_PROVIDER is set" in text
+
+
+def test_a_failing_service_factory_reports_the_type_only(pilot_env, tmp_path, monkeypatch):
+    import rag_qa
+
+    def boom(**_kwargs):
+        raise RuntimeError("detail that could echo never-print")
+
+    monkeypatch.setattr(rag_qa, "build_question_service", boom)
+    code, text = run(tmp_path)
+    assert code == 1 and "the service factory failed: RuntimeError" in text and "never-print" not in text

@@ -141,3 +141,31 @@ def test_quota_store_failure_raises_the_tripwire(caplog):
     summary = summary_tool.summarise(lines)
     assert [a["alert"] for a in summary["alerts"]] == ["quota_store_unavailable"]
     assert summary["rate_store_errors"] == 1
+
+
+def test_an_empty_quota_store_result_also_raises_the_tripwire(caplog):
+    from contextlib import contextmanager
+
+    from infrastructure import question_rate_limit as qrl
+
+    class Cursor:
+        def execute(self, *_a):
+            pass
+
+        def fetchone(self):
+            return None
+
+    class Conn:
+        def cursor(self):
+            return _ctx(Cursor())
+
+    @contextmanager
+    def _ctx(value):
+        yield value
+
+    store = qrl.PostgresQuestionRateStore("postgresql://never-printed.invalid/db", connection=lambda _c: _ctx(Conn()))
+    with caplog.at_level(logging.INFO, logger=qrl.logger.name), pytest.raises(qrl.QuestionRateLimitUnavailable):
+        store.consume("11111111-2222-3333-4444-555555555555", qrl.QuestionRatePolicy(10, 100))
+    lines = [r.getMessage() for r in caplog.records if r.name == qrl.logger.name]
+    assert lines == ["rag_question_rate_store_error type=EmptyResult"]
+    assert [a["alert"] for a in summary_tool.summarise(lines)["alerts"]] == ["quota_store_unavailable"]
