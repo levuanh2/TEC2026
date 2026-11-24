@@ -14,12 +14,16 @@ A1–A15 status, latency risk, rollback rehearsal). Production remains **NO-GO**
 - #92 head is now `ef6b9a2`. The two commits after `c71f07e` (`efc0f00`, `ef6b9a2`) change test inputs only
   (an ACTION test asks a real farming question instead of "?"); no production code changed. The acceptance
   runs of 2026-11-21 ran on `c71f07e`. CI 17/17 on `ef6b9a2`.
-- #95 (Draft, stacked on #92, head `ec06989` since 2026-11-24; `d69550e` before) adds the per-user question rate limit (A12 code path; the values
+- #95 (Draft, stacked on #92, head `37e2d54` since 2026-11-24; `ec06989` and `d69550e` before) adds the per-user question rate limit (A12 code path; the values
   10/min and 100/24 h are PROPOSED, not owner decisions) and pilot monitoring (A13 prep). Its release order and
   safeguards are in `docs/rag/RAG_QA_PILOT_SAFEGUARDS.md` and `docs/rag/RAG_V15_RELEASE_LEVELS.md` on that
   branch. CI 17/17 on `d69550e` (2026-11-23) and on `ec06989` (2026-11-24). `ec06989` adds only DB tests and a
   mandatory read-only database role preflight to that runbook (§5.1: the API's database login must satisfy the
-  quota table's forced RLS); it is prepared, not run on hosted.
+  quota table's forced RLS); it is prepared, not run on hosted. `1fb4fe5..37e2d54` add the pilot cohort gate
+  (`RAG_QA_ALLOWED_USER_IDS`: unset = nobody, a non-cohort caller gets 403 `question_not_enabled` before the quota
+  and any read; `*` is never a pilot value), an offline configuration preflight run in the candidate image before
+  a deploy (`python -m rag_qa_preflight`; a malformed cohort or limit would stop the whole API at import), and two
+  tripwires (`cohort_unrestricted`, `quota_store_unavailable`). CI 17/17 on `37e2d54`.
 - Integration validation (TEST ONLY, never merged, closed): #97 `380d325` = #91 `46219b2` + main `63ae678` +
   #95 `d69550e`. CI 17/17; backend + DB 4157 passed / 2 skipped / 0 failed; migration upgrade of a seeded main
   (17 new, 43 total), `db_audit` PASS, lifecycle 36/36; Playwright mock 129. Technical evidence only, not a
@@ -91,7 +95,7 @@ DB tests on an isolated stack in the session that built it (numbers in §10).
 | D8-B topic-aware scope (`question_scope.py`) | ✅ | ✅ | — | ✅ | ✅ code | ⬜ | — |
 | Action tier (recommend/what_if) via provider adapter, quotas, kill switch | ✅ | ✅ | — | ✅ (scripted + 108+ paid DeepSeek-flash synthetic calls, 2026-11-07/08) | ✅ code, no provider | ⬜ | Track C |
 | **Server-side READ-only lock** | ⬜ | ⬜ | **#92** | ✅ (§10) | ⬜ | ⬜ | review (§9) |
-| Per-user question rate limit + pilot monitoring (migration `20261106090000`) | ⬜ | ⬜ | **#95** (on #92) | ✅ (CI 17/17 at `d69550e`, 2026-11-23; at `ec06989`, 2026-11-24) | ⬜ | ⬜ | review (§9); A-12 values and hosted migration approval |
+| Per-user question rate limit + pilot monitoring (migration `20261106090000`) | ⬜ | ⬜ | **#95** (on #92) | ✅ (CI 17/17 at `d69550e`, 2026-11-23; at `ec06989` and at `37e2d54`, 2026-11-24) | ⬜ | ⬜ | review (§9); A-12 values and hosted migration approval |
 | Migration A, ST1, ST1.1 (knowledge tables, lexical RPC, artifact guard) | ✅ | ✅ | — | ✅ | ✅ hosted | — (0 approved docs) | — |
 | Migration `20261105090000` (batch/carbon set-based RLS) | ✅ | ✅ | — | ✅ | **UNVERIFIED** | — | read-only hosted check |
 | M1 status lifecycle, M2 verified approval + H-a/H-b/H-c hardening, M3 effective dates, M4/M4.1 claims + reviewer read, M5 tags, M6 revocation runbook | ⬜ | ✅ (9 migrations) | — | ✅ | ⬜ | ⬜ | integrate → main merge needs review; hosted migrations need per-batch approval |
@@ -180,7 +184,7 @@ READ LLM) is a separate Track C-style effort with its own real-model evaluation.
 |---|---|---|---|
 | A1 | #92 reviewed by an independent human through the owner-controlled review process (§9), with every required review and check satisfied | PR review record, merge SHA | ⬜ |
 | A2 | main CI 17/17 at the exact merge SHA | `gh pr checks` output | ⬜ |
-| A3 | Owner decision A-0 (pilot goal) and A-1 (pilot cohort: named QA/trial accounts only) recorded | decision note | ⬜ |
+| A3 | Owner decision A-0 (pilot goal) and A-1 (pilot cohort: named QA/trial accounts only) recorded; the server enforces it with `RAG_QA_ALLOWED_USER_IDS` (#95), equal to the approved set (deploy preflight) | decision note | ⬜ |
 | A4 | Read-only hosted check (owner-authorized, rolled-back transaction): migration history; `20261105090000` applied or not; `count(*) knowledge_documents where status='approved'` = 0 | SQL output | ⬜ |
 | A5 | Isolated QA (§6): `ai-qa-real.spec.ts` serial on a local or separate-project stack with READ-only flags: farmer, manager, outsider; logout/account switch; 390 px; empty/error/loading | Playwright report + screenshots | ⬜ |
 | A6 | Backend route/auth evidence on that stack: `test_rag_questions_route_db.py`, `test_route_positive_auth.py`, tier-lock tests | pytest log | ⬜ (CI runs DB suites on the PR) |
@@ -355,7 +359,7 @@ The details (access, protection settings, review path) are decided by the owner 
 | `tsc -b` | same | 0 errors |
 | CI on #92 | GitHub | see the PR checks |
 | Earlier rounds (state of record, not re-run) | #81 3924 passed; #89 3948; #90 3978; #91 4005 passed / 7 skipped; #91 CI 17/17 | per PR bodies |
-| Later (2026-11-23 / 24) | #92 `ef6b9a2` CI 17/17; #95 `d69550e` CI 17/17, then `ec06989` (DB role preflight tests) CI 17/17; #91 `46219b2` CI 17/17; TEST-ONLY #97 `380d325` CI 17/17, backend + DB 4157 passed / 2 skipped / 0 failed | GitHub CI |
+| Later (2026-11-23 / 24) | #92 `ef6b9a2` CI 17/17; #95 `d69550e` CI 17/17, then `ec06989` (DB role preflight tests) CI 17/17, then `37e2d54` (cohort gate, configuration preflight, tripwires) CI 17/17; #91 `46219b2` CI 17/17; TEST-ONLY #97 `380d325` CI 17/17, backend + DB 4157 passed / 2 skipped / 0 failed | GitHub CI |
 
 ## 11. Monitoring and rollback (Phase 2 specifics)
 

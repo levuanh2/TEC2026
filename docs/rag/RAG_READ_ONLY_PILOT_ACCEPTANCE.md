@@ -27,7 +27,7 @@ Update 2026-11-24 (no acceptance run was repeated; §3 results belong to `c71f07
 | PR | Head | CI | State |
 |---|---|---|---|
 | #92 | `ef6b9a2` (`efc0f00`, `ef6b9a2`: test inputs only) | 17/17 SUCCESS | OPEN Draft |
-| #95 per-user rate limit + monitoring + DB role preflight, stacked on #92 | `ec06989` (`d69550e` on 2026-11-23) | 17/17 SUCCESS at both | OPEN Draft |
+| #95 per-user rate limit + monitoring + DB role preflight + pilot cohort gate + offline configuration preflight, stacked on #92 | `37e2d54` (2026-11-24; `ec06989` and `d69550e` before) | 17/17 SUCCESS at each | OPEN Draft |
 | this documentation PR | replaces #94 (closed, not merged, 2026-11-24), which replaced #93 | — | Draft |
 | main / integrate/rag-v15 | `63ae678` / `5f7e730` | — | unchanged |
 
@@ -85,7 +85,9 @@ what-if); no number outside the trusted facts; empty corpus → `insufficient_ev
 citations; recommend/what_if → 503 `action_tier_disabled`, identical in and out of scope; 6
 malformed shapes → 422; action wording inside a READ intent stays composed; other farm of the same
 HTX → 404; unknown season → 404; empty journal → data gaps listed without invented numbers; manager
-READ on two farms; outsider → 404 / no panel; signed-out token → 401; farmer sign-out then manager
+READ on two farms; outsider → 404 / no panel (2026-11-21, before #95's cohort gate: with it, a signed-in
+account outside `RAG_QA_ALLOWED_USER_IDS` gets 403 `question_not_enabled` before any read, and 404 stays the
+tenant-scope answer for a cohort account); signed-out token → 401; farmer sign-out then manager
 sign-in → no previous answer; 390 px layout; "mẫu cố định" disclosure; typed action question shows
 "Giai đoạn thử nghiệm chưa có gợi ý hành động…" and is sent as a READ intent.
 
