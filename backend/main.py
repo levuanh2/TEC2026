@@ -204,12 +204,15 @@ if settings.auth_configured and settings.supabase_db_url and settings.supabase_c
 # recommend/what_if additionally need RAG_LLM_* (infrastructure/llm_client.py).
 # Every question is rate limited per verified user (RAG_QA_RATE_LIMIT_*,
 # infrastructure/question_rate_limit.py); a bad limit setting fails start-up.
+# Only the approved pilot cohort may ask (RAG_QA_ALLOWED_USER_IDS: comma-separated Auth user
+# ids, or "*" for everyone signed in); unset = nobody, so enabling Q&A never opens it to all.
 if (os.environ.get("RAG_QA_ENABLED", "").strip().lower() == "true"
         and settings.auth_configured and settings.supabase_db_url and settings.supabase_configured):
     from infrastructure.question_rate_limit import build_question_rate_limiter
     _rag_question_singleton = rag_qa.build_question_service(
         carbon_service=_service_singleton, write_gate=PostgresRecommendationRepository(settings).assert_can_write,
-        rate_limiter=build_question_rate_limiter(db_url=settings.supabase_db_url))
+        rate_limiter=build_question_rate_limiter(db_url=settings.supabase_db_url),
+        allowed_user_ids=rag_qa.pilot_cohort_from_env())
     app.dependency_overrides[api._rag_question_service] = lambda: _rag_question_singleton
 
 if settings.auth_configured and settings.supabase_db_url and settings.supabase_configured:

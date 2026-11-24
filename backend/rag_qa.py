@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -57,7 +58,8 @@ from recommendation.rag import (
     RagQuestionRequest,
     UnsupportedWhatIfDimension,
 )
-from recommendation.rag.errors import ActionTierDisabled, QuestionRateLimitUnavailable, QuestionRateLimited
+from recommendation.rag.errors import (ActionTierDisabled, QuestionNotEnabledForAccount, QuestionRateLimitUnavailable,
+                                       QuestionRateLimited)
 from recommendation.rag.models import SIMULABLE_SCENARIOS
 from recommendation.rag.informational import CapabilityRoutedGenerator
 
@@ -307,6 +309,34 @@ def action_tier_enabled_from_env(env: Mapping[str, str] | None = None) -> bool:
     return (env.get(ACTION_TIER_ENV) or "").strip().lower() == "true"
 
 
+#: Pilot cohort gate. A comma-separated list of Supabase Auth user ids allowed to ask; the
+#: exact value "*" opens Q&A to every signed-in user (an owner decision, never the default).
+#: Unset or empty = nobody (fail closed): turning RAG_QA_ENABLED on never opens the pilot to
+#: all users by accident.
+ALLOWED_USERS_ENV = "RAG_QA_ALLOWED_USER_IDS"
+
+
+def pilot_cohort_from_env(env: Mapping[str, str] | None = None) -> frozenset[str] | None:
+    """`None` = no cohort restriction ("*"); a frozenset = only these user ids (empty = nobody).
+    A value that is not a UUID makes start-up fail, like a bad rate-limit setting."""
+    env = os.environ if env is None else env
+    raw = (env.get(ALLOWED_USERS_ENV) or "").strip()
+    if raw == "*":
+        logger.warning("rag_question_cohort mode=open_to_all_signed_in_users")
+        return None
+    ids: set[str] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.add(str(uuid.UUID(part)))
+        except ValueError:
+            raise ValueError(f"{ALLOWED_USERS_ENV} must be '*' or comma-separated UUIDs") from None
+    logger.info("rag_question_cohort mode=%s users=%s", "allow_list" if ids else "closed", len(ids))
+    return frozenset(ids)
+
+
 class RagQuestionService:
     """`POST /v1/crop-seasons/{id}/questions`. Long-lived; per-request reader.
 
@@ -318,9 +348,13 @@ class RagQuestionService:
     def __init__(self, *, carbon_service: Any, llm_client: StructuredLlmClient | None = None,
                  retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None,
                  quota: QuotaGate | None = None, action_tier_enabled: bool = True,
-                 rate_limiter: question_rate_limit.QuestionRateLimiter | None = None) -> None:
+                 rate_limiter: question_rate_limit.QuestionRateLimiter | None = None,
+                 allowed_user_ids: frozenset[str] | None = None) -> None:
         self._carbon = carbon_service
         self._rate_limiter = rate_limiter
+        # None = no cohort restriction (tests / "*"); a set = only these verified user ids.
+        self._allowed_user_ids = (None if allowed_user_ids is None
+                                  else frozenset(str(uuid.UUID(u)) for u in allowed_user_ids))
         self._action_tier_enabled = action_tier_enabled
         self._llm = llm_client if action_tier_enabled else None
         self._retrieval = retrieval or RetrievalSettings()
@@ -339,13 +373,31 @@ class RagQuestionService:
     def rate_limited(self) -> bool:
         return self._rate_limiter is not None
 
-    def _consume_question(self, reader: Any, request_id: str | None) -> str:
-        """Verify the caller with Supabase Auth, then count one question for that user.
+    @property
+    def cohort_restricted(self) -> bool:
+        return self._allowed_user_ids is not None
 
-        `reader.user_id()` is the Auth call: an expired, invalid, logged-out or revoked JWT
-        raises `InvalidTokenError` (401) here, before any quota row is touched. Nothing else is
-        read before the limit, so an over-limit request is the same for every season id."""
+    def _verify_caller(self, reader: Any) -> str | None:
+        """Supabase Auth verification (one call) when the cohort gate or the rate limit needs the
+        user id, then the cohort gate. `reader.user_id()` raises `InvalidTokenError` (401) for an
+        expired, invalid, logged-out or revoked JWT, before any quota row is touched. A caller
+        outside the approved cohort is refused here: no quota is used and nothing about any
+        season is read, so the refusal is the same for every season id."""
+        if self._allowed_user_ids is None and self._rate_limiter is None:
+            return None
         user_id = str(reader.user_id())
+        if self._allowed_user_ids is not None:
+            try:
+                normalised = str(uuid.UUID(user_id))
+            except ValueError:
+                normalised = ""
+            if normalised not in self._allowed_user_ids:
+                raise QuestionNotEnabledForAccount("this account is not in the approved Q&A cohort")
+        return user_id
+
+    def _consume_question(self, user_id: str, request_id: str | None) -> str:
+        """Count one question for the user verified by `_verify_caller`. Nothing else is read
+        before the limit, so an over-limit request is the same for every season id."""
         try:
             self._rate_limiter.consume(user_id, request_id=request_id)
         except question_rate_limit.QuestionRateLimited as exc:
@@ -365,8 +417,9 @@ class RagQuestionService:
                 # First statement: nothing is read, simulated, retrieved or generated, and the
                 # refusal is the same for every season, so it reveals nothing about scope.
                 raise ActionTierDisabled("the action tier is disabled on this server")
-            verified_user_id = (self._consume_question(reader, request_id)
-                                if self._rate_limiter is not None else None)
+            verified_user_id = self._verify_caller(reader)
+            if self._rate_limiter is not None:
+                self._consume_question(verified_user_id, request_id)
             if question.mode is not RagMode.ASK:
                 raise RagAccessDenied("only ask mode is available")
             hypothetical = None
@@ -446,6 +499,7 @@ HTTP_STATUS: dict[str, int] = {
     "quota_exceeded": 429,
     "question_rate_limited": 429,
     "question_rate_limit_unavailable": 503,
+    "question_not_enabled": 403,
 }
 
 PUBLIC_MESSAGES: dict[str, str] = {
@@ -458,6 +512,7 @@ PUBLIC_MESSAGES: dict[str, str] = {
     "quota_exceeded": "Đã đạt giới hạn lượt hỏi trợ lý AI cho hôm nay. Vui lòng thử lại sau.",
     "question_rate_limited": "Bạn đã hỏi quá nhiều câu trong thời gian ngắn. Vui lòng thử lại sau.",
     "question_rate_limit_unavailable": "Trợ lý tạm thời chưa nhận câu hỏi. Vui lòng thử lại sau.",
+    "question_not_enabled": "Tính năng hỏi đáp đang thử nghiệm và chưa mở cho tài khoản này.",
 }
 _GROUNDING_MESSAGE = "Câu trả lời không vượt qua kiểm tra nguồn dẫn nên đã bị chặn. Vui lòng thử lại."
 
@@ -483,18 +538,22 @@ def respond(service: RagQuestionService, **kwargs: Any) -> dict[str, Any]:
 
 
 def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None,
-                           rate_limiter: question_rate_limit.QuestionRateLimiter | None = None) -> RagQuestionService:
+                           rate_limiter: question_rate_limit.QuestionRateLimiter | None = None,
+                           allowed_user_ids: frozenset[str] | None = None) -> RagQuestionService:
     """Composition-root factory: tier, provider and retrieval cutoff from server-side env only.
 
     READ-only unless `RAG_QA_ACTION_TIER_ENABLED=true`: then no provider setting is even
     read, so a stray `RAG_LLM_PROVIDER` or API key cannot make a model reachable.
-    `rate_limiter` is always passed by main.py (`build_question_rate_limiter`); tests may omit it."""
+    `rate_limiter` is always passed by main.py (`build_question_rate_limiter`); tests may omit it.
+    `allowed_user_ids` is always passed by main.py (`pilot_cohort_from_env()`, closed when unset);
+    `None` (tests, or the explicit "*") means no cohort restriction."""
     raw = (os.environ.get("RAG_RETRIEVAL_MIN_FUSED_SCORE") or "").strip()
     retrieval = RetrievalSettings(min_fused_score=float(raw)) if raw else RetrievalSettings()
     if not action_tier_enabled_from_env():
         logger.info("rag_question_service tier=read_only provider=not_loaded")
         return RagQuestionService(carbon_service=carbon_service, retrieval=retrieval, write_gate=write_gate,
-                                  action_tier_enabled=False, rate_limiter=rate_limiter)
+                                  action_tier_enabled=False, rate_limiter=rate_limiter,
+                                  allowed_user_ids=allowed_user_ids)
 
     from infrastructure.llm_client import build_llm_client, load_llm_settings
     from infrastructure.llm_quota import build_quota_gate, load_quota_policy
@@ -504,7 +563,8 @@ def build_question_service(*, carbon_service: Any, write_gate: WriteGate | None,
     logger.warning("rag_alert action_tier_enabled provider_configured=%s", settings is not None)
     return RagQuestionService(carbon_service=carbon_service, llm_client=build_llm_client(settings),
                               retrieval=retrieval, write_gate=write_gate,
-                              quota=build_quota_gate(load_quota_policy(), settings), rate_limiter=rate_limiter)
+                              quota=build_quota_gate(load_quota_policy(), settings), rate_limiter=rate_limiter,
+                              allowed_user_ids=allowed_user_ids)
 
 
 def http_error(exc: RagError) -> tuple[int, str, str]:

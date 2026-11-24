@@ -128,6 +128,7 @@ describe('SeasonQuestionPanel', () => {
     [503, 'action_tier_disabled', /chỉ hỗ trợ câu hỏi giải thích/, false],
     [429, 'question_rate_limited', /hỏi quá nhiều câu/, false],
     [503, 'question_rate_limit_unavailable', /tạm thời chưa nhận câu hỏi/, false],
+    [403, 'question_not_enabled', /chưa mở cho tài khoản này/, false],
     [404, 'not_found', /không có quyền/, false],
     [502, 'citation_mismatch', /kiểm tra nguồn dẫn/, true],
     [0, 'offline', /Không có kết nối/, true],

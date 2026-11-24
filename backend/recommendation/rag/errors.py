@@ -61,6 +61,14 @@ class QuestionRateLimitUnavailable(RagError):
     code = "question_rate_limit_unavailable"
 
 
+class QuestionNotEnabledForAccount(RagError):
+    """Pilot cohort gate (`RAG_QA_ALLOWED_USER_IDS`): the verified caller is not in the approved
+    QA cohort. Raised after JWT verification and before the rate limit and any season read, so
+    it costs no quota and is the same for every season id."""
+
+    code = "question_not_enabled"
+
+
 class InvalidGeneratedSchema(RagError):
     code = "invalid_generated_schema"
 

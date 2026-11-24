@@ -57,6 +57,11 @@ what_if_scenario?}`. It has no organization, farm, tenant or filter field, and u
   Store `RAG_QA_RATE_LIMIT_STORE=postgres` (default; durable, atomic, migration 20261106090000) or
   `memory` (one API process only). A store that cannot answer gives 503
   `question_rate_limit_unavailable`; there is no "off".
+- **Pilot cohort (before the rate limit):** after the JWT is verified, only the Supabase Auth user
+  ids in `RAG_QA_ALLOWED_USER_IDS` (comma-separated) may ask; anyone else gets 403
+  `question_not_enabled`, identical for every `crop_season_id`, with no quota used and nothing read.
+  Unset or empty = nobody (fail closed); the exact value `*` opens Q&A to every signed-in user (an
+  owner decision). A value that is not `*` or UUIDs fails start-up.
 - **Switch:** the route is OFF unless `RAG_QA_ENABLED=true`, and returns 503
   `backend_not_configured` while off.
 - **Further reading:** `docs/rag/RAG_V1_ARCHITECTURE.md`.

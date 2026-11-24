@@ -12,11 +12,18 @@ hosted, staging or production.
    `action_tier_disabled`. Reads nothing, costs no quota.
 2. Supabase Auth verifies the JWT (`reader.user_id()`): invalid, expired, logged-out or revoked
    → 401 `unauthenticated`. Not counted.
-3. One question is counted for the **verified user id**. Over the limit → 429
+3. Pilot cohort gate: the verified user id must be in `RAG_QA_ALLOWED_USER_IDS`
+   (comma-separated Auth user ids of the approved A-1 accounts). Anyone else → 403
+   `question_not_enabled` "Tính năng hỏi đáp đang thử nghiệm và chưa mở cho tài khoản này.", same
+   body for every season id, no quota used, nothing read. Unset/empty = nobody (fail closed); `*` =
+   every signed-in user, an explicit owner decision for a later level, never for the L1 pilot.
+   Without this gate, `RAG_QA_ENABLED=true` + `VITE_AI_QA_ENABLED=true` would open Q&A to every
+   farmer and manager in production, not only to the cohort.
+4. One question is counted for the **verified user id**. Over the limit → 429
    `question_rate_limited` + `Retry-After: <seconds>`, Vietnamese message
    "Bạn đã hỏi quá nhiều câu trong thời gian ngắn. Vui lòng thử lại sau." Same body for every
    season id (no tenant information; changing the season id does not reset the count).
-4. Only then: scope check, season / Carbon / knowledge reads, composition.
+5. Only then: scope check, season / Carbon / knowledge reads, composition.
 
 | Setting (server env) | Default | Notes |
 |---|---|---|
