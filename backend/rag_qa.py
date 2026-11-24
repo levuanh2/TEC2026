@@ -386,14 +386,22 @@ class RagQuestionService:
         if self._allowed_user_ids is None and self._rate_limiter is None:
             return None
         user_id = str(reader.user_id())
-        if self._allowed_user_ids is not None:
-            try:
-                normalised = str(uuid.UUID(user_id))
-            except ValueError:
-                normalised = ""
-            if normalised not in self._allowed_user_ids:
-                raise QuestionNotEnabledForAccount("this account is not in the approved Q&A cohort")
+        if not self.in_cohort(user_id):
+            raise QuestionNotEnabledForAccount("this account is not in the approved Q&A cohort")
         return user_id
+
+    def in_cohort(self, user_id: str) -> bool:
+        """The ONE cohort decision, used by `answer` (refuses with 403) and by GET /v1/me's
+        `ai_qa_available` (shows or hides the web panel), so the two can never disagree.
+        `user_id` must already be verified by Supabase Auth. True only for a listed id, or for
+        every id when the cohort is unrestricted ("*"); an empty cohort or a value that is not a
+        UUID is False. Visibility is not authorization: `answer` still checks the tenant scope."""
+        if self._allowed_user_ids is None:
+            return True
+        try:
+            return str(uuid.UUID(str(user_id))) in self._allowed_user_ids
+        except ValueError:
+            return False
 
     def _consume_question(self, user_id: str, request_id: str | None) -> str:
         """Count one question for the user verified by `_verify_caller`. Nothing else is read
