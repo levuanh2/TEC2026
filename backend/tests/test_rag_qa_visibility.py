@@ -84,14 +84,25 @@ def test_the_default_dependency_that_refuses_with_503_hides_it():
     assert response.status_code == 200 and response.json()["ai_qa_available"] is False
 
 
-def test_any_error_deciding_hides_it_and_keeps_me_working(caplog):
+def test_any_error_deciding_hides_it_and_keeps_me_working(monkeypatch):
     class Broken:
         def in_cohort(self, _user_id):
             raise RuntimeError("cohort unknown")
+
+    class Recorder:
+        """Not caplog: another test's logging config can disable `agricarbon.api` in the full suite."""
+        def __init__(self):
+            self.lines = []
+
+        def warning(self, msg, *args):
+            self.lines.append(msg % args)
+
+    recorder = Recorder()
+    monkeypatch.setattr(api, "logger", recorder)
     client = app_client(Broken(), MeReader(user=USER_A))
     response = me(client)
     assert response.status_code == 200 and response.json()["ai_qa_available"] is False
-    assert any("rag_question_capability_unavailable type=RuntimeError" in r.getMessage() for r in caplog.records)
+    assert recorder.lines == ["rag_question_capability_unavailable type=RuntimeError"]
 
 
 def test_a_truthy_non_boolean_answer_is_not_true():
