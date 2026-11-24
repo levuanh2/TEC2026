@@ -14,9 +14,9 @@ import './aiQuestions.css'
 
 export type QuestionAudience = 'farmer' | 'manager'
 
-/** Build-time switch for the entry points (default OFF). The backend route has its own
- * switch (RAG_QA_ENABLED); both must be on for the panel to be shown and answer. */
-export const aiQuestionsEnabled = import.meta.env.VITE_AI_QA_ENABLED === 'true'
+// Entry points decide visibility with `useAiQuestionsVisible()` (aiQuestionsVisibility.ts): the
+// build flag VITE_AI_QA_ENABLED AND the server's `ai_qa_available` for this session (V-1b).
+// There is deliberately no build-flag-only export here any more.
 /** Offer the farmer action intent only when the server's action tier is on too
  *  (`RAG_QA_ACTION_TIER_ENABLED=true`); the server refuses it either way when it is off. */
 export const aiActionTierEnabled = import.meta.env.VITE_AI_QA_ACTION_ENABLED === 'true'
