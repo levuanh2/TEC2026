@@ -62,6 +62,12 @@ what_if_scenario?}`. It has no organization, farm, tenant or filter field, and u
   `question_not_enabled`, identical for every `crop_season_id`, with no quota used and nothing read.
   Unset or empty = nobody (fail closed); the exact value `*` opens Q&A to every signed-in user (an
   owner decision). A value that is not `*` or UUIDs fails start-up.
+- **Panel visibility (`GET /v1/me` `ai_qa_available`):** true only when this server has Q&A enabled
+  and wired, the verified caller is in the same cohort the route checks (one decision,
+  `RagQuestionService.in_cohort`), and no password change is pending; otherwise false (also on any
+  error while deciding). It reads no quota, calls no model, reads no season and never describes
+  another account. The web shows the Q&A panel only when its build flag is on AND this field is
+  `true`; a missing or non-boolean value hides it. Visibility is not authorization.
 - **Switch:** the route is OFF unless `RAG_QA_ENABLED=true`, and returns 503
   `backend_not_configured` while off.
 - **Further reading:** `docs/rag/RAG_V1_ARCHITECTURE.md`.
