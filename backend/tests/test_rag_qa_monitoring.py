@@ -100,3 +100,44 @@ def test_an_unsafe_client_request_id_is_replaced(supplied, caplog):
     assert echoed != supplied and len(echoed) == 36
     access = [r.getMessage() for r in caplog.records if r.name == "agricarbon.access"]
     assert access and supplied not in access[0] and f"request_id={echoed} " in access[0]
+
+
+# -- cohort + quota store tripwires (from the backend's own log lines) ------------------------
+
+def _cohort_lines(value, caplog):
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=rag_qa.logger.name):
+        rag_qa.pilot_cohort_from_env({"RAG_QA_ALLOWED_USER_IDS": value})
+    return [r.getMessage() for r in caplog.records if r.name == rag_qa.logger.name]
+
+
+def test_unrestricted_cohort_start_up_raises_the_tripwire(caplog):
+    lines = _cohort_lines("*", caplog)
+    assert lines == ["rag_question_cohort mode=open_to_all_signed_in_users"]
+    summary = summary_tool.summarise(lines)
+    assert [a["alert"] for a in summary["alerts"]] == ["cohort_unrestricted"]
+    assert summary["cohort_modes_seen"] == {"open_to_all_signed_in_users": 1}
+
+
+@pytest.mark.parametrize("value,mode", [("11111111-2222-3333-4444-555555555555", "allow_list"), ("", "closed")])
+def test_allow_list_or_closed_cohort_is_no_alert(caplog, value, mode):
+    lines = _cohort_lines(value, caplog)
+    summary = summary_tool.summarise(lines)
+    assert summary["alerts"] == [] and summary["cohort_modes_seen"] == {mode: 1}
+    assert "11111111-2222" not in "\n".join(lines)  # the log line carries a count, never an id
+
+
+def test_quota_store_failure_raises_the_tripwire(caplog):
+    from infrastructure import question_rate_limit as qrl
+
+    def broken(_conninfo):
+        raise OSError("connection refused")
+
+    store = qrl.PostgresQuestionRateStore("postgresql://never-printed.invalid/db", connection=broken)
+    with caplog.at_level(logging.INFO, logger=qrl.logger.name), pytest.raises(qrl.QuestionRateLimitUnavailable):
+        store.consume("11111111-2222-3333-4444-555555555555", qrl.QuestionRatePolicy(10, 100))
+    lines = [r.getMessage() for r in caplog.records if r.name == qrl.logger.name]
+    assert lines == ["rag_question_rate_store_error type=OSError"]
+    summary = summary_tool.summarise(lines)
+    assert [a["alert"] for a in summary["alerts"]] == ["quota_store_unavailable"]
+    assert summary["rate_store_errors"] == 1

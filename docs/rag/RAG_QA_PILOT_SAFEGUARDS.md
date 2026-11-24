@@ -51,6 +51,8 @@ pruned after 24 h), so retrying while limited does not extend the wait.
 | `rag_question` (`agricarbon.rag`) | `request_id intent mode status error llm_calls tokens cost llm_ms total_ms tier` | errors by code; `llm_calls`; tier |
 | `rag_question_service` | `tier=read_only provider=not_loaded` / `tier=read_and_action ...` | start-up tier |
 | `rag_question_rate_limited` | `request_id window retry_after_s` | 429 by window |
+| `rag_question_rate_store_error` (ERROR) | `type` | the quota store failed; that question was 503 (fail closed) |
+| `rag_question_cohort` | `mode=allow_list users=<n>` / `mode=closed users=0` / `mode=open_to_all_signed_in_users` (WARNING) | start-up cohort (§1 step 3) |
 | `rag_alert` (ERROR) | `llm_calls_in_read_only` / `action_tier_enabled` | tripwires (§3) |
 | `rag_tenant_isolation_violation` (ERROR) | — | security failure |
 
@@ -72,8 +74,13 @@ percentiles, and exits 1 on any alert. No paid monitoring service is needed:
 | `llm_calls_nonzero` | any `llm_calls > 0` while READ-only is expected | stop Q&A now |
 | `action_tier_enabled` | API started with `tier=read_and_action` | stop Q&A now |
 | `tenant_isolation` | any tenant-isolation violation | stop Q&A now |
+| `cohort_unrestricted` | API started with `RAG_QA_ALLOWED_USER_IDS=*` | stop Q&A now during the pilot (`*` is never a pilot value) |
+| `quota_store_unavailable` | any `rag_question_rate_store_error` | investigate now; every question is refused while it lasts |
 | `server_errors` | 5xx > 2 % of ≥ 20 questions in the window | investigate; stop if it persists |
 | `latency_p95` | p95 > 8000 ms over ≥ 20 questions | investigate (each question is 26–41 sequential statements) |
+
+The summary only sees an API that runs: an API that fails to start writes no Q&A line, so the
+container state / a health probe must be watched separately.
 
 Who receives the alert and who may stop Q&A: **PENDING (A-13)**. The person needs shell access to
 the API host (container env + Caddy). Until A-13 is decided, the pilot must not open.
@@ -109,9 +116,20 @@ path **before** any deploy. Nothing in this section was run on hosted.
 5. Fail-closed and recovery check on an isolated stack with the same versions (not on
    production): function missing → 503; function back → 200.
 6. Only then deploy the code of #92 + #95, following the merge / release plan the owner approved.
+   Before the running container is replaced, run the offline configuration check **in the
+   candidate image** with the production env-file and no network:
+   `docker run --rm --network none --env-file <api env-file> --entrypoint python <candidate image> -m rag_qa_preflight --expect-user-ids-file <approved ids>`.
+   It must print `RAG-QA-PREFLIGHT PASS (configuration only)`. It refuses `*`, an empty or
+   malformed cohort, a cohort that differs from the approved set, the action tier, a provider or
+   its credential variables, a store other than `postgres`, bad limits, and settings main.py
+   needs to wire Q&A. A malformed cohort or limit makes main.py fail at import, which stops the
+   **whole** API, so this check comes first. PASS is configuration only: database, Auth and
+   network readiness are shown by the candidate's start-up log and the smoke, not by it.
 7. Production smoke (one QA account, within its quota): READ answers 200 with `llm_calls 0`;
    recommend 503 `action_tier_disabled`; question 11 within a minute 429 with `Retry-After`;
-   another QA account is not affected; an outsider gets 404; `rag_qa_log_summary.py` over the
+   another QA account is not affected; a cohort account asking about another tenant's season gets
+   404; a signed-in account outside the cohort gets 403 `question_not_enabled`; an invalid JWT
+   gets 401; `rag_qa_log_summary.py` over the
    smoke window shows no alert; p50 / p95 measured on production (not inferred from local).
 8. Only then open Q&A to the approved QA cohort (A-1).
 

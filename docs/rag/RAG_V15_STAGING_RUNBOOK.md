@@ -127,14 +127,16 @@ questions and record any off-topic answer.
    rag_qa.py, rag_llm_benchmark.py, verify_llm_provider.py, test_rag_questions_route_db.py,
    test_rag_retrieval_db.py, policy.json, plus informational.py / orchestrator.py from the D8-B fix).
 4. Staging (only after a deployment approval): on Render `agricarbon-api-staging`
-   (`srv-danpuojm8hqs73c59fh0`) set `RAG_QA_ENABLED=true`, leave every `RAG_LLM_*`, `GEMINI_*`,
+   (`srv-danpuojm8hqs73c59fh0`) set `RAG_QA_ENABLED=true` and `RAG_QA_ALLOWED_USER_IDS` (the staging QA
+   accounts' Auth user ids; unset = nobody can ask), leave every `RAG_LLM_*`, `GEMINI_*`,
    `DEEPSEEK_*`, `RAG_D8C_ENABLED` unset; on `agricarbon-web-staging` (`srv-danpuojm8hqs73c59fj0`)
    set `VITE_AI_QA_ENABLED=true`; deploy the exact merged SHA to both (`POST /v1/services/{id}/deploys
    {"commitId": "<sha>"}`), poll until `live`, check `commit.id`. No migration, no hosted data write.
 5. Read-only verification: `GET /health`; with a staging QA farmer JWT, `POST
    /v1/crop-seasons/{id}/questions` explain → 200 `system_composed`, `llm_calls 0`; recommend and
-   what_if → 503 `action_tier_disabled` for every caller (action tier off, PR #92); an outsider's
-   explain → 404. The startup log must show `rag_question_service tier=read_only provider=not_loaded`.
+   what_if → 503 `action_tier_disabled` for every caller (action tier off, PR #92); a QA account's
+   explain on another tenant's season → 404; a signed-in account outside `RAG_QA_ALLOWED_USER_IDS`
+   → 403 `question_not_enabled`; an invalid JWT → 401. The startup log must show `rag_question_service tier=read_only provider=not_loaded`.
    Then `ai-qa-real.spec.ts` with `REAL_E2E_BASE_URL=<staging web>` and staging identities, 1 worker
    (the `evidence` assertion expects citations: with the empty hosted corpus, expect that one step to
    report insufficient evidence — run with the spec's evidence step treated as N/A, or after a
