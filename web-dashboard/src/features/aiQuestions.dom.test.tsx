@@ -20,7 +20,7 @@ const ask = {
   reset() { fake.calls.length = 0; fake.queue.length = 0; fake.impl = async () => { throw new Error('unset') } },
 }
 
-import { QUESTION_TIMEOUT_MS, SeasonQuestionPanel } from './aiQuestions'
+import { QA_PRIVACY_NOTICE, QUESTION_TIMEOUT_MS, SeasonQuestionPanel } from './aiQuestions'
 
 const answer = (over: Partial<QuestionAnswer> = {}): QuestionAnswer => ({
   status: 'generated', intent: 'explain', cropSeasonId: 's1',
@@ -75,6 +75,20 @@ describe('SeasonQuestionPanel', () => {
     expect(ask.calls).toHaveLength(0)
     fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() => expect(ask.calls).toHaveLength(1))
+  })
+
+  it('shows the approved privacy notice to farmers and managers, before any question is asked', () => {
+    for (const audience of ['farmer', 'manager'] as const) {
+      render(<SeasonQuestionPanel seasonId="s1" audience={audience} />)
+      const note = screen.getByRole('note', { name: 'Thông báo quyền riêng tư' })
+      expect(note.textContent).toBe(QA_PRIVACY_NOTICE)
+      for (const phrase of ['không gửi nội dung câu hỏi đến mô hình AI bên ngoài', 'chưa cung cấp khuyến nghị canh tác tự động',
+        'Nội dung câu hỏi không được lưu', 'chưa đạt yêu cầu MRV', 'báo cho quản trị viên HTX']) {
+        expect(note.textContent).toContain(phrase)
+      }
+      expect(ask.calls).toHaveLength(0)
+      cleanup()
+    }
   })
 
   it('a manager is never offered the action intent', () => {
