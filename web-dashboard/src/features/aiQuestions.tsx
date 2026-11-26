@@ -17,6 +17,9 @@ export type QuestionAudience = 'farmer' | 'manager'
 /** Build-time switch for the entry points (default OFF). The backend route has its own
  * switch (RAG_QA_ENABLED); both must be on for the panel to be shown and answer. */
 export const aiQuestionsEnabled = import.meta.env.VITE_AI_QA_ENABLED === 'true'
+/** Offer the farmer action intent only when the server's action tier is on too
+ *  (`RAG_QA_ACTION_TIER_ENABLED=true`); the server refuses it either way when it is off. */
+export const aiActionTierEnabled = import.meta.env.VITE_AI_QA_ACTION_ENABLED === 'true'
 
 /** Client-side bound on one question; the server has its own provider timeout. */
 export const QUESTION_TIMEOUT_MS = 45_000
@@ -66,6 +69,7 @@ function failureMessage(error: unknown, timedOut: boolean): { message: string; r
   if (timedOut) return { message: 'Quá thời gian chờ câu trả lời. Bạn có thể thử lại.', retryable: true }
   if (!(error instanceof ApiError)) return { message: 'Không gửi được câu hỏi. Vui lòng thử lại.', retryable: true }
   if (error.code === 'backend_not_configured') return { message: 'Trợ lý hỏi đáp chưa được bật cho hệ thống này.', retryable: false }
+  if (error.code === 'action_tier_disabled') return { message: 'Giai đoạn thử nghiệm chỉ hỗ trợ câu hỏi giải thích số liệu; chưa có gợi ý hành động.', retryable: false }
   if (error.code === 'generation_unavailable') return { message: 'Loại câu hỏi này cần trợ lý AI, hiện chưa sẵn sàng. Hãy chọn loại câu hỏi khác.', retryable: false }
   if (error.status === 404) return { message: 'Không tìm thấy vụ, hoặc bạn không có quyền với loại câu hỏi này.', retryable: false }
   if (error.status === 422) return { message: 'Câu hỏi chưa hợp lệ. Hãy viết ngắn gọn hơn và chọn loại câu hỏi.', retryable: false }
@@ -81,8 +85,12 @@ function factValue(value: QuestionAnswer['facts'][number]['value'], unit: string
   return unit ? `${value} ${unit}` : String(value)
 }
 
-export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; audience: QuestionAudience }) {
-  const intents = audience === 'farmer' ? [...READ_INTENTS, FARMER_ACTION] : READ_INTENTS
+export function SeasonQuestionPanel({ seasonId, audience, actionTier = aiActionTierEnabled }: {
+  seasonId: string; audience: QuestionAudience; actionTier?: boolean
+}) {
+  const canAct = audience === 'farmer' && actionTier
+  const readOnlyTrial = audience === 'farmer' && !actionTier
+  const intents = canAct ? [...READ_INTENTS, FARMER_ACTION] : READ_INTENTS
   const [question, setQuestion] = useState('')
   const [intent, setIntent] = useState<QuestionIntent>('explain')
   // The user's own radio choice always wins over the typed-question hint.
@@ -126,7 +134,7 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
 
   function onQuestionChange(text: string) {
     setQuestion(text)
-    const hint = suggestIntent(text, audience === 'farmer')
+    const hint = suggestIntent(text, canAct)
     setActionNotAvailable(hint.actionNotAvailable)
     if (intentChosen) return
     if (hint.intent && intents.some((o) => o.intent === hint.intent)) {
@@ -179,7 +187,9 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
                   onKeyDown={onKeyDown} aria-describedby={`${ids}-hint`} />
         <p id={`${ids}-hint`} className="aiq__hint" aria-live="polite">
           {autoPicked && <>Đã chọn loại câu hỏi “{INTENT_LABEL[autoPicked]}” theo nội dung câu hỏi. Bạn có thể đổi.</>}
-          {actionNotAvailable && <>Gợi ý hành động chỉ dành cho nông hộ có quyền ghi của vụ. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>}
+          {actionNotAvailable && (readOnlyTrial
+            ? <>Giai đoạn thử nghiệm chưa có gợi ý hành động. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>
+            : <>Gợi ý hành động chỉ dành cho nông hộ có quyền ghi của vụ. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>)}
         </p>
         <div className="aiq__actions">
           <button type="submit" className="aiq__send" disabled={busy || !question.trim()}>

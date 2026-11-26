@@ -35,6 +35,14 @@ class GenerationUnavailable(RagError):
     code = "generation_unavailable"
 
 
+class ActionTierDisabled(RagError):
+    """The server runs READ-only (`RAG_QA_ACTION_TIER_ENABLED` is not "true"): recommend,
+    what_if and non-ASK modes are refused before any read. Not a GenerationUnavailable
+    subclass, so no handler can mistake it for a transient provider failure."""
+
+    code = "action_tier_disabled"
+
+
 class InvalidGeneratedSchema(RagError):
     code = "invalid_generated_schema"
 
