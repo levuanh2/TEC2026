@@ -29,8 +29,10 @@ const dict = (v: unknown): Record<string, unknown> =>
   v != null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 const statusClass = (v: unknown) =>
   v === 'VERIFIED' ? 'verified' : v === 'PENDING_VERIFICATION' ? 'pending' : 'test'
-const statusLabel = (v: unknown) =>
-  v === 'VERIFIED' ? 'Đã xác minh' : v === 'PENDING_VERIFICATION' ? 'Chờ xác minh' : 'Chưa xác minh'
+// VERIFIED means the factor's value was matched to a recorded source table, not that an expert verified it
+// (domain_expert_review is PENDING). Same wording as the MRV label "Hệ số chưa đối chiếu nguồn".
+export const statusLabel = (v: unknown) =>
+  v === 'VERIFIED' ? 'Đã đối chiếu nguồn' : v === 'PENDING_VERIFICATION' ? 'Chờ đối chiếu nguồn' : 'Chưa đối chiếu nguồn'
 
 /**
  * Premium Carbon screen (brief §12): hero result emphasising CO₂e/kg, scenario
@@ -347,7 +349,7 @@ function ProvenanceItem({ entry }: { entry: any }) {
             <p className="muted">—</p>
           )}
 
-          <h4>Trạng thái xác minh tham số</h4>
+          <h4>Trạng thái đối chiếu nguồn của tham số</h4>
           {Object.keys(status).length ? (
             <dl>
               {Object.entries(status).map(([k, v]) => (
