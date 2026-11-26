@@ -17,6 +17,9 @@ one, #33 must still be merged afterwards (its diff then shrinks to docs + V1.5).
 | `VITE_AI_QA_ENABLED` | `true` (build time) | the season panel is shown |
 | `RAG_QA_ACTION_TIER_ENABLED` | **unset** (since PR #92) | READ-only: recommend / what_if are 503 `action_tier_disabled` before any read; provider settings are not even loaded. A demo of AI action answers needs `true` here **and** `VITE_AI_QA_ACTION_ENABLED=true` in the web build, or the feature looks broken |
 | `VITE_AI_QA_ACTION_ENABLED` | **unset** (build time, since PR #92) | the farmer "Gợi ý hành động" option is hidden |
+| `RAG_QA_RATE_LIMIT_PER_MINUTE` / `RAG_QA_RATE_LIMIT_PER_DAY` | unset → 10 / 100 (proposed, not owner-approved) | per verified user, sliding windows; 429 `question_rate_limited` + `Retry-After` before any read; integers ≥ 1 only, a bad value fails start-up |
+| `RAG_QA_ALLOWED_USER_IDS` | the staging QA accounts' Auth user ids, comma-separated (or `*` on a staging stack with test users only) | pilot cohort gate: anyone else gets 403 `question_not_enabled` before the rate limit and any read; **unset = nobody may ask** |
+| `RAG_QA_RATE_LIMIT_STORE` | unset → `postgres` | needs migration `20261106090000_rag_question_rate_limit.sql` on that database; without it every question is 503 `question_rate_limit_unavailable` (fail closed). `memory` = one API process only, resets on restart. Staging shares the hosted Supabase, so applying it for staging **is** the hosted migration: follow the release order in `RAG_QA_PILOT_SAFEGUARDS.md` §5 (Path A, or an explicitly chosen Path B). The limit is per account: testers sharing a QA account share its quota (§6) |
 | `RAG_LLM_PROVIDER` | **unset** | strategy B baseline: READ composed, action intents 503 |
 | `RAG_D8C_ENABLED` | **unset** (not in this branch) | — |
 | `RAG_LLM_KILL_SWITCH` | `true` once a provider is ever configured, until its gate passes | no model call at all |
@@ -124,14 +127,16 @@ questions and record any off-topic answer.
    rag_qa.py, rag_llm_benchmark.py, verify_llm_provider.py, test_rag_questions_route_db.py,
    test_rag_retrieval_db.py, policy.json, plus informational.py / orchestrator.py from the D8-B fix).
 4. Staging (only after a deployment approval): on Render `agricarbon-api-staging`
-   (`srv-danpuojm8hqs73c59fh0`) set `RAG_QA_ENABLED=true`, leave every `RAG_LLM_*`, `GEMINI_*`,
+   (`srv-danpuojm8hqs73c59fh0`) set `RAG_QA_ENABLED=true` and `RAG_QA_ALLOWED_USER_IDS` (the staging QA
+   accounts' Auth user ids; unset = nobody can ask), leave every `RAG_LLM_*`, `GEMINI_*`,
    `DEEPSEEK_*`, `RAG_D8C_ENABLED` unset; on `agricarbon-web-staging` (`srv-danpuojm8hqs73c59fj0`)
    set `VITE_AI_QA_ENABLED=true`; deploy the exact merged SHA to both (`POST /v1/services/{id}/deploys
    {"commitId": "<sha>"}`), poll until `live`, check `commit.id`. No migration, no hosted data write.
 5. Read-only verification: `GET /health`; with a staging QA farmer JWT, `POST
    /v1/crop-seasons/{id}/questions` explain → 200 `system_composed`, `llm_calls 0`; recommend and
-   what_if → 503 `action_tier_disabled` for every caller (action tier off, PR #92); an outsider's
-   explain → 404. The startup log must show `rag_question_service tier=read_only provider=not_loaded`.
+   what_if → 503 `action_tier_disabled` for every caller (action tier off, PR #92); a QA account's
+   explain on another tenant's season → 404; a signed-in account outside `RAG_QA_ALLOWED_USER_IDS`
+   → 403 `question_not_enabled`; an invalid JWT → 401. The startup log must show `rag_question_service tier=read_only provider=not_loaded`.
    Then `ai-qa-real.spec.ts` with `REAL_E2E_BASE_URL=<staging web>` and staging identities, 1 worker
    (the `evidence` assertion expects citations: with the empty hosted corpus, expect that one step to
    report insufficient evidence — run with the spec's evidence step treated as N/A, or after a
