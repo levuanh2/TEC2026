@@ -88,6 +88,15 @@ function factValue(value: QuestionAnswer['facts'][number]['value'], unit: string
   return unit ? `${value} ${unit}` : String(value)
 }
 
+/** A11 privacy notice, owner-approved text (2026-11-25). Shown above the panel for every pilot user. */
+export const QA_PRIVACY_NOTICE =
+  'Tính năng hỏi đáp đang trong giai đoạn thử nghiệm, hỗ trợ giải thích dữ liệu vụ mùa thuộc phạm vi được phép truy cập. ' +
+  'Hệ thống không gửi nội dung câu hỏi đến mô hình AI bên ngoài trong chế độ hiện tại và chưa cung cấp khuyến nghị canh tác tự động. ' +
+  'Hệ thống có giới hạn tần suất sử dụng và lưu thông tin vận hành cần thiết để bảo đảm an toàn, ổn định dịch vụ. ' +
+  'Nội dung câu hỏi không được lưu; hệ thống chỉ ghi tài khoản và thời điểm hỏi để giới hạn tần suất. ' +
+  'Số liệu Carbon là ước tính nội bộ, chưa đạt yêu cầu MRV. ' +
+  'Nếu câu trả lời sai hoặc hiển thị dữ liệu không thuộc về bạn, hãy ngừng sử dụng và báo cho quản trị viên HTX.'
+
 export function SeasonQuestionPanel({ seasonId, audience, actionTier = aiActionTierEnabled }: {
   seasonId: string; audience: QuestionAudience; actionTier?: boolean
 }) {
@@ -162,6 +171,7 @@ export function SeasonQuestionPanel({ seasonId, audience, actionTier = aiActionT
         <p className="aiq__lead">
           Câu trả lời chỉ dùng số liệu đã ghi nhận của vụ và tài liệu đã được duyệt. Hệ thống không lưu câu hỏi.
         </p>
+        <p className="aiq__notice" role="note" aria-label="Thông báo quyền riêng tư">{QA_PRIVACY_NOTICE}</p>
       </div>
 
       <div className="aiq__suggest" role="group" aria-label="Câu hỏi gợi ý">
