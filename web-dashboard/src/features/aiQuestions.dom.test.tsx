@@ -142,6 +142,21 @@ describe('SeasonQuestionPanel', () => {
     expect(alert.textContent).not.toContain('internal detail')
   })
 
+  it('403 question_not_enabled from an open panel (cohort changed): one request, no retry, no automatic resend', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      ask.implement(async () => { throw new ApiError(403, 'question_not_enabled', 'internal detail') })
+      render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Vụ này đang thế nào?' }))
+      expect((await screen.findByRole('alert')).textContent).toMatch(/chưa mở cho tài khoản này/)
+      await act(async () => { vi.advanceTimersByTime(QUESTION_TIMEOUT_MS * 2) })
+      expect(ask.calls).toHaveLength(1)
+      expect(screen.queryByRole('button', { name: 'Thử lại' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('times out on its own and offers a retry with the same intent', async () => {
     vi.useFakeTimers()
     ask.implement((_s: string, _r: unknown, signal: AbortSignal) => new Promise((_res, rej) => {

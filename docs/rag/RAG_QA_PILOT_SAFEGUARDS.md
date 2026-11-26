@@ -228,6 +228,24 @@ API stays fail-closed.
    E5.2 → E5.1 → rate-limit rollback and re-apply also left `db_audit` and the lifecycle probe
    (36/36) passing.
 
+### Panel visibility (V-1b): deploy and rollback order
+
+`VITE_AI_QA_ENABLED` is a build-time flag for the whole site. Since V-1b the web shows the panel only
+when that flag is on AND `GET /v1/me` returned `ai_qa_available: true` for the current session, so
+accounts outside `RAG_QA_ALLOWED_USER_IDS` do not see the feature at all (they would still get 403
+`question_not_enabled` on a direct call).
+
+1. Deploy the API with the capability field (and the Q&A env, preflight PASS) first.
+2. Then build the web with `VITE_AI_QA_ENABLED=true` from a commit that contains V-1b.
+3. A V-1b web against an older API (no field) hides the panel for everybody: safe, never open.
+4. Rollback: never redeploy a web build that predates V-1b with `VITE_AI_QA_ENABLED=true` — it
+   shows the panel to every signed-in user. Roll the web back to a V-1b build, or build with the
+   flag off. Rolling the API back to one without the field hides the panel (fail closed).
+5. The cohort is read at API start-up: removing an account means re-creating the API container
+   with the new `RAG_QA_ALLOWED_USER_IDS` (after the preflight). An open tab then hides the panel
+   at its next `/v1/me` re-check (window focus, tab shown again or token refresh; at most once a
+   minute). Until then any question it sends gets 403; nothing is answered.
+
 ## 6. QA cohort and acceptance runs
 
 The limit counts per **signed-in account**, not per person or device. Testers sharing one QA

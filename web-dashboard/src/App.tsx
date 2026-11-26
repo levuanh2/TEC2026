@@ -14,6 +14,7 @@ import { buildNav } from './nav'
 import { go, Link, LoadingSkeleton, Notice, setLinkIntentHandler } from './ui'
 import { prefetchRoute, retryFailedChunks } from './routeChunks'
 import { ChunkErrorBoundary } from './chunkRecovery'
+import { AiQuestionsCapability } from './features/aiQuestionsVisibility'
 import { prefetchRouteData } from './query/prefetch'
 import type { SeasonTab } from './pages/season'
 import { OperationsOverview, SeasonsWorkspace } from './pages/operations'
@@ -327,7 +328,9 @@ function applyRoleRedirect(role: string, currentPath: string) {
 function verifiedScope(userId: string, v: CurrentUser): string {
   // `access` lists every membership and farm role, read-only ones included:
   // losing a farm this account could only read must drop its cached rows too.
-  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.access ?? [], v.mustChangePassword === true])
+  // The Q&A capability (V-1b) is part of the scope: gaining or losing it drops every cache and
+  // remounts the business tree, so a panel (and its last answer) never outlives it.
+  return JSON.stringify([userId, v.role, v.organizationId, [...(v.writableFarmIds ?? [])].sort(), v.access ?? [], v.mustChangePassword === true, v.aiQaAvailable === true])
 }
 
 /** /v1/me answered for an account other than the session's (the shared token
@@ -732,19 +735,27 @@ function AppRoot() {
     return <PlanSelectionPage home={viewer.role === 'farmer' ? '/farmer' : '/dashboard'} />
   }
 
+  // Q&A panel visibility (V-1b): only what /v1/me said for THIS verified session. An unverified
+  // or mock session, a failed /v1/me, or a backend without the field gives false.
+  const aiQuestionsCapability = verified && viewer.aiQaAvailable === true
+
   if ((usingMockData && path.startsWith('/farmer')) || (!usingMockData && viewer.role === 'farmer')) {
     return (
-      <ChunkErrorBoundary key={scopeEpoch} fullPage resetKey={path} onRetry={retryFailedChunks}>
-        <Suspense fallback={<main className="login">Đang tải…</main>}>
-          <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
-        </Suspense>
-      </ChunkErrorBoundary>
+      <AiQuestionsCapability.Provider value={aiQuestionsCapability}>
+        <ChunkErrorBoundary key={scopeEpoch} fullPage resetKey={path} onRetry={retryFailedChunks}>
+          <Suspense fallback={<main className="login">Đang tải…</main>}>
+            <FarmerExperience session={session} viewer={viewer} path={path.startsWith('/farmer') ? path : '/farmer'} />
+          </Suspense>
+        </ChunkErrorBoundary>
+      </AiQuestionsCapability.Provider>
     )
   }
 
   return (
-    <AppShell key={scopeEpoch} session={session} viewer={viewer} path={path}>
-      {render(path, viewer)}
-    </AppShell>
+    <AiQuestionsCapability.Provider value={aiQuestionsCapability}>
+      <AppShell key={scopeEpoch} session={session} viewer={viewer} path={path}>
+        {render(path, viewer)}
+      </AppShell>
+    </AiQuestionsCapability.Provider>
   )
 }

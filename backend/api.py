@@ -545,8 +545,33 @@ def list_scenarios() -> dict[str, Any]:
 
 
 @router.get("/me", tags=['Auth'], response_model=schemas.MeResponse)
-def get_me(repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
-    return _read_or_404(repo.me)
+def get_me(request: Request, repo: SupabaseReadRepository = Depends(_read_repo)) -> dict[str, Any]:
+    me = _read_or_404(repo.me)
+    me["ai_qa_available"] = _ai_qa_available(request, me)
+    return me
+
+
+def _ai_qa_available(request: Request, me: dict[str, Any]) -> bool:
+    """Whether the web may SHOW the season Q&A panel to this verified caller. Visibility only:
+    POST /v1/crop-seasons/{id}/questions still checks the tier lock, the JWT, the cohort, the
+    rate limit and the tenant scope on every question.
+
+    One source of truth: the question service the questions route itself is given (the
+    `_rag_question_service` override main.py installs only when Q&A is enabled and configured)
+    and its own `in_cohort`, so this can never disagree with the 403 `question_not_enabled`.
+    Nothing else is read: no quota, no model, no retrieval, no season. Fails closed: Q&A not
+    wired, a pending password change (every other route answers 403 then), or any error -> False.
+    It says nothing about other accounts (no list, no count)."""
+    if me.get("must_change_password"):
+        return False
+    provide = request.app.dependency_overrides.get(_rag_question_service)
+    if provide is None:
+        return False
+    try:
+        return provide().in_cohort(str(me["user_id"])) is True
+    except Exception as exc:  # noqa: BLE001 - visibility must never break /v1/me; hide instead
+        logger.warning("rag_question_capability_unavailable type=%s", type(exc).__name__)
+        return False
 
 
 def _password_change_service() -> PasswordChangeService:
