@@ -29,12 +29,14 @@ Nothing is persisted (D4): no question, answer, evidence or generated recommenda
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -79,29 +81,81 @@ class CallerSeasonFactsSource:
     reads (`stored`, `readiness`) sit behind the same caller-scoped gate as the Carbon routes.
     """
 
-    def __init__(self, reader: Any, carbon_service: Any) -> None:
+    def __init__(self, reader: Any, carbon_service: Any, *, concurrent: bool = True) -> None:
         self._reader = reader
         self._carbon = carbon_service
+        self._concurrent = concurrent
+        # crop_season_id -> {read name: ("ok", value) | ("error", exception)}
+        self._outcomes: dict[str, dict[str, tuple[str, Any]]] = {}
+
+    def _reads(self, crop_season_id: str) -> dict[str, Callable[[], Any]]:
+        """The season's independent fact reads, each exactly the call the sequential
+        version made (same caller-scoped reader, same service-role Carbon reads)."""
+        sid = crop_season_id
+        return {
+            "season": lambda: self._reader.season(sid),
+            "activity_summary": lambda: self._reader.activity_summary(sid),
+            "metrics": lambda: self._reader.metrics(sid),
+            "carbon_actual": lambda: self._carbon.stored(sid, "as_recorded"),
+            "carbon_readiness": lambda: self._carbon.readiness(sid),
+            "recommendations": lambda: self._reader.recommendations(sid),
+            "comparison_seasons": lambda: self._comparison_seasons(sid),
+        }
+
+    def _outcome(self, name: str, crop_season_id: str) -> Any:
+        """The result of one read, or its exception re-raised at the moment the caller asks
+        for it, exactly as the sequential call would have raised it.
+
+        Latency (L1 profile 2026-11-27, production image on EC2): these 7 reads ran one
+        after another, about 4.3 s of a 5.8 s question, because each is several
+        Sydney -> Seoul round trips. None depends on another's result, so on the first
+        request for a season all 7 start at once and every later call is served from what
+        they returned. This adapter is only called AFTER the scope resolver has authorized
+        the season (and after the cohort gate and the rate limit), so nothing is read
+        earlier than before: only the reads that were already going to run overlap. Each
+        worker runs in its own copy of the request context, like
+        `SupabaseReadRepository._concurrent`, so the read profiler stays attributed.
+        """
+        outcomes = self._outcomes.get(crop_season_id)
+        if outcomes is None:
+            outcomes = self._outcomes[crop_season_id] = self._run_all(self._reads(crop_season_id))
+        kind, value = outcomes[name]
+        if kind == "error":
+            raise value
+        return value
+
+    def _run_all(self, reads: Mapping[str, Callable[[], Any]]) -> dict[str, tuple[str, Any]]:
+        def settle(read: Callable[[], Any]) -> tuple[str, Any]:
+            try:
+                return ("ok", read())
+            except Exception as exc:  # noqa: BLE001 - re-raised by `_outcome` at the caller's own call
+                return ("error", exc)
+
+        if not self._concurrent:
+            return {name: settle(read) for name, read in reads.items()}
+        with ThreadPoolExecutor(max_workers=len(reads), thread_name_prefix="rag-facts") as pool:
+            futures = {name: pool.submit(contextvars.copy_context().run, settle, read) for name, read in reads.items()}
+            return {name: future.result() for name, future in futures.items()}
 
     def season(self, crop_season_id: str) -> Mapping[str, Any]:
-        return self._reader.season(crop_season_id)
+        return self._outcome("season", crop_season_id)
 
     def activity_summary(self, crop_season_id: str) -> Mapping[str, Any]:
-        return self._reader.activity_summary(crop_season_id)
+        return self._outcome("activity_summary", crop_season_id)
 
     def metrics(self, crop_season_id: str) -> Mapping[str, Any]:
-        return self._reader.metrics(crop_season_id)
+        return self._outcome("metrics", crop_season_id)
 
     def carbon_actual(self, crop_season_id: str) -> Mapping[str, Any] | None:
-        return self._carbon.stored(crop_season_id, "as_recorded")
+        return self._outcome("carbon_actual", crop_season_id)
 
     def carbon_readiness(self, crop_season_id: str) -> Mapping[str, Any] | None:
-        return self._carbon.readiness(crop_season_id)
+        return self._outcome("carbon_readiness", crop_season_id)
 
     def recommendation_signals(self, crop_season_id: str, *, fresh: bool) -> Sequence[Mapping[str, Any]]:
         if fresh:  # preview is refused by the route; never evaluate rules here
             raise RagAccessDenied("preview mode is not available")
-        return self._reader.recommendations(crop_season_id)
+        return self._outcome("recommendations", crop_season_id)
 
     def cv_signals(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
         return ()  # not wired in V1 Q&A: CV results stay on their own screen
@@ -110,6 +164,9 @@ class CallerSeasonFactsSource:
         return ()  # Core V1 has no finalized benchmark source
 
     def comparison_seasons(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
+        return self._outcome("comparison_seasons", crop_season_id)
+
+    def _comparison_seasons(self, crop_season_id: str) -> list[dict[str, Any]]:
         season = self._reader.season(crop_season_id)
         organization_id = self._reader.season_lineage(crop_season_id)["organization_id"]
         others = [row for row in self._reader.seasons_for_plot(str(season["plot_id"]))
