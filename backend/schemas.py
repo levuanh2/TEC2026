@@ -71,6 +71,11 @@ class MeResponse(BaseModel):
     # /v1/me and POST /v1/me/password answer; everything else is 403
     # `password_change_required` (and the database refuses too).
     must_change_password: bool = False
+    # Season Q&A pilot (V-1b): true only when the server has Q&A enabled and this verified
+    # account is in its approved cohort (`RAG_QA_ALLOWED_USER_IDS`), and no password change is
+    # pending. The web shows the Q&A panel only then. Visibility, not authorization: every
+    # question is still checked by the server. Never describes any other account.
+    ai_qa_available: bool = False
 
 
 class PasswordChangeRequest(BaseModel):
@@ -457,6 +462,12 @@ class RagCitationResponse(BaseModel):
     source_type: str
     url: str | None = None
     published_at: date | None = None
+    #: M7 E5/E3: trusted Vietnamese warning when the document carries integrity findings an expert dismissed.
+    #: Non-null means "integrity warning present": the server then sends `url` as null, and clients must not
+    #: offer any navigation link for that citation.
+    integrity_warning: str | None = None
+    #: Additive: the trusted labels of those findings, shown separately from the warning sentence.
+    integrity_detail: str | None = None
 
 
 class RagTrustedFactResponse(BaseModel):

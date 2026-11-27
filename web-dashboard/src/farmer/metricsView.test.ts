@@ -109,6 +109,13 @@ describe('missing is never 0', () => {
     // The factor limitation is named apart from what the farmer can fix.
     expect(carbon.method.join(' ')).toMatch(/Giới hạn phương pháp \(không phải do bạn nhập thiếu\): Hệ số nhiên liệu/)
   })
+
+  it('describes the factor set without claiming it is verified (expert review is pending)', () => {
+    const carbon = detail(metricDetails(metrics({ totalCo2eKg: 2400, co2ePerKg: 0.46 }), noFacts), 'carbon')
+    const text = carbon.method.join(' ')
+    expect(text).toMatch(/bộ hệ số mặc định; bộ hệ số chưa được chuyên gia thẩm định\./)
+    expect(words(carbon)).not.toMatch(/đã xác minh|đã kiểm chứng|đã thẩm định/)
+  })
 })
 
 describe('Carbon, when calculated, reads in the agreed order', () => {

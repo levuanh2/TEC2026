@@ -6124,6 +6124,11 @@
             "type": "boolean",
             "title": "Must Change Password",
             "default": false
+          },
+          "ai_qa_available": {
+            "type": "boolean",
+            "title": "Ai Qa Available",
+            "default": false
           }
         },
         "type": "object",
@@ -7516,6 +7521,28 @@
               }
             ],
             "title": "Published At"
+          },
+          "integrity_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Warning"
+          },
+          "integrity_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Detail"
           }
         },
         "type": "object",

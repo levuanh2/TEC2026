@@ -8,15 +8,18 @@
 // season's or another person's screen.
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ApiError } from '../api/client'
-import { askSeasonQuestion, type QuestionAnswer, type QuestionIntent } from '../api/questions'
+import { askSeasonQuestion, type QuestionAnswer, type QuestionCitation, type QuestionIntent } from '../api/questions'
 import { suggestIntent } from './questionIntent'
 import './aiQuestions.css'
 
 export type QuestionAudience = 'farmer' | 'manager'
 
-/** Build-time switch for the entry points (default OFF). The backend route has its own
- * switch (RAG_QA_ENABLED); both must be on for the panel to be shown and answer. */
-export const aiQuestionsEnabled = import.meta.env.VITE_AI_QA_ENABLED === 'true'
+// Entry points decide visibility with `useAiQuestionsVisible()` (aiQuestionsVisibility.ts): the
+// build flag VITE_AI_QA_ENABLED AND the server's `ai_qa_available` for this session (V-1b).
+// There is deliberately no build-flag-only export here any more.
+/** Offer the farmer action intent only when the server's action tier is on too
+ *  (`RAG_QA_ACTION_TIER_ENABLED=true`); the server refuses it either way when it is off. */
+export const aiActionTierEnabled = import.meta.env.VITE_AI_QA_ACTION_ENABLED === 'true'
 
 /** Client-side bound on one question; the server has its own provider timeout. */
 export const QUESTION_TIMEOUT_MS = 45_000
@@ -26,7 +29,7 @@ interface IntentOption { intent: QuestionIntent; label: string; hint: string }
 const READ_INTENTS: IntentOption[] = [
   { intent: 'explain', label: 'Giải thích vụ', hint: 'Mô tả số liệu đã ghi nhận của vụ' },
   { intent: 'data_gap', label: 'Dữ liệu còn thiếu', hint: 'Những dữ liệu cần bổ sung để tính phát thải' },
-  { intent: 'evidence', label: 'Tài liệu tham khảo', hint: 'Đoạn tài liệu đã duyệt liên quan câu hỏi' },
+  { intent: 'evidence', label: 'Tài liệu tham khảo', hint: 'Đoạn tài liệu trong kho tri thức liên quan câu hỏi' },
   { intent: 'compare', label: 'So sánh', hint: 'Đặt số liệu vụ này cạnh vụ khác bạn được xem' },
 ]
 const FARMER_ACTION: IntentOption = {
@@ -46,7 +49,7 @@ const SUGGESTIONS: Record<QuestionAudience, { text: string; intent: QuestionInte
   manager: [
     { text: 'Tóm tắt số liệu của vụ này', intent: 'explain' },
     { text: 'Vụ này còn thiếu dữ liệu nào để tính phát thải?', intent: 'data_gap' },
-    { text: 'Có tài liệu đã duyệt nào về giảm phát thải mê-tan?', intent: 'evidence' },
+    { text: 'Có tài liệu nào trong kho tri thức về giảm phát thải mê-tan?', intent: 'evidence' },
     { text: 'So sánh với các vụ khác của cùng thửa', intent: 'compare' },
   ],
 }
@@ -66,6 +69,10 @@ function failureMessage(error: unknown, timedOut: boolean): { message: string; r
   if (timedOut) return { message: 'Quá thời gian chờ câu trả lời. Bạn có thể thử lại.', retryable: true }
   if (!(error instanceof ApiError)) return { message: 'Không gửi được câu hỏi. Vui lòng thử lại.', retryable: true }
   if (error.code === 'backend_not_configured') return { message: 'Trợ lý hỏi đáp chưa được bật cho hệ thống này.', retryable: false }
+  if (error.code === 'action_tier_disabled') return { message: 'Giai đoạn thử nghiệm chỉ hỗ trợ câu hỏi giải thích số liệu; chưa có gợi ý hành động.', retryable: false }
+  if (error.code === 'question_rate_limited') return { message: 'Bạn đã hỏi quá nhiều câu trong thời gian ngắn. Vui lòng thử lại sau ít phút.', retryable: false }
+  if (error.code === 'question_rate_limit_unavailable') return { message: 'Trợ lý tạm thời chưa nhận câu hỏi. Vui lòng thử lại sau.', retryable: false }
+  if (error.code === 'question_not_enabled') return { message: 'Tính năng hỏi đáp đang thử nghiệm và chưa mở cho tài khoản này.', retryable: false }
   if (error.code === 'generation_unavailable') return { message: 'Loại câu hỏi này cần trợ lý AI, hiện chưa sẵn sàng. Hãy chọn loại câu hỏi khác.', retryable: false }
   if (error.status === 404) return { message: 'Không tìm thấy vụ, hoặc bạn không có quyền với loại câu hỏi này.', retryable: false }
   if (error.status === 422) return { message: 'Câu hỏi chưa hợp lệ. Hãy viết ngắn gọn hơn và chọn loại câu hỏi.', retryable: false }
@@ -81,8 +88,21 @@ function factValue(value: QuestionAnswer['facts'][number]['value'], unit: string
   return unit ? `${value} ${unit}` : String(value)
 }
 
-export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; audience: QuestionAudience }) {
-  const intents = audience === 'farmer' ? [...READ_INTENTS, FARMER_ACTION] : READ_INTENTS
+/** A11 privacy notice, owner-approved text (2026-11-25). Shown above the panel for every pilot user. */
+export const QA_PRIVACY_NOTICE =
+  'Tính năng hỏi đáp đang trong giai đoạn thử nghiệm, hỗ trợ giải thích dữ liệu vụ mùa thuộc phạm vi được phép truy cập. ' +
+  'Hệ thống không gửi nội dung câu hỏi đến mô hình AI bên ngoài trong chế độ hiện tại và chưa cung cấp khuyến nghị canh tác tự động. ' +
+  'Hệ thống có giới hạn tần suất sử dụng và lưu thông tin vận hành cần thiết để bảo đảm an toàn, ổn định dịch vụ. ' +
+  'Nội dung câu hỏi không được lưu; hệ thống chỉ ghi tài khoản và thời điểm hỏi để giới hạn tần suất. ' +
+  'Số liệu Carbon là ước tính nội bộ, chưa đạt yêu cầu MRV. ' +
+  'Nếu câu trả lời sai hoặc hiển thị dữ liệu không thuộc về bạn, hãy ngừng sử dụng và báo cho quản trị viên HTX.'
+
+export function SeasonQuestionPanel({ seasonId, audience, actionTier = aiActionTierEnabled }: {
+  seasonId: string; audience: QuestionAudience; actionTier?: boolean
+}) {
+  const canAct = audience === 'farmer' && actionTier
+  const readOnlyTrial = audience === 'farmer' && !actionTier
+  const intents = canAct ? [...READ_INTENTS, FARMER_ACTION] : READ_INTENTS
   const [question, setQuestion] = useState('')
   const [intent, setIntent] = useState<QuestionIntent>('explain')
   // The user's own radio choice always wins over the typed-question hint.
@@ -126,7 +146,7 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
 
   function onQuestionChange(text: string) {
     setQuestion(text)
-    const hint = suggestIntent(text, audience === 'farmer')
+    const hint = suggestIntent(text, canAct)
     setActionNotAvailable(hint.actionNotAvailable)
     if (intentChosen) return
     if (hint.intent && intents.some((o) => o.intent === hint.intent)) {
@@ -149,8 +169,9 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
       <div className="aiq__head">
         <h2 id={`${ids}-title`} className="aiq__title">Hỏi đáp về vụ này</h2>
         <p className="aiq__lead">
-          Câu trả lời chỉ dùng số liệu đã ghi nhận của vụ và tài liệu đã được duyệt. Hệ thống không lưu câu hỏi.
+          Câu trả lời chỉ dùng số liệu đã ghi nhận của vụ và tài liệu trong kho tri thức. Hệ thống không lưu câu hỏi.
         </p>
+        <p className="aiq__notice" role="note" aria-label="Thông báo quyền riêng tư">{QA_PRIVACY_NOTICE}</p>
       </div>
 
       <div className="aiq__suggest" role="group" aria-label="Câu hỏi gợi ý">
@@ -179,7 +200,9 @@ export function SeasonQuestionPanel({ seasonId, audience }: { seasonId: string; 
                   onKeyDown={onKeyDown} aria-describedby={`${ids}-hint`} />
         <p id={`${ids}-hint`} className="aiq__hint" aria-live="polite">
           {autoPicked && <>Đã chọn loại câu hỏi “{INTENT_LABEL[autoPicked]}” theo nội dung câu hỏi. Bạn có thể đổi.</>}
-          {actionNotAvailable && <>Gợi ý hành động chỉ dành cho nông hộ có quyền ghi của vụ. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>}
+          {actionNotAvailable && (readOnlyTrial
+            ? <>Giai đoạn thử nghiệm chưa có gợi ý hành động. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>
+            : <>Gợi ý hành động chỉ dành cho nông hộ có quyền ghi của vụ. Bạn vẫn có thể hỏi về số liệu, dữ liệu còn thiếu và tài liệu.</>)}
         </p>
         <div className="aiq__actions">
           <button type="submit" className="aiq__send" disabled={busy || !question.trim()}>
@@ -225,7 +248,7 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
       {answer.answer && <p className="aiq__text">{answer.answer}</p>}
       <p className="aiq__provenance">
         {aiWritten
-          ? 'Do trợ lý AI viết từ tài liệu đã duyệt; mọi số liệu và nguồn đã được hệ thống kiểm tra.'
+          ? 'Do trợ lý AI viết từ tài liệu trong kho tri thức; hệ thống đã đối chiếu số liệu và nguồn dẫn với dữ liệu được truy xuất, không xác minh nội dung khoa học.'
           : 'Hệ thống tự soạn từ số liệu đã ghi nhận, không dùng mô hình AI. Đây là câu trả lời theo mẫu cố định của loại câu hỏi đã chọn, không diễn giải riêng câu chữ của bạn.'}
       </p>
 
@@ -267,21 +290,14 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
       <div className="aiq__block">
         <h3>Nguồn tài liệu</h3>
         {answer.citations.length === 0 ? (
-          <p className="aiq__muted">Chưa có tài liệu đã duyệt nào khớp với câu hỏi này.</p>
+          <p className="aiq__muted">Chưa có đoạn tài liệu nào trong kho tri thức khớp với câu hỏi này.</p>
         ) : (
-          <ol className="aiq__citations">
-            {answer.citations.map((c) => (
-              <li key={`${c.sourceId}/${c.chunkId}`}>
-                <span className="aiq__cite-title">{c.title}</span>
-                {c.section && <span className="aiq__muted"> · {c.section}</span>}
-                <span className="aiq__muted"> · {SOURCE_TYPE[c.sourceType] ?? c.sourceType}</span>
-                {c.publishedAt && <span className="aiq__muted"> · {c.publishedAt}</span>}
-                {c.url && (
-                  <> · <a href={c.url} target="_blank" rel="noopener noreferrer">Mở nguồn<span className="sr-only"> (tab mới)</span></a></>
-                )}
-              </li>
-            ))}
-          </ol>
+          <>
+            <p className="aiq__muted">{CITATION_SCOPE_NOTE}</p>
+            <ol className="aiq__citations">
+              {answer.citations.map((c) => <Citation key={`${c.sourceId}/${c.chunkId}`} citation={c} />)}
+            </ol>
+          </>
         )}
       </div>
 
@@ -294,5 +310,47 @@ function Answer({ answer, question }: { answer: QuestionAnswer; question: string
         </details>
       )}
     </article>
+  )
+}
+
+/** Workflow approval is not scientific verification (M7 READ-tier citation UX, 2026-11-16). */
+export const CITATION_SCOPE_NOTE =
+  'Tài liệu được dẫn là tài liệu trong kho tri thức đã qua quy trình duyệt tài liệu; điều đó không có nghĩa nội dung khoa học đã được xác minh độc lập.'
+/** Shown instead of the link when a citation carries an integrity warning. */
+export const LINK_WITHHELD_NOTE = 'Không hiển thị liên kết nguồn cho tài liệu có cảnh báo kiểm tra.'
+
+/** Only an https URL is ever offered as a link. Re-checked here, not only in the API mapper. */
+export function navigableUrl(url: string | null): string | null {
+  if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url)) return null
+  try { return new URL(url).protocol === 'https:' ? url : null } catch { return null }
+}
+
+/** One citation. The warning sits directly after the title, always visible (no tooltip), and is the
+ *  accessible description of the citation group. A warned citation is never offered as a link: that
+ *  decision uses the server's structured state (integrityWarning present), never the warning's wording.
+ *  All text is rendered as React text nodes (no HTML interpolation). */
+function Citation({ citation: c }: { citation: QuestionCitation }) {
+  const id = useId()
+  const warned = c.integrityWarning !== null
+  const url = warned ? null : navigableUrl(c.url)
+  const titleId = `${id}-title`
+  const warningId = `${id}-warning`
+  const detailId = `${id}-detail`
+  const described = warned ? [warningId, ...(c.integrityDetail ? [detailId] : [])].join(' ') : undefined
+  return (
+    <li className={`aiq__cite${warned ? ' is-warned' : ''}`}>
+      <div role="group" aria-labelledby={titleId} aria-describedby={described}>
+        <span id={titleId} className="aiq__cite-title">{c.title}</span>
+        {warned && <p id={warningId} className="aiq__cite-warning" role="note">{c.integrityWarning}</p>}
+        {warned && c.integrityDetail && <p id={detailId} className="aiq__cite-detail">{c.integrityDetail}</p>}
+        <p className="aiq__cite-meta">
+          {[c.section, SOURCE_TYPE[c.sourceType] ?? c.sourceType, c.publishedAt].filter(Boolean).join(' · ')}
+          {url && (
+            <> · <a href={url} target="_blank" rel="noopener noreferrer">Mở nguồn<span className="sr-only"> (tab mới)</span></a></>
+          )}
+          {warned && <> · <span className="aiq__cite-nolink">{LINK_WITHHELD_NOTE}</span></>}
+        </p>
+      </div>
+    </li>
   )
 }

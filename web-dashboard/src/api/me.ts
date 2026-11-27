@@ -3,7 +3,7 @@ import type { Role } from '../types'
 
 interface Membership { organization_id?: string; role?: string }
 interface FarmMembership { farm_id?: string; farm_role?: string }
-interface MeResponse { user_id?: string; full_name?: string | null; roles: string[]; organization_memberships: Membership[]; farm_memberships?: FarmMembership[]; must_change_password?: boolean }
+interface MeResponse { user_id?: string; full_name?: string | null; roles: string[]; organization_memberships: Membership[]; farm_memberships?: FarmMembership[]; must_change_password?: boolean; ai_qa_available?: boolean }
 
 // Canonical backend role names (`organization_role` enum). A user with none of
 // them falls back to the Farmer shell, whose data is still RLS-scoped and whose
@@ -19,6 +19,10 @@ export interface CurrentUser { role: Role; organizationId: string | null; fullNa
   userId?: string
   /** Live server flag: the account still has its temporary password. */
   mustChangePassword?: boolean
+  /** Season Q&A pilot (V-1b): present only when /v1/me said `ai_qa_available: true` for this
+   *  account. Missing, false, null or any other value = hidden. Never written to the hint, so a
+   *  restored tab or another account can never inherit it. */
+  aiQaAvailable?: true
   /** Everything /v1/me said this account may reach: each active organisation
    *  membership (`org:<id>:<role>`) and each farm role (`farm:<id>:<role>`,
    *  read-only ones included), sorted. Not shown anywhere; the shell compares
@@ -47,6 +51,7 @@ export function toCurrentUser(response: MeResponse): CurrentUser {
     writableFarmIds,
     // Present only when set, so every normal account keeps the same shape.
     ...(response.must_change_password === true ? { mustChangePassword: true } : {}),
+    ...(response.ai_qa_available === true ? { aiQaAvailable: true as const } : {}),
     ...(response.user_id ? { userId: response.user_id } : {}),
   }
 }
@@ -77,8 +82,9 @@ export function readViewerHint(userId: string): CurrentUser | null {
 }
 
 export function writeViewerHint(userId: string, viewer: CurrentUser): void {
-  // `access` is a comparison key for this tab, not a routing hint: kept out of storage.
-  const { access: _access, ...hint } = viewer
+  // `access` is a comparison key for this tab, not a routing hint: kept out of storage. The Q&A
+  // capability is per verified answer only (V-1b): never stored either.
+  const { access: _access, aiQaAvailable: _aiQaAvailable, ...hint } = viewer
   try { localStorage.setItem(VIEWER_HINT_KEY, JSON.stringify({ userId, ...hint })) } catch { /* storage unavailable */ }
 }
 

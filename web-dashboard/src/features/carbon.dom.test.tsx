@@ -11,9 +11,18 @@ vi.mock('../api/carbon', () => ({
   calculateCarbon: vi.fn(),
 }))
 
-const { CarbonPanel } = await import('./carbon')
+const { CarbonPanel, statusLabel } = await import('./carbon')
 
 afterEach(cleanup)
+
+describe('parameter status wording', () => {
+  it('says a factor was matched to its source, never that it was verified', () => {
+    expect(statusLabel('VERIFIED')).toBe('Đã đối chiếu nguồn')
+    expect(statusLabel('PENDING_VERIFICATION')).toBe('Chờ đối chiếu nguồn')
+    expect(statusLabel('TEST_ONLY')).toBe('Chưa đối chiếu nguồn')
+    for (const v of ['VERIFIED', 'PENDING_VERIFICATION', null]) expect(statusLabel(v)).not.toMatch(/xác minh/)
+  })
+})
 
 describe('Carbon recalculate affordance', () => {
   it('is shown when the viewer may persist, and the empty state names that same button', async () => {

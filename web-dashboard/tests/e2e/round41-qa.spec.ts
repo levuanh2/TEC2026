@@ -1,7 +1,12 @@
 import { expect, test, type Page } from './fixtures'
-import { isInstitutionalGreen } from './round41-helpers'
+import { isInstitutionalGreen, tokenColour } from './round41-helpers'
 
 /* Round 4.1 gates on the mock tenant — no credentials.
+ *
+ * Palette 2026-11 (user decision, docs/UI_REFRESH_2026_11.md): the forest rail stays the navigation
+ * colour, and the workspace CTA, markers and ink are the approved forest/leaf tokens. Round 4.1's
+ * "no green on the workspace CTA or active tab" rule is superseded; these gates now pin that each
+ * control draws its own token and that the rail colour itself never leaks into the workspace.
  *
  * The mock viewer belongs to no cooperative, so the /carbon action geometry
  * runs on real data in round41-real.spec.ts. Here: the institutional green
@@ -10,7 +15,6 @@ import { isInstitutionalGreen } from './round41-helpers'
  * (farmer/round41.dom.test.tsx, utils/demoMarker.test.ts). */
 
 const S = 'crop-demo-01'
-const TEXT = 0.04
 
 test('the detector recognises Round 4 colours and passes the Round 4.1 slate', () => {
   // Round 4 values, as Chrome reports them: CTA fill, active-tab marker,
@@ -27,7 +31,7 @@ const colours = (page: Page, selector: string) => page.locator(selector).first()
   return { bg: cs.backgroundColor, border: cs.borderBottomColor, color: cs.color }
 })
 
-test('institutional green: in the Farmer navbar, not on the workspace CTA or active tab', async ({ page }) => {
+test('palette: forest rail in the Farmer navbar, the CTA on its own token, the rail colour not in the workspace', async ({ page }) => {
   await page.goto('/farmer/journal')
   await expect(page.locator('main').getByRole('button', { name: 'Ghi hoạt động' }).first()).toBeVisible()
 
@@ -35,14 +39,12 @@ test('institutional green: in the Farmer navbar, not on the workspace CTA or act
   expect(isInstitutionalGreen(side.bg), `navbar ${side.bg}`).toBe(true)
 
   const cta = await colours(page, 'main .fw-btn:not(.fw-btn--ghost):not(.fw-btn--soft)')
-  expect(isInstitutionalGreen(cta.bg), `CTA fill ${cta.bg}`).toBe(false)
-  expect(isInstitutionalGreen(cta.border), `CTA edge ${cta.border}`).toBe(false)
-
-  const pill = await colours(page, 'main .fw-pill[aria-pressed="true"]')
-  expect(isInstitutionalGreen(pill.border), `active filter marker ${pill.border}`).toBe(false)
+  expect(cta.bg, 'CTA fill is --ac-cta').toBe(await tokenColour(page, '--ac-cta'))
+  expect(cta.color, 'CTA ink is --ac-cta-ink').toBe(await tokenColour(page, '--ac-cta-ink'))
+  expect(cta.bg, 'the rail colour stays in navigation').not.toBe(side.bg)
 })
 
-test('institutional green: in the Management sidebar, not on the season tabs or buttons', async ({ page }) => {
+test('palette: forest rail in the Management sidebar, tabs and buttons on their tokens', async ({ page }) => {
   await page.goto(`/crop-seasons/${S}/carbon`)
   await expect(page.locator('.tab[aria-current="page"]').first()).toBeVisible()
 
@@ -50,16 +52,16 @@ test('institutional green: in the Management sidebar, not on the season tabs or 
   expect(isInstitutionalGreen(side.bg), `sidebar ${side.bg}`).toBe(true)
 
   const tab = await colours(page, '.tab[aria-current="page"]')
-  expect(isInstitutionalGreen(tab.border), `active tab ${tab.border}`).toBe(false)
-  expect(isInstitutionalGreen(tab.color, TEXT), `active tab ink ${tab.color}`).toBe(false)
+  expect(tab.border, 'active tab marker is --ac-marker').toBe(await tokenColour(page, '--ac-marker'))
 
   // Every filled button and every link the workspace draws.
   const leaks = await page.locator('main').evaluate((main) => [...main.querySelectorAll<HTMLElement>('.btn:not(.btn--ghost):not(.btn--quiet), a:not(.btn)')]
     .filter((el) => el.getBoundingClientRect().width > 0)
     .map((el) => { const cs = getComputedStyle(el); return `${el.textContent!.trim().slice(0, 30)}|${cs.backgroundColor}|${cs.color}` }))
+  expect(leaks.length).toBeGreaterThan(0)
   for (const l of leaks) {
-    const [, bg, ink] = l.split('|')
-    expect(isInstitutionalGreen(bg) || isInstitutionalGreen(ink, TEXT), l).toBe(false)
+    const [, bg] = l.split('|')
+    expect(bg, `${l}: the rail colour stays in navigation`).not.toBe(side.bg)
   }
 })
 

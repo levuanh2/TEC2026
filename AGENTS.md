@@ -1,5 +1,79 @@
 # Herdr Multi-Agent Protocol — AgriCarbon/TEC2026
 
+## Logo PR #76 CI follow-up (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `docs/BRAND_LOGO_2026_11.md`, this ownership note | — (released) | Open logo PR and follow GitHub CI; document the required guarded-manifest commit trailer for the asset-only pubspec change. Preserve CI thresholds/history; no local Android execution or deployment. | PR #76 opened; documentation follow-up carries `CI-Policy-Change` for the asset-only `app/pubspec.yaml` change. Final checks tracked on the PR. No runtime or CI-policy changes. |
+
+## Publish supplied logo (2026-11-13)
+
+User requested commit/push of the completed web and Flutter logo changes to
+`ui/agricarbon-web-flutter-2026-11-12`. Codex owns this publication note and
+the logo report publication update. Preserve history; no force-push, deployment
+or local Android execution.
+
+## Supplied brand logo (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| Web shared brand/sidebar/auth/public-header/footer presentation, logo styles, `web-dashboard/public/visuals/agricarbon-logo.png` (new); Flutter BrandMark and logo asset/manifest; logo handoff note | — (released) | Replace the placeholder sprout badge with the supplied green A/rice logo; preserve aspect ratio and use a light backing on dark surfaces. Presentation only; no backend/auth/billing changes, Android execution, publishing or deployment. Herdr unavailable. | DONE: original attachment shared across web/Flutter; web build PASS, Vitest 788/788, Playwright 18/18 at five widths with accessibility checks; desktop/sidebar/mobile login screenshots reviewed. Flutter formatted/source-reviewed only; no local Android execution. |
+
+## PR #73 CI follow-up (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `app/test/pricing_selection_test.dart` (new), this ownership record and `docs/PRICING_UI_2026_11.md` (verification update) | — (released) | PR #73's Flutter analyze and 483 tests pass, but changed-line coverage for new pricing UI is 3.6% (required 80%). Add meaningful pricing choice/login/summary tests; validate via GitHub CI. Preserve CI thresholds and runtime behavior; no emulator or local Android execution. | Added 10 widget tests covering 6 choices, cancel, responsive/large text, review and auth/password-gate priority. Formatted/source-reviewed; validation tracked by PR #73 CI. |
+
+## Publish pricing + selection (2026-11-13)
+
+User requested commit/push of the completed web and Android pricing/selection
+changes on the current branch `ui/agricarbon-web-flutter-2026-11-12`.
+Codex owns this publication note and the pricing report update. Keep existing
+history; no force-push, backend changes, deployment or Android execution.
+
+## Pricing selection CTA (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| Web pricing view/data/CSS, `App.tsx` and `routes.ts` (selection entry and login return only), selection view/tests; Flutter pricing/login/account screens, pricing presentation data and `app/lib/shell/auth_gate.dart` (pending choice UI only); `docs/PRICING_UI_2026_11.md` | — (released) | Add per-plan selection/purchase CTAs. Signed-out users enter existing login; retain audience and plan for review after authentication. Reuse existing auth/role verification; no payment, subscription activation, quota, backend or auth service changes. Android source review only, no emulator/build/test. | DONE: web build PASS; Vitest 788/788; public Playwright 10/10 incl. all 6 CTAs × desktop/mobile, auth-return and verification failure. Android formatted and source-reviewed only. |
+
+## Service pricing (2026-11-13)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/public/{PublicSite.tsx,PricingTables.tsx,public.css,pricing.ts}` (new pricing view/data), `web-dashboard/src/App.tsx` (pricing link only), `web-dashboard/src/farmer/pages/Account.tsx` (pricing link only), public pricing tests; `app/lib/screens/{pricing_screen.dart,service_plans.dart}` (new), `app/lib/screens/login_screen.dart` and `app/lib/shell/tabs/account_tab.dart` (pricing links only), `docs/PRICING_UI_2026_11.md` (new) | — (released) | Display the two user-supplied pricing tables (Farmer/Cooperative, FREE/PLUS/PRO) on web and Android, replacing unpublished pricing. Presentation only; no billing, quotas, auth or backend changes. Android code review only per user instruction; Herdr unavailable. | DONE: web build PASS; Vitest 777/777; public Playwright 9/9 incl. 5 widths and axe. Android 6 prices/70 text fields aligned, imports/icons reviewed, formatted; no emulator, app execution, APK build or Flutter tests/analyze. |
+
+## Publish web + Flutter UI (2026-11-12)
+
+User explicitly requested all completed interface changes on a new branch.
+Codex owns final report/ownership updates and `app/.gitignore` (generated Kotlin
+cache only), then commit/push to `ui/agricarbon-web-flutter-2026-11-12`.
+Preserve branch history; no force-push, backend changes or deployment.
+
+## Flutter visual parity (2026-11-12)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `app/lib/design/**`, `app/lib/screens/**`, `app/lib/shell/tabs/**` (presentation only), `app/assets/**` (new), `app/pubspec.yaml` (assets/fonts only), UI verification/preview files in `app/test/` and `app/tool/`, `docs/FLUTTER_UI_REFRESH_2026_11.md` (new) | — (released) | Match AgriCarbon web palette, bundled Vietnamese font, rice artwork, slogan, login, shared surfaces/navigation/cards and gentle accessible motion. Preserve auth, offline writes, synchronization and Carbon/CV logic. Herdr unavailable. | DONE: analyze clean; Flutter tests 483/483; 10 visual tests with bundled fonts, 320–800px login and enlarged text; browser preview build PASS, 0 JS page errors. Android device acceptance not run. |
+
+## Public website (2026-11-12)
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/public/**` (new), `web-dashboard/src/App.tsx` (public entry boundary), `web-dashboard/src/routes.ts`, `web-dashboard/index.html`, `web-dashboard/src/components/BrandScenery.tsx` (home link), `web-dashboard/public/downloads/**` (new), `web-dashboard/tests/e2e/public-site.spec.ts` (new), public routing tests, `docs/PUBLIC_WEBSITE_2026_11.md` (new) | — (released) | Public AgriCarbon home before login; platform/services/reports/pricing/news pages. Original design inspired by supplied reference, pricing explicitly unpublished. No backend, auth contract, deployment or Git publishing changes. Herdr unavailable. | DONE: build PASS; Vitest 777/777; Playwright 28/28 (including 9 public-site tests, 35 public route/viewport views, desktop/mobile axe, keyboard, menu, downloads, no private API requests); local preview 5173. |
+
+## UI refresh (2026-11-10)
+
+Publishing scope (2026-11-11): Codex prepared the UI refresh files and its report
+for the user-requested commit and push to the new branch
+`ui/agricarbon-refresh-2026-11-11` (the latest user request explicitly asks for a new branch).
+Preserve existing branch history; no force-push, backend edits or deployment.
+
+| Files | Owner | Task | Status |
+|---|---|---|---|
+| `web-dashboard/src/**` (presentation only), `web-dashboard/index.html`, `web-dashboard/public/visuals/**`, `web-dashboard/tests/e2e/visual-refresh.spec.ts`, `docs/UI_REFRESH_2026_11.md` | — (released) | User-authorized coordinated Farmer/Management visual refresh, login artwork, slogan, responsive styling and motion. Preserve API/auth/business behavior. Herdr executable unavailable in this session. | DONE: Vitest 768/768; build PASS; mock Playwright 19/19 including 13 routes × 5 widths, login a11y/keyboard, reduced motion and overlay positioning. Local preview opened; no hosted writes, commit, push or deploy. |
+
 Claude và Codex cùng chạy trong cùng workspace Herdr, cùng làm repo này. Không
 có kênh tự động khác — mọi phối hợp qua Herdr pane messaging + file này.
 
@@ -28,6 +102,8 @@ Không sửa file agent khác đang sở hữu. Trước khi sửa:
 3. Khai báo ownership tại đây trước khi bắt đầu.
 
 ## File ownership (cập nhật liên tục — sửa xong thì release)
+
+| `web-dashboard/src/farmer/FarmerExperience.tsx`, `web-dashboard/src/farmer/font-fix.css` (new), `web-dashboard/index.html` | — (released) | Fix Vietnamese display-font rendering; no edits to dirty colour CSS files. | DONE: 84 source files and 48 route/viewport views scanned, 6 activity dialogs checked, visual desktop/mobile; browser smoke 2 passed, Vitest 153 passed, build passed |
 
 | `backend/api.py`, `backend/main.py`, `backend/schemas.py`, `backend/service.py`, `backend/infrastructure/config.py`, `backend/infrastructure/write_repo.py` (new), `backend/tests/test_activity_writes.py` (new), `supabase/migrations/20260910080441_farmer_web_activity_idempotency.sql`, `docs/FARMER_WEB_WRITE_CONTRACT.md`, `docs/API_CATALOG.md`, `docs/openapi.json` | — (released) | FW-2 Part 1 FastAPI Farmer online activity writes for fertilizer/irrigation/harvest only: authorization, atomic persistence, idempotency and tests. No React write UI. | DONE: backend 165 passed; web 23 passed/build passed; mock Playwright Farmer + Management passed; no hosted mutation or migration deployment. |
 

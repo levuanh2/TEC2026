@@ -1,19 +1,21 @@
 # Security review package R3: web session, role verification and cache isolation (2026-11-06)
 
+> Edited 2026-11-24: repository-governance details (access, review settings) were replaced by neutral wording. The technical evidence, dates and SHAs are unchanged.
+
 **Human review status: `HUMAN_REVIEW_PENDING`.**
 
-> **Release R3 rollout, 2026-11-06.** #21 was merged at `48a5a2a` (head `e1cc238`) as an **owner-authorized admin merge**. That is not a human review. It was deployed to production as Render `dep-dbmp3eu1egvs73d85g60`, entry `index-Xl7lm6cM.js`. The owner approved the behaviour change R16. Rollout details: §11.
+> **Release R3 rollout, 2026-11-06.** #21 was merged at `48a5a2a` (head `e1cc238`) as an **owner-authorized exception** (merged without the required human review). That is not a human review. It was deployed to production as Render `dep-dbmp3eu1egvs73d85g60`, entry `index-Xl7lm6cM.js`. The owner approved the behaviour change R16. Rollout details: §11.
 
-An AI agent (Claude Code) prepared this package on 2026-11-06. **It is not a human review**, and nothing in it approves anything. It exists so that a human reviewer (SiriusNoPro, or another person with authority over the repository) can check the authentication and authorization code of the web dashboard quickly and record a verdict.
+An AI agent (Claude Code) prepared this package on 2026-11-06. **It is not a human review**, and nothing in it approves anything. It exists so that an independent human reviewer with authority over the repository can check the authentication and authorization code of the web dashboard quickly and record a verdict.
 
 **What "human review complete" means for the release gate.** A human has reviewed **all** of these:
 - the fix PR #21 (§6, R1–R10);
 - #13, the RLS migration that is **already applied to the hosted database**;
 - #15/#16, role verification through `/v1/me` (§8, R11–R15).
 
-Approving #21 alone does not complete the human review. Every PR from #12 to #19 was merged with `--admin` and 0 human reviews.
+Approving #21 alone does not complete the human review. Every PR from #12 to #19 was merged as an owner-authorized exception, with 0 human reviews.
 
-Release R2 (#17, #18, #19) was merged with `--admin` on 2026-11-05. Before those merges, the only review was a read-only report by another AI agent (agy), with the verdict APPROVE (0 critical, 0 major). That report is not a human approval. This R3 review re-read the same code and found two Medium issues and four Low issues that the earlier report did not list (§4).
+Release R2 (#17, #18, #19) was merged as an owner-authorized exception on 2026-11-05. Before those merges, the only review was a read-only report by another AI agent (agy), with the verdict APPROVE (0 critical, 0 major). That report is not a human approval. This R3 review re-read the same code and found two Medium issues and four Low issues that the earlier report did not list (§4).
 
 ## 1. Scope
 
@@ -148,11 +150,11 @@ Use #23 instead. It measured the policy on the production bundle in real Chrome,
 | 2 | full CSP **enforced**, HSTS 1 day | harness pass with 0 violations; after ≥ 7 days of stage 1 |
 | 3 | HSTS 1 year, this host only | after ≥ 14 days of stage 2 |
 
-`render.yaml` is not code-owned, although its merge changes production. Adding it to CODEOWNERS is an owner decision.
+Merging a change to `render.yaml` changes production, so it needs the same independent review as code; how that is enforced is an owner decision.
 
 ## 8. Also pending human review: #13 (RLS, applied to hosted) and #15/#16 (role verification)
 
-These were merged before R2's session work, with `--admin` and 0 human reviews, and no review was requested on them. They are in scope for the human review. #13 matters most: it changed which rows each person can read, and it runs on the production database now.
+These were merged before R2's session work, as owner-authorized exceptions with 0 human reviews, and no review was requested on them. They are in scope for the human review. #13 matters most: it changed which rows each person can read, and it runs on the production database now.
 
 | PR | What it changed | State |
 |---|---|---|
@@ -162,7 +164,7 @@ These were merged before R2's session work, with `--admin` and 0 human reviews, 
 
 R3 checked part of #13 again (AI, read-only): `readable_batch_ids()` follows the same chain as `user_can_read_batch` (batch → season → plot → `user_can_read_farm`, no `deleted_at` filter on the batch). It is `security definer` with `search_path = ''`, executable by `authenticated` only, and lives in `private`, which PostgREST does not expose. The live policies on hosted are the set-based ones. That is not a human review.
 
-**Code-owner note.** #13 touches code-owned paths (`supabase/migrations/`, `scripts/ci/policy/`). Their only code owner is the PR's author (`levuanh2`), so no independent code-owner review is possible today. A review by SiriusNoPro (write access, not a code owner) is a valid human review, but GitHub does not count it as a code-owner approval. Either accept that and record it, or add a second code owner.
+**Code-owner note.** #13 touches code-owned paths (`supabase/migrations/`, `scripts/ci/policy/`). It needs an independent human review by someone other than its author; how a code-owner review is provided is an owner decision (details outside git).
 
 Checklist (tick in a review or a comment on the PR concerned):
 
@@ -181,7 +183,7 @@ Verdict line per PR: `HUMAN_REVIEW #13|#15|#16: APPROVE | REQUEST_CHANGES — <n
 - [ ] R18. A changed scope drops every cache and remounts the business tree (`scopeEpoch`); a 401/403 shows the neutral screen; 0/5xx keeps the role (`sessionRevalidation.dom.test.tsx`, real Chrome scenario 5).
 - [ ] R19. A late answer for an ended or replaced session changes nothing (`sessionReplacement.dom.test.tsx`, real Chrome scenarios 2 and 3).
 
-Verdict line: `HUMAN_REVIEW #17: APPROVE | REQUEST_CHANGES — <name>, <date>`. The verdict is recorded after the merge, and it does not turn #17's admin merge into a pre-merge approval.
+Verdict line: `HUMAN_REVIEW #17: APPROVE | REQUEST_CHANGES — <name>, <date>`. The verdict is recorded after the merge, and it does not turn #17's owner-authorized exception into a pre-merge approval.
 
 ## 9. What each kind of evidence is worth
 
@@ -198,7 +200,7 @@ Verdict line: `HUMAN_REVIEW #17: APPROVE | REQUEST_CHANGES — <name>, <date>`. 
 | Condition for PRODUCTION PASS | Status |
 |---|---|
 | 1. F1–F6 fixed and verified | **Met.** Fixed in #21, merged `48a5a2a`, deployed `dep-dbmp3eu1egvs73d85g60`; browser-side production smoke 8/8 + 6/6 |
-| 2. #21 human security review | **PENDING.** Merged as an owner-authorized admin exception; tracked in #24 |
+| 2. #21 human security review | **PENDING.** Merged as an owner-authorized exception; tracked in #24 |
 | 3. Human review of #13, #15/#16, #17 | **PENDING** (#24) |
 | 4. Authenticated Manager/Farmer QA | **BLOCKED_CREDENTIALS** (`~/.agricarbon-qa.env` absent) |
 | 5. No unresolved Critical/High | **Met** |
@@ -211,7 +213,7 @@ Verdict line: `HUMAN_REVIEW #17: APPROVE | REQUEST_CHANGES — <name>, <date>`. 
 
 | Step | Evidence |
 |---|---|
-| #21 merge | Owner-authorized admin merge of pinned head `e1cc238` → `48a5a2a`. Merge note on #21: "Owner-authorized admin merge; independent human security review pending". Required CI 17/17 on the head; CI run `42187031841` on `main` green (17 jobs) |
+| #21 merge | Owner-authorized exception, pinned head `e1cc238` → `48a5a2a`. The merge note on #21 records the exception and the pending independent human security review. Required CI 17/17 on the head; CI run `42187031841` on `main` green (17 jobs) |
 | Deploy | Render `agricarbon-web-staging` (`srv-danpuojm8hqs73c59fj0`, repo `levuanh2/TEC2026`, branch `main`, domains `agricarbon.info.vn` + `www`): `dep-dbmp3eu1egvs73d85g60` **live** at `48a5a2a`. Origin and CDN serve `index-Xl7lm6cM.js`; the bundle carries the R3 sign-out strings |
 | Rollback target | `dep-dbmcstd9fdbs73ckg6e0` (`654f95c`, `index-YKjxTk3n.js`). Rolling back would restore F1–F6 (F2/F4/F5 date from `3acfba7`), so it is reserved for a regression that is worse than they are |
 | HTTP checks | HTTPS 301, `/health` 200, `/v1/me` 401 without and with an invalid token, CORS only for the site origin (foreign origin → 400), 10/10 chunks 200, no secret in the bundle |

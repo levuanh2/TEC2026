@@ -56,3 +56,6 @@ TEC2026 - Phieu dang ky du thi.docx.md
 TEC2026*.docx.md
 /backend-resolved.txt
 .hypothesis/
+
+# Local, private working files (review notes, evidence logs). Never committed.
+/.tmp/

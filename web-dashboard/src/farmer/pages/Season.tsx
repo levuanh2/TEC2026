@@ -1,4 +1,5 @@
-import { SeasonQuestionPanel, aiQuestionsEnabled } from '../../features/aiQuestions'
+import { SeasonQuestionPanel } from '../../features/aiQuestions'
+import { useAiQuestionsVisible } from '../../features/aiQuestionsVisibility'
 import type { SeasonMetrics } from '../../api/metrics'
 import type { Activity } from '../../types'
 import { date, daysSince, ha } from '../../format'
@@ -142,6 +143,7 @@ function SeasonOverview({ id, ctx, seasonCtx, writeCtx, metrics, activities, mut
   id: string; ctx: SeasonCtx | null; seasonCtx: SeasonContext | null; writeCtx: SeasonContext | null
   metrics: QueryState<SeasonMetrics>; activities: QueryState<Activity[]>; mutations: ActivityMutations
 }) {
+  const showQuestions = useAiQuestionsVisible()
   return (
     <>
       {/* One way to start a record, the same one the journal has: the
@@ -165,7 +167,7 @@ function SeasonOverview({ id, ctx, seasonCtx, writeCtx, metrics, activities, mut
       </div>
       <CvPreviewCard season={seasonCtx} seasonId={id} />
       <CvHistorySection seasonId={id} />
-      {aiQuestionsEnabled && <SeasonQuestionPanel seasonId={id} audience="farmer" />}
+      {showQuestions && <SeasonQuestionPanel seasonId={id} audience="farmer" />}
     </>
   )
 }

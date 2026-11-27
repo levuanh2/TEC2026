@@ -23,7 +23,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from infrastructure.config import load_settings  # noqa: E402
-from tests.knowledge_status_paths import bring, m2_cleanup  # noqa: E402
+from tests.knowledge_status_paths import M2, bring, m2_cleanup, transition  # noqa: E402
 
 _SETTINGS = load_settings()
 _DB_URL = _SETTINGS.supabase_db_url
@@ -54,7 +54,7 @@ def _sha(text: str) -> str:
 
 
 def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=None, farm=None,
-               source_status="approved", document_status="approved"):
+               source_status="approved", document_status="approved", expert_dismisses=False):
     """One source + version + chunk (operator path, table owner), in the given statuses."""
     source_id = f"rq-{ids['run']}-{key.replace('_', '-')}"
     ids["sources"].append(source_id)
@@ -75,8 +75,16 @@ def _knowledge(conn, ids, approver, key, content, *, visibility="public", org=No
     # this module's chunks above any other committed public knowledge, deterministically.
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
-                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
-    bring(conn, "document", doc, document_status, approver=approver, reason="fixture")   # via expert_review (D3)
+                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(FIXTURE + content)))
+    if expert_dismisses:
+        # kn-claims-4 extracts "phát thải bằng không" from this chunk, and the E2 gate then blocks it
+        # (reference_conflict). This module tests retrieval scope, not integrity, so the version is approved
+        # the only way the gate allows: a (synthetic, mistaken) expert dismisses the finding first.
+        bring(conn, "document", doc, "expert_review", reason="fixture")
+        M2.of(conn).dismiss_blocking_findings(doc)
+        transition(conn, "document", doc, "expert_review", "approved", reason="fixture", approver=approver)
+    else:
+        bring(conn, "document", doc, document_status, approver=approver, reason="fixture")   # via expert_review (D3)
     ids[key] = chunk_id
 
 
@@ -95,7 +103,7 @@ def _supersede(conn, ids, approver, key, content):
     chunk_id = _sha(source_id + "v2" + content)[:20]
     conn.execute("insert into public.knowledge_chunks (document_pk, chunk_id, ordinal, section_path, content,"
                  " content_sha256) values (%s, %s, 0, %s, %s, %s)",
-                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(content)))
+                 (doc, chunk_id, section(ids), FIXTURE + content, _sha(FIXTURE + content)))
     bring(conn, "document", doc, "approved", approver=approver, reason="fixture v2")
     ids[key + "_v2"] = chunk_id
 
@@ -167,7 +175,7 @@ def env():
                        source_status="approved", document_status="archived")
             _knowledge(conn, ids, approver, "archived_src", "nguồn awd đã lưu trữ",
                        source_status="archived", document_status="approved")
-            _knowledge(conn, ids, approver, "injection", INJECTION)
+            _knowledge(conn, ids, approver, "injection", INJECTION, expert_dismisses=True)
             # Superseded: v1 approved then archived, v2 approved (source integrity: only the current version).
             _knowledge(conn, ids, approver, "superseded", "phiên bản awd cũ đã bị thay thế",
                        source_status="approved", document_status="archived")
@@ -341,3 +349,22 @@ def test_ended_membership_loses_tenant_knowledge_and_write(env):
     assert {env["org_a_doc"], env["farm_a_doc"]}.isdisjoint(after)
     with pytest.raises(RagAccessDenied):
         _evidence(env, "leaver", "leaver", intent="recommend")
+
+
+# ================================================================== M7 E5: the answer-time recheck over PostgREST
+
+def test_the_answer_time_recheck_over_postgrest_is_scoped_like_retrieval(env):
+    """`SupabaseReadRepository.knowledge_evidence_state` (the production reader, REAL JWT, PostgREST) re-validates
+    cited chunks with retrieval's admissibility: the member's own tenant chunks and public ones come back with a
+    consistent content hash; another tenant's chunk, and everything for a caller who cannot read the season, do
+    not (no existence signal)."""
+    import hashlib
+    wanted = [env["public"], env["org_a_doc"], env["org_b_doc"]]
+    retrieved = {c.chunk_id: c for c in _evidence(env, "member", "member").evidence}
+    rows = _reader(env, "member").knowledge_evidence_state(str(env["season_member"]), wanted)
+    by_id = {r["chunk_id"]: r for r in rows}
+    assert set(by_id) == {env["public"], env["org_a_doc"]}
+    for chunk_id, row in by_id.items():
+        assert row["content_hash_consistent"] is True and row["approval_assurance"] == "verified"
+        assert row["content_sha256"] == hashlib.sha256(retrieved[chunk_id].content.encode()).hexdigest()
+    assert _reader(env, "outsider").knowledge_evidence_state(str(env["season_member"]), wanted) == []
