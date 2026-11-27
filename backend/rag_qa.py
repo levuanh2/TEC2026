@@ -42,7 +42,7 @@ from typing import Any
 
 from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
-from infrastructure import question_rate_limit
+from infrastructure import profiling, question_rate_limit
 from infrastructure.read_repo import ReadNotFoundError
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
@@ -113,8 +113,10 @@ class CallerSeasonFactsSource:
         they returned. This adapter is only called AFTER the scope resolver has authorized
         the season (and after the cohort gate and the rate limit), so nothing is read
         earlier than before: only the reads that were already going to run overlap. Each
-        worker runs in its own copy of the request context, like
-        `SupabaseReadRepository._concurrent`, so the read profiler stays attributed.
+        worker runs in a fresh context that carries only the request profile (see `_run_all`).
+
+        One instance serves ONE request on ONE thread (built per request in `answer`); it is
+        not meant to be shared across threads.
         """
         outcomes = self._outcomes.get(crop_season_id)
         if outcomes is None:
@@ -133,8 +135,18 @@ class CallerSeasonFactsSource:
 
         if not self._concurrent:
             return {name: settle(read) for name, read in reads.items()}
+        profile = profiling.current()
+
+        def in_worker(read: Callable[[], Any]) -> tuple[str, Any]:
+            # A FRESH context, not a copy of the caller's: only the request profile crosses into the
+            # worker. A copy would also carry `pg_pool.bound()` / `PostgresCarbonRepository.session()`
+            # state, and two workers would then share ONE psycopg connection (not thread-safe for
+            # concurrent statements). Without that state each worker checks out its own connection.
+            profiling.attach(profile)
+            return settle(read)
+
         with ThreadPoolExecutor(max_workers=len(reads), thread_name_prefix="rag-facts") as pool:
-            futures = {name: pool.submit(contextvars.copy_context().run, settle, read) for name, read in reads.items()}
+            futures = {name: pool.submit(contextvars.Context().run, in_worker, read) for name, read in reads.items()}
             return {name: future.result() for name, future in futures.items()}
 
     def season(self, crop_season_id: str) -> Mapping[str, Any]:

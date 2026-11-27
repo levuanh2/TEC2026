@@ -61,6 +61,12 @@ def current() -> RequestProfile | None:
     return _current.get()
 
 
+def attach(profile: RequestProfile | None) -> None:
+    """Make `profile` the current one in THIS context (a worker thread's fresh context).
+    `RequestProfile.record` is lock-protected, so several workers may share one profile."""
+    _current.set(profile)
+
+
 @contextmanager
 def phase(label: str):
     """Time one named phase of the in-flight request (Round 5.1 Carbon profile)."""

@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 
 import contextvars
+import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -83,6 +84,7 @@ class ReadNotFoundError(Exception): pass
 class SupabaseReadRepository:
     def __init__(self, settings: Settings, token: str, client: Any | None = None):
         self._settings = settings
+        self._client_lock = threading.Lock()
         self._pooled = client is None
         if client is None:
             # Reused per caller token (see supabase_clients): already bound to
@@ -128,7 +130,13 @@ class SupabaseReadRepository:
                         raise
                     transport_retries -= 1
                     time.sleep(_RETRY_BACKOFF_SECONDS)
-                    self.client = supabase_clients.renew(self._settings, self.token, failed)
+                    fresh = supabase_clients.renew(self._settings, self.token, failed)
+                    # Several threads share this repository (`_concurrent`, the Q&A facts reads). Only
+                    # the one whose client is still the failed one swaps it; a slower thread must not
+                    # put back an older replacement over a newer one.
+                    with self._client_lock:
+                        if self.client is failed:
+                            self.client = fresh
 
     def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
         with profiling.observe(label):

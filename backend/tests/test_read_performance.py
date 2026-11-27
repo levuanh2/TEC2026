@@ -147,6 +147,32 @@ def test_dropped_connection_is_retried_once_on_a_fresh_client(monkeypatch):
     assert repo.client is clients[1]
 
 
+def test_a_slower_retrying_thread_never_puts_back_an_older_replacement(monkeypatch):
+    """Two threads share one repository (`_concurrent`, the Q&A fact reads). If another thread
+    already swapped `repo.client` while this one was renewing, this one must keep that newer
+    client instead of overwriting it with the replacement it got for the older failure."""
+    clients: list[_Client] = []
+
+    def make(url, key, **_kw):
+        client = _Client(rows={"farms": [{"id": "f1"}]}, fail_times=1 if not clients else 0)
+        clients.append(client)
+        return client
+
+    _patch_factory(monkeypatch, make)
+    repo = SupabaseReadRepository(SETTINGS, "token-a")
+    newer = _Client(rows={"farms": [{"id": "f1"}]})
+    real_renew = supabase_clients.renew
+
+    def renew_while_another_thread_swaps(settings, token, failed=None):
+        replacement = real_renew(settings, token, failed)
+        repo.client = newer  # the other thread finished its own swap first
+        return replacement
+
+    monkeypatch.setattr(supabase_clients, "renew", renew_while_another_thread_swaps)
+    assert repo._many("farms") == [{"id": "f1"}]
+    assert repo.client is newer
+
+
 def test_retry_is_not_applied_to_an_injected_client(monkeypatch):
     """A test/production caller that supplied its own client owns its failures."""
     injected = _Client(fail_times=1)

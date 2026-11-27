@@ -196,11 +196,110 @@ def test_preview_is_still_refused_without_reading():
     assert reader.calls == []
 
 
-def test_request_context_reaches_every_worker():
+def test_other_request_context_does_not_reach_the_workers():
+    # Fresh worker contexts by design (only the request profile is attached, see the test below):
+    # any other context variable of the caller stays on the caller's thread.
     reader = FakeReader()
     token = REQUEST.set("request-42")
     try:
         _all(rag_qa.CallerSeasonFactsSource(reader, FakeCarbon(reader)))
     finally:
         REQUEST.reset(token)
-    assert reader.seen_request == {"request-42"}
+    assert reader.seen_request == {None}
+
+
+# -- review follow-ups (agy review of #103, 2026-11-27) ------------------------------------------
+
+from infrastructure import pg_pool, profiling  # noqa: E402
+from recommendation.rag import (AccessLevel, AuthorizedSeasonScope, RagIntent, RagMode,  # noqa: E402
+                                RagOrchestrator, RagQuestionRequest, build_season_context)
+
+SCOPE = AuthorizedSeasonScope(actor_id="44444444-4444-4444-8444-444444444444", organization_id=ORG,
+                              farm_id="55555555-5555-4555-8555-555555555555",
+                              plot_id="66666666-6666-4666-8666-666666666666", crop_season_id=SID,
+                              access=AccessLevel.READ)
+
+
+class _Never:
+    def __getattr__(self, name):
+        raise AssertionError(f"must not be called: {name}")
+
+
+def test_a_denied_scope_reads_no_fact_at_all():
+    class Deny:
+        def resolve(self, crop_season_id, level):
+            raise RagAccessDenied("not in scope")
+
+    reader = FakeReader()
+    orchestrator = RagOrchestrator(retriever=_Never(), generator=_Never(), what_if=_Never())
+    with pytest.raises(RagAccessDenied):
+        orchestrator.answer(RagQuestionRequest(question="Vụ này thế nào?", crop_season_id=SID,
+                                               intent=RagIntent.EXPLAIN, mode=RagMode.ASK),
+                            scope_resolver=Deny(), facts=rag_qa.CallerSeasonFactsSource(reader, FakeCarbon(reader)))
+    assert reader.calls == []
+
+
+@pytest.mark.parametrize("failing,expected", [
+    ({"carbon_actual", "season"}, "carbon_actual"),
+    ({"carbon_readiness", "activity_summary"}, "carbon_readiness"),
+    ({"season", "metrics"}, "season"),
+    ({"activity_summary", "recommendations"}, "activity_summary"),
+])
+def test_the_real_context_builder_sees_the_same_first_error_as_sequential(failing, expected):
+    def first_error(concurrent: bool) -> str:
+        reader = FakeReader(fail={name: ReadNotFoundError(name) for name in failing})
+        source = rag_qa.CallerSeasonFactsSource(reader, FakeCarbon(reader), concurrent=concurrent)
+        with pytest.raises(ReadNotFoundError) as caught:
+            build_season_context(SCOPE, source, mode=RagMode.ASK)
+        return str(caught.value)
+
+    assert first_error(True) == first_error(False) == expected
+
+
+def test_all_seven_top_level_reads_are_in_flight_together():
+    # 7 parties: season, the comparison's own season read, activity_summary, metrics(current),
+    # recommendations, stored, readiness. Any read waiting for another to finish breaks it.
+    barrier = threading.Barrier(7, timeout=5)
+
+    class Reader(FakeReader):
+        def season(self, sid):
+            barrier.wait(); return super().season(sid)
+
+        def activity_summary(self, sid):
+            barrier.wait(); return super().activity_summary(sid)
+
+        def metrics(self, sid):
+            if sid == SID: barrier.wait()
+            return super().metrics(sid)
+
+        def recommendations(self, sid):
+            barrier.wait(); return super().recommendations(sid)
+
+    class Carbon(FakeCarbon):
+        def stored(self, sid, scenario):
+            barrier.wait(); return super().stored(sid, scenario)
+
+        def readiness(self, sid):
+            barrier.wait(); return super().readiness(sid)
+
+    reader = Reader()
+    facts = _all(rag_qa.CallerSeasonFactsSource(reader, Carbon(reader)))
+    assert facts["comparison"][0]["crop_season_id"] == OTHER
+
+
+def test_only_the_request_profile_crosses_into_a_worker_never_a_bound_connection():
+    seen: list[tuple[object, object]] = []
+
+    class Reader(FakeReader):
+        def activity_summary(self, sid):
+            seen.append((pg_pool._bound.get(), profiling.current()))
+            return super().activity_summary(sid)
+
+    reader = Reader()
+    profile = profiling.start()
+    token = pg_pool._bound.set({"conninfo": object()})  # as if inside pg_pool.bound(...)
+    try:
+        _all(rag_qa.CallerSeasonFactsSource(reader, FakeCarbon(reader)))
+    finally:
+        pg_pool._bound.reset(token)
+    assert seen == [(None, profile)]
