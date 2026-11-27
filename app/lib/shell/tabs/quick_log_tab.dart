@@ -145,7 +145,8 @@ class _TypeGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = AppBreakpoints.quickActionColumns(constraints.maxWidth);
+        final columns = AppBreakpoints.quickActionColumns(
+            constraints.maxWidth / MediaQuery.textScalerOf(context).scale(1));
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -210,7 +211,10 @@ class _TypeChip extends StatelessWidget {
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Row(
             children: [
-              Icon(kActivityTypeIcons[type], color: AppColors.primary),
+              AppIconTile(
+                  icon: kActivityTypeIcons[type] ?? Icons.eco_outlined,
+                  tone: activityTone(type),
+                  size: 32),
               const SizedBox(width: AppSpacing.xs),
               Flexible(
                 child: Text(

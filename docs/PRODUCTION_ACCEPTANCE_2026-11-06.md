@@ -1,5 +1,7 @@
 # Production acceptance — Release R3 (2026-11-06)
 
+> Edited 2026-11-24: repository-governance details (access, review settings) were replaced by neutral wording. The technical evidence, dates and SHAs are unchanged.
+
 **Release gate: `PRODUCTION CONDITIONAL`.**
 **Flags: `AUTHENTICATED_QA_PENDING` · `HUMAN_SECURITY_REVIEW_PENDING`.**
 
@@ -166,7 +168,7 @@ The full item list is R1–R19 in `SECURITY_REVIEW_R3_2026-11-06.md` §6 and §8
 
 | ID | Severity | Item | Disposition |
 |---|---|---|---|
-| — | Process | No human review on any PR from #12 to #25. The only code owner is the author, and `enforce_admins` is off, so every merge was an admin merge | Open: #24. A second human code owner is the owner's decision |
+| — | Process | No human review on any PR from #12 to #25; every merge was an owner-authorized exception | Open: #24. The independent review path is the owner's decision (details outside git) |
 | — | Process | Authenticated QA has never run since the R2/R3 changes | Open: §7 |
 | F4 residual | Low | The refresh token can outlive a sign-out that never reached the server | Accepted by the owner; the UI warns |
 | F7 Stage 2 | Medium (hardening) | CSP only partly enforced (Report-Only for scripts and connections); HSTS 300 s | Frozen. Earliest proposal 2026-11-13, after observation and a separate compatibility check. Not a condition for closing R3 |

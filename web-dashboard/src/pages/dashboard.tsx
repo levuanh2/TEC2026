@@ -121,7 +121,7 @@ function DashboardBody({ organizationId }: { organizationId: string }) {
                 </div>
               </div>
               <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
-                Số CO₂e cấp vùng chỉ hiện khi bộ hệ số phát thải (GWP, hệ số nhiên liệu) được xác minh. Kết quả chi tiết
+                Số CO₂e cấp vùng chỉ hiện khi bộ hệ số phát thải có đủ GWP và hệ số nhiên liệu. Kết quả chi tiết
                 xem trong từng vụ canh tác.
               </p>
             </div>

@@ -23,6 +23,7 @@ class MetricCard extends StatelessWidget {
     this.hero = false,
     this.missingLabel = 'Chưa có dữ liệu',
     this.onTap,
+    this.tone = AppTone.neutral,
   });
 
   final String label;
@@ -44,6 +45,7 @@ class MetricCard extends StatelessWidget {
 
   final String missingLabel;
   final VoidCallback? onTap;
+  final AppTone tone;
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +54,7 @@ class MetricCard extends StatelessWidget {
 
     return AppCard(
       variant: hero ? AppCardVariant.highlight : AppCardVariant.plain,
+      tone: tone,
       onTap: onTap,
       padding: EdgeInsets.all(hero ? AppSpacing.lg : AppSpacing.md),
       child: Column(
