@@ -412,6 +412,15 @@
    "execute": [],
    "security_definer": false
   },
+  "private.knowledge_admitted_document_pks()": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
+  },
   "private.knowledge_apply_document_transition(uuid,knowledge_status,knowledge_status,text,uuid)": {
    "config": [
     "search_path=\"\""
@@ -481,6 +490,15 @@
    ],
    "execute": [],
    "security_definer": false
+  },
+  "private.knowledge_cited_chunk_hashes(text[])": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "authenticated"
+   ],
+   "security_definer": true
   },
   "private.knowledge_cited_integrity_status(uuid,text[],boolean)": {
    "config": [
@@ -1838,7 +1856,7 @@
    "roles": [
     "authenticated"
    ],
-   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (EXISTS ( SELECT 1\n   FROM knowledge_documents d\n  WHERE (d.id = knowledge_chunks.document_pk))))",
+   "using": "((NOT ( SELECT private.knowledge_read_blocked() AS knowledge_read_blocked)) AND (EXISTS ( SELECT 1\n   FROM knowledge_documents d\n  WHERE (d.id = knowledge_chunks.document_pk))) AND ((document_pk IN ( SELECT private.knowledge_admitted_document_pks() AS knowledge_admitted_document_pks)) OR (EXISTS ( SELECT 1\n   FROM knowledge_documents d\n  WHERE ((d.id = knowledge_chunks.document_pk) AND (d.approval_assurance = 'demo_unverified'::text))))))",
    "with_check": null
   },
   "knowledge_documents.knowledge_documents_select": {

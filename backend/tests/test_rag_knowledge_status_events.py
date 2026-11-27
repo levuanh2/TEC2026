@@ -336,6 +336,7 @@ E7_1_ROLLBACK = ROOT / "supabase/rollbacks/20261114090000_knowledge_integrity_po
 E5_ROLLBACK = ROOT / "supabase/rollbacks/20261114120000_knowledge_answer_time_evidence_e5.down.sql"
 E5_1_ROLLBACK = ROOT / "supabase/rollbacks/20261120090000_knowledge_pin_aware_admission_e5_1.down.sql"
 E5_2_ROLLBACK = ROOT / "supabase/rollbacks/20261120120000_knowledge_pin_generation_e5_2.down.sql"
+CRA_ROLLBACK = ROOT / "supabase/rollbacks/20261127090000_knowledge_chunks_read_admission.down.sql"
 TRIGGER_FUNCTIONS = ("enforce_knowledge_source_scope", "enforce_knowledge_document_immutability",
                      "enforce_knowledge_chunk_immutability")
 
@@ -365,9 +366,17 @@ def unwind_m6_1(tx):
         tx.cur.execute(_without_tx_control(M6_1_ROLLBACK))
 
 
+def unwind_chunks_read_admission(tx):
+    """20261127090000 (direct chunk read obeys admission) unwinds before E5.2, when it is installed."""
+    tx.cur.execute("select to_regprocedure('private.knowledge_admitted_document_pks()') is not null")
+    if tx.cur.fetchone()[0]:
+        tx.cur.execute(_without_tx_control(CRA_ROLLBACK))
+
+
 def unwind_e5_2(tx):
     """M7 E5.2 (pin generations) unwinds first, when it is installed (its rollback needs the explicit
     acknowledgement and ends in safe refusal)."""
+    unwind_chunks_read_admission(tx)
     tx.cur.execute("select to_regprocedure('private.knowledge_stamp_pin_generation()') is not null")
     if tx.cur.fetchone()[0]:
         tx.cur.execute("select extractor_version, review_version, registry_version, registry_digest,"

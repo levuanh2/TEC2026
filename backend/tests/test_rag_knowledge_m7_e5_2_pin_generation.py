@@ -28,7 +28,8 @@ from tests.test_rag_knowledge_m7_e5_1_pin_admission import (SPELLED_ZERO_POISON,
                                                              approve_under_kn3, legacy_rows, problem, real_pin,
                                                              status_for)
 from tests.test_rag_knowledge_m7_e5_answer_time import AWD_TEXT, EQ_DOC, STATE_PIN, DbReader, ask
-from tests.test_rag_knowledge_status_events import E5_2_ROLLBACK, ROOT, _without_tx_control
+from tests.test_rag_knowledge_status_events import (E5_2_ROLLBACK, ROOT, _without_tx_control,
+                                                     unwind_chunks_read_admission)
 from tests.test_rag_knowledge_storage import CHECK_VIOLATION, PERMISSION_DENIED, psycopg, pytestmark, tx  # noqa: F401
 
 __all__ = ["pytestmark", "tx", "m2"]
@@ -335,11 +336,23 @@ def test_stale_chunks_no_longer_starve_retrieval(tx, m2):
     stale, clean, src = starved_corpus(tx, m2, 10)
     baseline_rpc(tx)
     query = "tưới ngập khô xen kẽ mê-tan"
-    status, rows = tx.as_user(tx.member, "select chunk_id from pg_temp.match_e5_1_baseline(%s, %s, 8)",
-                              (tx.season_a, query))
+    baseline = "select chunk_id from pg_temp.match_e5_1_baseline(%s, %s, 8)"
+    # The E5.1 counterfactual is measured under the chunks policy E5.1 ran with (Migration A's, before
+    # 20261127090000 made the direct chunk read admission-aware), inside a savepoint.
+    tx.settle()
+    tx.cur.execute("savepoint e5_1_policy")
+    tx.cur.execute("drop policy knowledge_chunks_select on public.knowledge_chunks")
+    tx.cur.execute("create policy knowledge_chunks_select on public.knowledge_chunks for select to authenticated using ("
+                   " not (select private.knowledge_read_blocked()) and exists (select 1 from public.knowledge_documents d"
+                   " where d.id = knowledge_chunks.document_pk))")
+    status, rows = tx.as_user(tx.member, baseline, (tx.season_a, query))
+    tx.cur.execute("rollback to savepoint e5_1_policy")
     assert status == "ok"
     e51 = [r[0] for r in rows]
     assert clean not in e51 and len(set(e51) & set(stale)) == 8     # E5.1: top_k all stale, the clean chunk unseen
+    # Since 20261127090000 the old function cannot starve either: stale chunks are not readable at all.
+    status, rows = tx.as_user(tx.member, baseline, (tx.season_a, query))
+    assert status == "ok" and clean in [r[0] for r in rows] and not {r[0] for r in rows} & set(stale)
     e52 = [r[3] for r in tx.rpc(tx.member, tx.season_a, query, 8)]
     assert clean in e52 and not set(e52) & set(stale)               # E5.2: only admitted versions are ranked
     body, reader = ask(tx, (src, clean))
@@ -405,6 +418,7 @@ def test_the_rollback_ends_in_safe_refusal_keeps_the_audit_and_a_re_apply_never_
     tx.cur.execute("select count(*) from private.knowledge_integrity_pin_generations")
     log_rows = tx.cur.fetchone()[0]
     tx.cur.execute("set local knowledge.e5_2_rollback = 'safe-refusal-acknowledged'")
+    unwind_chunks_read_admission(tx)                                # the layer above E5.2 first
     tx.cur.execute(_without_tx_control(E5_2_ROLLBACK))
     # safe refusal: pin cleared as a final logged generation; nothing is retrievable or admissible
     assert current_tuple(tx) == (None,) * 6 and gen(tx) == g + 1
