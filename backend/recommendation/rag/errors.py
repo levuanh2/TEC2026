@@ -35,6 +35,40 @@ class GenerationUnavailable(RagError):
     code = "generation_unavailable"
 
 
+class ActionTierDisabled(RagError):
+    """The server runs READ-only (`RAG_QA_ACTION_TIER_ENABLED` is not "true"): recommend,
+    what_if and non-ASK modes are refused before any read. Not a GenerationUnavailable
+    subclass, so no handler can mistake it for a transient provider failure."""
+
+    code = "action_tier_disabled"
+
+
+class QuestionRateLimited(RagError):
+    """The verified caller asked more questions than the server-side per-user limit allows.
+    Raised after JWT verification and before any season read, so it is the same for every
+    season id. `retry_after_seconds` becomes the Retry-After header."""
+
+    code = "question_rate_limited"
+
+    def __init__(self, message: str = "question rate limit reached", *, retry_after_seconds: int = 60) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = max(1, int(retry_after_seconds))
+
+
+class QuestionRateLimitUnavailable(RagError):
+    """The rate-limit store could not answer: the question is refused, never let through."""
+
+    code = "question_rate_limit_unavailable"
+
+
+class QuestionNotEnabledForAccount(RagError):
+    """Pilot cohort gate (`RAG_QA_ALLOWED_USER_IDS`): the verified caller is not in the approved
+    QA cohort. Raised after JWT verification and before the rate limit and any season read, so
+    it costs no quota and is the same for every season id."""
+
+    code = "question_not_enabled"
+
+
 class InvalidGeneratedSchema(RagError):
     code = "invalid_generated_schema"
 

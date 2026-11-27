@@ -1,5 +1,7 @@
 # Post-rollout QA — 2026-11-05
 
+> Edited 2026-11-24: repository-governance details (access, review settings) were replaced by neutral wording. The technical evidence, dates and SHAs are unchanged.
+
 Scope: the production rollout of 2026-11-05, which had three parts:
 - PR #13: RLS migration `20261104090000`, applied to hosted;
 - PR #16: integration of #12 (query cache, lazy routes) and #15 (role verified by `/v1/me`);
@@ -11,7 +13,7 @@ Production: https://agricarbon.info.vn (frontend), https://api.agricarbon.info.v
 
 > **Correction and status update, 2026-11-06 (Release R3).** This section was added after the fact. The text below it is kept as written on 2026-11-05.
 >
-> - **No pull request in this release had a human review.** #12–#19 were all merged by `levuanh2` with `--admin`, with **0 reviews** on GitHub, while `main` requires 1 approving review (`enforce_admins` is off, so an admin can bypass it). The review request to SiriusNoPro is still open on every one of them. The table in §6 lists each merge.
+> - **No pull request in this release had a human review.** #12–#19 were all merged as owner-authorized exceptions, with **0 human reviews** on GitHub. Human review requests are still open. The table in §6 lists each merge. Repository review settings and access are owner-controlled; their details are kept outside git.
 > - Where this report says "a separate read-only review with verdict APPROVE", that review was written by **an AI agent (agy)**, not by a person. It is evidence of a check. It is not an approval, and it does not replace a human review.
 > - The R3 re-review (also by an AI agent, Claude Code) found 2 Medium and 4 Low issues in the #17-era session code that the agy report did not list. None is Critical or High. Fixes are on a separate branch that is waiting for human review. See [`SECURITY_REVIEW_R3_2026-11-06.md`](SECURITY_REVIEW_R3_2026-11-06.md).
 > - Status flags: **`HUMAN_REVIEW_PENDING`** (#13, #15, #16, #17 and #18 change Auth/RBAC/RLS behaviour) and **`AUTHENTICATED_QA_PENDING`** (no QA credentials file on 2026-11-06 either: `BLOCKED_CREDENTIALS`).
@@ -110,7 +112,7 @@ The "hard refresh" variant still transferred 1 KB, so it did not bypass the cach
 
 ### Release, 2026-11-06
 
-Both PRs were merged with `--admin` as an owner-authorized exception, because the required reviewer had not responded. This is **not** an independent approval. The conditions are recorded on each PR: admin executor, verified HEAD, required CI 17/17, a separate read-only review with verdict APPROVE (0 critical, 0 major), and local gates.
+Both PRs were merged as an owner-authorized exception, without the required human review. This is **not** an independent approval. The conditions are recorded on each PR: verified HEAD, required CI 17/17, a separate read-only review with verdict APPROVE (0 critical, 0 major), and local gates.
 
 *(R3 note: the "separate read-only review" was an AI agent's report (agy), not a person's. No human has reviewed #17 or #18. See §6.)*
 
@@ -137,20 +139,20 @@ Authenticated QA with real Manager and Farmer accounts has **not** run, because 
 
 ## 6. Review and merge record (added 2026-11-06, R3)
 
-From GitHub on 2026-11-06. Branch protection on `main`: 1 approving review required, code-owner review required, stale reviews dismissed, `enforce_admins` off.
+From GitHub on 2026-11-06. Repository review settings and access are owner-controlled; their details are kept outside git.
 
-| PR | Area | Merge commit | Merged (UTC) | By | Human reviews | AI review |
+| PR | Area | Merge commit | Merged (UTC) | Merge | Human reviews | AI review |
 |---|---|---|---|---|---|---|
-| #13 | **RLS** (migration `20261104090000`, applied to hosted) | `ec5e81f` | 2026-11-05 07:48 | levuanh2, `--admin` | 0 | agy (read-only) |
-| #12 | Web query cache, lazy routes | `8aedb3d` | 2026-11-05 08:12 | levuanh2, `--admin` | 0 | — |
-| #15 | **Auth/RBAC** (role verified by `/v1/me`) | `8aedb3d` | 2026-11-05 08:12 | levuanh2, `--admin` | 0 | — |
-| #16 | Integration of #12 + #15 | `71409ea` | 2026-11-05 08:12 | levuanh2, `--admin` | 0 | — |
-| #18 | Chunk-load recovery | `a2f4801` | 2026-11-05 18:10 | levuanh2, `--admin` | 0 | agy (read-only), APPROVE |
-| #17 | **Auth/RBAC** (open-tab `/v1/me` re-check, cache isolation) | `654f95c` | 2026-11-05 18:35 | levuanh2, `--admin` | 0 | agy (read-only), APPROVE |
-| #19 | Docs (this report) | `1e720e5` | 2026-11-05 18:55 | levuanh2, `--admin` | 0 | agy (read-only) |
-| #21 | **Auth** (R3 security fixes F1–F6) | `48a5a2a` | 2026-11-06 | levuanh2, owner-authorized `--admin` (only the required review was missing; CI 17/17; head pinned) | 0 | Claude Code (author); human review pending in #24 |
+| #13 | **RLS** (migration `20261104090000`, applied to hosted) | `ec5e81f` | 2026-11-05 07:48 | owner-authorized exception | 0 | agy (read-only) |
+| #12 | Web query cache, lazy routes | `8aedb3d` | 2026-11-05 08:12 | owner-authorized exception | 0 | — |
+| #15 | **Auth/RBAC** (role verified by `/v1/me`) | `8aedb3d` | 2026-11-05 08:12 | owner-authorized exception | 0 | — |
+| #16 | Integration of #12 + #15 | `71409ea` | 2026-11-05 08:12 | owner-authorized exception | 0 | — |
+| #18 | Chunk-load recovery | `a2f4801` | 2026-11-05 18:10 | owner-authorized exception | 0 | agy (read-only), APPROVE |
+| #17 | **Auth/RBAC** (open-tab `/v1/me` re-check, cache isolation) | `654f95c` | 2026-11-05 18:35 | owner-authorized exception | 0 | agy (read-only), APPROVE |
+| #19 | Docs (this report) | `1e720e5` | 2026-11-05 18:55 | owner-authorized exception | 0 | agy (read-only) |
+| #21 | **Auth** (R3 security fixes F1–F6) | `48a5a2a` | 2026-11-06 | owner-authorized exception (only the required review was missing; CI 17/17; head pinned) | 0 | Claude Code (author); human review pending in #24 |
 
-A review request to SiriusNoPro is open on #17, #18, #19 and #20. #13, #15 and #16 had none; R3 requested one (2026-11-06). SiriusNoPro has write access and is not a code owner. The web source (`web-dashboard/src/**`) is not a code-owned path, so an approval by SiriusNoPro satisfies the review rule for a PR that changes only that path.
+Human review requests are open on #17, #18, #19 and #20. #13, #15 and #16 had none; R3 requested one (2026-11-06).
 
 ## 7. Release R3 status (2026-11-06)
 
@@ -166,9 +168,9 @@ A review request to SiriusNoPro is open on #17, #18, #19 and #20. #13, #15 and #
 | Hosted migration history and RLS | PASS. 25 rows, last `20261104090000`, equal to the 25 files on `main`. 026 not applied (`private.readable_crop_ids` absent). `activities_select` is set-based; `production_batches_select` and both `carbon_calculations` SELECT policies are still per-row | read-only session (`transaction_read_only=on`), 2026-11-06 |
 | API 5xx in the container log | Not checked in R3: reading the EC2 log needs the user to run `.tmp/rls-20261104090000/ec2_error_counts.sh` | — |
 | Frontend security headers | **Open (Medium, hardening)**: only `X-Content-Type-Options`; no HSTS, CSP, `frame-ancestors`/`X-Frame-Options` or `Referrer-Policy`. A staged plan was measured on the production bundle (0 CSP violations with the full policy enforced; framing refused) and is in **#23, not applied** | finding F7; #23 |
-| `render.yaml` | **Merging a change to it is a production rollout.** The Render Blueprint `tec` has `autoSync: true` on `main`, and `agricarbon-web-staging` is the production site. The file is not code-owned | Render API, read-only |
+| `render.yaml` | **Merging a change to it is a production rollout.** The Render Blueprint `tec` has `autoSync: true` on `main`, and `agricarbon-web-staging` is the production site | Render API, read-only |
 | Security review | **`HUMAN_REVIEW_PENDING`**. AI-prepared package with findings F1–F11 and a reviewer checklist. The scope of the human review is #21 **plus #13 (RLS, applied to hosted) and #15/#16 (role verification)**: approving #21 alone does not complete it | [`SECURITY_REVIEW_R3_2026-11-06.md`](SECURITY_REVIEW_R3_2026-11-06.md) |
-| Security fixes | **F1–F6 fixed and deployed** (#21, merged `48a5a2a` by owner-authorized admin exception; independent human review pending). Final F4 design: local first, at once; only a 2xx from `/logout` confirms; bounded retry; the other tabs end. Vitest 727/727, Playwright mock 111/111, real Chrome 16/16 (old build 5/16), mutation 40/40; browser smoke on the deployed bundle 8/8 | PR #21; security review §11 |
+| Security fixes | **F1–F6 fixed and deployed** (#21, merged `48a5a2a` as an owner-authorized exception; independent human review pending). Final F4 design: local first, at once; only a 2xx from `/logout` confirms; bounded retry; the other tabs end. Vitest 727/727, Playwright mock 111/111, real Chrome 16/16 (old build 5/16), mutation 40/40; browser smoke on the deployed bundle 8/8 | PR #21; security review §11 |
 | Manager and Farmer real QA, cross-account isolation | **`BLOCKED_CREDENTIALS` / `AUTHENTICATED_QA_PENDING`**. `~/.agricarbon-qa.env` does not exist. The runner was re-audited: self-test 24/24, specs unchanged since the audit (sha256), 1 worker, traces off, no write spec | `.tmp/post-rollout-qa/` (local) |
 | Authenticated endpoint p50/p95 | `BLOCKED_CREDENTIALS` | — |
 | PR #20 (migration 026) | Draft. **NO-GO / INSUFFICIENT ENDPOINT EVIDENCE**. The SQL review passes (same access as the per-row helpers) and CI is green; the gain is proven only at query level | PR #20 review comment |
@@ -184,9 +186,9 @@ A pull request is in scope when it changes any of these:
 - any FastAPI authorization check;
 - any RLS policy, `private.*` helper, grant or migration under `supabase/migrations/`.
 
-1. **A human approves it before it is merged.** The approval is a GitHub review by a person with authority (SiriusNoPro, or a code owner for code-owned paths). An AI review (agy, Claude, Codex) can be attached as evidence. It is never counted as the approval, and the PR text must call it an AI review.
-2. **No `--admin` merge for these PRs.** If the owner still decides on an emergency exception, a comment on the PR says so in so many words ("owner-authorized exception, not reviewed"), the release gate cannot be higher than `PRODUCTION CONDITIONAL`, and a human review is requested again after the merge, with this status shown as `HUMAN_REVIEW_PENDING` until it lands.
+1. **A human approves it before it is merged.** The approval is a GitHub review by an independent person with review authority (for code-owned paths, a code owner). An AI review (agy, Claude, Codex) can be attached as evidence. It is never counted as the approval, and the PR text must call it an AI review.
+2. **No merge without that review for these PRs.** If the owner still decides on an emergency exception, a comment on the PR says so in so many words ("owner-authorized exception, not reviewed"), the release gate cannot be higher than `PRODUCTION CONDITIONAL`, and a human review is requested again after the merge, with this status shown as `HUMAN_REVIEW_PENDING` until it lands.
 3. **Fail-closed tests, proven by mutation.** Every guard the PR adds or relies on has a test that fails when the guard is removed. The PR lists the guards and the result of removing each one.
 4. **Evidence beyond mocks.** At least one test runs the real library at the boundary (for example the real auth-js client with a fake network), plus a real-browser run for multi-tab behaviour. A PR that changes data visibility also needs an equivalence check per identity on an isolated stack.
 5. **Hosted changes are separate decisions.** Merging a migration does not approve applying it. Each hosted apply needs its own owner approval, a preflight, a backup, a post-check and a tested rollback (see `MIGRATION_HISTORY.md`).
-6. **The release record keeps the difference.** Release reports say "human review", "AI review" or "none" for each PR, and never upgrade an AI review or an admin merge into an approval.
+6. **The release record keeps the difference.** Release reports say "human review", "AI review" or "none" for each PR, and never upgrade an AI review or an owner-authorized exception into an approval.

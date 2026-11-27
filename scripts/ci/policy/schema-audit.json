@@ -285,6 +285,13 @@
    ],
    "security_definer": true
   },
+  "private.consume_rag_question_quota(uuid,integer,integer)": {
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [],
+   "security_definer": false
+  },
   "private.crop_season_transition_allowed(crop_status,crop_status)": {
    "config": [
     "search_path=\"\""

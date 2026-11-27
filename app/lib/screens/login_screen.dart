@@ -4,6 +4,8 @@ import '../design/design.dart';
 import '../services/auth_actions.dart';
 import '../services/auth_errors.dart';
 import 'forgot_password_screen.dart';
+import 'pricing_screen.dart';
+import 'service_plans.dart';
 
 /// Thông báo một lần hiển thị trên màn đăng nhập.
 enum LoginNotice { none, sessionExpired }
@@ -19,10 +21,14 @@ class LoginScreen extends StatefulWidget {
     super.key,
     required this.actions,
     this.notice = LoginNotice.none,
+    this.selectedPlan,
+    this.onPlanSelected,
   });
 
   final AuthActions actions;
   final LoginNotice notice;
+  final ServicePlanSelection? selectedPlan;
+  final ValueChanged<ServicePlanSelection>? onPlanSelected;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -38,6 +44,17 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _emailError;
   String? _passwordError;
   String? _formError;
+  ServicePlanSelection? _localPlan;
+
+  Future<void> _openPricing() async {
+    final choice = await Navigator.of(context).push<ServicePlanSelection>(
+      MaterialPageRoute<ServicePlanSelection>(
+          builder: (_) => const PricingScreen()),
+    );
+    if (!mounted || choice == null) return;
+    setState(() => _localPlan = choice);
+    widget.onPlanSelected?.call(choice);
+  }
 
   @override
   void dispose() {
@@ -97,54 +114,36 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return Scaffold(
-      backgroundColor: AppColors.headerDark,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: AppSpacing.xl),
-                  Text(
-                    'AgriCarbon',
-                    style: text.displayMedium?.copyWith(color: Colors.white),
-                  ),
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    'Theo dõi canh tác',
-                    style: text.bodyLarge
-                        ?.copyWith(color: AppColors.onHeaderSecondary),
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  if (widget.notice == LoginNotice.sessionExpired) ...[
-                    const OfflineBanner(
-                      icon: Icons.lock_clock_outlined,
-                      message:
-                          'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại. '
-                          'Dữ liệu chưa gửi vẫn được giữ trên máy.',
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  _card(context, text),
-                ],
-              ),
+    return BrandAuthFrame(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.notice == LoginNotice.sessionExpired) ...[
+            const OfflineBanner(
+              icon: Icons.lock_clock_outlined,
+              message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại. '
+                  'Dữ liệu chưa gửi vẫn được giữ trên máy.',
             ),
-          ),
-        ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          _card(context, text),
+        ],
       ),
     );
   }
 
   Widget _card(BuildContext context, TextTheme text) {
+    final selection = widget.selectedPlan ?? _localPlan;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadii.xxl),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+              color: AppColors.shadow, blurRadius: 24, offset: Offset(0, 6))
+        ],
       ),
       child: AutofillGroup(
         child: Column(
@@ -153,6 +152,12 @@ class _LoginScreenState extends State<LoginScreen> {
             Text('Đăng nhập', style: text.headlineMedium),
             const SizedBox(height: AppSpacing.xxs),
             Text('Dùng cho nông dân và cán bộ HTX', style: text.bodySmall),
+            if (selection != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                  'Bạn đã chọn gói ${selection.plan.name} — ${selection.audienceLabel}. Đăng nhập để tiếp tục với gói đã chọn.',
+                  style: text.bodyMedium?.copyWith(color: AppColors.primary)),
+            ],
             const SizedBox(height: AppSpacing.lg),
             TextField(
               controller: _emailController,
@@ -213,6 +218,7 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: AppSpacing.lg),
             PrimaryButton(
               label: 'Đăng nhập',
+              icon: Icons.lock_outline,
               loading: _submitting,
               onPressed: _submit,
             ),
@@ -223,6 +229,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _submitting ? null : _openForgotPassword,
                 child: const Text('Quên mật khẩu?'),
               ),
+            ),
+            TextButton.icon(
+              onPressed: _submitting ? null : _openPricing,
+              icon: const Icon(Icons.payments_outlined, size: 18),
+              label: const Text('Xem bảng giá dịch vụ'),
             ),
             const SizedBox(height: AppSpacing.xs),
             Center(
