@@ -4,6 +4,17 @@ Labels name document SECTIONS (and optionally chunk ids), never numbers. A query
 when the r-th retrieved chunk matches an `expected` (or `acceptable`) label. Negative queries
 have `negative: true` and an empty `expected`; any returned chunk is a false positive.
 
+Ranked-list metrics over POSITIVE queries (negatives are judged by `negative_fpr` only), each the
+mean of the per-query value (docs/rag/RAG_V15_SCIENTIFIC_EVAL.md):
+* relevant chunk = it matches an `expected` or an `acceptable` label;
+* precision@k = relevant chunks in the top k / k (a short list is not rewarded);
+* recall@k = expected labels matched by at least one chunk in the top k / expected labels;
+* f1@k = per-query harmonic mean of precision@k and recall@k (0 when both are 0);
+* ndcg@k = DCG / ideal DCG with graded gains (expected 2, acceptable 1), each label credited ONCE at
+  its first matching rank, so several chunks of one section do not inflate it;
+* hit@k and mrr@10 as before (first relevant rank).
+The runner must retrieve at least max(METRIC_KS) chunks for the @10 values to mean anything.
+
 This module computes; it does not retrieve. The runner (`scripts/eval_retrieval.py`) feeds it
 the ranked results of the REAL retriever. HOLDOUT is only ever scored, never used to choose a
 parameter: `score()` refuses to mix splits.
@@ -12,14 +23,18 @@ parameter: `score()` refuses to mix splits.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 HIT_KS = (1, 3, 5, 8)
-RECALL_KS = (5, 8)
+RECALL_KS = (1, 3, 5, 8, 10)
+#: precision / f1 / ndcg cut-offs
+METRIC_KS = (1, 3, 5, 10)
 MRR_K = 10
+EXPECTED_GAIN, ACCEPTABLE_GAIN = 2, 1
 SPLITS = frozenset({"dev", "holdout", "fixture"})
 
 
@@ -113,17 +128,61 @@ class QueryOutcome:
     expected_total: int
     latency_ms: float
     top: list[dict[str, Any]] = field(default_factory=list)
+    #: ranks (1-based) of every relevant chunk, and the first rank of each expected / acceptable label
+    relevant_ranks: tuple[int, ...] = ()
+    expected_first_ranks: tuple[int | None, ...] = ()
+    acceptable_first_ranks: tuple[int | None, ...] = ()
 
 
 def judge(query: EvalQuery, ranked: Sequence[Mapping[str, Any]], latency_ms: float) -> QueryOutcome:
     labels = query.expected + query.acceptable
     first = next((rank for rank, chunk in enumerate(ranked, 1) if any(l.matches(chunk) for l in labels)), None)
-    found = sum(1 for label in query.expected if any(label.matches(chunk) for chunk in ranked[:max(RECALL_KS)]))
+    found = sum(1 for label in query.expected if any(label.matches(chunk) for chunk in ranked[:8]))
+    relevant = tuple(rank for rank, chunk in enumerate(ranked, 1) if any(l.matches(chunk) for l in labels))
+
+    def first_ranks(group: tuple[Label, ...]) -> tuple[int | None, ...]:
+        return tuple(next((rank for rank, chunk in enumerate(ranked, 1) if label.matches(chunk)), None)
+                     for label in group)
+
     top = [{"rank": rank, "source_id": c.get("source_id"), "document_id": c.get("document_id"),
             "section": c.get("section"), "chunk_id": c.get("chunk_id"), "score": c.get("score")}
            for rank, c in enumerate(ranked[:MRR_K], 1)]
     return QueryOutcome(query.id, query.category, query.negative, len(ranked), first, found,
-                        len(query.expected), latency_ms, top)
+                        len(query.expected), latency_ms, top, relevant, first_ranks(query.expected),
+                        first_ranks(query.acceptable))
+
+
+def precision_at(o: QueryOutcome, k: int) -> float:
+    return sum(1 for rank in o.relevant_ranks if rank <= k) / k
+
+
+def recall_at(o: QueryOutcome, k: int) -> float | None:
+    if not o.expected_first_ranks:
+        return None
+    return sum(1 for rank in o.expected_first_ranks if rank is not None and rank <= k) / len(o.expected_first_ranks)
+
+
+def f1_at(o: QueryOutcome, k: int) -> float | None:
+    p, r = precision_at(o, k), recall_at(o, k)
+    if r is None:
+        return None
+    return 0.0 if p + r == 0 else 2 * p * r / (p + r)
+
+
+def ndcg_at(o: QueryOutcome, k: int) -> float | None:
+    gains = ([(rank, EXPECTED_GAIN) for rank in o.expected_first_ranks]
+             + [(rank, ACCEPTABLE_GAIN) for rank in o.acceptable_first_ranks])
+    if not gains:
+        return None
+    dcg = sum(g / math.log2(rank + 1) for rank, g in gains if rank is not None and rank <= k)
+    ideal = sorted((g for _, g in gains), reverse=True)[:k]
+    idcg = sum(g / math.log2(i + 2) for i, g in enumerate(ideal))
+    return dcg / idcg if idcg else None
+
+
+def _mean(values: Iterable[float | None]) -> float | None:
+    xs = [v for v in values if v is not None]
+    return sum(xs) / len(xs) if xs else None
 
 
 def _percentile(values: list[float], q: float) -> float | None:
@@ -146,10 +205,13 @@ def score(queries: Iterable[EvalQuery], outcomes: Iterable[QueryOutcome]) -> dic
         return {"count": n, "of": d, "rate": (n / d) if d else None}
 
     hit = {f"hit@{k}": frac(sum(1 for o in positives if o.first_rank and o.first_rank <= k), len(positives)) for k in HIT_KS}
-    recall = {}
-    for k in RECALL_KS:
-        values = [o.expected_found / o.expected_total for o in positives if o.expected_total]
-        recall[f"recall@{k}"] = (sum(values) / len(values)) if values else None
+    # recall@k counts the labels found in the top k (before: the top 8 for every k, so recall@5 == recall@8)
+    recall = {f"recall@{k}": _mean(recall_at(o, k) for o in positives) for k in RECALL_KS}
+    ranked_metrics = {}
+    for k in METRIC_KS:
+        ranked_metrics[f"precision@{k}"] = _mean(precision_at(o, k) for o in positives)
+        ranked_metrics[f"f1@{k}"] = _mean(f1_at(o, k) for o in positives)
+        ranked_metrics[f"ndcg@{k}"] = _mean(ndcg_at(o, k) for o in positives)
     mrr = (sum(1 / o.first_rank for o in positives if o.first_rank and o.first_rank <= MRR_K) / len(positives)
            if positives else None)
     latencies = [o.latency_ms for o in outcomes]
@@ -166,7 +228,7 @@ def score(queries: Iterable[EvalQuery], outcomes: Iterable[QueryOutcome]) -> dic
         "split": splits.pop(),
         "set_version": max(q.set_version for q in queries),
         "queries": len(queries), "positives": len(positives), "negatives": len(negatives),
-        **hit, **recall, "mrr@10": mrr,
+        **hit, **recall, **ranked_metrics, "mrr@10": mrr,
         "negative_fpr": frac(sum(1 for o in negatives if o.returned), len(negatives)),
         "empty_result_rate": frac(sum(1 for o in positives if o.returned == 0), len(positives)),
         "latency_ms": {"p50": _percentile(latencies, 0.5), "p95": _percentile(latencies, 0.95)},
