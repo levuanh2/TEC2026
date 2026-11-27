@@ -28,6 +28,15 @@ import { CITATION_SCOPE_NOTE, LINK_WITHHELD_NOTE, QA_PRIVACY_NOTICE, QUESTION_TI
 const CONTESTED = 'Tài liệu đang có nội dung khoa học cần xác minh lại; không sử dụng làm căn cứ hướng dẫn canh tác.'
 const CAVEAT = 'Lưu ý: tài liệu này có phát hiện kiểm tra đã được chuyên gia đánh giá là báo động nhầm hoặc khác biệt theo ngữ cảnh; hệ thống không tự xác minh nội dung khoa học.'
 
+/** Citation warnings only: since #102 the panel also shows the privacy notice as a `note` (named, below). */
+const PRIVACY_NOTE = 'Thông báo quyền riêng tư'
+const citationNotes = () => screen.getAllByRole('note').filter((n) => n.getAttribute('aria-label') !== PRIVACY_NOTE)
+const citationNote = () => {
+  const notes = citationNotes()
+  if (notes.length !== 1) throw new Error(`expected exactly one citation warning, found ${notes.length}`)
+  return notes[0]
+}
+
 const answer = (over: Partial<QuestionAnswer> = {}): QuestionAnswer => ({
   status: 'generated', intent: 'explain', cropSeasonId: 's1',
   answer: 'Tổng phát thải khí nhà kính đã tính cho vụ: 2.900 kg CO2e.',
@@ -143,10 +152,10 @@ describe('SeasonQuestionPanel', () => {
     render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
     fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tài liệu nào nói về AWD?' } })
     fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
-    const note = await screen.findByRole('note')
+    const note = await screen.findByText(CONTESTED)
     expect(note.textContent).toBe(CONTESTED)
     expect(note.closest('li')?.textContent).toContain('Hướng dẫn tưới AWD')       // inside its own citation
-    expect(screen.getAllByRole('note')).toHaveLength(1)                             // the clean citation has none
+    expect(citationNotes()).toHaveLength(1)                             // the clean citation has none
     expect(document.body.textContent).not.toContain('reference_conflict')
   })
 
@@ -352,7 +361,7 @@ describe('READ-tier contested citations', () => {
 
   it('is visible without hover: no tooltip, not hidden, not collapsed, not colour alone', async () => {
     await show([contested])
-    const warning = screen.getByRole('note')
+    const warning = citationNote()
     for (let el: HTMLElement | null = warning; el; el = el.parentElement) {
       expect(el.hidden).toBe(false)
       expect(el.getAttribute('aria-hidden')).not.toBe('true')
@@ -385,7 +394,7 @@ describe('READ-tier contested citations', () => {
 
   it('keeps an integrity caveat distinct from a scientific contradiction', async () => {
     await show([contested, caveated])
-    const notes = screen.getAllByRole('note').map((n) => n.textContent)
+    const notes = citationNotes().map((n) => n.textContent)
     expect(notes).toEqual([CONTESTED, CAVEAT])
     expect(within(groupOf('Tài liệu có lưu ý')).queryByText(/khoa học cần xác minh lại/)).toBeNull()
   })
@@ -407,7 +416,7 @@ describe('READ-tier contested citations', () => {
 
   it('still warns when the warned citation has no URL at all', async () => {
     await show([{ ...contested, url: null }])
-    expect(screen.getByRole('note').textContent).toBe(CONTESTED)
+    expect(citationNote().textContent).toBe(CONTESTED)
     expect(screen.queryByRole('link')).toBeNull()
   })
 
@@ -415,7 +424,7 @@ describe('READ-tier contested citations', () => {
     // a warning whose wording mentions nothing about science still withholds the link
     await show([cite({ title: 'Tài liệu X', integrityWarning: 'Lưu ý.', integrityDetail: null })])
     expect(screen.queryByRole('link')).toBeNull()
-    expect(screen.getByRole('note').textContent).toBe('Lưu ý.')
+    expect(citationNote().textContent).toBe('Lưu ý.')
   })
 
   it.each([
@@ -443,7 +452,7 @@ describe('READ-tier contested citations', () => {
 
   it('a manager sees the same warning, title and withheld link', async () => {
     await show([contested], 'manager')
-    expect(screen.getByRole('note').textContent).toBe(CONTESTED)
+    expect(citationNote().textContent).toBe(CONTESTED)
     expect(screen.queryByRole('link')).toBeNull()
   })
 
