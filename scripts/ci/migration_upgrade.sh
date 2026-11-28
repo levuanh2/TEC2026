@@ -82,10 +82,42 @@ fingerprint() {
 before="$(fingerprint)"
 echo "seeded base: $(printf '%s\n' "$before" | wc -l) public tables, $(printf '%s\n' "$before" | awk -F'[ :]' '{s += $2} END {print s}') rows, $(printf '%s\n' "$before" | awk -F'[ :]' '$2 == 0 {e++} END {print e + 0}') empty tables"
 
+# A new migration that sorts BEFORE the newest base migration (a branch that merged the deploy branch) is
+# applied out of order with --include-all, but only when it is byte-identical to the deploy branch's copy
+# (the rule of check_migrations.py --deploy-ref): hosted already applied it there, in order. Otherwise the
+# CLI's own refusal stands.
+# Fixed on purpose (as check_migrations.DEPLOY_REF): no variable can point the exception at another ref.
+DEPLOY_REF="origin/main"
+deploy_commit=""
+if resolved="$(git -C "$ROOT" rev-parse -q --verify "$DEPLOY_REF^{commit}" 2>/dev/null)"; then
+  deploy_commit="$resolved"   # not fetched -> stays empty -> no exception (fail closed)
+fi
+# never when origin/main IS the commit under test (it would vouch for itself)
+if [ "$deploy_commit" = "$(git -C "$ROOT" rev-parse HEAD)" ]; then deploy_commit=""; fi
+# newest version the seeded base DB really has (without the held-back file of the N-1 -> N mode)
+newest_base="$(comm -23 <(printf '%s\n' "$base_files") <(printf '%s\n' "$new") | tail -1 | cut -d_ -f1)"
+include_all=""
+for f in $new; do
+  if [ "$(printf '%s' "$f" | cut -d_ -f1)" \< "$newest_base" ] || [ "$(printf '%s' "$f" | cut -d_ -f1)" = "$newest_base" ]; then
+    deployed=""
+    if [ -n "$deploy_commit" ]; then
+      if blob="$(git -C "$ROOT" rev-parse -q --verify "$deploy_commit:supabase/migrations/$f" 2>/dev/null)"; then
+        deployed="$blob"
+      fi
+    fi
+    if [ -n "$deployed" ] && [ "$deployed" = "$(git -C "$ROOT" hash-object "supabase/migrations/$f")" ]; then
+      echo "::notice title=Migration upgrade::$f is older than $newest_base on $BASE but identical to $DEPLOY_REF: applied with --include-all"
+      include_all="--include-all"
+    else
+      echo "::error title=Migration upgrade::$f sorts before $newest_base on $BASE and is not identical to $DEPLOY_REF"
+      exit 1
+    fi
+  fi
+done
 for f in $new; do
   cp "$ROOT/supabase/migrations/$f" "$BASE_TREE/supabase/migrations/$f"
 done
-supabase migration up --local --workdir "$BASE_TREE"
+supabase migration up --local $include_all --workdir "$BASE_TREE"
 
 applied="$(sql 'select version from supabase_migrations.schema_migrations order by version')"
 expected="$(printf '%s\n' "$head_files" | cut -d_ -f1)"

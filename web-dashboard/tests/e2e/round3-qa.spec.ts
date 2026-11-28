@@ -188,7 +188,10 @@ test('technical fields are disclosed, closed, and only in Management', async ({ 
 
 /* ----------------------------------------------- §8 visual system pass */
 
-test('no institutional dark green, no emoji and no serif in the workspace', async ({ page }) => {
+/* Palette 2026-11 (user decision, docs/UI_REFRESH_2026_11.md): forest ink, CTA and markers are the
+ * approved workspace palette, so Round 3's "no dark green text or rule" check is superseded. What it
+ * protected stays: the workspace never becomes a dark green PANEL (content stays on light paper). */
+test('no dark green panel, no emoji and no serif in the workspace', async ({ page }) => {
   test.setTimeout(180_000)
   for (const path of ALL) {
     await settle(page, path)
@@ -207,10 +210,13 @@ test('no institutional dark green, no emoji and no serif in the workspace', asyn
       }
       const green: string[] = []
       const serif: string[] = []
+      const mainBox = main.getBoundingClientRect()
       for (const el of els) {
         const cs = getComputedStyle(el)
-        for (const prop of ['backgroundColor', 'color', 'borderBottomColor', 'borderLeftColor'] as const) {
-          if (institutional(cs[prop])) { green.push(`${el.tagName}.${String(el.className).slice(0, 40)}:${prop}`); break }
+        const box = el.getBoundingClientRect()
+        // a panel: a dark green fill over at least half the workspace width and 120 px of height
+        if (institutional(cs.backgroundColor) && box.width >= mainBox.width / 2 && box.height >= 120) {
+          green.push(`${el.tagName}.${String(el.className).slice(0, 40)}:backgroundColor`)
         }
         if (/serif/i.test(cs.fontFamily) && !/sans-serif/i.test(cs.fontFamily) && el.textContent?.trim()) {
           serif.push(`${el.tagName}.${String(el.className).slice(0, 40)}`)
@@ -225,7 +231,7 @@ test('no institutional dark green, no emoji and no serif in the workspace', asyn
       }
       return { green: [...new Set(green)].slice(0, 5), emoji: [...new Set(emoji)].slice(0, 5), serif: [...new Set(serif)].slice(0, 5) }
     })
-    expect(found.green, `institutional green in main on ${path}`).toEqual([])
+    expect(found.green, `dark green panel in main on ${path}`).toEqual([])
     expect(found.emoji, `emoji glyph on ${path}`).toEqual([])
     expect(found.serif, `serif type on ${path}`).toEqual([])
   }

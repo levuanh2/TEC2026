@@ -20,7 +20,7 @@ const ask = {
   reset() { fake.calls.length = 0; fake.queue.length = 0; fake.impl = async () => { throw new Error('unset') } },
 }
 
-import { QUESTION_TIMEOUT_MS, SeasonQuestionPanel } from './aiQuestions'
+import { QA_PRIVACY_NOTICE, QUESTION_TIMEOUT_MS, SeasonQuestionPanel } from './aiQuestions'
 
 const answer = (over: Partial<QuestionAnswer> = {}): QuestionAnswer => ({
   status: 'generated', intent: 'explain', cropSeasonId: 's1',
@@ -77,15 +77,44 @@ describe('SeasonQuestionPanel', () => {
     await waitFor(() => expect(ask.calls).toHaveLength(1))
   })
 
+  it('shows the approved privacy notice to farmers and managers, before any question is asked', () => {
+    for (const audience of ['farmer', 'manager'] as const) {
+      render(<SeasonQuestionPanel seasonId="s1" audience={audience} />)
+      const note = screen.getByRole('note', { name: 'Thông báo quyền riêng tư' })
+      expect(note.textContent).toBe(QA_PRIVACY_NOTICE)
+      for (const phrase of ['không gửi nội dung câu hỏi đến mô hình AI bên ngoài', 'chưa cung cấp khuyến nghị canh tác tự động',
+        'Nội dung câu hỏi không được lưu', 'chưa đạt yêu cầu MRV', 'báo cho quản trị viên HTX']) {
+        expect(note.textContent).toContain(phrase)
+      }
+      expect(ask.calls).toHaveLength(0)
+      cleanup()
+    }
+  })
+
   it('a manager is never offered the action intent', () => {
     render(<SeasonQuestionPanel seasonId="s1" audience="manager" />)
     expect(screen.queryByLabelText('Gợi ý hành động')).toBeNull()
     expect(screen.getByLabelText('Giải thích vụ')).toBeTruthy()
   })
 
-  it('a farmer may choose it; the server still decides', () => {
-    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+  it('a farmer may choose it when the action tier is on; the server still decides', () => {
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" actionTier />)
     expect(screen.getByLabelText('Gợi ý hành động')).toBeTruthy()
+  })
+
+  it('READ-only build (default): a farmer is not offered the action intent', () => {
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    expect(screen.queryByLabelText('Gợi ý hành động')).toBeNull()
+    expect(screen.getByLabelText('Giải thích vụ')).toBeTruthy()
+  })
+
+  it('READ-only build: an action question is not auto-routed to recommend and says why', async () => {
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tôi nên làm gì để giảm phát thải?' } })
+    expect(screen.getByText(/Giai đoạn thử nghiệm chưa có gợi ý hành động/)).toBeTruthy()
+    expect(screen.queryByText(/chỉ dành cho nông hộ có quyền ghi/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
+    await waitFor(() => expect(ask.calls[0]?.[1]).toEqual({ question: 'Tôi nên làm gì để giảm phát thải?', intent: 'explain' }))
   })
 
   it('shows a loading state while waiting', async () => {
@@ -110,6 +139,10 @@ describe('SeasonQuestionPanel', () => {
   it.each([
     [503, 'backend_not_configured', /chưa được bật/, false],
     [503, 'generation_unavailable', /chưa sẵn sàng/, false],
+    [503, 'action_tier_disabled', /chỉ hỗ trợ câu hỏi giải thích/, false],
+    [429, 'question_rate_limited', /hỏi quá nhiều câu/, false],
+    [503, 'question_rate_limit_unavailable', /tạm thời chưa nhận câu hỏi/, false],
+    [403, 'question_not_enabled', /chưa mở cho tài khoản này/, false],
     [404, 'not_found', /không có quyền/, false],
     [502, 'citation_mismatch', /kiểm tra nguồn dẫn/, true],
     [0, 'offline', /Không có kết nối/, true],
@@ -121,6 +154,21 @@ describe('SeasonQuestionPanel', () => {
     expect(alert.textContent).toMatch(text)
     expect(!!screen.queryByRole('button', { name: 'Thử lại' })).toBe(retry)
     expect(alert.textContent).not.toContain('internal detail')
+  })
+
+  it('403 question_not_enabled from an open panel (cohort changed): one request, no retry, no automatic resend', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      ask.implement(async () => { throw new ApiError(403, 'question_not_enabled', 'internal detail') })
+      render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Vụ này đang thế nào?' }))
+      expect((await screen.findByRole('alert')).textContent).toMatch(/chưa mở cho tài khoản này/)
+      await act(async () => { vi.advanceTimersByTime(QUESTION_TIMEOUT_MS * 2) })
+      expect(ask.calls).toHaveLength(1)
+      expect(screen.queryByRole('button', { name: 'Thử lại' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('times out on its own and offers a retry with the same intent', async () => {
@@ -205,7 +253,7 @@ describe('SeasonQuestionPanel', () => {
       recommendations: [{ title: 'Cân nhắc tưới ngập khô xen kẽ', actions: ['Theo dõi mực nước'], ruleCode: 'water.awd_from_continuous_flooding' }],
       storedRecommendations: [{ ruleCode: 'water.awd_from_continuous_flooding', type: 'optimization', title: 'Chuyển sang tưới AWD', status: 'generated' }],
     }))
-    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" actionTier />)
     fireEvent.click(screen.getByLabelText('Gợi ý hành động'))
     fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tôi nên làm gì?' } })
     fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))
@@ -220,7 +268,7 @@ describe('SeasonQuestionPanel', () => {
       status: 'insufficient_evidence', intent: 'recommend', insufficientReason: 'no_rule_signal', citations: [], facts: [],
       answer: 'Vụ này chưa có khuyến nghị nào do hệ thống quy tắc ghi nhận, nên trợ lý không đưa ra gợi ý hành động.',
     }))
-    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" />)
+    render(<SeasonQuestionPanel seasonId="s1" audience="farmer" actionTier />)
     fireEvent.click(screen.getByLabelText('Gợi ý hành động'))
     fireEvent.change(screen.getByLabelText('Câu hỏi của bạn'), { target: { value: 'Tôi nên làm gì?' } })
     fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }))

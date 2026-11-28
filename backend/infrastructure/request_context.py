@@ -12,6 +12,7 @@ access log luôn có `db_calls`/`db_ms`, đều là số — không chứa dữ 
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 
@@ -23,6 +24,7 @@ from . import profiling
 
 logger = logging.getLogger("agricarbon.access")
 
+_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _SAFE_LABEL = str.maketrans({";": "_", ",": "_", '"': "_", "\\": "_"})
 
 
@@ -42,7 +44,9 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         self._server_timing = server_timing
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        supplied = request.headers.get("x-request-id") or ""
+        # A client id is kept for cross-system tracing only if it cannot forge log fields.
+        request_id = supplied if _REQUEST_ID.fullmatch(supplied) else str(uuid.uuid4())
         request.state.request_id = request_id
         profile = profiling.start()
         started = time.monotonic()

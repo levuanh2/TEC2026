@@ -20,6 +20,8 @@ from tests.test_rag_qa import GOOD_RECOMMEND, Carbon, Llm, Reader, gate  # noqa:
 
 URL = f"/v1/crop-seasons/{SEASON_ID}/questions"
 AUTH = {"Authorization": "Bearer t"}
+#: A real farming question: a content-free ACTION question ("?") is asked back before any model call.
+ACTION_QUESTION = "Tôi nên điều chỉnh tưới nước thế nào để giảm phát thải mê-tan?"
 
 
 def client(service=None, reader=None, configured=True):
@@ -97,14 +99,14 @@ def test_recommend_with_write_and_a_provider():
 
 def test_recommend_without_a_provider_is_503():
     service = RagQuestionService(carbon_service=Carbon(), write_gate=gate())
-    response = client(service).post(URL, json={"question": "?", "intent": "recommend"}, headers=AUTH)
+    response = client(service).post(URL, json={"question": ACTION_QUESTION, "intent": "recommend"}, headers=AUTH)
     assert response.status_code == 503 and response.json()["detail"]["error"]["code"] == "generation_unavailable"
 
 
 def test_ungrounded_output_is_502_without_internal_detail():
     bad = {**GOOD_RECOMMEND, "evidence_refs": [{"source_id": "invented-src", "chunk_id": "zz"}]}
     service = RagQuestionService(carbon_service=Carbon(), llm_client=Llm(bad), write_gate=gate())
-    response = client(service).post(URL, json={"question": "?", "intent": "recommend"}, headers=AUTH)
+    response = client(service).post(URL, json={"question": ACTION_QUESTION, "intent": "recommend"}, headers=AUTH)
     assert response.status_code == 502 and "invented-src" not in response.text
 
 

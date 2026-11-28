@@ -27,7 +27,8 @@ import {
 import { ActivityTimeline, ActivityCoverage } from '../features/activities'
 import { CarbonPanel } from '../features/carbon'
 import { SeasonMethodologyPanel } from '../features/seasonMethodology'
-import { SeasonQuestionPanel, aiQuestionsEnabled } from '../features/aiQuestions'
+import { SeasonQuestionPanel } from '../features/aiQuestions'
+import { useAiQuestionsVisible } from '../features/aiQuestionsVisibility'
 import type { Role } from '../types'
 
 export type SeasonTab = 'overview' | 'activities' | 'performance' | 'carbon' | 'mrv'
@@ -44,6 +45,7 @@ type Batches = Awaited<ReturnType<typeof getProductionBatches>>
  * data streams into its own section so a slow query never blanks the page.
  */
 export function SeasonHub({ id, tab, role, organizationId }: { id: string; tab: SeasonTab; role?: Role; organizationId?: string | null }) {
+  const showQuestions = useAiQuestionsVisible()
   const frame = useAsync(async () => {
     const season = await getCropSeason(id)
     const plot = season?.plotId ? await getPlot(season.plotId).catch(() => undefined) : undefined
@@ -128,7 +130,7 @@ export function SeasonHub({ id, tab, role, organizationId }: { id: string; tab: 
             {tab === 'overview' && (
               <Overview season={season} plot={plot} metrics={metrics} activities={activities} batches={batches} base={base} />
             )}
-            {tab === 'overview' && aiQuestionsEnabled && <SeasonQuestionPanel seasonId={season.id} audience="manager" />}
+            {tab === 'overview' && showQuestions && <SeasonQuestionPanel seasonId={season.id} audience="manager" />}
             {tab === 'activities' && (
               <Section title="Nhật ký hoạt động" description="Ghi nhận canh tác theo nhóm — nhấp để xem chi tiết">
                 <Async state={activities} skeleton="table">
