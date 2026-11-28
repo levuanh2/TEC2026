@@ -9,12 +9,13 @@ from __future__ import annotations
 import math
 
 import contextvars
+import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from . import auth, memberships, profiling, supabase_clients
+from . import auth, memberships, profiling, request_deadline, supabase_clients
 from .auth_admin import must_change_password
 from .config import Settings
 
@@ -83,6 +84,7 @@ class ReadNotFoundError(Exception): pass
 class SupabaseReadRepository:
     def __init__(self, settings: Settings, token: str, client: Any | None = None):
         self._settings = settings
+        self._client_lock = threading.Lock()
         self._pooled = client is None
         if client is None:
             # Reused per caller token (see supabase_clients): already bound to
@@ -121,14 +123,26 @@ class SupabaseReadRepository:
                     return attempt()
                 except Exception as exc:  # noqa: BLE001 - re-raised unless it is one of the two retryable cases
                     if _is_clock_skew(exc) and not skew_retried:
+                        if not request_deadline.affords(_CLOCK_SKEW_WAIT_SECONDS):
+                            raise  # L1 #103 A1: the request cannot wait 1 s for the clock any more
                         skew_retried = True
                         time.sleep(_CLOCK_SKEW_WAIT_SECONDS)
                         continue
                     if not isinstance(exc, _TRANSPORT_ERRORS) or not self._pooled or transport_retries == 0:
                         raise
+                    if not request_deadline.affords(_RETRY_BACKOFF_SECONDS):
+                        # L1 #103 A1: at (or within one backoff of) the request deadline a transport error is not
+                        # worth a retry, and a timeout there is not a dead connection: no sleep, no client swap.
+                        raise
                     transport_retries -= 1
                     time.sleep(_RETRY_BACKOFF_SECONDS)
-                    self.client = supabase_clients.renew(self._settings, self.token, failed)
+                    fresh = supabase_clients.renew(self._settings, self.token, failed)
+                    # Several threads share this repository (`_concurrent`, the Q&A facts reads). Only
+                    # the one whose client is still the failed one swaps it; a slower thread must not
+                    # put back an older replacement over a newer one.
+                    with self._client_lock:
+                        if self.client is failed:
+                            self.client = fresh
 
     def _select(self, label: str, build: Callable[[Any], Any]) -> list[dict[str, Any]]:
         with profiling.observe(label):

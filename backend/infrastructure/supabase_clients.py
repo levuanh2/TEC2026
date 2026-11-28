@@ -25,6 +25,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
+from . import request_deadline
 from .config import Settings
 
 MAX_CLIENTS = 32
@@ -67,7 +68,24 @@ def _transport() -> Any:
         http2=False,
         timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS),
         limits=httpx.Limits(max_connections=MAX_CONNECTIONS, max_keepalive_connections=MAX_CONNECTIONS),
+        event_hooks={"request": [_apply_request_deadline]},
     )
+
+
+def _apply_request_deadline(request: Any) -> None:
+    """L1 #103 A1: under a request deadline (the Q&A path) no PostgREST / Auth call starts once it has
+    passed, and each of its timeouts (connect, read, write, pool wait) is at most what is left. Without
+    a deadline (every other route) the request is untouched (REQUEST_TIMEOUT_SECONDS)."""
+    left = request_deadline.remaining()
+    if left is None:
+        return
+    request_deadline.check("an HTTP call")
+    limit = request_deadline.clamp(left)
+    timeouts = dict(request.extensions.get("timeout") or {})
+    request.extensions["timeout"] = {
+        key: (limit if timeouts.get(key) is None else min(timeouts[key], limit))
+        for key in ("connect", "read", "write", "pool")
+    }
 
 
 def _close(client: Any) -> None:

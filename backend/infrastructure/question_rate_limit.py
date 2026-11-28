@@ -42,6 +42,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from . import request_deadline
+
 logger = logging.getLogger("agricarbon.rag.rate_limit")
 
 PER_MINUTE_ENV = "RAG_QA_RATE_LIMIT_PER_MINUTE"
@@ -161,10 +163,18 @@ class PostgresQuestionRateStore:
     def consume(self, user_id: str, policy: QuestionRatePolicy) -> QuestionRateDecision:
         try:
             with self._connection(self._conninfo) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "select allowed, limit_window, retry_after_seconds "
-                    "from private.consume_rag_question_quota(%s::uuid, %s, %s)",
-                    (user_id, policy.per_minute, policy.per_day))
+                sql = ("select allowed, limit_window, retry_after_seconds "
+                       "from private.consume_rag_question_quota(%s::uuid, %s, %s)")
+                params = (user_id, policy.per_minute, policy.per_day)
+                timeout_ms = request_deadline.statement_timeout_ms()
+                if timeout_ms is not None and hasattr(conn, "pipeline"):
+                    # L1 #103 A1: bounded by the request deadline, in the same round trip. A timeout is a
+                    # store failure like any other: refused below (fail closed), never let through.
+                    with conn.pipeline():
+                        conn.execute("select set_config('statement_timeout', %s, true)", [str(timeout_ms)])
+                        cur.execute(sql, params)
+                else:
+                    cur.execute(sql, params)
                 row = cur.fetchone()
         except Exception as exc:  # noqa: BLE001 - any store failure refuses (fail closed)
             logger.error("rag_question_rate_store_error type=%s", type(exc).__name__)

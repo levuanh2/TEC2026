@@ -29,18 +29,22 @@ Nothing is persisted (D4): no question, answer, evidence or generated recommenda
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import logging
 import os
+import threading
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Any
 
 from infrastructure.llm_client import LlmUnavailable, StructuredLlmClient
 from infrastructure.llm_quota import QuotaGate, QuotaRefused
-from infrastructure import question_rate_limit
+from infrastructure import pg_pool, profiling, question_rate_limit, request_deadline
 from infrastructure.read_repo import ReadNotFoundError
 from rag_application import CallerSeasonScopeResolver, LexicalKnowledgeRetriever, RetrievalSettings, WriteGate
 from recommendation.rag import (
@@ -68,6 +72,17 @@ logger = logging.getLogger("agricarbon.rag")
 #: Other seasons of the same plot used as COMPARE form A (caller-readable, RLS).
 MAX_COMPARISON_SEASONS = 3
 
+#: L1 #103 A1. Whole-question server deadline. Production READ p95 is ~8 s on main and ~3 s with the
+#: overlapped fact reads, max 8.4 s; the web client gives up at 45 s. Past it the question is refused
+#: (503 `question_timeout`) and every DB / HTTP call it still has in flight is cut at the same instant
+#: (infrastructure/request_deadline.py), so its connections go back to the pool.
+QUESTION_DEADLINE_SECONDS = 20.0
+#: L1 #103 A1. Of the pg pool's `pg_pool.MAX_SIZE` (8) connections, Q&A may hold at most this many at
+#: once (rate-limit check + the 2 Carbon reads of each question), so a burst of questions can never take
+#: the pool from the Carbon calculation / write APIs. A question that cannot get a slot before its
+#: deadline is refused like any other timeout.
+QA_PG_BUDGET = 4
+
 
 # -- facts source (Core V1 reads, caller-scoped) -----------------------------
 
@@ -79,29 +94,124 @@ class CallerSeasonFactsSource:
     reads (`stored`, `readiness`) sit behind the same caller-scoped gate as the Carbon routes.
     """
 
-    def __init__(self, reader: Any, carbon_service: Any) -> None:
+    def __init__(self, reader: Any, carbon_service: Any, *, concurrent: bool = True) -> None:
         self._reader = reader
         self._carbon = carbon_service
+        self._concurrent = concurrent
+        # crop_season_id -> {read name: ("ok", value) | ("error", exception)}
+        self._outcomes: dict[str, dict[str, tuple[str, Any]]] = {}
+        #: stage timings of the last concurrent run (ms; `pending` = workers still running at the deadline)
+        self.stages: dict[str, float] = {}
+
+    def _reads(self, crop_season_id: str) -> dict[str, Callable[[], Any]]:
+        """The season's independent fact reads, each exactly the call the sequential
+        version made (same caller-scoped reader, same service-role Carbon reads)."""
+        sid = crop_season_id
+        return {
+            "season": lambda: self._reader.season(sid),
+            "activity_summary": lambda: self._reader.activity_summary(sid),
+            "metrics": lambda: self._reader.metrics(sid),
+            "carbon_actual": lambda: self._carbon.stored(sid, "as_recorded"),
+            "carbon_readiness": lambda: self._carbon.readiness(sid),
+            "recommendations": lambda: self._reader.recommendations(sid),
+            "comparison_seasons": lambda: self._comparison_seasons(sid),
+        }
+
+    def _outcome(self, name: str, crop_season_id: str) -> Any:
+        """The result of one read, or its exception re-raised at the moment the caller asks
+        for it, exactly as the sequential call would have raised it.
+
+        Latency (L1 profile 2026-11-27, production image on EC2): these 7 reads ran one
+        after another, about 4.3 s of a 5.8 s question, because each is several
+        Sydney -> Seoul round trips. None depends on another's result, so on the first
+        request for a season all 7 start at once and every later call is served from what
+        they returned. This adapter is only called AFTER the scope resolver has authorized
+        the season (and after the cohort gate and the rate limit), so nothing is read
+        earlier than before: only the reads that were already going to run overlap. Each
+        worker runs in a fresh context that carries only the request profile (see `_run_all`).
+
+        One instance serves ONE request on ONE thread (built per request in `answer`); it is
+        not meant to be shared across threads.
+        """
+        outcomes = self._outcomes.get(crop_season_id)
+        if outcomes is None:
+            outcomes = self._outcomes[crop_season_id] = self._run_all(self._reads(crop_season_id))
+        kind, value = outcomes[name]
+        if kind == "error":
+            raise value
+        return value
+
+    def _run_all(self, reads: Mapping[str, Callable[[], Any]]) -> dict[str, tuple[str, Any]]:
+        def settle(read: Callable[[], Any]) -> tuple[str, Any]:
+            try:
+                return ("ok", read())
+            except Exception as exc:  # noqa: BLE001 - re-raised by `_outcome` at the caller's own call
+                return ("error", exc)
+
+        if not self._concurrent:
+            return {name: settle(read) for name, read in reads.items()}
+        profile = profiling.current()
+        deadline_at, budget = request_deadline.at(), pg_pool.current_budget()
+        lock = threading.Lock()
+        queue_ms: list[float] = []
+        run_ms: list[float] = []
+
+        def in_worker(read: Callable[[], Any], submitted: float) -> tuple[str, Any]:
+            # A FRESH context, not a copy of the caller's: only the request profile, the request deadline
+            # and the Q&A pool budget cross into the worker. A copy would also carry `pg_pool.bound()` /
+            # `PostgresCarbonRepository.session()` state, and two workers would then share ONE psycopg
+            # connection (not thread-safe for concurrent statements). Without that state each worker
+            # checks out its own connection.
+            started = time.monotonic()
+            profiling.attach(profile)
+            with request_deadline.bound(deadline_at), pg_pool.budget(budget):
+                outcome = settle(read)
+            with lock:
+                queue_ms.append((started - submitted) * 1000)
+                run_ms.append((time.monotonic() - started) * 1000)
+            return outcome
+
+        # Not `with ThreadPoolExecutor(...)`: its exit joins every worker, so one hung read would hold the
+        # request past any deadline. The wait ends at the request deadline; a worker still running then is
+        # never joined (shutdown(wait=False)) and its own DB / HTTP calls end at the same deadline.
+        pool = ThreadPoolExecutor(max_workers=len(reads), thread_name_prefix="rag-facts")
+        waited = time.monotonic()
+        try:
+            futures = {name: pool.submit(contextvars.Context().run, in_worker, read, time.monotonic())
+                       for name, read in reads.items()}
+            _, pending = wait(futures.values(), timeout=request_deadline.remaining())
+        finally:
+            closing = time.monotonic()
+            pool.shutdown(wait=False, cancel_futures=True)
+            done_at = time.monotonic()
+            with lock:
+                self.stages = {"wait_ms": (closing - waited) * 1000, "shutdown_ms": (done_at - closing) * 1000,
+                               "queue_ms_max": max(queue_ms, default=0.0), "worker_ms_max": max(run_ms, default=0.0)}
+        self.stages["pending"] = float(len(pending))
+        # A read still running at the deadline is an error like any other read error: raised when the caller
+        # asks for it (never re-run: the outcomes are stored), and the question ends as `question_timeout`.
+        late = request_deadline.DeadlineExceeded("a season fact read was still running at the request deadline")
+        return {name: ("error", late) if future in pending else future.result() for name, future in futures.items()}
 
     def season(self, crop_season_id: str) -> Mapping[str, Any]:
-        return self._reader.season(crop_season_id)
+        return self._outcome("season", crop_season_id)
 
     def activity_summary(self, crop_season_id: str) -> Mapping[str, Any]:
-        return self._reader.activity_summary(crop_season_id)
+        return self._outcome("activity_summary", crop_season_id)
 
     def metrics(self, crop_season_id: str) -> Mapping[str, Any]:
-        return self._reader.metrics(crop_season_id)
+        return self._outcome("metrics", crop_season_id)
 
     def carbon_actual(self, crop_season_id: str) -> Mapping[str, Any] | None:
-        return self._carbon.stored(crop_season_id, "as_recorded")
+        return self._outcome("carbon_actual", crop_season_id)
 
     def carbon_readiness(self, crop_season_id: str) -> Mapping[str, Any] | None:
-        return self._carbon.readiness(crop_season_id)
+        return self._outcome("carbon_readiness", crop_season_id)
 
     def recommendation_signals(self, crop_season_id: str, *, fresh: bool) -> Sequence[Mapping[str, Any]]:
         if fresh:  # preview is refused by the route; never evaluate rules here
             raise RagAccessDenied("preview mode is not available")
-        return self._reader.recommendations(crop_season_id)
+        return self._outcome("recommendations", crop_season_id)
 
     def cv_signals(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
         return ()  # not wired in V1 Q&A: CV results stay on their own screen
@@ -110,6 +220,9 @@ class CallerSeasonFactsSource:
         return ()  # Core V1 has no finalized benchmark source
 
     def comparison_seasons(self, crop_season_id: str) -> Sequence[Mapping[str, Any]]:
+        return self._outcome("comparison_seasons", crop_season_id)
+
+    def _comparison_seasons(self, crop_season_id: str) -> list[dict[str, Any]]:
         season = self._reader.season(crop_season_id)
         organization_id = self._reader.season_lineage(crop_season_id)["organization_id"]
         others = [row for row in self._reader.seasons_for_plot(str(season["plot_id"]))
@@ -349,8 +462,12 @@ class RagQuestionService:
                  retrieval: RetrievalSettings | None = None, write_gate: WriteGate | None = None,
                  quota: QuotaGate | None = None, action_tier_enabled: bool = True,
                  rate_limiter: question_rate_limit.QuestionRateLimiter | None = None,
-                 allowed_user_ids: frozenset[str] | None = None) -> None:
+                 allowed_user_ids: frozenset[str] | None = None,
+                 deadline_seconds: float = QUESTION_DEADLINE_SECONDS, pg_budget: int = QA_PG_BUDGET) -> None:
         self._carbon = carbon_service
+        self._deadline_seconds = deadline_seconds
+        # One per process (the service is long-lived): shared by every in-flight question.
+        self._pg_budget = threading.BoundedSemaphore(pg_budget)
         self._rate_limiter = rate_limiter
         # None = no cohort restriction (tests / "*"); a set = only these verified user ids.
         self._allowed_user_ids = (None if allowed_user_ids is None
@@ -419,6 +536,11 @@ class RagQuestionService:
         started = time.perf_counter()
         meter = UsageMeter()
         status, error_code = "error", None
+        facts: CallerSeasonFactsSource | None = None
+        # L1 #103 A1: the whole question runs under one deadline and the Q&A share of the pg pool.
+        limits = contextlib.ExitStack()
+        limits.enter_context(request_deadline.bound(time.monotonic() + self._deadline_seconds))
+        limits.enter_context(pg_pool.budget(self._pg_budget))
         try:
             if not self._action_tier_enabled and (question.intent in ACTION_INTENTS
                                                   or question.mode is not RagMode.ASK):
@@ -451,17 +573,28 @@ class RagQuestionService:
                 generator=CapabilityRoutedGenerator(action=action),
                 what_if=CarbonScenarioWhatIf(self._carbon),
             )
+            facts = CallerSeasonFactsSource(reader, self._carbon)
             result = orchestrator.answer(
                 request, scope_resolver=CallerSeasonScopeResolver(reader, write_gate=self._write_gate),
-                facts=CallerSeasonFactsSource(reader, self._carbon),
+                facts=facts,
             )
             assert_recommendations_follow_rules(result)
             status = result.status
             return to_response(result, meter, composed=meter.calls == 0)
         except RagError as exc:
+            if _deadline_failure(exc):
+                error_code = QuestionTimedOut.code
+                raise QuestionTimedOut("the question did not finish before its deadline") from exc
             error_code = exc.code
             raise
+        except Exception as exc:
+            if _deadline_failure(exc):
+                error_code = QuestionTimedOut.code
+                raise QuestionTimedOut("the question did not finish before its deadline") from exc
+            raise
         finally:
+            left = request_deadline.remaining()
+            limits.close()
             tier = "read_and_action" if self._action_tier_enabled else "read_only"
             logger.info(
                 "rag_question request_id=%s intent=%s mode=%s status=%s error=%s llm_calls=%s "
@@ -473,6 +606,71 @@ class RagQuestionService:
                 # Impossible by construction (a READ-only service holds no provider client); a
                 # tripwire for monitoring (scripts/ops/rag_qa_log_summary.py), never expected.
                 logger.error("rag_alert llm_calls_in_read_only request_id=%s llm_calls=%s", request_id, meter.calls)
+            _log_stages(request_id, error_code == QuestionTimedOut.code, self._deadline_seconds, left, facts)
+
+
+class QuestionTimedOut(RagError):
+    """The question hit `QUESTION_DEADLINE_SECONDS` (or found no Q&A pool slot before it): 503."""
+
+    code = "question_timeout"
+
+
+def _timeout_types() -> tuple[type[BaseException], ...]:
+    types: list[type[BaseException]] = [TimeoutError]  # includes request_deadline.DeadlineExceeded
+    with contextlib.suppress(Exception):
+        import psycopg
+        types.append(psycopg.errors.QueryCanceled)  # statement_timeout
+    with contextlib.suppress(Exception):
+        from psycopg_pool import PoolTimeout
+        types.append(PoolTimeout)
+    with contextlib.suppress(Exception):
+        import httpx
+        types.append(httpx.TimeoutException)
+    return tuple(types)
+
+
+_TIMEOUT_TYPES = _timeout_types()
+#: a pool / semaphore wait that ends AT the deadline may return a few ms early (timer resolution)
+_DEADLINE_SLACK_SECONDS = 0.25
+
+
+def _deadline_failure(exc: BaseException) -> bool:
+    """True when `exc` is (or was caused by) a timeout AND the request deadline has passed: the
+    question ran out of time. A tenant-isolation violation is never re-labelled, whatever its cause."""
+    left = request_deadline.remaining()
+    if left is None or left > _DEADLINE_SLACK_SECONDS:
+        return False
+    if getattr(exc, "code", None) == "tenant_isolation_violation":
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, _TIMEOUT_TYPES):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _log_stages(request_id: str | None, timed_out: bool, deadline_s: float, left_s: float | None,
+                facts: CallerSeasonFactsSource | None) -> None:
+    """One line per question with the time spent in each stage (L1 #103 A1, the 33 s stall). Timings
+    and counts only: no question text, user, season, token or SQL."""
+    profile = profiling.current()
+    phases, labels = profile.snapshot() if profile is not None else ({}, {})
+    acquire = labels.pop("pg acquire", []) + labels.pop("pg connect", [])
+    pg_exec = [x for label, xs in labels.items() if label.startswith("carbon pg") for x in xs]
+    http = [x for label, xs in labels.items() if not label.startswith("carbon pg") for x in xs]
+    f = facts.stages if facts is not None else {}
+    logger.info(
+        "rag_question_stages request_id=%s timed_out=%s deadline_ms=%d left_ms=%s budget_wait_ms=%.0f "
+        "pg_acquire_n=%d pg_acquire_ms_max=%.0f pg_exec_n=%d pg_exec_ms=%.0f pg_release_ms=%.0f http_n=%d "
+        "http_ms=%.0f http_ms_max=%.0f facts_queue_ms_max=%.0f facts_worker_ms_max=%.0f facts_wait_ms=%.0f "
+        "facts_shutdown_ms=%.0f facts_pending=%d",
+        request_id, timed_out, int(deadline_s * 1000), "none" if left_s is None else int(left_s * 1000),
+        phases.get("pg budget wait", 0.0), len(acquire), max(acquire, default=0.0), len(pg_exec), sum(pg_exec),
+        phases.get("pg release", 0.0), len(http), sum(http), max(http, default=0.0), f.get("queue_ms_max", 0.0),
+        f.get("worker_ms_max", 0.0), f.get("wait_ms", 0.0), f.get("shutdown_ms", 0.0), int(f.get("pending", 0)))
 
 
 def to_response(result: RagAnswerResult, meter: UsageMeter, *, composed: bool) -> dict[str, Any]:
@@ -508,6 +706,7 @@ HTTP_STATUS: dict[str, int] = {
     "question_rate_limited": 429,
     "question_rate_limit_unavailable": 503,
     "question_not_enabled": 403,
+    "question_timeout": 503,
 }
 
 PUBLIC_MESSAGES: dict[str, str] = {
@@ -521,6 +720,7 @@ PUBLIC_MESSAGES: dict[str, str] = {
     "question_rate_limited": "Bạn đã hỏi quá nhiều câu trong thời gian ngắn. Vui lòng thử lại sau.",
     "question_rate_limit_unavailable": "Trợ lý tạm thời chưa nhận câu hỏi. Vui lòng thử lại sau.",
     "question_not_enabled": "Tính năng hỏi đáp đang thử nghiệm và chưa mở cho tài khoản này.",
+    "question_timeout": "Trợ lý chưa trả lời kịp. Vui lòng thử lại sau ít phút.",
 }
 _GROUNDING_MESSAGE = "Câu trả lời không vượt qua kiểm tra nguồn dẫn nên đã bị chặn. Vui lòng thử lại."
 
