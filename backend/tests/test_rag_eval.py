@@ -75,3 +75,65 @@ def test_one_split_per_score(tmp_path):
     queries = load_eval_set(_write(tmp_path, [_q("a", split="dev"), _q("b", split="holdout")]))
     with pytest.raises(EvalSetError, match="one split"):
         score(queries, [judge(q, [], 0.0) for q in queries])
+
+
+# -- precision@k, recall@k, f1@k, ndcg@k (L2 evaluation, 2026-11-27) ------------------------------
+
+import math  # noqa: E402
+
+from rag_eval import EvalQuery, Label, f1_at, ndcg_at, precision_at, recall_at  # noqa: E402
+
+A, B, C = Label("s", "d", "A"), Label("s", "d", "B"), Label("s", "d", "C")
+
+
+def _graded():
+    # expected A and B, acceptable C; ranking: Z, A, A > A.1, C, B
+    query = EvalQuery("g", "dev", "g", "concept", "explain", "q", False, (A, B), (C,))
+    return judge(query, [_chunk("Z"), _chunk("A"), _chunk("A > A.1"), _chunk("C"), _chunk("B")], 1.0)
+
+
+def test_precision_counts_relevant_chunks_over_k_and_never_rewards_a_short_list():
+    o = _graded()
+    assert o.relevant_ranks == (2, 3, 4, 5)
+    assert [precision_at(o, k) for k in (1, 3, 5, 10)] == [0.0, 2 / 3, 4 / 5, 4 / 10]
+
+
+def test_recall_counts_expected_labels_found_within_k():
+    o = _graded()
+    assert [recall_at(o, k) for k in (1, 3, 5, 10)] == [0.0, 0.5, 1.0, 1.0]
+
+
+def test_f1_is_the_per_query_harmonic_mean():
+    o = _graded()
+    assert f1_at(o, 1) == 0.0
+    assert f1_at(o, 3) == pytest.approx(4 / 7)
+    assert f1_at(o, 5) == pytest.approx(8 / 9)
+
+
+def test_ndcg_credits_each_label_once_with_graded_gains():
+    o = _graded()
+    ideal = 2 / math.log2(2) + 2 / math.log2(3) + 1 / math.log2(4)
+    dcg5 = 2 / math.log2(3) + 1 / math.log2(5) + 2 / math.log2(6)  # A@2, C@4, B@5 (A > A.1 is not a 2nd credit)
+    assert ndcg_at(o, 5) == pytest.approx(dcg5 / ideal)
+    assert ndcg_at(o, 1) == 0.0
+    perfect = judge(EvalQuery("p", "dev", "p", "concept", "explain", "q", False, (A, B), (C,)),
+                    [_chunk("A"), _chunk("B"), _chunk("C")], 1.0)
+    assert ndcg_at(perfect, 3) == pytest.approx(1.0)
+
+
+def test_recall_at_5_no_longer_counts_a_label_found_at_rank_7():
+    # Before: expected_found was measured in the top 8 and reused for every k, so recall@5 == recall@8.
+    query = EvalQuery("r", "dev", "r", "concept", "explain", "q", False, (A,))
+    o = judge(query, [_chunk("Z")] * 6 + [_chunk("A")], 1.0)
+    report = score([query], [o])
+    assert report["recall@5"] == 0.0 and report["recall@8"] == 1.0 and report["recall@10"] == 1.0
+
+
+def test_score_reports_every_requested_cutoff_over_positives_only(tmp_path):
+    queries = load_eval_set(_write(tmp_path, [_q("p1"), _q("n1", negative=True, category="negative")]))
+    outcomes = [judge(queries[0], [_chunk()], 1.0), judge(queries[1], [_chunk("Z")], 1.0)]
+    report = score(queries, outcomes)
+    for k in (1, 3, 5, 10):
+        assert f"precision@{k}" in report and f"f1@{k}" in report and f"ndcg@{k}" in report and f"recall@{k}" in report
+    assert report["precision@1"] == 1.0 and report["precision@3"] == pytest.approx(1 / 3)
+    assert report["ndcg@1"] == 1.0  # the negative query's false positive is not averaged in
