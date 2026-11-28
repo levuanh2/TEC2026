@@ -39,6 +39,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DIR = "supabase/migrations"
 NAME = re.compile(r"^(\d{14})_[a-z0-9_]+\.sql$")
 MANIFEST = "scripts/ci/policy/migrations.sha256"
+# The branch hosted databases follow. Fixed on purpose: no environment variable or argument can point the
+# older-migration exception at another ref (e.g. the change's own HEAD, which would vouch for itself).
+DEPLOY_REF = "origin/main"
 
 
 def digest(data: bytes) -> str:
@@ -65,6 +68,12 @@ def base_files(ref: str) -> dict[str, str]:
     return files
 
 
+def commit_of(ref: str) -> str:
+    """The commit `ref` names, or "" when it does not resolve (not fetched)."""
+    return subprocess.run(["git", "rev-parse", "-q", "--verify", f"{ref}^{{commit}}"], cwd=ROOT,
+                          capture_output=True, text=True, encoding="utf-8").stdout.strip()
+
+
 def head_blob(name: str) -> str:
     return subprocess.run(["git", "hash-object", f"{DIR}/{name}"], cwd=ROOT, check=True,
                           capture_output=True, text=True, encoding="utf-8").stdout.strip()
@@ -77,6 +86,7 @@ def main() -> int:
     args = ap.parse_args()
 
     errors: list[str] = []
+    notices: list[str] = []
     files = sorted(p for p in (ROOT / DIR).iterdir() if p.is_file())
     versions: dict[str, str] = {}
     for path in files:
@@ -127,12 +137,29 @@ def main() -> int:
             elif head_blob(name) != blob:
                 errors.append(f"{name}: already on {args.base_ref} and was edited -- add a new migration instead")
         newest_base = max((NAME.match(n).group(1) for n in base if NAME.match(n)), default="")
+        # A feature/integration branch that merges the deploy branch receives migrations that are OLDER than its
+        # own newest ones. They are allowed only when byte-identical to the deploy branch's copy: hosted databases
+        # follow the deploy branch, so such a migration was already applied there in version order, and renaming
+        # it would break that history. Anything else older than the base's newest is still refused.
+        deployed: dict[str, str] = {}
+        # Never when origin/main IS the commit under test (a push or dispatch on main): it would vouch for itself.
+        if DEPLOY_REF != args.base_ref and commit_of(DEPLOY_REF) not in ("", commit_of("HEAD")):
+            try:
+                deployed = base_files(DEPLOY_REF)
+            except subprocess.CalledProcessError:   # deploy ref not fetched: no exception is granted
+                deployed = {}
         for name in sorted(current - set(base)):
             m = NAME.match(name)
             if m and m.group(1) <= newest_base:
-                errors.append(f"{name}: version is not newer than {newest_base} on {args.base_ref}")
+                if deployed.get(name) is not None and deployed[name] == head_blob(name):
+                    notices.append(f"{name}: older than {newest_base} on {args.base_ref}, identical to "
+                                   f"{DEPLOY_REF} (already applied in order there): allowed")
+                else:
+                    errors.append(f"{name}: version is not newer than {newest_base} on {args.base_ref}")
 
     print(f"{len(files)} migration files checked" + (f" against {args.base_ref}" if args.base_ref else ""))
+    for notice in notices:
+        print(f"::notice title=Migration check::{notice}")
     for error in errors:
         print(f"::error title=Migration check::{error}")
     return 1 if errors else 0
