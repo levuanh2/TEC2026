@@ -405,9 +405,13 @@ def test_no_retry_within_one_backoff_of_the_deadline(monkeypatch):
         repo._many("farms")
     assert len(clients) == 1, "no client swap the deadline cannot pay for"
     assert time.monotonic() - started < rr._RETRY_BACKOFF_SECONDS, "no backoff sleep past the deadline"
-    # with time left the retry still happens exactly as before
+    # with time left the retry (backoff + client swap) still happens exactly as before
+    supabase_clients.clear()
+    clients.clear()
+    repo = SupabaseReadRepository(SETTINGS, "token-a")
     with request_deadline.bound(time.monotonic() + 10):
         assert repo._many("farms") == [{"id": "f1"}]
+    assert len(clients) == 2 and repo.client is clients[1], "the dead client is still replaced when time is left"
 
 
 class _FailingStore:
@@ -423,7 +427,7 @@ class _FailingStore:
             raise QuestionRateLimitUnavailable("the question rate limit store is unavailable") from exc
 
 
-@pytest.mark.parametrize("delay,code", [(0.0, "question_rate_limit_unavailable"), (0.5, "question_timeout")])
+@pytest.mark.parametrize("delay,code", [(0.0, "question_rate_limit_unavailable"), (2.1, "question_timeout")])
 def test_a_rate_limit_store_timeout_fails_closed_before_and_at_the_deadline(delay, code):
     import psycopg
     from infrastructure.question_rate_limit import QuestionRateLimiter
@@ -431,7 +435,7 @@ def test_a_rate_limit_store_timeout_fails_closed_before_and_at_the_deadline(dela
     limiter = QuestionRateLimiter(QuestionRatePolicy(per_minute=5, per_day=50),
                                   _FailingStore(lambda: psycopg.errors.QueryCanceled("statement timeout"), delay),
                                   store_kind="postgres")
-    service = rag_qa.RagQuestionService(carbon_service=Carbon(), rate_limiter=limiter, deadline_seconds=0.4)
+    service = rag_qa.RagQuestionService(carbon_service=Carbon(), rate_limiter=limiter, deadline_seconds=2.0)
     with pytest.raises(rag_qa.QuestionRefused) as refused:
         _ask(service, Reader())
     assert (refused.value.status, refused.value.code) == (503, code)  # refused either way: never let through
