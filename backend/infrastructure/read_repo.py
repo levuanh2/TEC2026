@@ -123,14 +123,16 @@ class SupabaseReadRepository:
                     return attempt()
                 except Exception as exc:  # noqa: BLE001 - re-raised unless it is one of the two retryable cases
                     if _is_clock_skew(exc) and not skew_retried:
+                        if not request_deadline.affords(_CLOCK_SKEW_WAIT_SECONDS):
+                            raise  # L1 #103 A1: the request cannot wait 1 s for the clock any more
                         skew_retried = True
                         time.sleep(_CLOCK_SKEW_WAIT_SECONDS)
                         continue
                     if not isinstance(exc, _TRANSPORT_ERRORS) or not self._pooled or transport_retries == 0:
                         raise
-                    if request_deadline.expired():
-                        # L1 #103 A1: a timeout at the request deadline is not a dead connection; no retry and
-                        # no client swap (the client is fine, the request is out of time).
+                    if not request_deadline.affords(_RETRY_BACKOFF_SECONDS):
+                        # L1 #103 A1: at (or within one backoff of) the request deadline a transport error is not
+                        # worth a retry, and a timeout there is not a dead connection: no sleep, no client swap.
                         raise
                     transport_retries -= 1
                     time.sleep(_RETRY_BACKOFF_SECONDS)

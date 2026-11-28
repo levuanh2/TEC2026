@@ -56,6 +56,12 @@ def expired() -> bool:
     return left is not None and left <= 0
 
 
+def affords(seconds: float) -> bool:
+    """True without a deadline, or when more than `seconds` (+ the minimum timeout) is left."""
+    left = remaining()
+    return left is None or left > seconds + MIN_TIMEOUT_SECONDS
+
+
 def check(step: str) -> None:
     """Refuse to START `step` once the deadline has passed."""
     if expired():

@@ -41,6 +41,12 @@ class RequestProfile:
         with self._lock:
             self.phases[label] = self.phases.get(label, 0.0) + elapsed_ms
 
+    def snapshot(self) -> tuple[dict[str, float], dict[str, list[float]]]:
+        """Copies of `phases` and `by_label`, taken under the lock: a worker that outlived its
+        request (L1 #103 A1, deadline) may still be recording into this profile."""
+        with self._lock:
+            return dict(self.phases), {label: list(xs) for label, xs in self.by_label.items()}
+
     def top(self, limit: int = 6) -> list[tuple[str, int, float]]:
         """(label, call count, total ms) for the slowest labels."""
         with self._lock:

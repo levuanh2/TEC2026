@@ -31,6 +31,13 @@ from tests.test_rag_qa import SEASON_ID, Carbon, Reader  # noqa: E402
 from tests.test_read_performance import SETTINGS, _Client, _patch_factory  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _fresh_client_cache():
+    supabase_clients.clear()  # as test_read_performance.py: no cached fake client leaks between tests
+    yield
+    supabase_clients.clear()
+
+
 def _ask(service, reader, question="Vụ này thế nào?"):
     return rag_qa.respond(service, reader=reader, crop_season_id=SEASON_ID,
                           question=rag_qa.QuestionInput(question=question, intent=RagIntent.EXPLAIN,
@@ -353,3 +360,78 @@ def test_no_transport_retry_or_client_swap_once_the_deadline_has_passed(monkeypa
     with request_deadline.bound(time.monotonic() - 1), pytest.raises(httpx.TransportError):
         repo._many("farms")
     assert len(clients) == 1 and repo.client is clients[0], "a timed-out request must not renew the client"
+
+
+# -- review follow-ups (agy, f763b1f) ---------------------------------------------------------------
+
+def test_the_stage_snapshot_is_safe_while_a_late_worker_still_records():
+    from infrastructure.profiling import RequestProfile
+
+    profile = RequestProfile()
+    stop = threading.Event()
+
+    def late_worker():
+        i = 0
+        while not stop.is_set():
+            profile.record(f"select table_{i % 500}", 1.0)
+            profile.record_phase(f"phase_{i % 500}", 1.0)
+            i += 1
+
+    t = threading.Thread(target=late_worker)
+    t.start()
+    try:
+        for _ in range(2000):
+            phases, labels = profile.snapshot()
+            assert isinstance(phases, dict) and isinstance(labels, dict)
+    finally:
+        stop.set()
+        t.join(5)
+
+
+def test_no_retry_within_one_backoff_of_the_deadline(monkeypatch):
+    from infrastructure import read_repo as rr
+
+    clients: list[_Client] = []
+
+    def make(url, key, **_kw):
+        client = _Client(rows={"farms": [{"id": "f1"}]}, fail_times=1 if not clients else 0)
+        clients.append(client)
+        return client
+
+    _patch_factory(monkeypatch, make)
+    repo = SupabaseReadRepository(SETTINGS, "token-a")
+    started = time.monotonic()
+    with request_deadline.bound(time.monotonic() + rr._RETRY_BACKOFF_SECONDS / 2), pytest.raises(httpx.TransportError):
+        repo._many("farms")
+    assert len(clients) == 1, "no client swap the deadline cannot pay for"
+    assert time.monotonic() - started < rr._RETRY_BACKOFF_SECONDS, "no backoff sleep past the deadline"
+    # with time left the retry still happens exactly as before
+    with request_deadline.bound(time.monotonic() + 10):
+        assert repo._many("farms") == [{"id": "f1"}]
+
+
+class _FailingStore:
+    def __init__(self, exc_factory, delay=0.0):
+        self.exc_factory, self.delay = exc_factory, delay
+
+    def consume(self, user_id, policy):
+        from infrastructure.question_rate_limit import QuestionRateLimitUnavailable
+        time.sleep(self.delay)
+        try:
+            raise self.exc_factory()
+        except Exception as exc:
+            raise QuestionRateLimitUnavailable("the question rate limit store is unavailable") from exc
+
+
+@pytest.mark.parametrize("delay,code", [(0.0, "question_rate_limit_unavailable"), (0.5, "question_timeout")])
+def test_a_rate_limit_store_timeout_fails_closed_before_and_at_the_deadline(delay, code):
+    import psycopg
+    from infrastructure.question_rate_limit import QuestionRateLimiter
+
+    limiter = QuestionRateLimiter(QuestionRatePolicy(per_minute=5, per_day=50),
+                                  _FailingStore(lambda: psycopg.errors.QueryCanceled("statement timeout"), delay),
+                                  store_kind="postgres")
+    service = rag_qa.RagQuestionService(carbon_service=Carbon(), rate_limiter=limiter, deadline_seconds=0.4)
+    with pytest.raises(rag_qa.QuestionRefused) as refused:
+        _ask(service, Reader())
+    assert (refused.value.status, refused.value.code) == (503, code)  # refused either way: never let through

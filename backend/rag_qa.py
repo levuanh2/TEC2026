@@ -657,8 +657,7 @@ def _log_stages(request_id: str | None, timed_out: bool, deadline_s: float, left
     """One line per question with the time spent in each stage (L1 #103 A1, the 33 s stall). Timings
     and counts only: no question text, user, season, token or SQL."""
     profile = profiling.current()
-    phases = dict(profile.phases) if profile is not None else {}
-    labels = {label: list(xs) for label, xs in profile.by_label.items()} if profile is not None else {}
+    phases, labels = profile.snapshot() if profile is not None else ({}, {})
     acquire = labels.pop("pg acquire", []) + labels.pop("pg connect", [])
     pg_exec = [x for label, xs in labels.items() if label.startswith("carbon pg") for x in xs]
     http = [x for label, xs in labels.items() if not label.startswith("carbon pg") for x in xs]
