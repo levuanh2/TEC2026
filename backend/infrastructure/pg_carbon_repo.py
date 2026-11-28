@@ -35,7 +35,7 @@ from typing import Any, Callable
 
 from carbon import SCENARIO_TO_DB
 
-from . import pg_pool, profiling
+from . import pg_pool, profiling, request_deadline
 from .auth import CropAccessError
 from .persist_access import _DENIED
 from .config import Settings
@@ -109,7 +109,16 @@ class PostgresCarbonRepository:
         travel with the statements (`last=True` queues the COMMIT). A connection
         without `pipeline` (a test savepoint) runs them one by one and leaves
         the transaction to its owner.
+
+        Under a request deadline (the Q&A path, L1 #103 A1) a transaction-local
+        `statement_timeout` for the time that is left goes first, in the same
+        round trip: Postgres itself cancels a statement that would outlive the
+        request, and the connection goes back to the pool. No deadline (every
+        other route) = exactly the statements given.
         """
+        timeout_ms = request_deadline.statement_timeout_ms()
+        if timeout_ms is not None:
+            statements = [("select set_config('statement_timeout', %s, true) as r", [str(timeout_ms)]), *statements]
         pipelined = hasattr(conn, "pipeline")
         cursors = [conn.cursor() for _ in statements]
         with profiling.observe(label):
@@ -121,7 +130,7 @@ class PostgresCarbonRepository:
             results = [_rows(cur) for cur in cursors]
         for cur in cursors:
             cur.close()
-        return results
+        return results[1:] if timeout_ms is not None else results
 
     # -- reads --------------------------------------------------------------
 

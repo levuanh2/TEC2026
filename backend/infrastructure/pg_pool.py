@@ -43,7 +43,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
 
-from . import profiling
+from . import profiling, request_deadline
 
 MIN_SIZE = 1
 # Well under uvicorn's default 40-thread pool; hosted Postgres connections are
@@ -55,6 +55,32 @@ TIMEOUT_SECONDS = 30.0
 _lock = threading.Lock()
 _pools: dict[str, Any] = {}
 _bound: ContextVar[dict[str, Any] | None] = ContextVar("agricarbon_pg_bound", default=None)
+# A caller's share of the pool (L1 #103, A1): a semaphore every checkout in this context must hold first. Set only
+# by the Q&A request (`rag_qa.QA_PG_BUDGET` of the MAX_SIZE connections), so questions can never take the whole
+# pool from the Carbon / write APIs. Unset = no budget, unchanged behaviour.
+_budget: ContextVar[threading.Semaphore | None] = ContextVar("agricarbon_pg_budget", default=None)
+
+
+@contextmanager
+def budget(semaphore: threading.Semaphore | None) -> Iterator[None]:
+    """Every pooled checkout in the block first takes one slot of `semaphore` (None = no budget)."""
+    token = _budget.set(semaphore)
+    try:
+        yield
+    finally:
+        _budget.reset(token)
+
+
+def current_budget() -> threading.Semaphore | None:
+    return _budget.get()
+
+
+def _pool_timeout(message: str) -> BaseException:
+    try:
+        from psycopg_pool import PoolTimeout
+    except Exception:  # noqa: BLE001 - optional dependency
+        return TimeoutError(message)
+    return PoolTimeout(message)
 
 
 def _pool_for(conninfo: str) -> Any | None:
@@ -85,6 +111,13 @@ def _record(label: str, started: float) -> None:
     profile = profiling.current()
     if profile is not None:
         profile.record(label, (time.monotonic() - started) * 1000)
+
+
+def _phase(label: str, started: float) -> None:
+    """A stage timing that is not a round trip (kept out of `db_calls` / `db_ms`)."""
+    profile = profiling.current()
+    if profile is not None:
+        profile.record_phase(label, (time.monotonic() - started) * 1000)
 
 
 @contextmanager
@@ -118,9 +151,25 @@ def connection(conninfo: str) -> Iterator[Any]:
             _record("pg connect", started)
             yield conn
         return
-    with pool.connection() as conn:
-        _record("pg acquire", started)
-        yield conn
+    # L1 #103 A1: with a request deadline the budget wait and the checkout end at it (PoolTimeout -> 503);
+    # without a deadline and a budget, exactly as before (TIMEOUT_SECONDS, no semaphore).
+    semaphore = _budget.get()
+    if semaphore is not None:
+        if not semaphore.acquire(timeout=request_deadline.clamp(TIMEOUT_SECONDS)):
+            _phase("pg budget wait", started)
+            raise _pool_timeout("no Q&A database connection slot before the request deadline")
+        _phase("pg budget wait", started)
+    try:
+        with pool.connection(timeout=request_deadline.clamp(TIMEOUT_SECONDS)) as conn:
+            _record("pg acquire", started)
+            try:
+                yield conn
+            finally:
+                released = time.monotonic()
+        _phase("pg release", released)  # commit/rollback + return to the pool
+    finally:
+        if semaphore is not None:
+            semaphore.release()
 
 
 @contextmanager

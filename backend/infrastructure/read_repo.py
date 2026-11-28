@@ -15,7 +15,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from . import auth, memberships, profiling, supabase_clients
+from . import auth, memberships, profiling, request_deadline, supabase_clients
 from .auth_admin import must_change_password
 from .config import Settings
 
@@ -127,6 +127,10 @@ class SupabaseReadRepository:
                         time.sleep(_CLOCK_SKEW_WAIT_SECONDS)
                         continue
                     if not isinstance(exc, _TRANSPORT_ERRORS) or not self._pooled or transport_retries == 0:
+                        raise
+                    if request_deadline.expired():
+                        # L1 #103 A1: a timeout at the request deadline is not a dead connection; no retry and
+                        # no client swap (the client is fine, the request is out of time).
                         raise
                     transport_retries -= 1
                     time.sleep(_RETRY_BACKOFF_SECONDS)
